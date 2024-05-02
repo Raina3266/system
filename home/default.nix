@@ -32,6 +32,8 @@
     vscode
     google-chrome
     vlc
+    libreoffice
+    obsidian
   ];
 
 }
