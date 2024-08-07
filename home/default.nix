@@ -17,9 +17,10 @@
     homeDirectory = "/home/raina";
   };
 
+  xdg.enable = true;
 
   # trick to force gnome to use proper icons for apps installed through nix
-  xdg.systemDirs.data = ["~/.nix-profile/share"];
+#  xdg.systemDirs.data = ["~/.nix-profile/share"];
 
   # Enable home-manager and git
   programs.git.enable = true;

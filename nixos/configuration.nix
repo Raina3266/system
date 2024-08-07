@@ -16,7 +16,7 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-  environment.gnome.excludePackages = with pkgs; [ gnome-tour gnome.gnome-contacts gnome.gnome-maps ];
+  environment.gnome.excludePackages = with pkgs; [ epiphany gnome-tour gnome.gnome-contacts gnome.gnome-maps ];
 
   networking.hostName = "nixos"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
@@ -71,6 +71,7 @@
     packages = with pkgs; [
       fira
       lxgw-wenkai
+      noto-fonts
     ];
   };
 
@@ -81,7 +82,6 @@
   services.printing.enable = true;
 
   # Enable sound with pipewire.
-  sound.enable = true;
   hardware.pulseaudio.enable = false;
   security.rtkit.enable = true;
   services.pipewire = {
