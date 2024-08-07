@@ -16,6 +16,8 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
+  environment.gnome.excludePackages = with pkgs; [ gnome-tour gnome.gnome-contacts gnome.gnome-maps ];
+
   networking.hostName = "nixos"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
@@ -55,6 +57,21 @@
   services.xserver = {
     layout = "gb";
     xkbVariant = "";
+  };
+
+  i18n.inputMethod = {
+      enabled = "fcitx5";
+      fcitx5.addons = with pkgs; [
+          fcitx5-chinese-addons
+          fcitx5-gtk
+      ];
+  };
+
+  fonts = {
+    packages = with pkgs; [
+      fira
+      lxgw-wenkai
+    ];
   };
 
   # Configure console keymap
