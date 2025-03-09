@@ -20,7 +20,7 @@
   xdg.enable = true;
 
   # trick to force gnome to use proper icons for apps installed through nix
-#  xdg.systemDirs.data = ["~/.nix-profile/share"];
+  #  xdg.systemDirs.data = ["~/.nix-profile/share"];
 
   # Enable home-manager and git
   programs.git.enable = true;
@@ -49,10 +49,14 @@
     vlc
     gimp-with-plugins
     kdePackages.kdenlive
+    masterpdfeditor
     obs-studio
     libreoffice
     qbittorrent
     anki-bin
+    rustup
+
+    gcc
   ];
 
   programs.fish = {
@@ -70,9 +74,16 @@
     enable = true;
     extensions = with pkgs.vscode-extensions; [
       dracula-theme.theme-dracula
+      dart-code.flutter
+      rust-lang.rust-analyzer
+      tamasfe.even-better-toml
+
+      bbenoist.nix # nix language support
+      kamadorueda.alejandra # better nix formatter
     ];
+    mutableExtensionsDir = false;
     userSettings = {
-      workbench.colorTheme = "Dracula"; 
+      workbench.colorTheme = "Dracula";
       files.autoSave = "afterDelay";
     };
   };
@@ -84,7 +95,5 @@
   #   font.name = "FiraSans";
   #   font.package = pkgs.fira;
   # };
-
-
 
 }
