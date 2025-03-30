@@ -39,7 +39,6 @@
 
   home.packages = with pkgs; [
     google-chrome
-    onedrive
     whatsapp-for-linux
     obsidian
     kitty
@@ -57,6 +56,9 @@
     rustup
 
     gcc
+
+    onedrivegui
+    onedrive
   ];
 
   programs.fish = {
@@ -95,5 +97,4 @@
   #   font.name = "FiraSans";
   #   font.package = pkgs.fira;
   # };
-
 }
