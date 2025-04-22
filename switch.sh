@@ -2,4 +2,6 @@
 set -euxo pipefail
 
 git add -A
-sudo nixos-rebuild switch --flake .#thinkpad --option eval-cache false --show-trace
+sudo nixos-rebuild switch --flake .#thinkpad 
+# useful for debugging the above command
+# --option eval-cache false --show-trace

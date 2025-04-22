@@ -49,14 +49,14 @@
   # Enable the X11 windowing system.
   services.xserver.enable = true;
 
-  # Enable the GNOME Desktop Environment.
-  services.xserver.displayManager.gdm.enable = true;
-  services.xserver.desktopManager.gnome.enable = true;
+  # Enable the KDE Plasma Desktop Environment.
+  services.displayManager.sddm.enable = true;
+  services.desktopManager.plasma6.enable = true;
 
   # Configure keymap in X11
   services.xserver = {
-    layout = "gb";
-    xkbVariant = "";
+    xkb.layout = "gb";
+    xkb.variant = "";
   };
  i18n.inputMethod = {
   enable = true;
@@ -88,7 +88,7 @@
   services.printing.enable = true;
 
   # Enable sound with pipewire.
-  hardware.pulseaudio.enable = false;
+  services.pulseaudio.enable = false;
   security.rtkit.enable = true;
   services.pipewire = {
     enable = true;
@@ -111,10 +111,6 @@
     isNormalUser = true;
     description = "Raina";
     extraGroups = [ "networkmanager" "wheel" ];
-    packages = with pkgs; [
-      firefox
-    #  thunderbird
-    ];
   };
 
   # Allow unfree packages
@@ -126,7 +122,16 @@
     vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     wget
     ripgrep
+    kdePackages.kio
+    kdePackages.kio-extras
+    kdePackages.kio-gdrive
+    kdePackages.systemsettings
+    kdePackages.kdeconnect-kde
+    kdePackages.kaccounts-providers
+    kdePackages.kaccounts-integration
   ];
+
+  services.accounts-daemon.enable = true;
 
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
