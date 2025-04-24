@@ -4,6 +4,11 @@
   pkgs,
   ...
 }: {
+
+  imports = [
+    ./cloud.nix
+  ];
+
   nixpkgs = {
     config = {
       allowUnfree = true;
@@ -56,8 +61,9 @@
     rustup
     libreoffice-qt
     gcc
-
-
+    fuse3
+    rclone-browser
+    rclone
     onedrivegui
     onedrive
   ];
