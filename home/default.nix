@@ -61,11 +61,6 @@
     rustup
     libreoffice-qt
     gcc
-    fuse3
-    rclone-browser
-    rclone
-    onedrivegui
-    onedrive
   ];
 
   programs.fish = {
