@@ -7,14 +7,9 @@
 
   imports = [
     ./cloud.nix
+    ./ocr.nix
+    ./shell/default.nix
   ];
-
-  nixpkgs = {
-    config = {
-      allowUnfree = true;
-    };
-  };
-
 
   # https://nixos.wiki/wiki/FAQ/When_do_I_update_stateVersion
   home.stateVersion = "23.05";
@@ -28,13 +23,6 @@
   # trick to force gnome to use proper icons for apps installed through nix
   #  xdg.systemDirs.data = ["~/.nix-profile/share"];
 
-  # Enable home-manager and git
-  programs.git.enable = true;
-  programs.git.userName = "Raina";
-  programs.git.userEmail = "chenganlin990326@gmail.com";
-  programs.git.extraConfig = {
-    push.autoSetupRemote = true;
-  };
 
   programs.gh.enable = true;
 
@@ -46,33 +34,28 @@
   home.packages = with pkgs; [
     google-chrome
     whatsapp-for-linux
+    discord
     obsidian
-    kitty
-    bat
-    tree
-    flutter
     vlc
     gimp-with-plugins
     kdePackages.kdenlive
-    masterpdfeditor
     obs-studio
     qbittorrent
     anki-bin
-    rustup
     libreoffice-qt
-    gcc
+    strawberry
+    yt-dlp
+    spotdl
+    ytdownloader
   ];
 
-  programs.fish = {
-    enable = true;
-    shellAbbrs = {
-      "gs" = "git switch";
-    };
-  };
-
-  programs.starship = {
-    enable = true;
-  };
+  # home.file.".local/share/applications/libreoffice-writer.desktop".text = ''
+  #   NoDisplay = true
+  #   Name = LibreOffice Writer
+  #   Exec = libreoffice --writer
+  #   Hidden = true
+  #   Type = Application
+  # '';
 
   programs.vscode = {
     enable = true;
@@ -92,12 +75,4 @@
       files.autoSave = "afterDelay";
     };
   };
-
-  programs.kitty.enable = true;
-
-  # gtk = {
-  #   enable = true;
-  #   font.name = "FiraSans";
-  #   font.package = pkgs.fira;
-  # };
 }
