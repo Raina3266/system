@@ -18,6 +18,8 @@
     gnome-music
     gnome-maps
     gnome-tour
+    pkgs.gnome-connections
+    pkgs.gnome-console
   ];
 
 # Enable Services
