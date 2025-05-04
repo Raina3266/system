@@ -1,15 +1,17 @@
-{ config, pkgs, ... }:
-
 {
+  config,
+  pkgs,
+  ...
+}: {
 # List packages installed in system profile. To search, run: $ nix search wget
   environment.systemPackages = with pkgs; [
-    vim 
+    vim
     ripgrep
     pkgs.fprintd
   ];
 
-  environment.gnome.excludePackages = with pkgs; [ 
-    epiphany 
+  environment.gnome.excludePackages = with pkgs; [
+    epiphany
     yelp
     totem
     gnome-contacts

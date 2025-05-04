@@ -1,25 +1,26 @@
 # Edit this configuration file to define what should be installed on
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
-
-{ config, pkgs, ... }:
 {
-  imports =
-    [ # Include the results of the hardware scan.
-      ./hardware-configuration.nix
-      ./services-pkgs.nix
-    ];
+  config,
+  pkgs,
+  ...
+}: {
+  imports = [
+    ./hardware-configuration.nix
+    ./services.nix
+  ];
 
   nix.settings.experimental-features = "nix-command flakes";
 
-# User Account
+  # User Account
   users.users.raina = {
     isNormalUser = true;
     description = "Raina";
-    extraGroups = [ "networkmanager" "wheel" "video" ];
+    extraGroups = ["networkmanager" "wheel" "video"];
   };
 
-# Desktop Environment
+  # Desktop Environment
   # Enable the X11 windowing system.
   services.xserver.enable = true;
 
@@ -27,22 +28,18 @@
   services.xserver.displayManager.gdm.enable = true;
   services.xserver.desktopManager.gnome.enable = true;
 
-# Bootloader.
+  # Bootloader.
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-# Network
+  # Network
   networking.hostName = "nixos"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
   # Enable networking
   networking.networkmanager.enable = true;
 
-  # Configure network proxy if necessary
-  # networking.proxy.default = "http://user:password@proxy:port/";
-  # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
-
-# Time and Language
+  # Time and Language
   # Set your time zone.
   time.timeZone = "Europe/London";
 
@@ -72,18 +69,22 @@
   i18n.inputMethod = {
     enable = true;
     type = "ibus";
-    ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
+    ibus.engines = with pkgs.ibus-engines; [libpinyin];
   };
 
-  fonts = {
-    packages = with pkgs; [
-      fira
-      lxgw-wenkai
-      noto-fonts
-    ];
-  };
+  # fonts = {
+  #   packages = with pkgs; [
+  #     fira
+  #     lxgw-wenkai
+  #     noto-fonts
+  #   ];
+  # };
 
-# List services that you want to enable:
+  # List services that you want to enable:
+
+  # Configure network proxy if necessary
+  # networking.proxy.default = "http://user:password@proxy:port/";
+  # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
 
   # Enable touchpad support (enabled default in most desktopManager).
   # services.xserver.libinput.enable = true;

@@ -4,10 +4,10 @@
   pkgs,
   ...
 }: {
-
   imports = [
     ./cloud.nix
     ./ocr.nix
+    ./vscode.nix
     ./shell/default.nix
   ];
 
@@ -17,19 +17,6 @@
     username = "raina";
     homeDirectory = "/home/raina";
   };
-
-  xdg.enable = true;
-
-  # trick to force gnome to use proper icons for apps installed through nix
-  #  xdg.systemDirs.data = ["~/.nix-profile/share"];
-
-
-  programs.gh.enable = true;
-
-  programs.direnv.enable = true;
-  programs.direnv.enableBashIntegration = true;
-  programs.direnv.nix-direnv.enable = true;
-  programs.bash.enable = true;
 
   home.packages = with pkgs; [
     google-chrome
@@ -46,8 +33,12 @@
     strawberry
     yt-dlp
     spotdl
-    ytdownloader
   ];
+
+  xdg.enable = true;
+
+  # trick to force gnome to use proper icons for apps installed through nix
+  #  xdg.systemDirs.data = ["~/.nix-profile/share"];
 
   # home.file.".local/share/applications/libreoffice-writer.desktop".text = ''
   #   NoDisplay = true
@@ -56,23 +47,4 @@
   #   Hidden = true
   #   Type = Application
   # '';
-
-  programs.vscode = {
-    enable = true;
-    profiles.default.extensions = with pkgs.vscode-extensions; [
-      dracula-theme.theme-dracula
-      dart-code.flutter
-      rust-lang.rust-analyzer
-      tamasfe.even-better-toml
-      mechatroner.rainbow-csv
-
-      bbenoist.nix # nix language support
-      kamadorueda.alejandra # better nix formatter
-    ];
-    mutableExtensionsDir = false;
-    profiles.default.userSettings = {
-      workbench.colorTheme = "Dracula";
-      files.autoSave = "afterDelay";
-    };
-  };
 }
