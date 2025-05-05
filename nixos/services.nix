@@ -8,16 +8,26 @@
     vim
     ripgrep
     pkgs.fprintd
+    gnomeExtensions.pano
+    gnomeExtensions.task-up
+    gnomeExtensions.tracker
+    gnomeExtensions.task-widget
+    gnomeExtensions.translate-clipboard
+    gnomeExtensions.peek-top-bar-on-fullscreen
   ];
 
   environment.gnome.excludePackages = with pkgs; [
     epiphany
+    geary
     yelp
+    seahorse
     totem
+    gnome-photos
     gnome-contacts
     gnome-music
     gnome-maps
     gnome-tour
+    pkgs.xterm
     pkgs.gnome-connections
     pkgs.gnome-console
   ];

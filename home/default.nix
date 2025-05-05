@@ -19,6 +19,8 @@
   };
 
   home.packages = with pkgs; [
+    evolution
+    evolution-ews
     google-chrome
     whatsapp-for-linux
     discord
@@ -29,7 +31,8 @@
     obs-studio
     qbittorrent
     anki-bin
-    libreoffice-qt
+    libreoffice
+    kid3
     strawberry
     yt-dlp
     spotdl
