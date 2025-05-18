@@ -7,7 +7,8 @@
   environment.systemPackages = with pkgs; [
     vim
     ripgrep
-    pkgs.fprintd
+    fprintd
+    gnome-online-accounts
     gnomeExtensions.pano
     gnomeExtensions.task-up
     gnomeExtensions.tracker
@@ -27,13 +28,14 @@
     gnome-music
     gnome-maps
     gnome-tour
-    pkgs.xterm
+    gnome-calendar
     pkgs.gnome-connections
     pkgs.gnome-console
   ];
 
 # Enable Services
   services.accounts-daemon.enable = true;
+  services.gnome.gnome-keyring.enable = true;
   services.fprintd.enable = true;
   services.udev.enable = true;
   services.fwupd.enable = true;

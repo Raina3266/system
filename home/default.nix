@@ -18,9 +18,14 @@
     homeDirectory = "/home/raina";
   };
 
+  programs.thunderbird = {
+    enable = true;
+    profiles.default = {
+      isDefault = true;
+    };
+  };
+
   home.packages = with pkgs; [
-    evolution
-    evolution-ews
     google-chrome
     whatsapp-for-linux
     discord
@@ -32,22 +37,14 @@
     qbittorrent
     anki-bin
     libreoffice
+    pdfstudioviewer
     kid3
-    strawberry
-    yt-dlp
+    gui-for-clash
+
+    lollypop
+    ffmpeg
     spotdl
+    lrcget
+    ytdownloader
   ];
-
-  xdg.enable = true;
-
-  # trick to force gnome to use proper icons for apps installed through nix
-  #  xdg.systemDirs.data = ["~/.nix-profile/share"];
-
-  # home.file.".local/share/applications/libreoffice-writer.desktop".text = ''
-  #   NoDisplay = true
-  #   Name = LibreOffice Writer
-  #   Exec = libreoffice --writer
-  #   Hidden = true
-  #   Type = Application
-  # '';
 }
