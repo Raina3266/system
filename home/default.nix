@@ -4,7 +4,13 @@
   pkgs,
   ...
 }: {
+  home.file.".config/kdeglobals".text = ''
+    [General]
+    TerminalApplication=kitty
+  '';
+
   imports = [
+    ./yazi.nix
     ./cloud.nix
     ./ocr.nix
     ./vscode.nix
@@ -37,12 +43,11 @@
     qbittorrent
     anki-bin
     libreoffice
-    pdfstudioviewer
+    pdf4qt
     kid3
     gui-for-clash
 
     lollypop
-    ffmpeg
     spotdl
     lrcget
     ytdownloader

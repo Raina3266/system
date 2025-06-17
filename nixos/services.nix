@@ -3,18 +3,19 @@
   pkgs,
   ...
 }: {
-# List packages installed in system profile. To search, run: $ nix search wget
+  # List packages installed in system profile. To search, run: $ nix search wget
   environment.systemPackages = with pkgs; [
     vim
     ripgrep
     fprintd
+    sushi
+    digikam
+    ffmpegthumbnailer
     gnome-online-accounts
     gnomeExtensions.pano
-    gnomeExtensions.task-up
     gnomeExtensions.tracker
-    gnomeExtensions.task-widget
+    gnomeExtensions.task-up-ultralite
     gnomeExtensions.translate-clipboard
-    gnomeExtensions.peek-top-bar-on-fullscreen
   ];
 
   environment.gnome.excludePackages = with pkgs; [
@@ -23,17 +24,20 @@
     yelp
     seahorse
     totem
+    snapshot
+    decibels
+    # loupe  Image Viewer.
     gnome-photos
     gnome-contacts
     gnome-music
     gnome-maps
     gnome-tour
     gnome-calendar
-    pkgs.gnome-connections
-    pkgs.gnome-console
+    gnome-connections
+    gnome-console
   ];
 
-# Enable Services
+  # Enable Services
   services.accounts-daemon.enable = true;
   services.gnome.gnome-keyring.enable = true;
   services.fprintd.enable = true;
