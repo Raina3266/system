@@ -23,11 +23,24 @@
       pkgs = import nixpkgs {
         system = "x86_64-linux";
         overlays = [nixGL.overlay];
-        config.allowUnfree = true;
+        config = {
+          allowUnfree = true;
+          permittedInsecurePackages = [
+            "qtwebengine-5.15.19"
+          ];
+        };
+      };
+      specialArgs = {
+        inputs = inputs;
       };
       modules = [
         ./nixos/configuration.nix
         home-manager.nixosModules.home-manager
+        {
+          home-manager.users.raina.home.stateVersion = "23.05";
+          home-manager.users.raina.programs.git.userEmail = "cgl0326@outlook.com";
+          home-manager.users.raina.personal.enable = true;
+        }
         {
           home-manager.backupFileExtension = "backup";
           home-manager.useUserPackages = true;

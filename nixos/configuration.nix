@@ -17,7 +17,7 @@
   users.users.raina = {
     isNormalUser = true;
     description = "Raina";
-    extraGroups = ["networkmanager" "wheel" "video"];
+    extraGroups = ["networkmanager" "wheel" "video" "jellyfin"];
   };
 
   # Desktop Environment
@@ -25,8 +25,8 @@
   services.xserver.enable = true;
 
   # Enable the GNOME Desktop Environment.
-  services.xserver.displayManager.gdm.enable = true;
-  services.xserver.desktopManager.gnome.enable = true;
+  services.displayManager.gdm.enable = true;
+  services.desktopManager.gnome.enable = true;
 
   # Bootloader.
   boot.loader.systemd-boot.enable = true;
@@ -71,7 +71,7 @@
     type = "ibus";
     ibus.engines = with pkgs.ibus-engines; [libpinyin];
   };
-
+  
   # fonts = {
   #   packages = with pkgs; [
   #     fira
@@ -114,3 +114,26 @@
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "23.11"; # Did you read the comment?
 }
+
+
+# # ai/default.nix
+# {pkgs, config, lib, ... }: {
+#   imports = [./ollama.nix];
+#   options = {
+#     services.ai.enable = mkEnableOption "AI services";
+#   };
+#   config = lib.mkIf config.services.ai.enable {
+#     environment.systemPackages = if config.services.ai.enable then [pkgs.ollama] else [];
+#   };
+# }
+
+# # ai/ollama.nix
+# {
+#   imports = [];
+#   options = {...};
+#   config = {...};
+# }
+
+# {
+#   foo = bar;
+# }

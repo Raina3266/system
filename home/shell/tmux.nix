@@ -7,19 +7,13 @@ in
     enable = true;
     prefix = "C-a";
     plugins = with pkgs.tmuxPlugins; [
-      (if isNixOS then {
-        plugin = catppuccin;
-        extraConfig = ''
-          run ${catppuccin}/tmux-catppuccin.nix
-          set -g @tmux-catppuccin 'mocha'
-        '';
-      } else {
+      {
         plugin = gruvbox;
         extraConfig = ''
           run ${gruvbox}/tmux-gruvbox.nix
           set -g @tmux-gruvbox 'dark'
         '';
-      })
+      }
     ]; 
 
     extraConfig = ''

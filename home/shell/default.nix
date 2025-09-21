@@ -15,11 +15,4 @@
       gcc
     ];
   };
-
-  # programs.fish = {
-  #   enable = true;
-  #   shellAbbrs = {
-  #     "gs" = "git switch";
-  #   };
-  # };
 }

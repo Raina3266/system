@@ -23,7 +23,7 @@ in {
     Service = with pkgs; {
       ExecStartPre= "/bin/sh -c 'until ${unixtools.ping}/bin/ping -c1 google.com; do ${coreutils}/bin/sleep 1; done;'";
       ExecStart = ''
-        ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' --vfs-cache-mode full --allow-non-empty
+        ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' --vfs-cache-mode full --allow-non-empty --uid $(id -u jellyfin) --gid $(id -g jellyfin)
         ${coreutils}/bin/ls ${mountDir_gdrive}
       '';
       
