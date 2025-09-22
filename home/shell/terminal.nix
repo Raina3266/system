@@ -1,6 +1,6 @@
-{pkgs, lib, ...}: 
+{pkgs, lib, nixosConfig ? null, ...}: 
 let
-    isNixOS = true;
+    isNixOS = nixosConfig != null;
 in
 {
     programs.kitty.enable = true;

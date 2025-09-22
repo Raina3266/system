@@ -18,18 +18,32 @@
     home-manager,
     nixGL,
     nixvim,
-  } @ inputs: {
-    nixosConfigurations.thinkpad = nixpkgs.lib.nixosSystem {
-      pkgs = import nixpkgs {
-        system = "x86_64-linux";
-        overlays = [nixGL.overlay];
-        config = {
-          allowUnfree = true;
-          permittedInsecurePackages = [
-            "qtwebengine-5.15.19"
-          ];
-        };
+  } @ inputs: let
+    pkgs = import nixpkgs {
+      system = "x86_64-linux";
+      overlays = [nixGL.overlay];
+      config = {
+        allowUnfree = true;
+        permittedInsecurePackages = [
+          "qtwebengine-5.15.19"
+        ];
       };
+    };
+  in {
+    homeConfigurations."raina" = home-manager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      extraSpecialArgs = {inherit inputs;};
+      modules = [
+        ./home
+        {
+          home.stateVersion = "24.11";
+          programs.git.userEmail = "raina@kaleidoscope.com";
+        }
+      ];
+    };
+
+    nixosConfigurations.thinkpad = nixpkgs.lib.nixosSystem {
+      inherit pkgs;
       specialArgs = {
         inputs = inputs;
       };

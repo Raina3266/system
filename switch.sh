@@ -6,7 +6,7 @@ git add -A
 if test -f /etc/NIXOS; then
     sudo nixos-rebuild switch --flake .#thinkpad --option eval-cache false --show-trace
 else
-    nix run home-manager/master -- switch --flake .
+    nix run home-manager/master -- switch --flake . -b backup
 fi
 
 # useful for debugging the above command
