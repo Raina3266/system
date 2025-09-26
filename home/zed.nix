@@ -10,4 +10,15 @@ in {
   programs.zed-editor.package = lib.mkIf (!isNixOS) (pkgs.writeShellScriptBin "zeditor" ''
     ${pkgs.nixgl.nixVulkanIntel}/bin/nixVulkanIntel ${pkgs.zed-editor}/bin/zeditor "$@"
   '');
+
+  xdg.configFile."zed/settings.json".text = ''
+  {
+    "theme": "Gruvbox Dark Hard",
+    "auto_install_extensions": {
+      "nix": true
+    }
+  }
+
+  // this IS managed by nix
+  '';
 }

@@ -10,9 +10,6 @@
     home.packages = with pkgs; [
       bat
       tree
-      flutter
-      rustup
-      gcc
     ];
   };
 }

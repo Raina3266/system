@@ -10,6 +10,7 @@
     ./vscode.nix
     ./shell
     ./personal
+    ./toolchains.nix
     ./nixgl.nix
     ./zed.nix
   ];
