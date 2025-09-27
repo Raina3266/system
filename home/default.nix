@@ -1,9 +1,8 @@
 {
-  lib,
-  config,
   pkgs,
   ...
-}: {
+}:
+{
   imports = [
     ./yazi.nix
     ./ocr.nix
@@ -43,6 +42,6 @@
     meld
     czkawka
   ];
-  
+
   programs.home-manager.enable = true;
 }

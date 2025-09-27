@@ -1,9 +1,10 @@
-{pkgs, ...}: {
-    home.packages = with pkgs; [
-      nodejs
-      pnpm
-      flutter
-      rustup
-      gcc
-    ];
+{ pkgs, ... }:
+{
+  home.packages = with pkgs; [
+    nodejs
+    pnpm
+    flutter
+    rustup
+    gcc
+  ];
 }

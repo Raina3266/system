@@ -1,8 +1,8 @@
-{ pkgs, ...}:
+{ pkgs, ... }:
 {
   programs.vscode = {
     enable = true;
-    package = pkgs.vscode.override {commandLineArgs = "--no-sandbox";};
+    package = pkgs.vscode.override { commandLineArgs = "--no-sandbox"; };
     profiles.default.extensions = with pkgs.vscode-extensions; [
       jdinhlife.gruvbox
       dart-code.flutter
@@ -18,10 +18,10 @@
     ];
     mutableExtensionsDir = false;
     profiles.default.userSettings = {
-        workbench.colorTheme = "Gruvbox Dark Hard";
-        files.autoSave = "afterDelay";
-        editor.inlayHints.enabled = "offUnlessPressed";
-        rust-analyzer.check.command = "clippy";
+      workbench.colorTheme = "Gruvbox Dark Hard";
+      files.autoSave = "afterDelay";
+      editor.inlayHints.enabled = "offUnlessPressed";
+      rust-analyzer.check.command = "clippy";
     };
   };
 }

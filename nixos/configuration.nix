@@ -2,10 +2,10 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 {
-  config,
   pkgs,
   ...
-}: {
+}:
+{
   imports = [
     ./hardware-configuration.nix
     ./services.nix
@@ -17,7 +17,12 @@
   users.users.raina = {
     isNormalUser = true;
     description = "Raina";
-    extraGroups = ["networkmanager" "wheel" "video" "jellyfin"];
+    extraGroups = [
+      "networkmanager"
+      "wheel"
+      "video"
+      "jellyfin"
+    ];
   };
 
   # Desktop Environment
@@ -69,9 +74,9 @@
   i18n.inputMethod = {
     enable = true;
     type = "ibus";
-    ibus.engines = with pkgs.ibus-engines; [libpinyin];
+    ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
   };
-  
+
   # fonts = {
   #   packages = with pkgs; [
   #     fira
@@ -114,7 +119,6 @@
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "23.11"; # Did you read the comment?
 }
-
 
 # # ai/default.nix
 # {pkgs, config, lib, ... }: {

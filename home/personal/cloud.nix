@@ -3,12 +3,14 @@
   config,
   pkgs,
   ...
-}: let
+}:
+let
   mountDir_gdrive = "${config.home.homeDirectory}/Documents/GoogleDrive";
   mountDir_onedrive_personal = "${config.home.homeDirectory}/Documents/OnedrivePersonal";
   mountDir_onedrive_whu = "${config.home.homeDirectory}/Documents/OnedriveWhu";
   mountDir_onedrive_ucl = "${config.home.homeDirectory}/Documents/OnedriveUcl";
-in {
+in
+{
   config = lib.mkIf config.personal.enable {
     home.packages = with pkgs; [
       fuse3
@@ -20,8 +22,8 @@ in {
     systemd.user.services.rclone-mount-gdrive = {
       Unit = {
         Description = "Mount Google Drive";
-        After = ["network-online.target"];
-        Wants = ["network-online.target"];
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = with pkgs; {
@@ -38,15 +40,15 @@ in {
       };
 
       Install = {
-        WantedBy = ["default.target"];
+        WantedBy = [ "default.target" ];
       };
     };
 
     systemd.user.services.rclone-mount-onedrive-personal = {
       Unit = {
         Description = "Mount Onedrive Personal";
-        After = ["network-online.target"];
-        Wants = ["network-online.target"];
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = with pkgs; {
@@ -63,15 +65,15 @@ in {
       };
 
       Install = {
-        WantedBy = ["default.target"];
+        WantedBy = [ "default.target" ];
       };
     };
 
     systemd.user.services.rclone-mount-onedrive-whu = {
       Unit = {
         Description = "Mount Onedrive WHU";
-        After = ["network-online.target"];
-        Wants = ["network-online.target"];
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = with pkgs; {
@@ -88,15 +90,15 @@ in {
       };
 
       Install = {
-        WantedBy = ["default.target"];
+        WantedBy = [ "default.target" ];
       };
     };
 
     systemd.user.services.rclone-mount-onedrive-ucl = {
       Unit = {
         Description = "Mount Onedrive UCL";
-        After = ["network-online.target"];
-        Wants = ["network-online.target"];
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = with pkgs; {
@@ -113,7 +115,7 @@ in {
       };
 
       Install = {
-        WantedBy = ["default.target"];
+        WantedBy = [ "default.target" ];
       };
     };
   };

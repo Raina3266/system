@@ -1,4 +1,5 @@
-{pkgs, ...}: let
+{ pkgs, ... }:
+let
   ocrScreenshot = pkgs.writeShellScriptBin "ocr-screenshot.sh" ''
     IMG_PATH=/tmp/screenshot.png
 
@@ -13,7 +14,8 @@
     # pkgs.translate-shell
     # trans -t zh-CN hello
   '';
-in {
+in
+{
   home.packages = [
     pkgs.gnome-screenshot
     pkgs.tesseract

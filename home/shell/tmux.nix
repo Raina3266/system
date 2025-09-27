@@ -1,7 +1,4 @@
-{pkgs, lib, ...}: 
-let 
-  isNixOS = true;
-in 
+{ pkgs, ... }:
 {
   programs.tmux = {
     enable = true;
@@ -14,7 +11,7 @@ in
           set -g @tmux-gruvbox 'dark'
         '';
       }
-    ]; 
+    ];
 
     extraConfig = ''
       set -g default-terminal "xterm-256color"

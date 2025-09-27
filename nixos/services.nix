@@ -1,8 +1,8 @@
 {
-  config,
   pkgs,
   ...
-}: {
+}:
+{
   # List packages installed in system profile. To search, run: $ nix search wget
   environment.systemPackages = with pkgs; [
     vim
@@ -37,6 +37,13 @@
     gnome-console
   ];
 
+  services.jellyfin = {
+    enable = true;
+    openFirewall = true;
+    user = "jellyfin";
+    group = "jellyfin";
+  };
+
   # Enable Services
   services.accounts-daemon.enable = true;
   services.gnome.gnome-keyring.enable = true;
@@ -44,13 +51,7 @@
   services.udev.enable = true;
   services.fwupd.enable = true;
   services.printing.enable = true;
-  services.jellyfin = {
-    enable = true;
-    openFirewall = true;
-    user = "jellyfin";
-    group = "jellyfin";
-  };
-  
+
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;

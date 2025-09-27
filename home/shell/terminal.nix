@@ -1,11 +1,18 @@
-{pkgs, lib, nixosConfig ? null, ...}: 
+{
+  pkgs,
+  lib,
+  nixosConfig ? null,
+  ...
+}:
 let
-    isNixOS = nixosConfig != null;
+  isNixOS = nixosConfig != null;
 in
 {
-    programs.kitty.enable = true;
-    programs.kitty.themeFile = "gruvbox-dark-hard";
-    programs.kitty.package = lib.mkIf (!isNixOS) (pkgs.writeShellScriptBin "kitty" ''
-        ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.kitty}/bin/kitty "$@"
-    '');
+  programs.kitty.enable = true;
+  programs.kitty.themeFile = "gruvbox-dark-hard";
+  programs.kitty.package = lib.mkIf (!isNixOS) (
+    pkgs.writeShellScriptBin "kitty" ''
+      ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.kitty}/bin/kitty "$@"
+    ''
+  );
 }
