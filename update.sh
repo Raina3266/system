@@ -1,5 +1,12 @@
 #! /usr/bin/env sh
 set -euxo pipefail
 
-sudo nix flake update
-./switch.sh
+git add -A
+
+if test -f /etc/NIXOS; then
+    sudo nix flake update
+    ./switch.sh
+else
+    nix flake update
+    ./switch.sh
+fi
