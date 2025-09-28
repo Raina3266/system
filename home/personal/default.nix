@@ -6,7 +6,7 @@
 }:
 {
   imports = [
-    ./cloud.nix
+    # ./cloud.nix
     ./jellyfin.nix
   ];
   options = {

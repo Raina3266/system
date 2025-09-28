@@ -39,6 +39,7 @@
 
   # Network
   networking.hostName = "nixos"; # Define your hostname.
+  networking.nameservers = ["1.1.1.1" "9.9.9.9"];
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
   # Enable networking
