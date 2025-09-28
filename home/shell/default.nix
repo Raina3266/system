@@ -2,6 +2,7 @@
 {
   imports = [
     ./nvim
+    ./atuin.nix
     ./git.nix
     ./terminal.nix
     ./tmux.nix
@@ -16,6 +17,11 @@
     home.packages = with pkgs; [
       bat
       tree
+      
+      bottom
+      killall
     ];
+    
+    programs.fish.enable = true;
   };
 }

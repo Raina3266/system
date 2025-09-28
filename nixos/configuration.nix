@@ -21,7 +21,6 @@
       "networkmanager"
       "wheel"
       "video"
-      "jellyfin"
     ];
   };
 
@@ -36,10 +35,14 @@
   # Bootloader.
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
+  boot.kernelPackages = pkgs.linuxPackages_latest;
 
   # Network
   networking.hostName = "nixos"; # Define your hostname.
-  networking.nameservers = ["1.1.1.1" "9.9.9.9"];
+  networking.nameservers = [
+    "1.1.1.1"
+    "9.9.9.9"
+  ];
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
   # Enable networking
@@ -119,6 +122,15 @@
   # Before changing this value read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "23.11"; # Did you read the comment?
+
+  hardware.intel-gpu-tools.enable = true;
+  hardware.graphics.extraPackages = with pkgs; [
+    intel-media-driver
+    intel-vaapi-driver
+    libvdpau-va-gl
+    vpl-gpu-rt
+  ];
+  environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; }; # Force intel-media-driver
 }
 
 # # ai/default.nix

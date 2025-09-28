@@ -41,6 +41,7 @@
     zoom-us
     meld
     czkawka
+    kodi
   ];
 
   programs.home-manager.enable = true;

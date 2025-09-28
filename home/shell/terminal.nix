@@ -15,4 +15,7 @@ in
       ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.kitty}/bin/kitty "$@"
     ''
   );
+  programs.kitty.settings = {
+    shell = "fish";
+  };
 }

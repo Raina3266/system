@@ -29,8 +29,7 @@ in
       Service = with pkgs; {
         ExecStartPre = "/bin/sh -c 'until ${unixtools.ping}/bin/ping -c1 google.com; do ${coreutils}/bin/sleep 1; done;'";
         ExecStart = ''
-          ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' --vfs-cache-mode full --allow-non-empty --uid $(id -u jellyfin) --gid $(id -g jellyfin)
-          ${coreutils}/bin/ls ${mountDir_gdrive}
+          ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' --vfs-cache-mode full --allow-non-empty
         '';
 
         ExecStop = ''
@@ -55,7 +54,6 @@ in
         ExecStartPre = "/bin/sh -c 'until ${unixtools.ping}/bin/ping -c1 google.com; do ${coreutils}/bin/sleep 1; done;'";
         ExecStart = ''
           ${rclone}/bin/rclone mount OnedrivePersonal: '${mountDir_onedrive_personal}' --vfs-cache-mode full --allow-non-empty
-          ${coreutils}/bin/ls ${mountDir_onedrive_personal}
         '';
 
         ExecStop = ''
@@ -80,7 +78,6 @@ in
         ExecStartPre = "/bin/sh -c 'until ${unixtools.ping}/bin/ping -c1 google.com; do ${coreutils}/bin/sleep 1; done;'";
         ExecStart = ''
           ${rclone}/bin/rclone mount OnedriveWhu: '${mountDir_onedrive_whu}' --vfs-cache-mode full --allow-non-empty
-          ${coreutils}/bin/ls ${mountDir_onedrive_whu}
         '';
 
         ExecStop = ''
@@ -105,7 +102,6 @@ in
         ExecStartPre = "/bin/sh -c 'until ${unixtools.ping}/bin/ping -c1 google.com; do ${coreutils}/bin/sleep 1; done;'";
         ExecStart = ''
           ${rclone}/bin/rclone mount OnedriveUcl: '${mountDir_onedrive_ucl}' --vfs-cache-mode full --allow-non-empty
-          ${coreutils}/bin/ls ${mountDir_onedrive_ucl}
         '';
 
         ExecStop = ''
