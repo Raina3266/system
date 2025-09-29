@@ -41,7 +41,7 @@
     zoom-us
     meld
     czkawka
-    kodi
+    fooyin
   ];
 
   programs.home-manager.enable = true;
