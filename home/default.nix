@@ -6,7 +6,6 @@
   imports = [
     ./yazi.nix
     ./ocr.nix
-    ./vscode.nix
     ./shell
     ./personal
     ./toolchains.nix

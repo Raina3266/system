@@ -5,6 +5,5 @@
     pnpm
     flutter
     rustup
-    gcc
   ];
 }

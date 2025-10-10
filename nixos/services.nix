@@ -10,12 +10,9 @@
     fprintd
     sushi
     digikam
-    ffmpegthumbnailer
-    gnome-online-accounts
-    gnomeExtensions.pano
-    gnomeExtensions.tracker
-    gnomeExtensions.task-up-ultralite
-    gnomeExtensions.translate-clipboard
+    yt-dlp
+    ffmpeg
+    gnomeExtensions.clipboard-history
   ];
 
   environment.gnome.excludePackages = with pkgs; [
