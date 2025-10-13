@@ -12,7 +12,7 @@
     digikam
     yt-dlp
     ffmpeg
-    gnomeExtensions.clipboard-history
+    gnomeExtensions.clipboard-history  
   ];
 
   environment.gnome.excludePackages = with pkgs; [

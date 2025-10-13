@@ -5,7 +5,7 @@
     userName = "Raina";
 
     difftastic.enable = true;
-    difftastic.display = "inline";
+    difftastic.options.display = "inline";
 
     extraConfig = {
       init.defaultBranch = "master";
