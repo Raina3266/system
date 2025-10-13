@@ -20,8 +20,6 @@
       gui-for-clash
       wechat
       qq
-      spotdl
-      lrcget
       ytdownloader
       whatsapp-for-linux
       kdePackages.kdenlive

@@ -71,15 +71,6 @@ in
             }
           }
         },
-        "yaml-language-server": {
-          "settings": {
-            "yaml": {
-              "schemas": {
-                "http://json.schemastore.org/composer": ["/*"]
-              }
-            }
-          }
-        }
       }
     }
 

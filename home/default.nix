@@ -33,13 +33,17 @@
     neovim
     google-chrome
     vlc
-    obs-studio
+    (pkgs.writeShellScriptBin "obs" ''
+      ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.obs-studio}/bin/obs "$@"
+    '')
     qbittorrent
     libreoffice
     pdf4qt
     zoom-us
     meld
     czkawka
+    spotdl
+    lrcget    
     fooyin
   ];
 

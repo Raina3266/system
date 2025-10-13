@@ -17,7 +17,7 @@
     home.packages = with pkgs; [
       bat
       tree
-      
+      yq 
       bottom
       killall
     ];
