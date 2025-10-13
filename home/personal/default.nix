@@ -21,6 +21,7 @@
       wechat
       qq
       ytdownloader
+      waylyrics
       whatsapp-for-linux
       kdePackages.kdenlive
       gimp-with-plugins
