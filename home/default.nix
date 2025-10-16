@@ -9,8 +9,6 @@
 # The nixos config CONTAINS the home-manager config
 {
   pkgs,
-  lib,
-  nixosConfig,
   ...
 }:
 {
