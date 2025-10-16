@@ -35,18 +35,34 @@
       };
     in
     {
-      homeConfigurations."raina" = home-manager.lib.homeManagerConfiguration {
+      nixosConfigurations.dell = nixpkgs.lib.nixosSystem {
         inherit pkgs;
-        extraSpecialArgs = { inherit inputs; };
+        specialArgs = {
+          inputs = inputs;
+        };
         modules = [
-          ./home
+          ./nixos/configuration.nix
+          ./nixos/hardware/dell.nix
           {
-            home.stateVersion = "24.11";
-            programs.git.userEmail = "raina@kaleidoscope.com";
+            # This value determines the NixOS release from which the default
+            # settings for stateful data, like file locations and database versions
+            # on your system were taken. It‘s perfectly fine and recommended to leave
+            # this value at the release version of the first install of this system.
+            # Before changing this value read the documentation for this option
+            # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+            system.stateVersion = "25.05"; # Did you read the comment?
+            
+            home-manager.users.raina.home.stateVersion = "23.05";
+            home-manager.users.raina.programs.git.userEmail = "raina@kaleidoscope.com";
+            home-manager.users.raina.personal.enable = false;
+            
+            services'.work.enable = true;
+            services'.work.tailscale.enable = true;
           }
         ];
       };
 
+      # sudo nixos-rebuild switch --flake .#thinkpad
       nixosConfigurations.thinkpad = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         specialArgs = {
@@ -54,20 +70,21 @@
         };
         modules = [
           ./nixos/configuration.nix
-          home-manager.nixosModules.home-manager
+          ./nixos/hardware/thinkpad.nix
           {
+            # This value determines the NixOS release from which the default
+            # settings for stateful data, like file locations and database versions
+            # on your system were taken. It‘s perfectly fine and recommended to leave
+            # this value at the release version of the first install of this system.
+            # Before changing this value read the documentation for this option
+            # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+            system.stateVersion = "23.11"; # Did you read the comment?
+            
             home-manager.users.raina.home.stateVersion = "23.05";
             home-manager.users.raina.programs.git.userEmail = "cgl0326@outlook.com";
             home-manager.users.raina.personal.enable = true;
-          }
-          {
-            home-manager.backupFileExtension = "backup";
-            home-manager.useUserPackages = true;
-            home-manager.users.raina = import ./home;
-            home-manager.useGlobalPkgs = true;
-            home-manager.extraSpecialArgs = {
-              inherit inputs;
-            };
+            
+            services'.personal.enable = true;
           }
         ];
       };

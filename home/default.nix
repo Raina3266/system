@@ -1,5 +1,16 @@
+# When you are in a home-manager module:
+#  - use `config` to access the home-manager config
+#  - use `nixosConfig` to access the nixos config
+# 
+# When you are in a nixos module:
+#  - you cannot access the home-manager config (because there are lots potentially)
+#  - use `config` to access the nixos config
+
+# The nixos config CONTAINS the home-manager config
 {
   pkgs,
+  lib,
+  nixosConfig,
   ...
 }:
 {
@@ -13,8 +24,6 @@
     ./zed.nix
   ];
 
-  # https://nixos.wiki/wiki/FAQ/When_do_I_update_stateVersion
-  # home.stateVersion = "23.05";
   home = {
     username = "raina";
     homeDirectory = "/home/raina";
@@ -33,9 +42,7 @@
     neovim
     google-chrome
     vlc
-    (pkgs.writeShellScriptBin "obs" ''
-      ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.obs-studio}/bin/obs "$@"
-    '')
+    obs-studio
     qbittorrent
     libreoffice
     pdf4qt
