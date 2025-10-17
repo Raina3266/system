@@ -89,16 +89,7 @@
     # Configure console keymap
     console.keyMap = "uk";
   
-    # Configure keymap in X11
-    services.xserver = {
-      xkb.layout = "gb";
-      xkb.variant = "";
-    };
-    i18n.inputMethod = {
-      enable = true;
-      type = "ibus";
-      ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
-    };
+
 
     # List services that you want to enable:
   

@@ -27,10 +27,10 @@
         config = {
           allowUnfree = true;
           packageOverrides = pkgs: {
-              intel-vaapi-driver = pkgs.intel-vaapi-driver.override {
-                enableHybridCodec = true;
-              };
+            intel-vaapi-driver = pkgs.intel-vaapi-driver.override {
+              enableHybridCodec = true;
             };
+          };
         };
       };
     in
@@ -51,11 +51,17 @@
             # Before changing this value read the documentation for this option
             # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
             system.stateVersion = "25.05"; # Did you read the comment?
-            
+
             home-manager.users.raina.home.stateVersion = "23.05";
             home-manager.users.raina.programs.git.userEmail = "raina@kaleidoscope.com";
             home-manager.users.raina.personal.enable = false;
-            
+
+            # Configure keymap in X11
+            services.xserver.xkb = {
+              layout = "us";
+              variant = "";
+            };
+
             services'.work.enable = true;
           }
         ];
@@ -78,10 +84,21 @@
             # Before changing this value read the documentation for this option
             # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
             system.stateVersion = "23.11"; # Did you read the comment?
-            
+
             home-manager.users.raina.home.stateVersion = "23.05";
             home-manager.users.raina.programs.git.userEmail = "cgl0326@outlook.com";
             home-manager.users.raina.personal.enable = true;
+            
+            # Configure keymap in X11
+            services.xserver.xkb = {
+              layout = "gb";
+              variant = "";
+            };
+            i18n.inputMethod = {
+              enable = true;
+              type = "ibus";
+              ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
+            };
             
             services'.personal.enable = true;
           }
