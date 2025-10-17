@@ -11,6 +11,7 @@
   imports = [
     inputs.home-manager.nixosModules.home-manager
     ./services.nix
+    # ./tailscale.nix
   ];
   
   options.services' = with lib; {

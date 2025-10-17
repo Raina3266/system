@@ -57,7 +57,6 @@
             home-manager.users.raina.personal.enable = false;
             
             services'.work.enable = true;
-            services'.work.tailscale.enable = true;
           }
         ];
       };

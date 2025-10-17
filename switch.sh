@@ -10,5 +10,7 @@ git add -A
 
 sudo nixos-rebuild switch --flake ".#$NAME" --show-trace
 
+# nix shell nixpkgs#git --extra-experimental-features nix-command --extra-experimental-features flakes
+
 # useful for debugging the above command
 # --option eval-cache false --show-trace
