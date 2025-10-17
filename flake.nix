@@ -54,7 +54,6 @@
 
             home-manager.users.raina.home.stateVersion = "23.05";
             home-manager.users.raina.programs.git.userEmail = "raina@kaleidoscope.com";
-            home-manager.users.raina.personal.enable = false;
 
             # Configure keymap in X11
             services.xserver.xkb = {
@@ -87,7 +86,6 @@
 
             home-manager.users.raina.home.stateVersion = "23.05";
             home-manager.users.raina.programs.git.userEmail = "cgl0326@outlook.com";
-            home-manager.users.raina.personal.enable = true;
             
             # Configure keymap in X11
             services.xserver.xkb = {
