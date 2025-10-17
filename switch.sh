@@ -1,13 +1,14 @@
 #! /usr/bin/env bash
 set -euxo pipefail
 
+# ./switch.sh thinkpad
+# ./switch.sh dell
+
+NAME="$1"  # either "thinkpad" or "dell"
+
 git add -A
 
-if test -f /etc/NIXOS; then
-    sudo nixos-rebuild switch --flake .#thinkpad --option eval-cache false --show-trace
-else
-    nix run home-manager/master -- switch --flake . -b backup
-fi
+sudo nixos-rebuild switch --flake ".#$NAME" --show-trace
 
 # useful for debugging the above command
 # --option eval-cache false --show-trace
