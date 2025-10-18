@@ -13,10 +13,11 @@
 }:
 {
   imports = [
+    ./work
+    ./personal
     ./yazi.nix
     ./ocr.nix
     ./shell
-    ./personal
     ./toolchains.nix
     ./nixgl.nix
     ./zed.nix
@@ -41,7 +42,6 @@
     google-chrome
     vlc
     obs-studio
-    qbittorrent
     libreoffice
     pdf4qt
     zoom-us
@@ -50,6 +50,9 @@
     spotdl
     lrcget    
     fooyin
+    obsidian
+    discord
+    kid3
   ];
 
   programs.home-manager.enable = true;

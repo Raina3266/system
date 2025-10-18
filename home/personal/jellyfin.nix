@@ -1,11 +1,11 @@
 {
   lib,
-  config,
+  nixosConfig,
   pkgs,
   ...
 }:
 {
-  config = lib.mkIf config.personal.enable {
+  config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
       jellyfin
       jellyfin-web

@@ -1,6 +1,7 @@
 {
   lib,
   config,
+  nixosConfig,
   pkgs,
   ...
 }:
@@ -11,7 +12,7 @@ let
   mountDir_onedrive_ucl = "${config.home.homeDirectory}/Documents/OnedriveUcl";
 in
 {
-  config = lib.mkIf config.personal.enable {
+  config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
       fuse3
       rclone

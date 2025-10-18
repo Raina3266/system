@@ -1,7 +1,7 @@
 {
   lib,
   pkgs,
-  config,
+  nixosConfig,
   ...
 }:
 {
@@ -9,14 +9,8 @@
     ./cloud.nix
     ./jellyfin.nix
   ];
-  options = {
-    personal.enable = lib.mkEnableOption "Personal stuff";
-  };
-  config = lib.mkIf config.personal.enable {
+  config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
-      obsidian
-      discord
-      kid3
       gui-for-clash
       wechat
       qq
@@ -25,6 +19,7 @@
       whatsapp-for-linux
       inkscape
       shotcut
+      qbittorrent
     ];
   };
 }

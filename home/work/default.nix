@@ -1,17 +1,15 @@
 {
   lib,
   pkgs,
-  config,
+  nixosConfig,
   ...
 }:
 {
-  options = {
-    work.enable = lib.mkEnableOption "work stuff";
-  };
-  config = lib.mkIf config.work.enable {
+  config = lib.mkIf nixosConfig.services'.work.enable {
     home.packages = with pkgs; [
       tailscale
       slack
+      docker
     ];
   };
 }
