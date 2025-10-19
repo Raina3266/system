@@ -21,9 +21,13 @@
     yelp
     seahorse
     totem
+    simple-scan
     snapshot
     decibels
     # loupe  Image Viewer.
+    gnome-weather
+    gnome-calculator
+    gnome-text-editor
     gnome-photos
     gnome-contacts
     gnome-music
