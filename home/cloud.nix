@@ -1,7 +1,5 @@
 {
-  lib,
   config,
-  nixosConfig,
   pkgs,
   ...
 }:
@@ -9,7 +7,7 @@ let
   mountDir_gdrive = "${config.home.homeDirectory}/Documents/GoogleDrive";
 in
 {
-  config = lib.mkIf nixosConfig.services'.personal.enable {
+  config = {
     home.packages = with pkgs; [
       fuse3
       rclone

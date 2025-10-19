@@ -53,8 +53,7 @@
             system.stateVersion = "25.05"; # Did you read the comment?
 
             home-manager.users.raina.home.stateVersion = "23.05";
-            home-manager.users.raina.programs.git.userEmail = "raina@kaleidoscope.com";
-
+            home-manager.users.raina.programs.git.settings.user.email = "raina@kaleidoscope.com";
             # Configure keymap in X11
             services.xserver.xkb = {
               layout = "us";
@@ -85,8 +84,7 @@
             system.stateVersion = "23.11"; # Did you read the comment?
 
             home-manager.users.raina.home.stateVersion = "23.05";
-            home-manager.users.raina.programs.git.userEmail = "cgl0326@outlook.com";
-            
+            home-manager.users.raina.programs.git.settings.user.email = "cgl0326@outlook.com";            
             # Configure keymap in X11
             services.xserver.xkb = {
               layout = "gb";

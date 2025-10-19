@@ -2,12 +2,11 @@
 {
   programs.git = {
     enable = true;
-    userName = "Raina";
 
     difftastic.enable = true;
     difftastic.options.display = "inline";
 
-    extraConfig = {
+    settings = {
       init.defaultBranch = "master";
 
       pull.rebase = true;
