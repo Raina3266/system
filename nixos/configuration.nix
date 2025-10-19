@@ -30,7 +30,6 @@
       extraGroups = [
         "networkmanager"
         "wheel"
-        "video"
       ];
     };
     
@@ -45,6 +44,7 @@
     # Desktop Environment
     # Enable the X11 windowing system.
     services.xserver.enable = true;
+    services.libinput.enable = true;
   
     # Enable the GNOME Desktop Environment.
     services.displayManager.gdm.enable = true;
@@ -88,17 +88,12 @@
   
     # Configure console keymap
     console.keyMap = "uk";
-  
-
 
     # List services that you want to enable:
   
     # Configure network proxy if necessary
     # networking.proxy.default = "http://user:password@proxy:port/";
     # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
-  
-    # Enable touchpad support (enabled default in most desktopManager).
-    # services.xserver.libinput.enable = true;
   
     # Some programs need SUID wrappers, can be configured further or are
     # started in user sessions.
@@ -116,7 +111,6 @@
     # networking.firewall.allowedUDPPorts = [ ... ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
-  
   
     hardware.intel-gpu-tools.enable = true;
     hardware.graphics.extraPackages = with pkgs; [
