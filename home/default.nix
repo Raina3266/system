@@ -15,6 +15,7 @@
   imports = [
     ./work
     ./personal
+    ./cloud.nix
     ./yazi.nix
     ./ocr.nix
     ./shell

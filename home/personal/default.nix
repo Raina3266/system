@@ -6,11 +6,11 @@
 }:
 {
   imports = [
-    ./cloud.nix
     ./jellyfin.nix
   ];
   config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
+      onedrivegui
       gui-for-clash
       wechat
       qq
