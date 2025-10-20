@@ -1,10 +1,12 @@
 { pkgs, ... }:
 {
+  programs.difftastic = {
+    enable = true;
+    options = "inline";
+  };
+
   programs.git = {
     enable = true;
-
-    difftastic.enable = true;
-    difftastic.options.display = "inline";
 
     settings = {
       init.defaultBranch = "master";

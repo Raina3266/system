@@ -13,16 +13,16 @@
     ./services.nix
     # ./tailscale.nix
   ];
-  
+
   options.services' = with lib; {
     personal.enable = mkEnableOption "personal stuff";
     work.enable = mkEnableOption "work stuff";
   };
-  
+
   config = {
-    
+
     nix.settings.experimental-features = "nix-command flakes";
-  
+
     # User Account
     users.users.raina = {
       isNormalUser = true;
@@ -30,9 +30,10 @@
       extraGroups = [
         "networkmanager"
         "wheel"
+        "docker"
       ];
     };
-    
+
     home-manager.backupFileExtension = "backup";
     home-manager.useUserPackages = true;
     home-manager.users.raina = import ../home;
@@ -40,22 +41,30 @@
     home-manager.extraSpecialArgs = {
       inherit inputs;
     };
-  
+    
+    virtualisation.docker.enable = true;
+
     # Desktop Environment
     # Enable the X11 windowing system.
     services.xserver.enable = true;
     services.libinput.enable = true;
-  
+
     # Enable the GNOME Desktop Environment.
     services.displayManager.gdm.enable = true;
     services.desktopManager.gnome.enable = true;
-  
+
     # Bootloader.
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = true;
-    
+
     boot.kernelPackages = pkgs.linuxPackages_latest;
-  
+
+    # Ensure v4l2 modules load
+    boot.kernelModules = [
+      "v4l2loopback"
+      "videobuf2_v4l2"
+    ];
+
     # Network
     networking.hostName = "nixos"; # Define your hostname.
     networking.nameservers = [
@@ -63,17 +72,17 @@
       "9.9.9.9"
     ];
     # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
-  
+
     # Enable networking
     networking.networkmanager.enable = true;
-  
+
     # Time and Language
     # Set your time zone.
     time.timeZone = "Europe/London";
-  
+
     # Select internationalisation properties.
     i18n.defaultLocale = "en_GB.UTF-8";
-  
+
     i18n.extraLocaleSettings = {
       LC_ADDRESS = "en_GB.UTF-8";
       LC_IDENTIFICATION = "en_GB.UTF-8";
@@ -85,16 +94,13 @@
       LC_TELEPHONE = "en_GB.UTF-8";
       LC_TIME = "en_GB.UTF-8";
     };
-  
-    # Configure console keymap
-    console.keyMap = "uk";
 
     # List services that you want to enable:
-  
+
     # Configure network proxy if necessary
     # networking.proxy.default = "http://user:password@proxy:port/";
     # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
-  
+
     # Some programs need SUID wrappers, can be configured further or are
     # started in user sessions.
     # programs.mtr.enable = true;
@@ -102,16 +108,16 @@
     #   enable = true;
     #   enableSSHSupport = true;
     # };
-  
+
     # Enable the OpenSSH daemon.
     # services.openssh.enable = true;
-  
+
     # Open ports in the firewall.
     # networking.firewall.allowedTCPPorts = [ ... ];
     # networking.firewall.allowedUDPPorts = [ ... ];
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
-  
+
     hardware.intel-gpu-tools.enable = true;
     hardware.graphics.extraPackages = with pkgs; [
       intel-media-driver
@@ -119,29 +125,8 @@
       libvdpau-va-gl
       vpl-gpu-rt
     ];
-    environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; }; # Force intel-media-driver
+    environment.sessionVariables = {
+      LIBVA_DRIVER_NAME = "iHD";
+    }; # Force intel-media-driver
   };
-
 }
-
-# # ai/default.nix
-# {pkgs, config, lib, ... }: {
-#   imports = [./ollama.nix];
-#   options = {
-#     services.ai.enable = mkEnableOption "AI services";
-#   };
-#   config = lib.mkIf config.services.ai.enable {
-#     environment.systemPackages = if config.services.ai.enable then [pkgs.ollama] else [];
-#   };
-# }
-
-# # ai/ollama.nix
-# {
-#   imports = [];
-#   options = {...};
-#   config = {...};
-# }
-
-# {
-#   foo = bar;
-# }
