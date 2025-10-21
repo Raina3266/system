@@ -1,10 +1,12 @@
 {
   pkgs,
+  lib,
   ...
 }:
 {
   # List packages installed in system profile. To search, run: $ nix search wget
   environment.systemPackages = with pkgs; [
+    tailscale
     vim
     ripgrep
     fprintd
@@ -41,6 +43,7 @@
   ];
   
   services.tailscale.enable = true;
+  systemd.services.tailscaled.wantedBy = pkgs.lib.mkForce [ ];
 
   services.jellyfin = {
     enable = true;

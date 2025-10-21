@@ -67,9 +67,12 @@
 
     # Network
     networking.nameservers = [
+      "100.100.100.100"
+      "8.8.8.8"
       "1.1.1.1"
       "9.9.9.9"
     ];
+    networking.search = [ "example.ts.net" ];
     # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
     # Enable networking

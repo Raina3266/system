@@ -5,7 +5,6 @@
 
     settings = {
       init.defaultBranch = "master";
-
       pull.rebase = true;
 
       push = {
