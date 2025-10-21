@@ -9,12 +9,12 @@
     programs.docker-cli.enable = true;
     programs.lazydocker.enable = true;
     home.packages = with pkgs; [
+      slack
+    ] ++ [
       nodejs
       pnpm
-      tailscale
-      slack
-      docker
       docker-compose
+      wasm-pack
     ];
   };
 }

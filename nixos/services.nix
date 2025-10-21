@@ -39,6 +39,8 @@
     gnome-connections
     gnome-console
   ];
+  
+  services.tailscale.enable = true;
 
   services.jellyfin = {
     enable = true;

@@ -35,7 +35,7 @@
       };
     in
     {
-      nixosConfigurations.dell = nixpkgs.lib.nixosSystem {
+      nixosConfigurations.rainawork = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         specialArgs = {
           inputs = inputs;
@@ -59,6 +59,8 @@
               layout = "us";
               variant = "";
             };
+            
+            networking.hostName = "rainawork"; # Define your hostname.
 
             services'.work.enable = true;
           }
@@ -66,7 +68,7 @@
       };
 
       # sudo nixos-rebuild switch --flake .#thinkpad
-      nixosConfigurations.thinkpad = nixpkgs.lib.nixosSystem {
+      nixosConfigurations.rainapersonal = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         specialArgs = {
           inputs = inputs;
@@ -95,6 +97,7 @@
               type = "ibus";
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
+            networking.hostName = "rainapersonal"; # Define your hostname.
             
             services'.personal.enable = true;
           }

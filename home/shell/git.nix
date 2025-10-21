@@ -1,10 +1,5 @@
 { pkgs, ... }:
 {
-  programs.difftastic = {
-    enable = true;
-    options = "inline";
-  };
-
   programs.git = {
     enable = true;
 
@@ -24,9 +19,14 @@
       };
     };
   };
-
+  
   programs.gh.enable = true;
   programs.gh-dash.enable = true;
+  
+  programs.difftastic = {
+    enable = true;
+    options = "inline";
+  };
 
   home.packages = with pkgs; [
     mergiraf

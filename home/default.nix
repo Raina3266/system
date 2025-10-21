@@ -37,9 +37,6 @@
   };
 
   home.packages = with pkgs; [
-    nil
-    nixd
-    neovim
     google-chrome
     vlc
     obs-studio
@@ -54,6 +51,7 @@
     obsidian
     discord
     kid3
+    
   ];
 
   programs.home-manager.enable = true;
