@@ -1,6 +1,5 @@
 {
   pkgs,
-  lib,
   ...
 }:
 {
@@ -41,9 +40,14 @@
     gnome-connections
     gnome-console
   ];
-  
+
+  virtualisation.docker.enable = true;
+
   services.tailscale.enable = true;
   systemd.services.tailscaled.wantedBy = pkgs.lib.mkForce [ ];
+  services.tailscale.extraUpFlags = [
+    "--accept-dns=true"
+  ];
 
   services.jellyfin = {
     enable = true;

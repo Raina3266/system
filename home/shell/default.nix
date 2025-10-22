@@ -20,6 +20,8 @@
       yq 
       bottom
       killall
+      
+      coreutils
     ];
     
     programs.fish.enable = true;

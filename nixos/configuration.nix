@@ -11,7 +11,6 @@
   imports = [
     inputs.home-manager.nixosModules.home-manager
     ./services.nix
-    # ./tailscale.nix
   ];
 
   options.services' = with lib; {
@@ -41,8 +40,6 @@
     home-manager.extraSpecialArgs = {
       inherit inputs;
     };
-    
-    virtualisation.docker.enable = true;
 
     # Desktop Environment
     # Enable the X11 windowing system.
@@ -65,18 +62,22 @@
       "videobuf2_v4l2"
     ];
 
+    # Enable networking
+    networking.networkmanager.enable = true;
+    networking.networkmanager.dns = "none";
+
     # Network
     networking.nameservers = [
       "100.100.100.100"
-      "8.8.8.8"
       "1.1.1.1"
       "9.9.9.9"
     ];
-    networking.search = [ "example.ts.net" ];
-    # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
+    networking.search = [
+      "tail689b6f.ts.net"
+      "example.ts.net"
+    ];
 
-    # Enable networking
-    networking.networkmanager.enable = true;
+    # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
     # Time and Language
     # Set your time zone.
