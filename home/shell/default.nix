@@ -25,5 +25,8 @@
     ];
     
     programs.fish.enable = true;
+    programs.fish.interactiveShellInit = ''
+      source ~/.secrets.fish &>/dev/null || true
+    '';
   };
 }
