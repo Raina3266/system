@@ -1,7 +1,7 @@
 # When you are in a home-manager module:
 #  - use `config` to access the home-manager config
 #  - use `nixosConfig` to access the nixos config
-# 
+#
 # When you are in a nixos module:
 #  - you cannot access the home-manager config (because there are lots potentially)
 #  - use `config` to access the nixos config
@@ -46,12 +46,10 @@
     meld
     czkawka
     spotdl
-    lrcget    
-    fooyin
+    lrcget
     obsidian
     discord
     kid3
-    
   ];
 
   programs.home-manager.enable = true;

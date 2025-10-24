@@ -10,7 +10,6 @@
     ripgrep
     fprintd
     sushi
-    digikam
     yt-dlp
     ffmpeg
     gnomeExtensions.clipboard-history
