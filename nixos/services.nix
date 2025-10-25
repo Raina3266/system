@@ -10,11 +10,7 @@
     ripgrep
     fprintd
     sushi
-    yt-dlp
-    ffmpeg
     gnomeExtensions.clipboard-history
-    v4l2-relayd
-    gst_all_1.icamerasrc-ipu6
   ];
 
   environment.gnome.excludePackages = with pkgs; [

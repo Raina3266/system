@@ -50,6 +50,8 @@
     obsidian
     discord
     kid3
+    yt-dlp
+    ffmpeg
   ];
 
   programs.home-manager.enable = true;
