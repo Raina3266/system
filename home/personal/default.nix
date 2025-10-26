@@ -19,7 +19,6 @@
       whatsapp-for-linux
       inkscape
       shotcut
-      fooyin
       qbittorrent
     ];
   };
