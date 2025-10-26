@@ -45,7 +45,6 @@
     zoom-us
     meld
     czkawka
-    spotdl
     lrcget
     obsidian
     discord
