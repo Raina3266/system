@@ -10,7 +10,6 @@
     ripgrep
     fprintd
     sushi
-    spotdl
     gnomeExtensions.clipboard-history
   ];
 

@@ -8,7 +8,7 @@ NAME="$1"  # either "thinkpad" or "dell"
 
 git add -A
 
-sudo nixos-rebuild switch --flake ".#$NAME" --show-trace
+sudo nixos-rebuild switch --upgrade --flake ".#$NAME" --show-trace
 
 # nix shell nixpkgs#git --extra-experimental-features nix-command --extra-experimental-features flakes
 

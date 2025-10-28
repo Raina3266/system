@@ -7,6 +7,7 @@
 {
   imports = [
     ./jellyfin.nix
+    ./cloud.nix
   ];
   config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
