@@ -10,9 +10,7 @@
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
-    
-    nixpkgs-spotdl.url = "github:nixos/nixpkgs/1c1c9b3f5ec0421eaa0f22746295466ee6a8d48f";
-  };
+    };
 
   outputs =
     {
@@ -21,7 +19,6 @@
       home-manager,
       nixGL,
       nixvim,
-      nixpkgs-spotdl,
     }@inputs:
     let
       pkgs = import nixpkgs {
@@ -41,7 +38,6 @@
       nixosConfigurations.rainawork = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         specialArgs = {
-          inherit nixpkgs-spotdl;
           inputs = inputs;
         };
         modules = [
