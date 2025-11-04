@@ -44,7 +44,6 @@
     zoom-us
     meld
     czkawka
-    lrcget
     obsidian
     discord
     kid3

@@ -15,6 +15,7 @@
       gui-for-clash
       wechat
       qq
+      wemeet
       ytdownloader
       waylyrics
       whatsapp-for-linux
