@@ -20,7 +20,7 @@
       yq 
       bottom
       killall
-      
+      lsof 
       coreutils
     ];
     

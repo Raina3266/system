@@ -23,7 +23,9 @@
     "rtsx_pci_sdmmc"
   ];
   boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ "kvm-intel" ];
+  boot.kernelModules = [
+    "kvm-intel"
+  ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" = {
@@ -54,5 +56,7 @@
   # networking.interfaces.wlp0s20f3.useDHCP = lib.mkDefault true;
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+  hardware.ipu6.enable = true;
+  hardware.ipu6.platform = "ipu6epmtl";
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
 }
