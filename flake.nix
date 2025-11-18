@@ -60,6 +60,15 @@
               variant = "";
             };
             
+            fonts = {
+              enableDefaultFonts = true;
+            
+              packages = with pkgs; [
+                noto-fonts
+                noto-fonts-cjk-sans
+              ];
+            };
+            
             networking.hostName = "rainawork"; # Define your hostname.
 
             services'.work.enable = true;
