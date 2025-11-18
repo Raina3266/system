@@ -15,9 +15,10 @@
   imports = [
     ./work
     ./personal
+    ./shell
     ./yazi.nix
     ./ocr.nix
-    ./shell
+    ./cloud.nix
     ./toolchains.nix
     ./nixgl.nix
     ./zed.nix
