@@ -17,7 +17,7 @@
       wemeet
       ytdownloader
       waylyrics
-      whatsapp-for-linux
+      wasistlos
       inkscape
       shotcut
       qbittorrent
