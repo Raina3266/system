@@ -4,7 +4,6 @@
     nil
     nixd
     neovim
-    flutter
     rustup
   ];
 }
