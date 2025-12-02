@@ -47,8 +47,7 @@
     czkawka
     obsidian
     discord
-    kid3
-    
+    kid3 
     yt-dlp
     spotdl
     ffmpeg

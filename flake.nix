@@ -1,4 +1,15 @@
 {
+  nixConfig = {
+    extra-substituters = [
+      "https://zed.cachix.org"
+      "https://cache.garnix.io"
+    ];
+    extra-trusted-public-keys = [
+      "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
+      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+    ];
+  };
+  
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -10,7 +21,9 @@
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
-    };
+    
+    zed.url = "github:zed-industries/zed";
+  };
 
   outputs =
     {
@@ -60,16 +73,16 @@
               layout = "us";
               variant = "";
             };
-            
+
             fonts = {
               enableDefaultPackages = true;
-            
+
               packages = with pkgs; [
                 noto-fonts
                 noto-fonts-cjk-sans
               ];
             };
-            
+
             networking.hostName = "rainawork"; # Define your hostname.
 
             services'.work.enable = true;
@@ -96,7 +109,7 @@
             system.stateVersion = "23.11"; # Did you read the comment?
 
             home-manager.users.raina.home.stateVersion = "23.05";
-            home-manager.users.raina.programs.git.settings.user.email = "cgl0326@outlook.com";            
+            home-manager.users.raina.programs.git.settings.user.email = "cgl0326@outlook.com";
             # Configure keymap in X11
             services.xserver.xkb = {
               layout = "gb";
@@ -108,7 +121,7 @@
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
             networking.hostName = "rainapersonal"; # Define your hostname.
-            
+
             services'.personal.enable = true;
           }
         ];

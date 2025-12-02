@@ -1,20 +1,11 @@
 {
   pkgs,
-  lib,
-  nixosConfig ? null,
+  inputs,
   ...
 }:
-let
-  isNixOS = nixosConfig != null;
-in
 {
   programs.zed-editor.enable = true;
-  programs.zed-editor.package = lib.mkIf (!isNixOS) (
-    pkgs.writeShellScriptBin "zeditor" ''
-      ${pkgs.nixgl.nixVulkanIntel}/bin/nixVulkanIntel ${pkgs.zed-editor}/bin/zeditor "$@"
-    ''
-  );
-
+  programs.zed-editor.package = inputs.zed.packages.${pkgs.system}.default;
   # xdg.configFile."zed/settings.json".text = ''
   # {
   #   "terminal": {
@@ -25,7 +16,7 @@ in
   #       "program": "fish"
   #     }
   #   },
-    
+
   #   "agent": {
   #     "dock": "right"
   #   },
