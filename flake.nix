@@ -19,6 +19,7 @@
       home-manager,
       nixGL,
       nixvim,
+      ...
     }@inputs:
     let
       pkgs = import nixpkgs {
@@ -61,7 +62,7 @@
             };
             
             fonts = {
-              enableDefaultFonts = true;
+              enableDefaultPackages = true;
             
               packages = with pkgs; [
                 noto-fonts
