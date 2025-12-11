@@ -51,6 +51,7 @@
     yt-dlp
     spotdl
     ffmpeg
+    sunshine
   ];
 
   programs.home-manager.enable = true;

@@ -5,7 +5,6 @@
 }:
 {
   programs.zed-editor.enable = true;
-  programs.zed-editor.package = inputs.zed.packages.${pkgs.system}.default;
   # xdg.configFile."zed/settings.json".text = ''
   # {
   #   "terminal": {

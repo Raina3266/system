@@ -16,11 +16,11 @@ let
   '';
 in
 {
-  home.packages = [
-    pkgs.gnome-tweaks
-    pkgs.gnome-screenshot
-    pkgs.tesseract
-    pkgs.wl-clipboard
+  home.packages = with pkgs; [
+    gnome-tweaks
+    gnome-screenshot
+    tesseract
+    wl-clipboard
     ocrScreenshot
   ];
 }
