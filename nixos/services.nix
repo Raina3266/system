@@ -10,6 +10,7 @@
     ripgrep
     fprintd
     sushi
+    postgresql_18
     clash-verge-rev
     gnomeExtensions.clipboard-history
     # v4l2-ctl -d /dev/video33 --set-fmt-video=width=1280,height=720,pixelformat=YUYV
