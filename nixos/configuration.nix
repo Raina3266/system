@@ -54,7 +54,7 @@
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = true;
 
-    boot.kernelPackages = pkgs.linuxPackages_6_17;
+    boot.kernelPackages = pkgs.linuxPackages_latest;
 
     # Ensure v4l2 modules load
     boot.kernelModules = [
