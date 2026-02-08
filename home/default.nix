@@ -49,7 +49,6 @@
     obsidian
     discord
     kid3 
-    yt-dlp
     spotdl
     ffmpeg
     sunshine

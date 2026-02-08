@@ -10,6 +10,7 @@
     ripgrep
     fprintd
     sushi
+    yt-dlp
     postgresql_18
     clash-verge-rev
     gnomeExtensions.clipboard-history
