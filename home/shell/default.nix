@@ -2,7 +2,6 @@
 {
   imports = [
     ./nvim
-    ./atuin.nix
     ./git.nix
     ./terminal.nix
     ./tmux.nix
@@ -17,16 +16,29 @@
     home.packages = with pkgs; [
       bat
       tree
-      yq 
+      yq
+      fzf
       bottom
       killall
-      lsof 
+      lsof
       coreutils
     ];
-    
+
     programs.fish.enable = true;
     programs.fish.interactiveShellInit = ''
+      echo "hello from `programs.fish.interactiveShellInit`"
       source ~/.secrets.fish &>/dev/null || true
     '';
+
+    programs.atuin = {
+      enable = true;
+      enableFishIntegration = true;
+      settings = {
+        filter_mode_shell_up_key_binding = "session";
+        enter_accept = true;
+      };
+
+      flags = [ "--disable-up-arrow" ];
+    };
   };
 }

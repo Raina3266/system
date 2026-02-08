@@ -10,8 +10,6 @@
       with pkgs;
       [
         slack
-      ]
-      ++ [
         terraform
         terragrunt
         azure-cli

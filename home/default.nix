@@ -18,7 +18,7 @@
     ./shell
     ./yazi.nix
     ./ocr.nix
-    ./cloud.nix
+#    ./cloud.nix
     ./toolchains.nix
     ./nixgl.nix
     ./zed.nix
