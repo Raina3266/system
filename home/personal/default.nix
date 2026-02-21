@@ -15,7 +15,6 @@
       qq
       wemeet
       ytdownloader
-      waylyrics
       wasistlos
       inkscape
       shotcut

@@ -9,6 +9,7 @@
   ];
 
   programs.yazi = {
+    shellWrapperName = "y";
     enable = true;
     enableFishIntegration = true;
     settings = {

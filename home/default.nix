@@ -52,6 +52,10 @@
     spotdl
     ffmpeg
     sunshine
+    exercism
+    waylyrics
+    python313Packages.syncedlyrics
+    lrcsnc
   ];
 
   programs.home-manager.enable = true;
