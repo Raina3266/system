@@ -1,11 +1,11 @@
 {
   pkgs,
+  lib,
   ...
 }:
 {
   # List packages installed in system profile. To search, run: $ nix search wget
   environment.systemPackages = with pkgs; [
-    tailscale
     vim
     ripgrep
     fprintd
@@ -14,11 +14,6 @@
     postgresql_18
     clash-verge-rev
     gnomeExtensions.clipboard-history
-    # v4l2-ctl -d /dev/video33 --set-fmt-video=width=1280,height=720,pixelformat=YUYV
-    v4l-utils
-    webcamoid
-    ipu6epmtl-camera-hal
-    gst_all_1.icamerasrc-ipu6epmtl
   ];
 
   environment.gnome.excludePackages = with pkgs; [
@@ -60,12 +55,11 @@
     user = "jellyfin";
     group = "jellyfin";
   };
-
+  
   # Enable Services
   services.accounts-daemon.enable = true;
   services.gnome.gnome-keyring.enable = true;
   services.fprintd.enable = true;
-  services.udev.enable = true;
   services.fwupd.enable = true;
   services.printing.enable = true;
 
@@ -84,6 +78,8 @@
     # no need to redefine it in your config for now)
     #media-session.enable = true;
   };
+  
+  services.udev.enable = true;
   services.udev.extraRules = ''
     ACTION=="add", SUBSYSTEM=="video4linux", ATTR{name}=="Intel MIPI Camera", \
       RUN+="${pkgs.v4l-utils}/bin/v4l2-ctl -d $env{DEVNAME} \

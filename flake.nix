@@ -121,6 +121,11 @@
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
             networking.hostName = "rainapersonal"; # Define your hostname.
+            
+            services.gvfs.enable = true;
+            programs.virt-manager.enable = true;
+            virtualisation.libvirtd.enable = true;
+            virtualisation.spiceUSBRedirection.enable = true;
 
             services'.personal.enable = true;
           }

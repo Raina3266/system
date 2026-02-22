@@ -7,6 +7,8 @@
 {
   imports = [
     ./jellyfin.nix
+    ./virtual.nix
+  #  ./cloud.nix
   ];
   config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
@@ -19,6 +21,7 @@
       inkscape
       shotcut
       qbittorrent
+      android-tools
     ];
   };
 }
