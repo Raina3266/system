@@ -9,7 +9,7 @@
       "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
     ];
   };
-  
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -21,7 +21,7 @@
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
-    
+
     zed.url = "github:zed-industries/zed";
   };
 
@@ -121,11 +121,16 @@
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
             networking.hostName = "rainapersonal"; # Define your hostname.
-            
+
             services.gvfs.enable = true;
             programs.virt-manager.enable = true;
-            virtualisation.libvirtd.enable = true;
             virtualisation.spiceUSBRedirection.enable = true;
+            virtualisation.libvirtd = {
+                enable = true;
+                qemu = {
+                  vhostUserPackages = [ pkgs.virtiofsd ];
+                };
+              };
 
             services'.personal.enable = true;
           }
