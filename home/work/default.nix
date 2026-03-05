@@ -23,6 +23,9 @@
         webcamoid
         ipu6epmtl-camera-hal
         gst_all_1.icamerasrc-ipu6epmtl
+        xh
+        protobuf
+        postman
       ];
   };
 }

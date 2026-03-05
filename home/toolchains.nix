@@ -5,5 +5,6 @@
     nixd
     neovim
     rustup
+    cargo-machete
   ];
 }
