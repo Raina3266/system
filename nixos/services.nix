@@ -41,6 +41,13 @@
     gnome-console
   ];
 
+  programs.nix-ld.enable = true;
+  programs.nix-ld.libraries = with pkgs; [
+    stdenv.cc.cc.lib  # libstdc++
+    zlib
+    openssl
+  ];
+
   virtualisation.docker.enable = true;
 
   # services.tailscale.enable = true;
@@ -55,7 +62,7 @@
     user = "jellyfin";
     group = "jellyfin";
   };
-  
+
   # Enable Services
   services.accounts-daemon.enable = true;
   services.gnome.gnome-keyring.enable = true;
@@ -78,7 +85,7 @@
     # no need to redefine it in your config for now)
     #media-session.enable = true;
   };
-  
+
   services.udev.enable = true;
   services.udev.extraRules = ''
     ACTION=="add", SUBSYSTEM=="video4linux", ATTR{name}=="Intel MIPI Camera", \
