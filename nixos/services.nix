@@ -1,6 +1,5 @@
 {
   pkgs,
-  lib,
   ...
 }:
 {
@@ -11,7 +10,6 @@
     fprintd
     sushi
     yt-dlp
-    postgresql_18
     clash-verge-rev
     gnomeExtensions.clipboard-history
   ];
@@ -46,6 +44,7 @@
     stdenv.cc.cc.lib  # libstdc++
     zlib
     openssl
+    sqlite
   ];
 
   virtualisation.docker.enable = true;
@@ -56,6 +55,12 @@
   #   "--accept-dns=true"
   # ];
 
+  services.postgresql.enable = true;
+  services.postgresql.authentication = pkgs.lib.mkForce ''
+    local all all           trust
+    host  all all 0.0.0.0/0 trust
+    host  all all ::0/0     trust
+  '';
   services.jellyfin = {
     enable = true;
     openFirewall = true;
