@@ -56,6 +56,8 @@
     waylyrics
     python313Packages.syncedlyrics
     lrcsnc
+    tauon
+    fooyin
   ];
 
   programs.home-manager.enable = true;
