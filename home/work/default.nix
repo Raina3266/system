@@ -26,6 +26,10 @@
         xh
         protobuf
         postman
+        kubernetes-helm
+        kubectl           # Kubernetes CLI
+        k9s               # Kubernetes CLI UI   # Helm (Package manager for K8s)
+        k3d
       ];
   };
 }

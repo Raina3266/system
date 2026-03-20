@@ -86,6 +86,8 @@
             networking.hostName = "rainawork"; # Define your hostname.
 
             services'.work.enable = true;
+            virtualisation.docker.enable = true;
+            
           }
         ];
       };

@@ -47,8 +47,6 @@
     sqlite
   ];
 
-  virtualisation.docker.enable = true;
-
   # services.tailscale.enable = true;
   # systemd.services.tailscaled.wantedBy = pkgs.lib.mkForce [ ];
   # services.tailscale.extraUpFlags = [
