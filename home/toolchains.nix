@@ -8,5 +8,6 @@
     rustup
     cargo-machete
     diesel-cli
+    cargo-audit
   ];
 }

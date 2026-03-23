@@ -69,6 +69,7 @@
 
     # Network
     networking.nameservers = [
+      "8.8.8.8"
       "100.100.100.100"
       "1.1.1.1"
       "9.9.9.9"
@@ -77,6 +78,10 @@
       "tail689b6f.ts.net"
       "example.ts.net"
     ];
+
+    networking.hosts = {
+      "127.0.0.1" = [ "ks-registry.localhost" ];
+    };
 
     # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
@@ -136,7 +141,5 @@
     environment.sessionVariables = {
       LIBVA_DRIVER_NAME = "iHD";
     }; # Force intel-media-driver
-    
-    services.mongodb.enable = true;
   };
 }

@@ -30,6 +30,7 @@
         kubectl           # Kubernetes CLI
         k9s               # Kubernetes CLI UI   # Helm (Package manager for K8s)
         k3d
+        net-tools
       ];
   };
 }

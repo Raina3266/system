@@ -87,7 +87,7 @@
 
             services'.work.enable = true;
             virtualisation.docker.enable = true;
-            
+            services.mongodb.enable = true;
           }
         ];
       };
