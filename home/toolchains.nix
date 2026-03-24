@@ -9,5 +9,6 @@
     cargo-machete
     diesel-cli
     cargo-audit
+    cargo-autoinherit
   ];
 }
