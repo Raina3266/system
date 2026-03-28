@@ -54,7 +54,6 @@
     sunshine
     exercism
     waylyrics
-    python313Packages.syncedlyrics
     lrcsnc
     tauon
     fooyin
