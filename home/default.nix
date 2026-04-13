@@ -57,6 +57,7 @@
     lrcsnc
     tauon
     fooyin
+    bottom
   ];
 
   programs.home-manager.enable = true;
