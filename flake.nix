@@ -87,7 +87,18 @@
 
             services'.work.enable = true;
             virtualisation.docker.enable = true;
-            services.mongodb.enable = true;
+            services.mongodb = {
+              enable = true;
+              package = pkgs.mongodb;
+
+              extraConfig = ''
+                replication:
+                  replSetName: "mongodb"
+                security:
+                  authorization: enabled
+                  keyFile: /var/lib/mongodb/keyfile
+              '';
+            };
           }
         ];
       };
@@ -128,11 +139,11 @@
             programs.virt-manager.enable = true;
             virtualisation.spiceUSBRedirection.enable = true;
             virtualisation.libvirtd = {
-                enable = true;
-                qemu = {
-                  vhostUserPackages = [ pkgs.virtiofsd ];
-                };
+              enable = true;
+              qemu = {
+                vhostUserPackages = [ pkgs.virtiofsd ];
               };
+            };
 
             services'.personal.enable = true;
           }

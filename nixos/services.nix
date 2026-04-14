@@ -53,18 +53,6 @@
   #   "--accept-dns=true"
   # ];
   
-  services.mongodb = {
-    enable = true;
-    package = pkgs.mongodb;
-    
-    extraConfig = ''
-      replication:
-        replSetName: "mongodb"
-      security:
-        authorization: enabled
-        keyFile: /var/lib/mongodb/keyfile
-    '';
-  };
 
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''
