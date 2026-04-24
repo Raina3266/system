@@ -86,19 +86,6 @@
             networking.hostName = "rainawork"; # Define your hostname.
 
             services'.work.enable = true;
-            virtualisation.docker.enable = true;
-            services.mongodb = {
-              enable = true;
-              package = pkgs.mongodb;
-
-              extraConfig = ''
-                replication:
-                  replSetName: "mongodb"
-                security:
-                  authorization: enabled
-                  keyFile: /var/lib/mongodb/keyfile
-              '';
-            };
           }
         ];
       };

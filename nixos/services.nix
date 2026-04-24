@@ -7,11 +7,10 @@
   environment.systemPackages = with pkgs; [
     vim
     ripgrep
-    fprintd
     sushi
-    yt-dlp
-    clash-verge-rev
+    gnomeExtensions.todo-list
     gnomeExtensions.clipboard-history
+    gnomeExtensions.astra-monitor
   ];
 
   environment.gnome.excludePackages = with pkgs; [
@@ -40,19 +39,6 @@
   ];
 
   programs.nix-ld.enable = true;
-  programs.nix-ld.libraries = with pkgs; [
-    stdenv.cc.cc.lib  # libstdc++
-    zlib
-    openssl
-    sqlite
-  ];
-
-  # services.tailscale.enable = true;
-  # systemd.services.tailscaled.wantedBy = pkgs.lib.mkForce [ ];
-  # services.tailscale.extraUpFlags = [
-  #   "--accept-dns=true"
-  # ];
-  
 
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''

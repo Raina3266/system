@@ -18,7 +18,7 @@
     ./shell
     ./yazi.nix
     ./ocr.nix
-#    ./cloud.nix
+    #    ./cloud.nix
     ./toolchains.nix
     ./nixgl.nix
     ./zed.nix
@@ -41,6 +41,7 @@
     firefox
     vlc
     obs-studio
+    slack
     libreoffice
     pdf4qt
     zoom-us
@@ -48,17 +49,21 @@
     czkawka
     obsidian
     discord
-    kid3 
+    kid3
     spotdl
     ffmpeg
     sunshine
     exercism
     waylyrics
-    lrcsnc
     tauon
     fooyin
-    bottom
+    clash-verge-rev
+    yt-dlp
   ];
 
   programs.home-manager.enable = true;
+
+  home.shellAliases = {
+    obcli = "~/.local/bin/obsidian";
+  };
 }
