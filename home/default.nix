@@ -18,16 +18,17 @@
     ./shell
     ./yazi.nix
     ./ocr.nix
-    #    ./cloud.nix
     ./toolchains.nix
     ./nixgl.nix
-    ./zed.nix
   ];
 
   home = {
     username = "raina";
     homeDirectory = "/home/raina";
   };
+  programs.home-manager.enable = true;
+
+  programs.zed-editor.enable = true;
 
   programs.thunderbird = {
     enable = true;
@@ -59,10 +60,9 @@
     fooyin
     clash-verge-rev
     yt-dlp
+    openai-whisper
   ];
-
-  programs.home-manager.enable = true;
-
+  
   home.shellAliases = {
     obcli = "~/.local/bin/obsidian";
   };

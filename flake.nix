@@ -115,6 +115,18 @@
               layout = "gb";
               variant = "";
             };
+
+            fonts = {
+              enableDefaultPackages = true;
+
+              packages = with pkgs; [
+                noto-fonts
+                noto-fonts-cjk-sans
+                noto-fonts-cjk-serif
+                wqy_zenhei
+                wqy_microhei
+              ];
+            };
             i18n.inputMethod = {
               enable = true;
               type = "ibus";

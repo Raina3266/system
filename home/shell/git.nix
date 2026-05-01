@@ -6,22 +6,20 @@
     settings = {
       init.defaultBranch = "master";
       pull.rebase = true;
-
       push = {
         default = "current";
         autoSetupRemote = true;
       };
-
       merge."mergiraf" = {
         name = "mergiraf";
         driver = "mergiraf merge --git %O %A %B -s %S -x %X -y %Y -p %P";
       };
     };
   };
-  
+
   programs.gh.enable = true;
   programs.gh-dash.enable = true;
-  
+
   programs.difftastic = {
     enable = true;
     options = "inline";
