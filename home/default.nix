@@ -27,6 +27,10 @@
     homeDirectory = "/home/raina";
   };
   programs.home-manager.enable = true;
+  programs.gnome-shell = {
+    enable = true;
+    extensions = [ { package = pkgs.gnomeExtensions.gsconnect; } ];
+  };
 
   programs.zed-editor.enable = true;
 
@@ -62,7 +66,7 @@
     yt-dlp
     openai-whisper
   ];
-  
+
   home.shellAliases = {
     obcli = "~/.local/bin/obsidian";
   };

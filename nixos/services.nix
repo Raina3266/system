@@ -39,7 +39,11 @@
   ];
 
   programs.nix-ld.enable = true;
-
+  programs.kdeconnect = {
+    enable = true;
+    package = pkgs.gnomeExtensions.gsconnect;
+  };
+  
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''
     local all all           trust
