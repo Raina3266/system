@@ -34,6 +34,10 @@
       ];
     };
 
+    virtualisation.docker = {
+      enable = true;
+    };
+    
     home-manager.backupFileExtension = "backup";
     home-manager.useUserPackages = true;
     home-manager.users.raina = import ../home;

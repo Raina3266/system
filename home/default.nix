@@ -64,6 +64,7 @@
     fooyin
     clash-verge-rev
     yt-dlp
+    stirling-pdf
     openai-whisper
   ];
 
