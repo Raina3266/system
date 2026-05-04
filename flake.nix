@@ -21,8 +21,6 @@
 
     nixvim.url = "github:nix-community/nixvim";
     nixvim.inputs.nixpkgs.follows = "nixpkgs";
-
-    zed.url = "github:zed-industries/zed";
   };
 
   outputs =
@@ -84,7 +82,6 @@
             };
 
             networking.hostName = "rainawork"; # Define your hostname.
-
             services'.work.enable = true;
           }
         ];
@@ -132,18 +129,8 @@
               type = "ibus";
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
+
             networking.hostName = "rainapersonal"; # Define your hostname.
-
-            services.gvfs.enable = true;
-            programs.virt-manager.enable = true;
-            virtualisation.spiceUSBRedirection.enable = true;
-            virtualisation.libvirtd = {
-              enable = true;
-              qemu = {
-                vhostUserPackages = [ pkgs.virtiofsd ];
-              };
-            };
-
             services'.personal.enable = true;
           }
         ];

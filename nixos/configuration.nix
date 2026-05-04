@@ -21,7 +21,11 @@
   config = {
 
     nix.settings.experimental-features = "nix-command flakes";
-
+    nix.settings.trusted-users = [
+      "root"
+      "raina"
+      "@wheel"
+    ];
     # User Account
     users.users.raina = {
       isNormalUser = true;
@@ -34,10 +38,8 @@
       ];
     };
 
-    virtualisation.docker = {
-      enable = true;
-    };
-    
+    virtualisation.docker.enable = true;
+
     home-manager.backupFileExtension = "backup";
     home-manager.useUserPackages = true;
     home-manager.users.raina = import ../home;
@@ -131,7 +133,12 @@
     # Or disable the firewall altogether.
     # networking.firewall.enable = false;
     networking.firewall = rec {
-      allowedTCPPortRanges = [ { from = 1714; to = 1764; } ];
+      allowedTCPPortRanges = [
+        {
+          from = 1714;
+          to = 1764;
+        }
+      ];
       allowedUDPPortRanges = allowedTCPPortRanges;
     };
 

@@ -63,6 +63,7 @@
   services.fprintd.enable = true;
   services.fwupd.enable = true;
   services.printing.enable = true;
+  services.gvfs.enable = true;
 
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;

@@ -19,21 +19,15 @@
     ./yazi.nix
     ./ocr.nix
     ./toolchains.nix
-    ./nixgl.nix
   ];
 
   home = {
     username = "raina";
     homeDirectory = "/home/raina";
   };
+  
   programs.home-manager.enable = true;
-  programs.gnome-shell = {
-    enable = true;
-    extensions = [ { package = pkgs.gnomeExtensions.gsconnect; } ];
-  };
-
   programs.zed-editor.enable = true;
-
   programs.thunderbird = {
     enable = true;
     profiles.default = {

@@ -2,7 +2,7 @@
 {
   programs.git = {
     enable = true;
-
+    signing.format = "openpgp";
     settings = {
       init.defaultBranch = "master";
       pull.rebase = true;

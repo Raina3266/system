@@ -6,8 +6,6 @@
 }:
 {
   imports = [
-    ./jellyfin.nix
-    ./virtual.nix
   #  ./cloud.nix
   ];
   config = lib.mkIf nixosConfig.services'.personal.enable {
@@ -17,11 +15,13 @@
       qq
       wemeet
       ytdownloader
-      wasistlos
+      whatsie
       inkscape
       shotcut
       qbittorrent
       android-tools
+      jellyfin
+      jellyfin-web
     ];
   };
 }

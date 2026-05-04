@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
     bottom
@@ -13,4 +13,8 @@
     cargo-audit
     cargo-autoinherit
   ];
+
+  targets.genericLinux.nixGL.packages = inputs.nixGL.packages;
+  targets.genericLinux.nixGL.defaultWrapper = "mesa";
+  targets.genericLinux.nixGL.installScripts = [ "mesa" ];
 }
