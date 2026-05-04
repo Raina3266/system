@@ -1,7 +1,6 @@
 { inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
-    bottom
     openssl
     gcc
     nil

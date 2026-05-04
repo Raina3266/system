@@ -14,7 +14,6 @@
       wechat
       qq
       wemeet
-      ytdownloader
       whatsie
       inkscape
       shotcut

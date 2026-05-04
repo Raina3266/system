@@ -22,6 +22,9 @@
       killall
       lsof
       coreutils
+      ffmpeg
+      mediainfo
+      exiftool
     ];
 
     programs.fish.enable = true;

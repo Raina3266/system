@@ -16,7 +16,6 @@
     ./work
     ./personal
     ./shell
-    ./yazi.nix
     ./ocr.nix
     ./toolchains.nix
   ];
@@ -50,7 +49,6 @@
     discord
     kid3
     spotdl
-    ffmpeg
     sunshine
     exercism
     waylyrics
