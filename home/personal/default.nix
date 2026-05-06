@@ -6,7 +6,7 @@
 }:
 {
   imports = [
-  #  ./cloud.nix
+    #  ./cloud.nix
   ];
   config = lib.mkIf nixosConfig.services'.personal.enable {
     home.packages = with pkgs; [
@@ -22,5 +22,23 @@
       jellyfin
       jellyfin-web
     ];
+    dconf.settings = {
+      "org/gnome/desktop/interface" = {
+        enable-hot-corners = false;
+      };
+
+      "org/gnome/desktop/interface" = {
+        show-battery-percentage = true;
+      };
+
+      "org/gnome/mutter" = {
+        center-new-windows = true;
+      };
+
+      # Custom keybindings
+      "org/gnome/desktop/wm/keybindings" = {
+        close = [ "<Super>q" ];
+      };
+    };
   };
 }

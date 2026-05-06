@@ -17,7 +17,6 @@ let
 in
 {
   home.packages = with pkgs; [
-    gnome-tweaks
     gnome-screenshot
     tesseract
     wl-clipboard
