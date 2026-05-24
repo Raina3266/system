@@ -56,8 +56,8 @@
     fooyin
     clash-verge-rev
     yt-dlp
-    stirling-pdf-desktop
     openai-whisper
+    anki
   ];
 
   home.shellAliases = {

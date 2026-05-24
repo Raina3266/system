@@ -8,6 +8,7 @@
     vim
     ripgrep
     sushi
+    gnomeExtensions.simple-timer
     gnomeExtensions.todotxt
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
