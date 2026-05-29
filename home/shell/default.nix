@@ -9,9 +9,12 @@
   config = {
     programs.starship.enable = true;
     programs.bash.enable = true;
-    programs.direnv.enable = true;
-    programs.direnv.enableBashIntegration = true;
-    programs.direnv.nix-direnv.enable = true;
+
+    programs.direnv = {
+      enable = true;
+      enableBashIntegration = true;
+      nix-direnv.enable = true;
+    };
 
     home.packages = with pkgs; [
       bat
