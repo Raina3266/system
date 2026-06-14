@@ -63,12 +63,6 @@
 
     boot.kernelPackages = pkgs.linuxPackages_latest;
 
-    # Ensure v4l2 modules load
-    boot.kernelModules = [
-      "v4l2loopback"
-      "videobuf2_v4l2"
-    ];
-
     # Enable networking
     networking.networkmanager.enable = true;
     networking.networkmanager.dns = "none";

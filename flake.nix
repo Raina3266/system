@@ -96,6 +96,7 @@
         modules = [
           ./nixos/configuration.nix
           ./nixos/hardware/thinkpad.nix
+          ./nixos/webcam-crop.nix
           {
             # This value determines the NixOS release from which the default
             # settings for stateful data, like file locations and database versions
@@ -132,6 +133,7 @@
 
             networking.hostName = "rainapersonal"; # Define your hostname.
             services'.personal.enable = true;
+            services'.croppedWebcam.enable = true;
           }
         ];
       };

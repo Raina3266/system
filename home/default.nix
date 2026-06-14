@@ -58,7 +58,6 @@
     yt-dlp
     openai-whisper
     anki
-    trilium-desktop
   ];
 
   home.shellAliases = {

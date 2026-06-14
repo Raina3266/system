@@ -44,6 +44,8 @@
     enable = true;
     package = pkgs.gnomeExtensions.gsconnect;
   };
+
+  services.openssh.enable = true;
   
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''
@@ -83,23 +85,4 @@
   };
 
   services.udev.enable = true;
-  services.udev.extraRules = ''
-    ACTION=="add", SUBSYSTEM=="video4linux", ATTR{name}=="Intel MIPI Camera", \
-      RUN+="${pkgs.v4l-utils}/bin/v4l2-ctl -d $env{DEVNAME} \
-        --set-fmt-video=width=1280,height=720,pixelformat=YUYV \
-        --set-parm=30"
-
-    # If the system is not a video device, we skip these rules by jumping to the end
-    SUBSYSTEM!="video4linux", GOTO="hide_cam_end"
-    # I found its name with udevadm info -q all -a /dev/video0
-    # If this is not the dummy video, we also skip these rules.
-    ATTR{name}!="Dummy video device (0x0000)", GOTO="hide_cam_end"
-    ACTION=="add", RUN+="${pkgs.coreutils}/bin/mkdir -p /dev/not-for-user"
-    ACTION=="add", RUN+="${pkgs.coreutils}/bin/mv -f $env{DEVNAME} /dev/not-for-user/"
-
-    ACTION=="remove", RUN+="${pkgs.coreutils}/bin/rm -f /dev/not-for-user/$name"
-    ACTION=="remove", RUN+="${pkgs.coreutils}/bin/rm -f /dev/not-for-user/$env{ID_SERIAL}"
-
-    LABEL="hide_cam_end"
-  '';
 }
