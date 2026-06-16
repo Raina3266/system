@@ -9,6 +9,7 @@
 # The nixos config CONTAINS the home-manager config
 {
   pkgs,
+  inputs,
   ...
 }:
 {
@@ -27,6 +28,8 @@
   
   programs.home-manager.enable = true;
   programs.zed-editor.enable = true;
+  # Zed nightly from the upstream flake (matches zed.cachix.org; see flake.nix).
+  programs.zed-editor.package = inputs.zed.packages.${pkgs.stdenv.hostPlatform.system}.default;
   programs.thunderbird = {
     enable = true;
     profiles.default = {
@@ -58,6 +61,7 @@
     yt-dlp
     openai-whisper
     anki
+    jupyter
   ];
 
   home.shellAliases = {

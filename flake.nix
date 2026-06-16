@@ -19,8 +19,12 @@
     # allows programs in nixpkgs that use OpenGL to work on non-nixos systems
     nixGL.url = "github:nix-community/nixGL";
 
-    nixvim.url = "github:nix-community/nixvim";
-    nixvim.inputs.nixpkgs.follows = "nixpkgs";
+    nixvim = {
+      url = "github:nix-community/nixvim";
+      inputs.nixpkgs.follows = "nixpkgs"; # <-- ADD THIS BACK
+    };
+
+    zed.url = "github:zed-industries/zed/nightly";
   };
 
   outputs =
