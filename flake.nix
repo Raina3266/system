@@ -39,7 +39,10 @@
     let
       pkgs = import nixpkgs {
         system = "x86_64-linux";
-        overlays = [ nixGL.overlay ];
+        overlays = [
+          nixGL.overlay
+          (import ./home/overlays/default.nix)
+        ];
         config = {
           allowUnfree = true;
           packageOverrides = pkgs: {

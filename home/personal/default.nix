@@ -22,6 +22,7 @@
       immich
       jellyfin
       jellyfin-web
+      nightingale
     ];
   };
 }

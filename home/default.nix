@@ -25,7 +25,7 @@
     username = "raina";
     homeDirectory = "/home/raina";
   };
-  
+
   programs.home-manager.enable = true;
   programs.zed-editor.enable = true;
   # Zed nightly from the upstream flake (matches zed.cachix.org; see flake.nix).
@@ -61,7 +61,7 @@
     yt-dlp
     openai-whisper
     anki
-    jupyter
+    pavucontrol
   ];
 
   home.shellAliases = {
