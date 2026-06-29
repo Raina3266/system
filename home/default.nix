@@ -62,6 +62,7 @@
     openai-whisper
     anki
     pavucontrol
+    siyuan
   ];
 
   home.shellAliases = {
