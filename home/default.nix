@@ -57,7 +57,7 @@
     vlc
     tauon
     fooyin
-    clementine
+    strawberry
     nightingale
     waylyrics
 
@@ -84,8 +84,5 @@
     # audio / system
     pavucontrol
     clash-verge-rev
-
-    # device / platform tools
-    android-tools
   ];
 }

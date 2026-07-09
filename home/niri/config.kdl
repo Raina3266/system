@@ -614,6 +614,9 @@ binds {
     Ctrl+Print { screenshot-screen; }
     Alt+Print { screenshot-window; }
 
+    // Region-select OCR: drag a box, text within it is OCR'd and copied.
+    Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot.sh"; }
+
     // Applications such as remote-desktop clients and software KVM switches may
     // request that niri stops processing the keyboard shortcuts defined here
     // so they may, for example, forward the key presses as-is to a remote machine.
