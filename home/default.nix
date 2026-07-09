@@ -17,6 +17,7 @@
     ./work
     ./personal
     ./niri
+    ./cloud.nix
     ./shell
     ./ocr.nix
     ./toolchains.nix
@@ -64,6 +65,8 @@
     anki
     pavucontrol
     piper-tts
+    immich
+    clementine
   ];
 
   home.shellAliases = {

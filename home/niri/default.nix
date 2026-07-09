@@ -10,9 +10,11 @@
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
   programs.rofi.enable = true;
 
-  gtk = {
-    enable = true;
-    cursorTheme.name = "Everforest cursors";
-    cursorTheme.package = pkgs.everforest-cursors;
+  home.pointerCursor = {
+    package = pkgs.bibata-cursors;
+    name = "Bibata-Modern-Classic";
+    size = 24;
+    gtk.enable = true;
+    x11.enable = true;
   };
 }
