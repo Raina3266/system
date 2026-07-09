@@ -16,6 +16,7 @@
   imports = [
     ./work
     ./personal
+    ./niri
     ./shell
     ./ocr.nix
     ./toolchains.nix
@@ -62,7 +63,7 @@
     openai-whisper
     anki
     pavucontrol
-    siyuan
+    piper-tts
   ];
 
   home.shellAliases = {

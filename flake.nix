@@ -16,6 +16,9 @@
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
+    handy.url = "github:cameron1024/handy";
+    handy.inputs.nixpkgs.follows = "nixpkgs";
+
     # allows programs in nixpkgs that use OpenGL to work on non-nixos systems
     nixGL.url = "github:nix-community/nixGL";
 

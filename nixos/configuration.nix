@@ -32,13 +32,11 @@
       extraGroups = [
         "networkmanager"
         "wheel"
-        "docker"
+        "input"
         "libvirtd"
       ];
     };
-
-    virtualisation.docker.enable = true;
-
+    
     home-manager.backupFileExtension = "backup";
     home-manager.useUserPackages = true;
     home-manager.users.raina = import ../home;
@@ -51,6 +49,7 @@
     # Enable the X11 windowing system.
     services.xserver.enable = true;
     services.libinput.enable = true;
+    programs.niri.enable = true;
 
     # Enable the GNOME Desktop Environment.
     services.displayManager.gdm.enable = true;
@@ -72,10 +71,6 @@
       "100.100.100.100"
       "1.1.1.1"
       "9.9.9.9"
-    ];
-    networking.search = [
-      "tail689b6f.ts.net"
-      "example.ts.net"
     ];
 
     # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
