@@ -24,7 +24,7 @@
 
     nixvim = {
       url = "github:nix-community/nixvim";
-      inputs.nixpkgs.follows = "nixpkgs"; # <-- ADD THIS BACK
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     zed.url = "github:zed-industries/zed/nightly";
@@ -57,55 +57,15 @@
       };
     in
     {
-      nixosConfigurations.rainawork = nixpkgs.lib.nixosSystem {
+      # sudo nixos-rebuild switch --flake .#raina
+      nixosConfigurations.raina = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         specialArgs = {
           inputs = inputs;
         };
         modules = [
           ./nixos/configuration.nix
-          ./nixos/hardware/dell.nix
-          {
-            # This value determines the NixOS release from which the default
-            # settings for stateful data, like file locations and database versions
-            # on your system were taken. It‘s perfectly fine and recommended to leave
-            # this value at the release version of the first install of this system.
-            # Before changing this value read the documentation for this option
-            # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
-            system.stateVersion = "25.05"; # Did you read the comment?
-
-            home-manager.users.raina.home.stateVersion = "23.05";
-            home-manager.users.raina.programs.git.settings.user.email = "raina@kaleidoscope.com";
-            # Configure keymap in X11
-            services.xserver.xkb = {
-              layout = "us";
-              variant = "";
-            };
-
-            fonts = {
-              enableDefaultPackages = true;
-
-              packages = with pkgs; [
-                noto-fonts
-                noto-fonts-cjk-sans
-              ];
-            };
-
-            networking.hostName = "rainawork"; # Define your hostname.
-            services'.work.enable = true;
-          }
-        ];
-      };
-
-      # sudo nixos-rebuild switch --flake .#thinkpad
-      nixosConfigurations.rainapersonal = nixpkgs.lib.nixosSystem {
-        inherit pkgs;
-        specialArgs = {
-          inputs = inputs;
-        };
-        modules = [
-          ./nixos/configuration.nix
-          ./nixos/hardware/thinkpad.nix
+          ./nixos/hardware.nix
           ./nixos/webcam-crop.nix
           {
             # This value determines the NixOS release from which the default
@@ -141,8 +101,7 @@
               ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
             };
 
-            networking.hostName = "rainapersonal"; # Define your hostname.
-            services'.personal.enable = true;
+            networking.hostName = "raina"; # Define your hostname.
             services'.croppedWebcam.enable = true;
           }
         ];

@@ -46,7 +46,7 @@
   };
 
   services.openssh.enable = true;
-  
+
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''
     local all all           trust

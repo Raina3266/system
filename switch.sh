@@ -1,12 +1,8 @@
 #! /usr/bin/env bash
 set -euxo pipefail
 
-# ./switch.sh thinkpad
-# ./switch.sh dell
-
-NAME="$1"  # either "thinkpad" or "dell"
-
-git add -A
+# ./switch.sh raina
+NAME="$1"  # e.g. "raina"
 
 nixos-rebuild build --flake ".#$NAME"
 sudo nixos-rebuild switch --flake ".#$NAME"

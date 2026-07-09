@@ -25,9 +25,6 @@ in
   dconf.settings = {
     "org/gnome/desktop/interface" = {
       enable-hot-corners = false;
-    };
-
-    "org/gnome/desktop/interface" = {
       show-battery-percentage = true;
     };
 

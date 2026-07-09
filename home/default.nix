@@ -1,12 +1,3 @@
-# When you are in a home-manager module:
-#  - use `config` to access the home-manager config
-#  - use `nixosConfig` to access the nixos config
-#
-# When you are in a nixos module:
-#  - you cannot access the home-manager config (because there are lots potentially)
-#  - use `config` to access the nixos config
-
-# The nixos config CONTAINS the home-manager config
 {
   pkgs,
   inputs,
@@ -14,8 +5,6 @@
 }:
 {
   imports = [
-    ./work
-    ./personal
     ./niri
     ./cloud.nix
     ./shell
@@ -29,47 +18,74 @@
   };
 
   programs.home-manager.enable = true;
-  programs.zed-editor.enable = true;
-  # Zed nightly from the upstream flake (matches zed.cachix.org; see flake.nix).
-  programs.zed-editor.package = inputs.zed.packages.${pkgs.stdenv.hostPlatform.system}.default;
+
+  programs.zed-editor = {
+    enable = true;
+    # Nightly from the upstream flake (matches zed.cachix.org; see flake.nix).
+    package = inputs.zed.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  };
+
   programs.thunderbird = {
     enable = true;
-    profiles.default = {
-      isDefault = true;
-    };
+    profiles.default.isDefault = true;
   };
 
   home.packages = with pkgs; [
+    # browsers
     google-chrome
     firefox
-    vlc
-    obs-studio
+
+    # communication
     slack
+    discord
+    zoom-us
+    wechat
+    qq
+    wemeet
+    whatsie
+
+    # productivity / office
     libreoffice
     pdf4qt
-    zoom-us
+    obsidian
+    anki
     meld
     czkawka
-    obsidian
-    discord
-    kid3
-    spotdl
-    sunshine
     exercism
-    waylyrics
+
+    # media playback
+    vlc
     tauon
     fooyin
-    clash-verge-rev
+    clementine
+    nightingale
+    waylyrics
+
+    # media creation / editing
+    obs-studio
+    inkscape
+    shotcut
+    sunshine
+    kid3
+    spotdl
     yt-dlp
     openai-whisper
-    anki
-    pavucontrol
     piper-tts
-    immich
-    clementine
-  ];
 
-  home.shellAliases = {
-    obcli = "~/.local/bin/obsidian";
-  };
+    # media servers / sync
+    jellyfin
+    jellyfin-web
+    immich
+    onedrivegui
+
+    # downloads / torrent
+    qbittorrent
+
+    # audio / system
+    pavucontrol
+    clash-verge-rev
+
+    # device / platform tools
+    android-tools
+  ];
 }

@@ -24,7 +24,7 @@ in
       };
 
       Service = with pkgs; {
-        Type = "notify";
+        Type = "simple";
         # Run at low priority so rclone never starves interactive work.
         Nice = 10;
         IOSchedulingClass = "best-effort";
@@ -41,7 +41,6 @@ in
 
         ExecStart = ''
           ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' \
-            --systemd \
             --vfs-cache-mode full \
             --vfs-cache-max-size 5G \
             --vfs-cache-max-age 168h \
@@ -59,6 +58,9 @@ in
             --tpslimit-burst 20
         '';
 
+        # Use the setuid wrapper at /run/wrappers/bin/fusermount3, not the
+        # non-setuid copy in the nix store — only the wrapper can unmount
+        # FUSE filesystems as an unprivileged user.
         ExecStop = ''
           /run/wrappers/bin/fusermount3 -u '${mountDir_gdrive}'
         '';
