@@ -617,6 +617,9 @@ binds {
     // Region-select OCR: drag a box, text within it is OCR'd and copied.
     Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot.sh"; }
 
+    // Toggle Handy speech-to-text transcription (sends a signal to the running instance).
+    Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "handy" "--toggle-transcription"; }
+
     // Applications such as remote-desktop clients and software KVM switches may
     // request that niri stops processing the keyboard shortcuts defined here
     // so they may, for example, forward the key presses as-is to a remote machine.

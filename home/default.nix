@@ -58,7 +58,6 @@
     tauon
     fooyin
     strawberry
-    nightingale
     waylyrics
 
     # media creation / editing
@@ -77,6 +76,7 @@
     jellyfin-web
     immich
     onedrivegui
+    baidunetdisk
 
     # downloads / torrent
     qbittorrent

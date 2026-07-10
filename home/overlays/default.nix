@@ -1,4 +1,4 @@
-final: prev: 
+final: prev:
 {
-  nightingale = final.callPackage ./packages/nightingale.nix {};
+  baidunetdisk = final.callPackage ./packages/baidupan.nix { };
 }
