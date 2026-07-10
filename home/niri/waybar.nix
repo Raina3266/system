@@ -4,7 +4,10 @@
 }:
 {
   # waybar-lyric is a standalone binary invoked by the custom/lyrics module below.
-  home.packages = [ pkgs.waybar-lyric ];
+  home.packages = with pkgs; [
+    waybar-lyric
+    xwayland-satellite
+  ];
 
   programs.waybar = {
     enable = true;

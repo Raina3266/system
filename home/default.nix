@@ -6,8 +6,8 @@
 {
   imports = [
     ./niri
-    ./cloud.nix
     ./shell
+    ./cloud.nix
     ./ocr.nix
     ./toolchains.nix
   ];
@@ -56,8 +56,6 @@
     # media playback
     vlc
     tauon
-    fooyin
-    strawberry
     waylyrics
 
     # media creation / editing
@@ -76,7 +74,6 @@
     jellyfin-web
     immich
     onedrivegui
-    baidunetdisk
 
     # downloads / torrent
     qbittorrent

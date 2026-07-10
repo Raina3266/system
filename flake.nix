@@ -12,12 +12,10 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixGL.url = "github:nix-community/nixGL";
 
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
-
-    # allows programs in nixpkgs that use OpenGL to work on non-nixos systems
-    nixGL.url = "github:nix-community/nixGL";
 
     nixvim = {
       url = "github:nix-community/nixvim";
@@ -37,11 +35,11 @@
       ...
     }@inputs:
     let
+      system = "x86_64-linux";
       pkgs = import nixpkgs {
-        system = "x86_64-linux";
+        inherit system;
         overlays = [
           nixGL.overlay
-          (import ./home/overlays/default.nix)
         ];
         config = {
           allowUnfree = true;
@@ -56,6 +54,7 @@
     {
       # sudo nixos-rebuild switch --flake .#raina
       nixosConfigurations.raina = nixpkgs.lib.nixosSystem {
+        inherit system;
         inherit pkgs;
         specialArgs = {
           inputs = inputs;
