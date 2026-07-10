@@ -8,6 +8,8 @@
     vim
     ripgrep
     sushi
+    ffmpegthumbnailer
+    gdk-pixbuf
     gnomeExtensions.simple-timer
     gnomeExtensions.todotxt
     gnomeExtensions.clipboard-history
@@ -40,11 +42,16 @@
   ];
 
   programs.nix-ld.enable = true;
-  programs.kdeconnect = {
-    enable = true;
-    package = pkgs.gnomeExtensions.gsconnect;
-  };
 
+  # File Manager
+  programs.thunar.enable = true;
+  programs.xfconf.enable = true;
+  programs.thunar.plugins = with pkgs.xfce; [
+    thunar-volman
+    thunar-media-tags-plugin
+  ];
+  services.tumbler.enable = true; # Thumbnail support for images
+  
   services.openssh.enable = true;
 
   services.postgresql.enable = true;
@@ -58,6 +65,11 @@
     openFirewall = true;
     user = "jellyfin";
     group = "jellyfin";
+  };
+
+  programs.kdeconnect = {
+    enable = true;
+    package = pkgs.gnomeExtensions.gsconnect;
   };
 
   # Enable Services
