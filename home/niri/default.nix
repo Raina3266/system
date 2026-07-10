@@ -9,7 +9,7 @@
   
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
   programs.rofi.enable = true;
-
+  
   home.pointerCursor = {
     enable = true;
     package = pkgs.bibata-cursors;

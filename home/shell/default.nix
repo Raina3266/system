@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 {
   imports = [
     ./nvim
@@ -29,6 +29,7 @@
       mediainfo
       exiftool
       handy
+      wtype
     ];
 
     programs.fish.enable = true;

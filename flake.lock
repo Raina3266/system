@@ -72,26 +72,6 @@
         "type": "github"
       }
     },
-    "handy": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1770498328,
-        "narHash": "sha256-E3asqRPwJH4g/lHVp0TJiuFSTB8yNcaHLc5D1Cd50LY=",
-        "owner": "cameron1024",
-        "repo": "handy",
-        "rev": "e5d8a8b60795157172a72e8fb2726c417ae004ed",
-        "type": "github"
-      },
-      "original": {
-        "owner": "cameron1024",
-        "repo": "handy",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -217,7 +197,6 @@
     },
     "root": {
       "inputs": {
-        "handy": "handy",
         "home-manager": "home-manager",
         "nixGL": "nixGL",
         "nixpkgs": "nixpkgs_2",
