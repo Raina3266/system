@@ -1,9 +1,14 @@
+# Desktop environment, system packages, and services.
+#
+# Grouped by concern: desktop, sound, desktop daemons, network services,
+# media services, database, and odds-and-ends. Core system identity
+# (boot, networking, locale, hardware) lives in ./configuration.nix.
 {
   pkgs,
   ...
 }:
 {
-  # List packages installed in system profile. To search, run: $ nix search wget
+  # ── System packages ───────────────────────────────────────────────────
   environment.systemPackages = with pkgs; [
     vim
     ripgrep
@@ -15,6 +20,17 @@
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
   ];
+
+  # ── Desktop environment ───────────────────────────────────────────────
+  services.xserver.enable = true;
+  services.xserver.xkb = {
+    layout = "gb";
+    variant = "";
+  };
+  services.libinput.enable = true;
+
+  services.displayManager.gdm.enable = true;
+  services.desktopManager.gnome.enable = true;
 
   environment.gnome.excludePackages = with pkgs; [
     epiphany
@@ -41,46 +57,23 @@
     gnome-console
   ];
 
-  programs.nix-ld.enable = true;
+  programs.niri.enable = true;
 
-  # File Manager
+  xdg.portal = {
+    enable = true;
+    extraPortals = with pkgs; [ xdg-desktop-portal-gnome ];
+  };
+
+  # File manager
   programs.thunar.enable = true;
   programs.xfconf.enable = true;
-  programs.thunar.plugins = with pkgs.xfce; [
+  programs.thunar.plugins = with pkgs; [
     thunar-volman
     thunar-media-tags-plugin
   ];
   services.tumbler.enable = true; # Thumbnail support for images
-  
-  services.openssh.enable = true;
 
-  services.postgresql.enable = true;
-  services.postgresql.authentication = pkgs.lib.mkForce ''
-    local all all           trust
-    host  all all 0.0.0.0/0 trust
-    host  all all ::0/0     trust
-  '';
-  services.jellyfin = {
-    enable = true;
-    openFirewall = true;
-    user = "jellyfin";
-    group = "jellyfin";
-  };
-
-  programs.kdeconnect = {
-    enable = true;
-    package = pkgs.gnomeExtensions.gsconnect;
-  };
-
-  # Enable Services
-  services.accounts-daemon.enable = true;
-  services.gnome.gnome-keyring.enable = true;
-  services.fprintd.enable = true;
-  services.fwupd.enable = true;
-  services.printing.enable = true;
-  services.gvfs.enable = true;
-
-  # Enable sound with pipewire.
+  # ── Sound (PipeWire) ──────────────────────────────────────────────────
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
   services.pipewire = {
@@ -88,13 +81,44 @@
     alsa.enable = true;
     alsa.support32Bit = true;
     pulse.enable = true;
-    # If you want to use JACK applications, uncomment this
-    #jack.enable = true;
-
-    # use the example session manager (no others are packaged yet so this is enabled by default,
-    # no need to redefine it in your config for now)
-    #media-session.enable = true;
   };
 
+  # ── Desktop daemons ───────────────────────────────────────────────────
+  services.accounts-daemon.enable = true;
+  services.gnome.gnome-keyring.enable = true;
+  services.gvfs.enable = true;
+  services.fprintd.enable = true;
+  services.fwupd.enable = true;
+  services.printing.enable = true;
   services.udev.enable = true;
+
+  # ── Network services ──────────────────────────────────────────────────
+  services.openssh.enable = true;
+
+  programs.kdeconnect = {
+    enable = true;
+    package = pkgs.gnomeExtensions.gsconnect;
+  };
+
+  # ── Media services ────────────────────────────────────────────────────
+  services.jellyfin = {
+    enable = true;
+    openFirewall = true;
+    user = "jellyfin";
+    group = "jellyfin";
+  };
+
+  # ── Database ──────────────────────────────────────────────────────────
+  services.postgresql.enable = true;
+  services.postgresql.authentication = pkgs.lib.mkForce ''
+    local all all           trust
+    host  all all 0.0.0.0/0 trust
+    host  all all ::0/0     trust
+  '';
+
+  # ── Misc ──────────────────────────────────────────────────────────────
+  programs.nix-ld.enable = true;
+
+  # Cropped virtual webcam (see ./webcam-crop.nix).
+  services'.croppedWebcam.enable = true;
 }

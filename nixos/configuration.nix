@@ -1,6 +1,10 @@
 # Edit this configuration file to define what should be installed on
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
+#
+# This file holds the core system identity: nix settings, the user account,
+# boot, filesystems, networking, time/locale, and hardware. Services, the
+# desktop environment, and installed packages live in ./services.nix.
 {
   pkgs,
   inputs,
@@ -13,14 +17,15 @@
   ];
 
   config = {
+    # Nix
     nix.settings.experimental-features = "nix-command flakes";
     nix.settings.trusted-users = [
       "root"
       "raina"
       "@wheel"
     ];
-    
-    # User Account
+
+    # User account & home-manager
     users.users.raina = {
       isNormalUser = true;
       description = "Raina";
@@ -30,77 +35,60 @@
         "input"
       ];
     };
-    
-    home-manager.backupFileExtension = "backup";
-    home-manager.useUserPackages = true;
-    home-manager.users.raina = import ../home;
-    home-manager.useGlobalPkgs = true;
-    home-manager.extraSpecialArgs = {
-      inherit inputs;
+
+    home-manager = {
+      backupFileExtension = "backup";
+      useUserPackages = true;
+      useGlobalPkgs = true;
+      users.raina = import ../home;
+      extraSpecialArgs = {
+        inherit inputs;
+      };
     };
 
-    swapDevices = [{
-      device = "/swap/swapfile";
-      size = 26 * 1024;
-    }];
-    
-    # File System
+    # Boot
+    boot.loader.systemd-boot.enable = true;
+    boot.loader.efi.canTouchEfiVariables = true;
+    boot.kernelPackages = pkgs.linuxPackages_latest;
+
+    # File systems & swap
+    swapDevices = [
+      {
+        device = "/swap/swapfile";
+        size = 26 * 1024;
+      }
+    ];
+
     services.btrfs.autoScrub = {
       enable = true;
       fileSystems = [ "/" ];
       interval = "weekly";
     };
 
-    # Desktop Environment
-    # Enable the X11 windowing system.
-    services.xserver.enable = true;
-    services.libinput.enable = true;
-    programs.niri.enable = true;
-
-    # Configure keymap in X11
-    services.xserver.xkb = {
-      layout = "gb";
-      variant = "";
-    };
-
-    # Enable the GNOME Desktop Environment.
-    services.displayManager.gdm.enable = true;
-    services.desktopManager.gnome.enable = true;
-
-    # Use the systemd-boot EFI boot loader.
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.efi.canTouchEfiVariables = true;
-    boot.kernelPackages = pkgs.linuxPackages_latest;
-
-    # Enable networking
-    networking.hostName = "raina"; # Define your hostname.
+    # Networking
+    networking.hostName = "raina";
     networking.networkmanager.enable = true;
     networking.networkmanager.dns = "none";
-
-    # Network
     networking.nameservers = [
       "8.8.8.8"
       "100.100.100.100"
       "1.1.1.1"
       "9.9.9.9"
     ];
-
-    # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
-
-    # Time and Language
-    # Set your time zone.
-    time.timeZone = "Europe/London";
-
-    # Select internationalisation properties.
-    i18n.defaultLocale = "en_GB.UTF-8";
-
-    # Input method (CJK).
-    i18n.inputMethod = {
-      enable = true;
-      type = "ibus";
-      ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
+    networking.firewall = rec {
+      allowedTCPPortRanges = [
+        {
+          from = 1714;
+          to = 1764;
+        }
+      ];
+      allowedUDPPortRanges = allowedTCPPortRanges;
     };
 
+    # Time & locale
+    time.timeZone = "Europe/London";
+
+    i18n.defaultLocale = "en_GB.UTF-8";
     i18n.extraLocaleSettings = {
       LC_ADDRESS = "en_GB.UTF-8";
       LC_IDENTIFICATION = "en_GB.UTF-8";
@@ -113,22 +101,14 @@
       LC_TIME = "en_GB.UTF-8";
     };
 
-    # List services that you want to enable:
-    xdg.portal = {
+    # Input method (CJK)
+    i18n.inputMethod = {
       enable = true;
-      extraPortals = with pkgs; [ xdg-desktop-portal-gnome ];
+      type = "ibus";
+      ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
     };
 
-    networking.firewall = rec {
-      allowedTCPPortRanges = [
-        {
-          from = 1714;
-          to = 1764;
-        }
-      ];
-      allowedUDPPortRanges = allowedTCPPortRanges;
-    };
-
+    # Hardware (Intel graphics / video acceleration)
     hardware.intel-gpu-tools.enable = true;
     hardware.graphics.extraPackages = with pkgs; [
       intel-media-driver
@@ -137,8 +117,8 @@
       vpl-gpu-rt
     ];
     environment.sessionVariables = {
-      LIBVA_DRIVER_NAME = "iHD";
-    }; # Force intel-media-driver
+      LIBVA_DRIVER_NAME = "iHD"; # Force intel-media-driver
+    };
 
     # Fonts
     fonts = {
@@ -151,9 +131,6 @@
         wqy_microhei
       ];
     };
-
-    # Cropped virtual webcam (see ./webcam-crop.nix).
-    services'.croppedWebcam.enable = true;
 
     # This value determines the NixOS release from which the default
     # settings for stateful data, like file locations and database versions
