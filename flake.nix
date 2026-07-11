@@ -63,43 +63,6 @@
           ./nixos/configuration.nix
           ./nixos/hardware.nix
           ./nixos/webcam-crop.nix
-          {
-            # This value determines the NixOS release from which the default
-            # settings for stateful data, like file locations and database versions
-            # on your system were taken. It‘s perfectly fine and recommended to leave
-            # this value at the release version of the first install of this system.
-            # Before changing this value read the documentation for this option
-            # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
-            system.stateVersion = "23.11"; # Did you read the comment?
-
-            home-manager.users.raina.home.stateVersion = "23.05";
-            home-manager.users.raina.programs.git.settings.user.email = "cgl0326@outlook.com";
-            # Configure keymap in X11
-            services.xserver.xkb = {
-              layout = "gb";
-              variant = "";
-            };
-
-            fonts = {
-              enableDefaultPackages = true;
-
-              packages = with pkgs; [
-                noto-fonts
-                noto-fonts-cjk-sans
-                noto-fonts-cjk-serif
-                wqy_zenhei
-                wqy_microhei
-              ];
-            };
-            i18n.inputMethod = {
-              enable = true;
-              type = "ibus";
-              ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
-            };
-
-            networking.hostName = "raina"; # Define your hostname.
-            services'.croppedWebcam.enable = true;
-          }
         ];
       };
     };

@@ -19,6 +19,7 @@
       "raina"
       "@wheel"
     ];
+    
     # User Account
     users.users.raina = {
       isNormalUser = true;
@@ -27,7 +28,6 @@
         "networkmanager"
         "wheel"
         "input"
-        "libvirtd"
       ];
     };
     
@@ -39,23 +39,41 @@
       inherit inputs;
     };
 
+    swapDevices = [{
+      device = "/swap/swapfile";
+      size = 26 * 1024;
+    }];
+    
+    # File System
+    services.btrfs.autoScrub = {
+      enable = true;
+      fileSystems = [ "/" ];
+      interval = "weekly";
+    };
+
     # Desktop Environment
     # Enable the X11 windowing system.
     services.xserver.enable = true;
     services.libinput.enable = true;
     programs.niri.enable = true;
 
+    # Configure keymap in X11
+    services.xserver.xkb = {
+      layout = "gb";
+      variant = "";
+    };
+
     # Enable the GNOME Desktop Environment.
     services.displayManager.gdm.enable = true;
     services.desktopManager.gnome.enable = true;
 
-    # Bootloader.
+    # Use the systemd-boot EFI boot loader.
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = true;
-
     boot.kernelPackages = pkgs.linuxPackages_latest;
 
     # Enable networking
+    networking.hostName = "raina"; # Define your hostname.
     networking.networkmanager.enable = true;
     networking.networkmanager.dns = "none";
 
@@ -75,6 +93,13 @@
 
     # Select internationalisation properties.
     i18n.defaultLocale = "en_GB.UTF-8";
+
+    # Input method (CJK).
+    i18n.inputMethod = {
+      enable = true;
+      type = "ibus";
+      ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
+    };
 
     i18n.extraLocaleSettings = {
       LC_ADDRESS = "en_GB.UTF-8";
@@ -114,5 +139,28 @@
     environment.sessionVariables = {
       LIBVA_DRIVER_NAME = "iHD";
     }; # Force intel-media-driver
+
+    # Fonts
+    fonts = {
+      enableDefaultPackages = true;
+      packages = with pkgs; [
+        noto-fonts
+        noto-fonts-cjk-sans
+        noto-fonts-cjk-serif
+        wqy_zenhei
+        wqy_microhei
+      ];
+    };
+
+    # Cropped virtual webcam (see ./webcam-crop.nix).
+    services'.croppedWebcam.enable = true;
+
+    # This value determines the NixOS release from which the default
+    # settings for stateful data, like file locations and database versions
+    # on your system were taken. It‘s perfectly fine and recommended to leave
+    # this value at the release version of the first install of this system.
+    # Before changing this value read the documentation for this option
+    # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+    system.stateVersion = "26.05"; # Did you read the comment?
   };
 }

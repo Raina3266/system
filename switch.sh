@@ -1,13 +1,10 @@
 #! /usr/bin/env bash
 set -euxo pipefail
 
-# ./switch.sh raina
-NAME="$1"  # e.g. "raina"
-
 git add -A
 
-nixos-rebuild build --flake ".#$NAME"
-sudo nixos-rebuild switch --flake ".#$NAME"
+nixos-rebuild build --flake .
+sudo nixos-rebuild switch --flake .
 
 # nix shell nixpkgs#git --extra-experimental-features nix-command --extra-experimental-features flakes
 
