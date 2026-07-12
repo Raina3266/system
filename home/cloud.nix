@@ -4,7 +4,7 @@
   ...
 }:
 let
-  mountDir_gdrive = "${config.home.homeDirectory}/Documents/GoogleDrive";
+  mountDir_gdrive = "${config.home.homeDirectory}/GoogleDrive";
 in
 {
   config = {
@@ -69,6 +69,52 @@ in
 
       Install = {
         WantedBy = [ "default.target" ];
+      };
+    };
+
+    # Pre-cache the Music folder by reading every file through the FUSE
+    # mount. With --vfs-cache-mode full on the mount, reading a file
+    # downloads it into the VFS cache, so subsequent accesses are local.
+    # Runs as a oneshot after the mount is up, and on a timer to pick up
+    # newly added remote files.
+    #
+    # Note: the mount's --vfs-cache-max-size is 5G; if Music exceeds that,
+    # older cached files will be evicted. Raise the limit in the mount
+    # service if needed.
+    systemd.user.services.rclone-cache-music = {
+      Unit = {
+        Description = "Pre-cache Google Drive Music folder into the VFS mount";
+        After = [ "rclone-mount-gdrive.service" ];
+        Requires = [ "rclone-mount-gdrive.service" ];
+      };
+
+      Service = with pkgs; {
+        Type = "oneshot";
+        Environment = "HOME=%h";
+        # Run at low priority, like the mount service.
+        Nice = 10;
+        IOSchedulingClass = "best-effort";
+        IOSchedulingPriority = 7;
+        # Reading a large library can take a while on first run.
+        TimeoutStartSec = "2h";
+
+        # `cat > /dev/null` reads each file end-to-end through the mount,
+        # which is what triggers the VFS download. `-type f` skips dirs.
+        ExecStart = ''
+          ${findutils}/bin/find '${mountDir_gdrive}/Music' -type f -print0 \
+            | xargs -0 -I{} sh -c 'cat "$1" > /dev/null' _ {}
+        '';
+      };
+    };
+
+    systemd.user.timers.rclone-cache-music = {
+      Install = {
+        WantedBy = [ "timers.target" ];
+      };
+      Timer = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "1h";
+        Persistent = true;
       };
     };
   };

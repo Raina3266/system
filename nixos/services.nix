@@ -16,7 +16,6 @@
     ffmpegthumbnailer
     gdk-pixbuf
     gnomeExtensions.simple-timer
-    gnomeExtensions.todotxt
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
   ];
@@ -43,6 +42,7 @@
     decibels
     papers
     showtime
+    nautilus
     # loupe  Image Viewer.
     gnome-weather
     gnome-calculator
