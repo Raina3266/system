@@ -8,7 +8,9 @@ let
   isNixOS = nixosConfig != null;
 in
 {
-  programs.kitty.enable = true;
+  programs.kitty = {
+    enable = true;
+  };
   programs.kitty.themeFile = "gruvbox-dark-hard";
   programs.kitty.package = lib.mkIf (!isNixOS) (
     pkgs.writeShellScriptBin "kitty" ''
@@ -17,5 +19,13 @@ in
   );
   programs.kitty.settings = {
     shell = "fish";
+  };
+
+  programs.ghostty = {
+    enable = true;
+    enableFishIntegration = true;
+    settings = {
+      command = "fish";
+    };
   };
 }

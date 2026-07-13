@@ -98,12 +98,12 @@
 
     # productivity / office
     libreoffice
-    pdf4qt
     obsidian
     anki
     meld
     czkawka
     exercism
+    stirling-pdf-desktop
 
     # media playback
     vlc
@@ -119,7 +119,6 @@
     kid3
     spotdl
     yt-dlp
-    picard
 
     # media servers / sync
     jellyfin
