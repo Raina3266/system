@@ -5,6 +5,43 @@
 }:
 let
   mountDir_gdrive = "${config.home.homeDirectory}/GoogleDrive";
+  musicDir_local = "${config.home.homeDirectory}/Music";
+  musicRemote = "GoogleDrive:Music";
+
+  # bisync state directory. Holds the lock file and per-side listings
+  # that bisync uses to detect changes since the last successful run.
+  bisyncStateDir = "${config.xdg.stateHome}/rclone-bisync-music";
+
+  # Wrapper script for the bisync run. Using a real script (instead of
+  # an inline `bash -c '...'` in ExecStart) sidesteps systemd's
+  # notoriously finicky ExecStart quoting rules — the script path is a
+  # single argument with no embedded quotes to parse.
+  bisyncScript = pkgs.writeShellScript "rclone-bisync-music.sh" ''
+    set -euo pipefail
+
+    # First-run detection: if no lock file exists yet, do a --resync
+    # to establish the baseline. Otherwise run a normal two-way sync.
+    if [ ! -f "${bisyncStateDir}/bisync.lck" ]; then
+      resync_flag="--resync"
+    else
+      resync_flag=""
+    fi
+
+    exec ${pkgs.rclone}/bin/rclone bisync \
+      "${musicDir_local}" "${musicRemote}" \
+      --workdir "${bisyncStateDir}" \
+      --check-access \
+      --conflict-resolve newer \
+      --conflict-suffix conflict \
+      --resilient \
+      --retries 3 \
+      --low-level-retries 10 \
+      --timeout 30s \
+      --contimeout 30s \
+      --tpslimit 10 \
+      --tpslimit-burst 20 \
+      $resync_flag
+  '';
 in
 {
   config = {
@@ -13,6 +50,11 @@ in
       rclone
     ];
 
+    # ── FUSE mount for browsing the rest of Google Drive ──────────────
+    # Kept for ad-hoc access to non-Music files. The Music subtree is
+    # handled separately by rclone-bisync-music below, which keeps a real
+    # local copy in ~/Music that survives reboots.
+    #
     # to view status, `systemctl --user status rclone-mount-gdrive.service`
     # to view errors, `journalctl --user-unit rclone-mount-gdrive.service`
     systemd.user.services.rclone-mount-gdrive = {
@@ -59,9 +101,10 @@ in
 
         # Use the setuid wrapper at /run/wrappers/bin/fusermount3, not the
         # non-setuid copy in the nix store — only the wrapper can unmount
-        # FUSE filesystems as an unprivileged user.
+        # FUSE filesystems as an unprivileged user. Ignore failure if the
+        # mount is already gone (e.g. bisync stopped it via Conflicts=).
         ExecStop = ''
-          /run/wrappers/bin/fusermount3 -u '${mountDir_gdrive}'
+          /run/wrappers/bin/fusermount3 -u '${mountDir_gdrive}' || true
         '';
         Restart = "on-failure";
         RestartSec = 10;
@@ -72,42 +115,60 @@ in
       };
     };
 
-    # Pre-cache the Music folder by reading every file through the FUSE
-    # mount. With --vfs-cache-mode full on the mount, reading a file
-    # downloads it into the VFS cache, so subsequent accesses are local.
-    # Runs as a oneshot after the mount is up, and on a timer to pick up
-    # newly added remote files.
+    # ── Two-way sync for ~/Music ↔ GoogleDrive:Music ──────────────────
     #
-    # Note: the mount's --vfs-cache-max-size is 5G; if Music exceeds that,
-    # older cached files will be evicted. Raise the limit in the mount
-    # service if needed.
-    systemd.user.services.rclone-cache-music = {
+    # Keeps a real local copy of the Music folder on disk (survives
+    # reboots, no eviction, no FUSE dependency) and propagates changes
+    # both ways: local edits upload, remote changes download.
+    #
+    # Conflict policy: the newer version wins; the older version is
+    # kept with a `-conflict` suffix so nothing is silently lost.
+    #
+    # IMPORTANT: the very first run must be a --resync to establish the
+    # baseline. The ExecStartPre below detects a missing lock file (i.e.
+    # bisync has never completed successfully) and runs `--resync` once.
+    # Subsequent runs are normal two-way syncs.
+    #
+    # to view status:  systemctl --user status rclone-bisync-music.service
+    # to view errors:  journalctl --user-unit rclone-bisync-music.service
+    # to force a full re-sync: systemctl --user stop rclone-bisync-music.timer
+    #   then: rm -rf ~/.local/state/rclone-bisync-music
+    #   then: systemctl --user start rclone-bisync-music.service
+    systemd.user.services.rclone-bisync-music = {
       Unit = {
-        Description = "Pre-cache Google Drive Music folder into the VFS mount";
-        After = [ "rclone-mount-gdrive.service" ];
-        Requires = [ "rclone-mount-gdrive.service" ];
+        Description = "Two-way sync ~/Music with GoogleDrive:Music";
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = with pkgs; {
         Type = "oneshot";
         Environment = "HOME=%h";
-        # Run at low priority, like the mount service.
         Nice = 10;
         IOSchedulingClass = "best-effort";
         IOSchedulingPriority = 7;
-        # Reading a large library can take a while on first run.
+        # A large library over a slow link can take a while.
         TimeoutStartSec = "2h";
 
-        # `cat > /dev/null` reads each file end-to-end through the mount,
-        # which is what triggers the VFS download. `-type f` skips dirs.
-        ExecStart = ''
-          ${findutils}/bin/find '${mountDir_gdrive}/Music' -type f -print0 \
-            | xargs -0 -I{} sh -c 'cat "$1" > /dev/null' _ {}
-        '';
+        # Ensure both the local directory and the bisync state directory
+        # exist. The state dir holds the lock file; if it's absent on
+        # startup, bisync treats this as a first run and the wrapper
+        # script adds --resync automatically.
+        ExecStartPre = [
+          "${coreutils}/bin/mkdir -p '${musicDir_local}'"
+          "${coreutils}/bin/mkdir -p '${bisyncStateDir}'"
+        ];
+
+        # The wrapper script handles first-run detection (--resync when
+        # no lock file exists yet) and conflict resolution (newer wins,
+        # loser kept with a `-conflict` suffix).
+        ExecStart = "${bisyncScript}";
       };
     };
 
-    systemd.user.timers.rclone-cache-music = {
+    # Run the sync shortly after boot (give the network time to come up)
+    # and then every hour to pick up changes from either side.
+    systemd.user.timers.rclone-bisync-music = {
       Install = {
         WantedBy = [ "timers.target" ];
       };

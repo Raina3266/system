@@ -129,7 +129,23 @@
         noto-fonts-cjk-serif
         wqy_zenhei
         wqy_microhei
+
+        nerd-fonts.jetbrains-mono
+        nerd-fonts.symbols-only
       ];
+
+      # Make a Nerd Font the system default so apps that use the
+      # fontconfig default sans/serif/monospace (niri's hotkey overlay,
+      # tab titles, etc.) pick up Nerd Font glyphs for icons.
+      fontconfig = {
+        enable = true;
+        defaultFonts = {
+          sansSerif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans" "Noto Sans CJK SC" "Noto Sans CJK JP" ];
+          serif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Serif" "Noto Serif CJK SC" "Noto Serif CJK JP" ];
+          monospace = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans Mono CJK SC" ];
+          emoji = [ "Symbols Nerd Font Mono" "Noto Color Emoji" ];
+        };
+      };
     };
 
     # This value determines the NixOS release from which the default

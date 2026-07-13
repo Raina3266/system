@@ -268,6 +268,10 @@ spawn-at-startup "waybar"
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy"
 
+// Start ibus-daemon for Chinese (libpinyin) input. The NixOS
+// i18n.inputMethod module sets the env vars; this runs the daemon.
+spawn-at-startup "ibus-daemon" "-x" "-r"
+
 // To run a shell command (with variables, pipes, etc.), use spawn-sh-at-startup:
 // spawn-sh-at-startup "qs -c ~/source/qs/MyAwesomeShell"
 
@@ -391,6 +395,24 @@ binds {
     // but you need to manually put each argument in separate "" quotes.
     XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
     XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
+
+    // ── Ctrl+F-key shortcuts ───────────────────────────────────────
+    // Ctrl+F1  Mute audio output
+    F1 hotkey-overlay-title="Mute Audio"      { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    // Ctrl+F2  Volume down
+    F2 hotkey-overlay-title="Volume Down"     { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }
+    // Ctrl+F3  Volume up
+    F3 hotkey-overlay-title="Volume Up"       { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
+    // Ctrl+F4  Mute mic
+    F4 hotkey-overlay-title="Mute Mic"        { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
+    // Ctrl+F5  Brightness down
+    F5 hotkey-overlay-title="Brightness Down" { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
+    // Ctrl+F6  Brightness up
+    F6 hotkey-overlay-title="Brightness Up"   { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
+    // Ctrl+F7  Switch window focus (cycle down within column)
+    F7 hotkey-overlay-title="Switch Window"   { focus-window-down; }
+    // Ctrl+F8  Do not disturb (toggles mako or swaync DND if installed)
+    F8 hotkey-overlay-title="Do Not Disturb"  { spawn-sh "makoctl set-mode dnd 2>/dev/null || swaync-client -t 2>/dev/null || true"; }
 
     // Open/close the Overview: a zoomed-out view of workspaces and windows.
     // You can also move the mouse into the top-left hot corner,
@@ -616,6 +638,10 @@ binds {
 
     // Toggle Handy speech-to-text transcription (sends SIGUSR2 to the running instance).
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-n" "handy"; }
+
+    // Toggle between English and Chinese (ibus libpinyin). Cycles the
+    // active ibus engine between the default (xkb:...) and libpinyin.
+    Super+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "ibus engine libpinyin || ibus engine xkb:us:eng"; }
 
     // Applications such as remote-desktop clients and software KVM switches may
     // request that niri stops processing the keyboard shortcuts defined here

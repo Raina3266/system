@@ -6,9 +6,14 @@
   imports = [
     ./waybar.nix
   ];
-  
+
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
   programs.rofi.enable = true;
+
+  # Tools invoked by niri binds in config.kdl.
+  home.packages = with pkgs; [
+    brightnessctl  # F5/F6 brightness keys
+  ];
   
   home.pointerCursor = {
     enable = true;

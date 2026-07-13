@@ -16,6 +16,27 @@
     # Nightly from the upstream flake (matches zed.cachix.org; see flake.nix).
     package = inputs.zed.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
+    # ── Extensions ──────────────────────────────────────────────────
+    extensions = [
+      "catppuccin"
+      "dracula"
+      "html"
+      "kdl"
+      "nix"
+      "toml"
+      "crates-lsp"           # Cargo.toml dependency info, version hints, features
+      "make"                 # Makefile syntax (often used in Rust projects)
+      "dockerfile"           # Dockerfile syntax (containerising Rust apps)
+      "docker-compose"       # docker-compose.yml support
+      "gitignore-templates"  # quick .gitignore scaffolding
+      "git-firefly"          # git gutter/blame enhancements
+      "yaml"                 # CI configs, flake.lock, k8s manifests
+      "json5"                # relaxed JSON (used by some Rust tooling)
+      "markdown-oxide"       # Markdown LSP (README, docs)
+      "github-actions"       # GitHub Actions workflow syntax
+      "editorconfig"         # .editorconfig support
+    ];
+
     userSettings = {
       # ── Theme & fonts ───────────────────────────────────────────────
       theme = {

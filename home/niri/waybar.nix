@@ -67,14 +67,14 @@
 
         # ── CPU ────────────────────────────────────────────────────────
         cpu = {
-          format = " {usage}%";
+          format = "󰍛 {usage}%";
           tooltip = true;
           interval = 2;
         };
 
         # ── RAM ────────────────────────────────────────────────────────
         memory = {
-          format = " {percentage}%";
+          format = "󰾆 {percentage}%";
           tooltip-format = "{used:0.1f}G / {total:0.1f}G";
           interval = 5;
         };
@@ -82,7 +82,7 @@
         # ── Disk ──────────────────────────────────────────────────────
         disk = {
           path = "/";
-          format = " {percentage_used}%";
+          format = "󰆓 {percentage_used}%";
           tooltip-format = "{used} / {total} ({percentage_used}%)";
           interval = 30;
         };
@@ -92,8 +92,8 @@
           hwmon-path = "";
           thermal-zone = 0;
           critical-threshold = 80;
-          format-critical = " {temperatureC}°C";
-          format = " {temperatureC}°C";
+          format-critical = "󰔅 {temperatureC}°C";
+          format = "󰔘 {temperatureC}°C";
           tooltip-format = "Sensor: {chip}";
           interval = 5;
         };
@@ -286,7 +286,7 @@
     # ── Cyberpunk theme ──────────────────────────────────────────────
     style = ''
       * {
-        font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", monospace;
+        font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
         font-size: 13px;
         font-weight: 600;
       }
