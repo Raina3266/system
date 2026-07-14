@@ -147,14 +147,56 @@ in
               height = 36;
               smooth-scrolling-threshold = 5;
 
-              modules-left = ["clock" "niri/workspaces" "group/hardware"];
+              modules-left = ["clock" "group/hardware" "group/starred"];
               modules-right = ["custom/cliphist" "custom/timer" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
 
-              "niri/workspaces" = {
-                format = "●";
+              "group/starred" = {
+                orientation = "horizontal";
+                drawer = {
+                  transition-duration = 300;
+                  transition-left-to-right = false;
+                };
+                modules = [
+                  "custom/obsidian"
+                  "custom/thunar"
+                  "custom/tauon"
+                  "custom/whatsapp"
+                  "custom/gkeep"
+                ];
+              };
+
+              "custom/obsidian" = {
+                format = "󰆼";
+                tooltip = true;
+                tooltip-format = "Obsidian";
+                on-click = "obsidian &";
+              };
+              "custom/thunar" = {
+                format = "󰉋";
+                tooltip = true;
+                tooltip-format = "Thunar";
+                on-click = "thunar &";
+              };
+              "custom/tauon" = {
+                format = "󰋋";
+                tooltip = true;
+                tooltip-format = "Tauon";
+                on-click = "tauon &";
+              };
+              "custom/whatsapp" = {
+                format = "💬";
+                tooltip = true;
+                tooltip-format = "WhatsApp";
+                on-click = "whatsie &";
+              };
+              "custom/gkeep" = {
+                format = "󰚺";
+                tooltip = true;
+                tooltip-format = "Google Keep";
+                on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
               };
 
               "clock" = {

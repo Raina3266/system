@@ -32,6 +32,7 @@ window#waybar {
 #custom-wifi, #custom-bt,
 #custom-cliphist,
 #custom-timer,
+#custom-obsidian, #custom-thunar, #custom-tauon, #custom-whatsapp, #custom-gkeep,
 #backlight, #pulseaudio, #battery,
 #custom-powermenu,
 #tray {
@@ -42,8 +43,8 @@ window#waybar {
   border: 1px solid rgba(255, 126, 219, 0.2);
 }
 
-/* ── Group containers (transparent, no box) ────────────── */
-#group-hardware, #group-system {
+/* ── Group containers (transparent, no box) ────────────────── */
+#group-hardware, #group-system, #group-starred {
   background-color: transparent;
   border: none;
   margin: 0;
@@ -52,7 +53,8 @@ window#waybar {
 
 /* Ensure all modules inside groups get box styling */
 #group-hardware > widget,
-#group-system > widget {
+#group-system > widget,
+#group-starred > widget {
   background-color: rgba(20, 20, 40, 0.7);
   margin: 0 3px;
   padding: 0 10px;
@@ -99,6 +101,22 @@ window#waybar {
 #group-system {
   color: #7afcff;
   text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#group-starred {
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── Starred apps ───────────────────────────────────────── */
+#custom-obsidian, #custom-thunar, #custom-tauon,
+#custom-whatsapp, #custom-gkeep {
+  color: #f29e74;
+  text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover,
+#custom-whatsapp:hover, #custom-gkeep:hover {
+  background-color: rgba(255, 126, 219, 0.15);
+  border-color: rgba(255, 126, 219, 0.5);
 }
 
 /* ── Center: workspaces ─────────────────────────────────── */
@@ -189,6 +207,7 @@ window#waybar {
 #custom-wifi:hover, #custom-bt:hover,
 #custom-cliphist:hover,
 #custom-timer:hover,
+#custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
 #backlight:hover, #pulseaudio:hover, #battery:hover,
 #custom-powermenu:hover, #tray:hover {
   background-color: rgba(255, 126, 219, 0.15);
