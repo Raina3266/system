@@ -125,7 +125,10 @@ window#waybar.bottom {
 #workspaces button {
   color: #5c6776;
   padding: 0 4px;
-  margin: 0;
+  margin: 0 3px;
+  background-color: rgba(20, 20, 40, 0.7);
+  border: 1px solid rgba(255, 126, 219, 0.2);
+  border-radius: 6px;
 }
 #workspaces button.active,
 #workspaces button.focused {
@@ -135,6 +138,14 @@ window#waybar.bottom {
 #workspaces button.urgent {
   color: #ff3333;
   text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+#workspaces button:hover {
+  background-color: rgba(255, 126, 219, 0.15);
+  background-image: none;
+  border-color: rgba(255, 126, 219, 0.5);
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+  box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
 /* ── Center: lyrics ─────────────────────────────────────── */
@@ -253,5 +264,15 @@ tooltip label {
 }
 #taskbar button:hover {
   background-color: rgba(255, 126, 219, 0.15);
+  background-image: none;
   border-color: rgba(255, 126, 219, 0.5);
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+  box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}
+#taskbar button.active:hover {
+  background-color: rgba(255, 126, 219, 0.15);
+  border-color: rgba(255, 126, 219, 0.5);
+  color: #ff7edb;
+  text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
 }
