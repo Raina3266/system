@@ -6,6 +6,50 @@
   ...
 }: let
   cfg = config.programs'.waybar;
+
+  # Wrap `cliphist store` so that every stored entry also gets a
+  # timestamp recorded in a sidecar file. The prune service below
+  # uses this to evict entries older than 3 days (cliphist itself
+  # only supports a count-based `max-items` limit, not age-based).
+  cliphist-store-timed = pkgs.writeShellScriptBin "cliphist-store-timed" ''
+    ts_dir="''${XDG_CACHE_HOME:-$HOME/.cache}/cliphist"
+    mkdir -p "$ts_dir"
+    ts_file="$ts_dir/timestamps"
+    now=$(date +%s)
+    # Read stdin into a variable so we can pass it to cliphist and
+    # also compute the id it will assign (the current max id + 1).
+    input=$(cat)
+    # Store via cliphist, then record the id it assigned. cliphist
+    # lists entries newest-first as "<id>\t<preview>"; the newest
+    # id is on the first line.
+    printf '%s' "$input" | ${pkgs.cliphist}/bin/cliphist store
+    newest_id=$(${pkgs.cliphist}/bin/cliphist list 2>/dev/null | head -1 | cut -f1)
+    [ -n "$newest_id" ] && printf '%s\t%s\n' "$newest_id" "$now" >> "$ts_file"
+  '';
+
+  # Prune cliphist entries older than 3 days, using the sidecar
+  # timestamp file maintained by cliphist-store-timed above.
+  cliphist-prune = pkgs.writeShellScriptBin "cliphist-prune" ''
+    ts_file="''${XDG_CACHE_HOME:-$HOME/.cache}/cliphist/timestamps"
+    [ -f "$ts_file" ] || exit 0
+    cutoff=$(($(date +%s) - 3 * 24 * 60 * 60))
+    to_delete=""
+    while IFS=$'\t' read -r id ts; do
+      [ -z "$id" ] || [ -z "$ts" ] && continue
+      if [ "$ts" -lt "$cutoff" ] 2>/dev/null; then
+        to_delete+="$id"$'\n'
+      fi
+    done < "$ts_file"
+    if [ -n "$to_delete" ]; then
+      printf '%s' "$to_delete" | ${pkgs.cliphist}/bin/cliphist delete 2>/dev/null || true
+    fi
+    # Rebuild the timestamp file to drop ids no longer in the db.
+    tmp=$(mktemp)
+    ${pkgs.cliphist}/bin/cliphist list 2>/dev/null | cut -f1 | while read -r id; do
+      grep -P "^$id\t" "$ts_file" >> "$tmp" 2>/dev/null || true
+    done
+    mv "$tmp" "$ts_file" 2>/dev/null || rm -f "$tmp"
+  '';
 in
   with lib; {
     options.programs'.waybar = {
@@ -29,7 +73,7 @@ in
             After = [ "graphical-session.target" ];
           };
           Service = {
-            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.cliphist}/bin/cliphist store";
+            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${cliphist-store-timed}/bin/cliphist-store-timed";
             Restart = "on-failure";
             RestartSec = 3;
           };
@@ -38,9 +82,39 @@ in
           };
         };
 
-        systemd.user.services.waybar = {
+        # Prune clipboard history older than 3 days, every hour.
+        systemd.user.services.cliphist-prune = {
+          Unit = {
+            Description = "Prune cliphist entries older than 3 days";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
           Service = {
-            Restart = lib.mkForce "always";
+            Type = "oneshot";
+            ExecStart = "${cliphist-prune}/bin/cliphist-prune";
+          };
+        };
+        systemd.user.timers.cliphist-prune = {
+          Unit = {
+            Description = "Hourly cliphist pruning";
+          };
+          Timer = {
+            OnBootSec = "5min";
+            OnUnitActiveSec = "1h";
+          };
+          Install = {
+            WantedBy = [ "timers.target" ];
+          };
+        };
+
+        systemd.user.services.waybar = {
+          Unit = {
+            # Only run under niri — GNOME/Mutter lacks layer-shell support
+            # and waybar would crash-loop there.
+            ConditionEnvironment = lib.mkForce ["XDG_CURRENT_DESKTOP=niri"];
+          };
+          Service = {
+            Restart = lib.mkForce "on-failure";
             RestartSec = 3;
           };
         };
@@ -74,7 +148,7 @@ in
               smooth-scrolling-threshold = 5;
 
               modules-left = ["clock" "niri/workspaces" "group/hardware"];
-              modules-right = ["custom/cliphist" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
+              modules-right = ["custom/cliphist" "custom/timer" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
@@ -178,8 +252,9 @@ in
 
               "custom/wifi" = {
                 format = "󰤨";
-                tooltip = true;
-                tooltip-format = "Wi-Fi networks\nLeft-click to scan & connect";
+                return-type = "json";
+                exec = ''echo '{"text":"󰤨","tooltip":"Wi-Fi networks\nLeft-click to scan & connect"}'  '';
+                interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-wifi" ''
                   # Get current connection for highlighting
                   current=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
@@ -240,9 +315,10 @@ in
               };
 
               "custom/bt" = {
-                format = "󰂗";
-                tooltip = true;
-                tooltip-format = "Bluetooth devices\nLeft-click to scan & connect";
+                format = "󰂯";
+                return-type = "json";
+                exec = ''echo '{"text":"󰂯","tooltip":"Bluetooth devices\nLeft-click to scan & connect"}'  '';
+                interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-bt" ''
                   if ! command -v bluetoothctl >/dev/null 2>&1; then
                     notify-send "Bluetooth" "bluetoothctl not found"
@@ -392,11 +468,12 @@ in
 
               "custom/cliphist" = {
                 format = "󰆏";
-                tooltip = true;
-                tooltip-format = "Clipboard history\nLeft-click to browse\nRight-click to clear";
+                return-type = "json";
+                exec = ''echo '{"text":"󰆏","tooltip":"Clipboard history\nLeft-click to browse\nRight-click to clear"}'  '';
+                interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-cliphist" ''
                   ${pkgs.cliphist}/bin/cliphist list \
-                    | ${pkgs.rofi}/bin/rofi -dmenu -p "Clipboard" -i \
+                    | rofi -dmenu -p "Clipboard" -i \
                     | ${pkgs.cliphist}/bin/cliphist decode \
                     | ${pkgs.wl-clipboard}/bin/wl-copy
                 '';
@@ -406,10 +483,94 @@ in
                 '';
               };
 
+              "custom/timer" = {
+                return-type = "json";
+                interval = 1;
+                exec = pkgs.writeShellScript "waybar-timer-poll" ''
+                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
+                  if [ ! -f "$state" ]; then
+                    printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
+                    exit 0
+                  fi
+                  read -r end label < "$state"
+                  now=$(date +%s)
+                  remaining=$((end - now))
+                  if [ "$remaining" -le 0 ]; then
+                    rm -f "$state"
+                    ${pkgs.libnotify}/bin/notify-send -u critical "Timer" "⏰ ${label:-Done}"
+                    printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
+                    exit 0
+                  fi
+                  h=$((remaining / 3600))
+                  m=$(((remaining % 3600) / 60))
+                  s=$((remaining % 60))
+                  if [ "$h" -gt 0 ]; then
+                    text=$(printf "󰔛 %d:%02d:%02d" "$h" "$m" "$s")
+                  else
+                    text=$(printf "󰔛 %d:%02d" "$m" "$s")
+                  fi
+                  tip=$(printf "Timer: %s\nRight-click to cancel" "${label:-running}")
+                  printf '{"text":"%s","tooltip":"%s"}' "$text" "$tip"
+                '';
+                on-click = pkgs.writeShellScript "waybar-timer-set" ''
+                  choice=$(printf '%s\n' \
+                    "1 min" "3 min" "5 min" "10 min" "15 min" \
+                    "20 min" "25 min" "30 min" "45 min" "1 hour" \
+                    "1.5 hours" "2 hours" "Custom…" \
+                    | rofi -dmenu -p "Timer" -i -no-custom)
+                  [ -z "$choice" ] && exit 0
+
+                  case "$choice" in
+                    *Custom*)
+                      input=$(rofi -dmenu -p "Duration (e.g. 90s, 10m, 2h)" -i)
+                      [ -z "$input" ] && exit 0
+                      ;;
+                    *hour*)  input="$(echo "$choice" | awk '{print $1}')h" ;;
+                    *hours*) input="$(echo "$choice" | awk '{print $1}')h" ;;
+                    *min*)   input="$(echo "$choice" | awk '{print $1}')m" ;;
+                    *) exit 0 ;;
+                  esac
+
+                  # Parse durations like 90s, 10m, 2h, or 1h30m
+                  total=0
+                  rest="$input"
+                  while [ -n "$rest" ]; do
+                    n=$(printf '%s' "$rest" | grep -oE '^[0-9]+')
+                    [ -z "$n" ] && break
+                    unit=$(printf '%s' "$rest" | grep -oE '^[0-9]+[a-zA-Z]' | grep -oE '[a-zA-Z]$')
+                    rest=$(printf '%s' "$rest" | sed -E "s/^$n$unit//")
+                    case "$unit" in
+                      s) total=$((total + n)) ;;
+                      m) total=$((total + n * 60)) ;;
+                      h) total=$((total + n * 3600)) ;;
+                      *) break ;;
+                    esac
+                  done
+
+                  if [ "$total" -le 0 ]; then
+                    ${pkgs.libnotify}/bin/notify-send "Timer" "Invalid duration: $input"
+                    exit 0
+                  fi
+
+                  end=$(( $(date +%s) + total ))
+                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
+                  printf '%s %s\n' "$end" "$input" > "$state"
+                  ${pkgs.libnotify}/bin/notify-send "Timer" "Started: $input"
+                '';
+                on-click-right = pkgs.writeShellScript "waybar-timer-cancel" ''
+                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
+                  if [ -f "$state" ]; then
+                    rm -f "$state"
+                    ${pkgs.libnotify}/bin/notify-send "Timer" "Cancelled"
+                  fi
+                '';
+              };
+
               "custom/powermenu" = {
                 format = "󰐥";
-                tooltip = true;
-                tooltip-format = "Power menu";
+                return-type = "json";
+                exec = ''echo '{"text":"󰐥","tooltip":"Power menu"}'  '';
+                interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-powermenu" ''
                   choice=$(rofi -dmenu -p "Power" -no-custom -i <<EOF
                   ⏻  Shutdown

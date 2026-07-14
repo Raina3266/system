@@ -31,6 +31,7 @@ window#waybar {
 #custom-lyrics,
 #custom-wifi, #custom-bt,
 #custom-cliphist,
+#custom-timer,
 #backlight, #pulseaudio, #battery,
 #custom-powermenu,
 #tray {
@@ -142,6 +143,10 @@ window#waybar {
   color: #7afcff;
   text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
+#custom-timer {
+  color: #f29e74;
+  text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
 #backlight {
   color: #f29e74;
   text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
@@ -183,6 +188,7 @@ window#waybar {
 #custom-lyrics:hover,
 #custom-wifi:hover, #custom-bt:hover,
 #custom-cliphist:hover,
+#custom-timer:hover,
 #backlight:hover, #pulseaudio:hover, #battery:hover,
 #custom-powermenu:hover, #tray:hover {
   background-color: rgba(255, 126, 219, 0.15);

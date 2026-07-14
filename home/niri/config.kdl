@@ -361,7 +361,7 @@ binds {
     Mod+Shift+Slash { show-hotkey-overlay; }
 
     // Suggested binds for running programs: terminal, app launcher, screen locker.
-    Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }
+    Mod+T hotkey-overlay-title="Open a Terminal: ghostty" { spawn "ghostty"; }
     Mod+D hotkey-overlay-title="Run an Application: rofi" { spawn "rofi" "-show" "drun"; }
     Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
 
@@ -634,8 +634,8 @@ binds {
     Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot.sh"; }
 
     // Clipboard history (cliphist + rofi). Left-click the waybar icon or press
-    // Mod+Shift+V to browse, select, and paste from clipboard history.
-    Mod+Shift+V hotkey-overlay-title="Clipboard History" { spawn-sh "cliphist list | rofi -dmenu -p 'Clipboard' -i | cliphist decode | wl-copy"; }
+    // Mod+Alt+V to browse, select, and paste from clipboard history.
+    Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn-sh "cliphist list | rofi -dmenu -p 'Clipboard' -i | cliphist decode | wl-copy"; }
 
     // Toggle Handy speech-to-text transcription (sends SIGUSR2 to the running instance).
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-n" "handy"; }

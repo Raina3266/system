@@ -11,6 +11,18 @@
   programs.rofi = {
     enable = true;
     theme = ./themes/rofi-cyberpunk.rasi;
+    # Use a wrapper that ensures the Wayland backend is used under niri.
+    # Without this, rofi may fall back to X11/Xwayland when WAYLAND_DISPLAY
+    # isn't in the inherited systemd environment, breaking outside-click
+    # dismissal. Under GNOME (no layer-shell), the wrapper leaves rofi alone.
+    package = pkgs.writeShellScriptBin "rofi" ''
+      if [ -z "''${WAYLAND_DISPLAY:-}" ] && pgrep -x niri >/dev/null 2>&1; then
+        niri_pid=$(pgrep -x niri | head -1)
+        wd=$(tr '\0' '\n' < /proc/$niri_pid/environ | grep '^WAYLAND_DISPLAY=' | cut -d= -f2-)
+        [ -n "$wd" ] && export WAYLAND_DISPLAY="$wd"
+      fi
+      exec ${pkgs.rofi}/bin/rofi "$@"
+    '';
   };
 
   # Tools invoked by niri binds in config.kdl.
