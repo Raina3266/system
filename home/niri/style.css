@@ -29,7 +29,6 @@ window#waybar {
 #cpu, #temperature, #memory, #disk, #network,
 #clock,
 #custom-lyrics,
-#custom-fcitx,
 #custom-wifi, #custom-bt,
 #backlight, #pulseaudio, #battery,
 #custom-powermenu,
@@ -127,10 +126,6 @@ window#waybar {
 }
 
 /* ── Right: amber/pink utilities ────────────────────────── */
-#custom-fcitx {
-  color: #f29e74;
-  text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-}
 #tray {
   color: #cbe3e7;
 }
@@ -181,7 +176,6 @@ window#waybar {
 #cpu:hover, #temperature:hover, #memory:hover, #disk:hover, #network:hover,
 #clock:hover,
 #custom-lyrics:hover,
-#custom-fcitx:hover,
 #custom-wifi:hover, #custom-bt:hover,
 #backlight:hover, #pulseaudio:hover, #battery:hover,
 #custom-powermenu:hover, #tray:hover {

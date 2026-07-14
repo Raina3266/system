@@ -6,55 +6,6 @@
   ...
 }: let
   cfg = config.programs'.waybar;
-  fcitxStatus = pkgs.writeShellApplication {
-    name = "fcitx-status.sh";
-    runtimeInputs = with pkgs; [ fcitx5 ];
-    text = ''
-      status=$(fcitx5-remote -n 2>/dev/null || echo "keyboard-us")
-      case "$status" in
-        "mozc") echo '{"text": "あ", "tooltip": "Mozc (Japanese)", "class": "mozc"}' ;;
-        "pinyin"|"shuangpin") echo '{"text": "拼", "tooltip": "Pinyin (Chinese)", "class": "pinyin"}' ;;
-        "hangul") echo '{"text": "한", "tooltip": "Hangul (Korean)", "class": "hangul"}' ;;
-        "keyboard-us") echo '{"text": "En", "tooltip": "English (US)", "class": "english"}' ;;
-        *) echo "{\"text\": \"$status\", \"tooltip\": \"$status\", \"class\": \"other\"}" ;;
-      esac
-    '';
-  };
-  fcitxCycle = pkgs.writeShellApplication {
-    name = "fcitx-cycle.sh";
-    runtimeInputs = with pkgs; [ fcitx5 ];
-    text = ''
-      current=$(fcitx5-remote -n 2>/dev/null || echo "keyboard-us")
-      # Get all available input methods from fcitx5
-      all=$(fcitx5-remote -l 2>/dev/null || echo "keyboard-us")
-      # Build ordered list
-      ims=$(echo "$all" | tr ' ' '\n' | grep -v '^$')
-      count=$(echo "$ims" | wc -l)
-      if [ "$count" -le 1 ]; then
-        exit 0
-      fi
-      # Find the index of the current IM and switch to the next one
-      i=0
-      next=""
-      found=0
-      while IFS= read -r im; do
-        i=$((i + 1))
-        if [ "$found" -eq 1 ]; then
-          next="$im"
-          found=2
-          break
-        fi
-        if [ "$im" = "$current" ]; then
-          found=1
-        fi
-      done <<< "$ims"
-      # If current was last (or not found), wrap to first
-      if [ -z "$next" ]; then
-        next=$(echo "$ims" | head -n 1)
-      fi
-      fcitx5-remote -s "$next"
-    '';
-  };
 in
   with lib; {
     options.programs'.waybar = {
@@ -104,7 +55,7 @@ in
               smooth-scrolling-threshold = 5;
 
               modules-left = ["clock" "niri/workspaces" "group/hardware"];
-              modules-right = ["custom/fcitx" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
+              modules-right = ["tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
@@ -119,7 +70,7 @@ in
                   transition-duration = 300;
                   transition-left-to-right = false;
                 };
-                modules = ["memory" "temperature" "cpu" "disk" "network"];
+                modules = ["temperature" "memory" "cpu" "disk" "network"];
               };
 
               "group/system" = {
@@ -336,15 +287,6 @@ in
                       ;;
                   esac
                 '';
-              };
-
-              "custom/fcitx" = {
-                format = "󰌌 {}";
-                return-type = "json";
-                interval = 2;
-                exec = "${fcitxStatus}/bin/fcitx-status.sh";
-                on-click = "${fcitxCycle}/bin/fcitx-cycle.sh";
-                tooltip = true;
               };
 
               "tray" = {

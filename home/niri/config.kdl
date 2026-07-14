@@ -264,7 +264,6 @@ layout {
 // See the binds section below for more spawn examples.
 
 // This line starts waybar, a commonly used bar for Wayland compositors.
-spawn-at-startup "waybar"
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy"
 
@@ -637,9 +636,9 @@ binds {
     // Toggle Handy speech-to-text transcription (sends SIGUSR2 to the running instance).
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-n" "handy"; }
 
-    // Toggle between English and Chinese (ibus libpinyin). Cycles the
-    // active ibus engine between the default (xkb:...) and libpinyin.
-    Super+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "ibus engine libpinyin || ibus engine xkb:us:eng"; }
+    // Toggle between English and Chinese (fcitx5). Switches between
+    // keyboard-gb (English) and pinyin (Chinese).
+    Mod+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "current=$(/run/current-system/sw/bin/fcitx5-remote -n 2>/dev/null); if [ \"$current\" = 'pinyin' ]; then /run/current-system/sw/bin/fcitx5-remote -s keyboard-gb; else /run/current-system/sw/bin/fcitx5-remote -s pinyin; fi"; }
 
     // Applications such as remote-desktop clients and software KVM switches may
     // request that niri stops processing the keyboard shortcuts defined here
