@@ -28,8 +28,6 @@
       ffmpeg
       mediainfo
       exiftool
-      handy
-      wtype
     ];
 
     programs.fish.enable = true;

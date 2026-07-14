@@ -633,6 +633,10 @@ binds {
     // Region-select OCR: drag a box, text within it is OCR'd and copied.
     Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot.sh"; }
 
+    // Clipboard history (cliphist + rofi). Left-click the waybar icon or press
+    // Mod+Shift+V to browse, select, and paste from clipboard history.
+    Mod+Shift+V hotkey-overlay-title="Clipboard History" { spawn-sh "cliphist list | rofi -dmenu -p 'Clipboard' -i | cliphist decode | wl-copy"; }
+
     // Toggle Handy speech-to-text transcription (sends SIGUSR2 to the running instance).
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-n" "handy"; }
 

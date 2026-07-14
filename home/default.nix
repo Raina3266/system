@@ -7,6 +7,7 @@
   imports = [
     ./niri
     ./shell
+    ./transcript.nix
     ./cloud.nix
     ./ocr.nix
     ./toolchains.nix

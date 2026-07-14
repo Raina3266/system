@@ -10,7 +10,7 @@
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
   programs.rofi = {
     enable = true;
-    theme = ./rofi.rasi;
+    theme = ./themes/rofi-cyberpunk.rasi;
   };
 
   # Tools invoked by niri binds in config.kdl.
@@ -40,6 +40,17 @@
 
     [GroupOrder]
     0="Default"
+  '';
+
+  # Cyberpunk fcitx5 theme (matches waybar/rofi palette).
+  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source = ./themes/fcitx5-cyberpunk.conf;
+
+  # Use the cyberpunk theme for the classic UI.
+  xdg.configFile."fcitx5/conf/classicui.conf".text = ''
+    Vertical Center=False
+    PerScreenDPI=True
+    UseDarkTheme=False
+    Theme=cyberpunk
   '';
   
   home.pointerCursor = {

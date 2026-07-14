@@ -17,7 +17,26 @@ in
 
     config = mkIf (pkgs.stdenv.isLinux && cfg.enable) (mkMerge [
       {
-        home.packages = [] ++ (optional cfg.enableLyrics pkgs.waybar-lyric);
+        home.packages = with pkgs; [
+          cliphist
+          wl-clipboard
+        ] ++ (optional cfg.enableLyrics pkgs.waybar-lyric);
+
+        systemd.user.services.cliphist = {
+          Unit = {
+            Description = "cliphist Wayland clipboard history daemon";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.cliphist}/bin/cliphist store";
+            Restart = "on-failure";
+            RestartSec = 3;
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
+        };
 
         systemd.user.services.waybar = {
           Service = {
@@ -45,7 +64,7 @@ in
           systemd = {
             enable = true;
           };
-          style = ./style.css;
+          style = ./themes/waybar-cyberpunk.css;
 
           settings = {
             topBar = ({
@@ -55,13 +74,33 @@ in
               smooth-scrolling-threshold = 5;
 
               modules-left = ["clock" "niri/workspaces" "group/hardware"];
-              modules-right = ["tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
+              modules-right = ["custom/cliphist" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
 
               "niri/workspaces" = {
                 format = "●";
+              };
+
+              "clock" = {
+                # Date + ISO week number + time. Click toggles an alternate
+                # full-date format; hover shows the calendar tooltip.
+                format = "󰃭 {:%A %d %B  %H:%M}";
+                format-alt = "󰃭 {:%A %Y-%m-%d  %H:%M:%S}";
+                tooltip-format = "<tt>{calendar}</tt>";
+                calendar = {
+                  mode = "month";
+                  mode-switcher = true;
+                  format = {
+                    months = "<span color='#ff7edb'><b>{}</b></span>";
+                    weekdays = "<span color='#7afcff'><b>{}</b></span>";
+                    days = "<span color='#cbe3e7'>{}</span>";
+                    today = "<span color='#ff3333'><b><u>{}</u></b></span>";
+                  };
+                };
+                on-click = "mode_switch";
+                on-scroll = "1";
               };
 
               "group/hardware" = {
@@ -349,6 +388,22 @@ in
                 exec-if = "which waybar-lyric";
                 exec = "waybar-lyric -qfpartial";
                 on-click = "waybar-lyric play-pause";
+              };
+
+              "custom/cliphist" = {
+                format = "󰆏";
+                tooltip = true;
+                tooltip-format = "Clipboard history\nLeft-click to browse\nRight-click to clear";
+                on-click = pkgs.writeShellScript "waybar-cliphist" ''
+                  ${pkgs.cliphist}/bin/cliphist list \
+                    | ${pkgs.rofi}/bin/rofi -dmenu -p "Clipboard" -i \
+                    | ${pkgs.cliphist}/bin/cliphist decode \
+                    | ${pkgs.wl-clipboard}/bin/wl-copy
+                '';
+                on-click-right = pkgs.writeShellScript "waybar-cliphist-clear" ''
+                  ${pkgs.cliphist}/bin/cliphist wipe
+                  ${pkgs.libnotify}/bin/notify-send "Clipboard" "History cleared"
+                '';
               };
 
               "custom/powermenu" = {
