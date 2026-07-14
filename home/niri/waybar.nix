@@ -1,414 +1,440 @@
 {
   pkgs,
+  lib,
+  config,
+  osConfig,
   ...
-}:
-{
-  # Tools used by waybar custom modules.
-  home.packages = with pkgs; [
-    waybar-lyric
-    xwayland-satellite
-    wl-clipboard
-    cliphist
-    rofi
-    btop
-    lm_sensors
-    nvitop
-  ];
-
-  programs.waybar = {
-    enable = true;
-
-    settings = [
-      {
-        layer = "top";
-        position = "top";
-        height = 34;
-        exclusive = true;
-        gtk-layer-shell = true;
-        passthrough = false;
-        fixed-center = true;
-        reload_style_on_change = true;
-        margin = "4px 2px";
-
-        # ── Left: screen switcher + system metrics ────────────────────
-        modules-left = [
-          "custom/screens"
-          "cpu"
-          "memory"
-          "disk"
-          "temperature"
-          "custom/gpu"
-          "network"
-        ];
-
-        # ── Center: lyrics (if playing) else clock + calendar ──────────
-        modules-center = [
-          "custom/lyrics"
-          "clock"
-        ];
-
-        # ── Right: settings dropdown, clipboard, todo, timer ───────────
-        modules-right = [
-          "custom/timer"
-          "custom/todo"
-          "custom/clipboard"
-          "custom/settings"
-          "tray"
-        ];
-
-        # ── Screen switcher (cycles niri monitors) ────────────────────
-        "custom/screens" = {
-          format = "󰍹";
-          tooltip = true;
-          tooltip-format = "Cycle monitor focus\nLeft-click: focus next monitor\nRight-click: move column to next monitor";
-          on-click = "niri msg action focus-monitor-right";
-          on-click-right = "niri msg action move-column-to-monitor-right";
-        };
-
-        # ── CPU ────────────────────────────────────────────────────────
-        cpu = {
-          format = "󰍛 {usage}%";
-          tooltip = true;
-          interval = 2;
-        };
-
-        # ── RAM ────────────────────────────────────────────────────────
-        memory = {
-          format = "󰾆 {percentage}%";
-          tooltip-format = "{used:0.1f}G / {total:0.1f}G";
-          interval = 5;
-        };
-
-        # ── Disk ──────────────────────────────────────────────────────
-        disk = {
-          path = "/";
-          format = "󰆓 {percentage_used}%";
-          tooltip-format = "{used} / {total} ({percentage_used}%)";
-          interval = 30;
-        };
-
-        # ── Temperature (sensors) ─────────────────────────────────────
-        temperature = {
-          hwmon-path = "";
-          thermal-zone = 0;
-          critical-threshold = 80;
-          format-critical = "󰔅 {temperatureC}°C";
-          format = "󰔘 {temperatureC}°C";
-          tooltip-format = "Sensor: {chip}";
-          interval = 5;
-        };
-
-        # ── GPU (NVIDIA via nvitop, fallback to Intel) ────────────────
-        "custom/gpu" = {
-          format = "󰢮 {}";
-          tooltip = true;
-          interval = 3;
-          exec = pkgs.writeShellScript "waybar-gpu" ''
-            # Try NVIDIA first
-            if command -v nvitop >/dev/null 2>&1; then
-              util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -1)
-              if [ -n "$util" ]; then
-                echo "''${util}%"
-                exit 0
-              fi
-            fi
-            # Fallback: intel_gpu_top is too heavy; just report N/A
-            echo "—"
-          '';
-        };
-
-        # ── Network ───────────────────────────────────────────────────
-        network = {
-          interval = 5;
-          format-wifi = "󰤨 {essid}";
-          format-ethernet = "󰈀 {ipaddr}";
-          format-disconnected = "󰤭";
-          tooltip-format-wifi = "{essid} ({signalStrength}dBm)\n{ipaddr}";
-          tooltip-format-ethernet = "{ifname}: {ipaddr}";
-        };
-
-        # ── Lyrics (centered, hides when nothing plays) ───────────────
-        "custom/lyrics" = {
-          return-type = "json";
-          format = "{icon} {0}";
-          hide-empty-text = true;
-          format-icons = {
-            playing = "▶";
-            paused = "⏸";
-            lyric = "🎵";
-            music = "🎵";
-          };
-          exec-if = "which waybar-lyric";
-          exec = "waybar-lyric -qfpartial";
-          on-click = "waybar-lyric play-pause";
-        };
-
-        # ── Clock + calendar (centered, hidden while lyrics play) ─────
-        clock = {
-          format = "󰃭 {:%H:%M  %a %d %b}";
-          format-alt = " {:%H:%M:%S}";
-          tooltip-format = "<tt>{calendar}</tt>";
-          calendar = {
-            mode = "year";
-            mode-mon-col = 3;
-            weeks-pos = "right";
-            on-scroll = 1;
-            on-click-right = "mode";
-            format = {
-              months = ''<span color='#ff7edb'><b>{}</b></span>'';
-              days = ''<span color='#cbe3e7'>{}</span>'';
-              weeks = ''<span color='#5c6776'><b>W{}</b></span>'';
-              weekdays = ''<span color='#f29e74'><b>{}</b></span>'';
-              today = ''<span color='#ff3333'><b><u>{}</u></b></span>'';
-            };
-          };
-          actions = {
-            on-click-right = "mode";
-            on-click-forward = "tz_up";
-            on-click-backward = "tz_down";
-            on-scroll-up = "shift_up";
-            on-scroll-down = "shift_down";
-          };
-        };
-
-        # ── Timer (simple countdown via shell) ────────────────────────
-        "custom/timer" = {
-          format = "󰔛 {}";
-          tooltip = true;
-          tooltip-format = "Left-click: start 5m timer\nMiddle-click: start 25m (pomodoro)\nRight-click: cancel timer";
-          exec = pkgs.writeShellScript "waybar-timer-status" ''
-            state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer"
-            if [ -f "$state" ]; then
-              target=$(cat "$state")
-              now=$(date +%s)
-              left=$((target - now))
-              if [ "$left" -le 0 ]; then
-                notify-send -u critical "Timer" "⏰ Time's up!"
-                rm -f "$state"
-                echo "done"
-              else
-                printf '%dm%02ds\n' $((left / 60)) $((left % 60))
-              fi
-            else
-              echo "—"
-            fi
-          '';
-          interval = 1;
-          on-click = pkgs.writeShellScript "waybar-timer-start" ''
-            state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer"
-            echo $(( $(date +%s) + 300 )) > "$state"
-          '';
-          on-click-middle = pkgs.writeShellScript "waybar-timer-pomodoro" ''
-            state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer"
-            echo $(( $(date +%s) + 1500 )) > "$state"
-          '';
-          on-click-right = pkgs.writeShellScript "waybar-timer-cancel" ''
-            rm -f "''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer"
-          '';
-        };
-
-        # ── Todo list (stored in XDG_RUNTIME_DIR, rofi picker) ─────────
-        "custom/todo" = {
-          format = "󰄬 {}";
-          tooltip = true;
-          tooltip-format = "Left-click: add item\nRight-click: list / remove";
-          exec = pkgs.writeShellScript "waybar-todo-count" ''
-            f="''${XDG_RUNTIME_DIR:-/tmp}/waybar-todo"
-            if [ -f "$f" ]; then
-              n=$(grep -c . "$f" 2>/dev/null || echo 0)
-              echo "$n"
-            else
-              echo "0"
-            fi
-          '';
-          interval = 5;
-          on-click = pkgs.writeShellScript "waybar-todo-add" ''
-            f="''${XDG_RUNTIME_DIR:-/tmp}/waybar-todo"
-            item=$(rofi -dmenu -p "Add todo" -l 0 2>/dev/null)
-            [ -n "$item" ] && echo "$item" >> "$f"
-          '';
-          on-click-right = pkgs.writeShellScript "waybar-todo-list" ''
-            f="''${XDG_RUNTIME_DIR:-/tmp}/waybar-todo"
-            if [ ! -f "$f" ] || [ ! -s "$f" ]; then
-              notify-send "Todo" "No items."
-              exit 0
-            fi
-            sel=$(rofi -dmenu -p "Remove" -no-custom < "$f" 2>/dev/null)
-            [ -n "$sel" ] && grep -Fxv "$sel" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-          '';
-        };
-
-        # ── Clipboard history (cliphist + rofi) ───────────────────────
-        "custom/clipboard" = {
-          format = "󰆏";
-          tooltip = true;
-          tooltip-format = "Clipboard history";
-          on-click = pkgs.writeShellScript "waybar-clipboard" ''
-            selection=$(cliphist list 2>/dev/null | rofi -dmenu -p "Clipboard" -i 2>/dev/null)
-            [ -n "$selection" ] && cliphist decode <<< "$selection" | wl-copy
-          '';
-        };
-
-        # ── Settings dropdown (rofi menu for wifi/bt/battery/etc) ─────
-        "custom/settings" = {
-          format = "󰒓";
-          tooltip = true;
-          tooltip-format = "Settings menu";
-          on-click = pkgs.writeShellScript "waybar-settings" ''
-            choice=$(rofi -dmenu -p "Settings" -no-custom -i <<EOF
-            󰤨  Wi-Fi
-            󰂯  Bluetooth
-            󰁹  Battery
-            󰕾  Volume
-            󰖩  Display
-            󰒃  Power
-            EOF
-            )
-            case "$choice" in
-              *Wi-Fi*)      ${pkgs.networkmanagerapplet}/bin/nm-connection-editor & ;;
-              *Bluetooth*)  ${pkgs.blueman}/bin/blueman-manager & ;;
-              *Battery*)    ${pkgs.gnome-power-manager}/bin/gnome-power-statistics & ;;
-              *Volume*)     ${pkgs.pavucontrol}/bin/pavucontrol & ;;
-              *Display*)    ${pkgs.gnome-control-center}/bin/gnome-control-center display & ;;
-              *Power*)      ${pkgs.gnome-control-center}/bin/gnome-control-center power & ;;
-            esac
-          '';
-        };
-
-        # ── Tray ──────────────────────────────────────────────────────
-        tray = {
-          show-passive-items = true;
-          spacing = 10;
-        };
-      }
-    ];
-
-    # ── Cyberpunk theme ──────────────────────────────────────────────
-    style = ''
-      * {
-        font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      window#waybar {
-        background-color: rgba(10, 10, 20, 0.85);
-        color: #cbe3e7;
-        border-bottom: 2px solid #ff7edb;
-        box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
-      }
-
-      /* ── Module base ─────────────────────────────────────────────── */
-      #workspaces,
-      #cpu, #memory, #disk, #temperature, #custom-gpu, #network,
-      #clock, #custom-lyrics,
-      #custom-timer, #custom-todo, #custom-clipboard, #custom-settings,
-      #tray {
-        background-color: rgba(20, 20, 40, 0.7);
-        margin: 0 3px;
-        padding: 0 10px;
-        border-radius: 6px;
-        border: 1px solid rgba(255, 126, 219, 0.2);
-      }
-
-      /* ── Left: neon cyan/pink ────────────────────────────────────── */
-      #custom-screens {
-        color: #ff7edb;
-        text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
-      }
-      #cpu {
-        color: #7afcff;
-        text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-      }
-      #memory {
-        color: #7afcff;
-        text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-      }
-      #disk {
-        color: #7afcff;
-        text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-      }
-      #temperature {
-        color: #f29e74;
-        text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-      }
-      #temperature.critical {
-        color: #ff3333;
-        text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
-        animation: blink 1s steps(2) infinite;
-      }
-      #custom-gpu {
-        color: #7afcff;
-        text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-      }
-      #network {
-        color: #7afcff;
-        text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-      }
-      #network.disconnected {
-        color: #ff3333;
-        text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
-      }
-
-      /* ── Center: lyrics (green when playing) / clock (purple) ───── */
-      #custom-lyrics {
-        color: #7afcff;
-        text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
-      }
-      #custom-lyrics.paused {
-        color: #5c6776;
-        text-shadow: none;
-      }
-      #clock {
-        color: #ff7edb;
-        text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
-      }
-
-      /* ── Right: amber/pink utilities ─────────────────────────────── */
-      #custom-timer {
-        color: #f29e74;
-        text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-      }
-      #custom-todo {
-        color: #f29e74;
-        text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-      }
-      #custom-clipboard {
-        color: #ff7edb;
-        text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-      }
-      #custom-settings {
-        color: #ff7edb;
-        text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-      }
-      #tray {
-        color: #cbe3e7;
-      }
-
-      /* ── Hover effect ────────────────────────────────────────────── */
-      #custom-screens:hover, #cpu:hover, #memory:hover, #disk:hover,
-      #temperature:hover, #custom-gpu:hover, #network:hover,
-      #clock:hover, #custom-lyrics:hover,
-      #custom-timer:hover, #custom-todo:hover, #custom-clipboard:hover,
-      #custom-settings:hover, #tray:hover {
-        background-color: rgba(255, 126, 219, 0.15);
-        border-color: rgba(255, 126, 219, 0.5);
-      }
-
-      /* ── Calendar tooltip ────────────────────────────────────────── */
-      tooltip {
-        background-color: rgba(10, 10, 20, 0.95);
-        border: 1px solid #ff7edb;
-        border-radius: 6px;
-        box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
-      }
-      tooltip label {
-        color: #cbe3e7;
-      }
-
-      @keyframes blink {
-        to { color: #1a1a2e; text-shadow: none; }
-      }
+}: let
+  cfg = config.programs'.waybar;
+  fcitxStatus = pkgs.writeShellApplication {
+    name = "fcitx-status.sh";
+    runtimeInputs = with pkgs; [ fcitx5 ];
+    text = ''
+      status=$(fcitx5-remote -n 2>/dev/null || echo "keyboard-us")
+      case "$status" in
+        "mozc") echo '{"text": "あ", "tooltip": "Mozc (Japanese)", "class": "mozc"}' ;;
+        "pinyin"|"shuangpin") echo '{"text": "拼", "tooltip": "Pinyin (Chinese)", "class": "pinyin"}' ;;
+        "hangul") echo '{"text": "한", "tooltip": "Hangul (Korean)", "class": "hangul"}' ;;
+        "keyboard-us") echo '{"text": "En", "tooltip": "English (US)", "class": "english"}' ;;
+        *) echo "{\"text\": \"$status\", \"tooltip\": \"$status\", \"class\": \"other\"}" ;;
+      esac
     '';
   };
-}
+  fcitxCycle = pkgs.writeShellApplication {
+    name = "fcitx-cycle.sh";
+    runtimeInputs = with pkgs; [ fcitx5 ];
+    text = ''
+      current=$(fcitx5-remote -n 2>/dev/null || echo "keyboard-us")
+      # Get all available input methods from fcitx5
+      all=$(fcitx5-remote -l 2>/dev/null || echo "keyboard-us")
+      # Build ordered list
+      ims=$(echo "$all" | tr ' ' '\n' | grep -v '^$')
+      count=$(echo "$ims" | wc -l)
+      if [ "$count" -le 1 ]; then
+        exit 0
+      fi
+      # Find the index of the current IM and switch to the next one
+      i=0
+      next=""
+      found=0
+      while IFS= read -r im; do
+        i=$((i + 1))
+        if [ "$found" -eq 1 ]; then
+          next="$im"
+          found=2
+          break
+        fi
+        if [ "$im" = "$current" ]; then
+          found=1
+        fi
+      done <<< "$ims"
+      # If current was last (or not found), wrap to first
+      if [ -z "$next" ]; then
+        next=$(echo "$ims" | head -n 1)
+      fi
+      fcitx5-remote -s "$next"
+    '';
+  };
+in
+  with lib; {
+    options.programs'.waybar = {
+      enable = mkEnableOption "waybar";
+      enableHyprlandIntegration = mkEnableOption "Hyprland workspace switcher";
+      enableNiriIntegration = mkEnableOption "Niri workspace switcher";
+      enableLyrics = mkEnableOption "waybar-lyric in the center";
+    };
+
+    config = mkIf (pkgs.stdenv.isLinux && cfg.enable) (mkMerge [
+      {
+        home.packages = [] ++ (optional cfg.enableLyrics pkgs.waybar-lyric);
+
+        systemd.user.services.waybar = {
+          Service = {
+            Restart = lib.mkForce "always";
+            RestartSec = 3;
+          };
+        };
+      }
+
+      (mkIf cfg.enableHyprlandIntegration {
+        wayland.windowManager.hyprland.settings = {
+          exec-once = [
+            "waybar"
+          ];
+
+          bind = [
+            "SUPER, b, exec, ${pkgs.killall}/bin/killall -SIGUSR1 .waybar-wrapped"
+          ];
+        };
+      })
+
+      (lib.mkIf (osConfig != null) {
+        programs.waybar = {
+          enable = true;
+          systemd = {
+            enable = true;
+          };
+          style = ./style.css;
+
+          settings = {
+            topBar = ({
+              layer = "top";
+              position = "top";
+              height = 36;
+              smooth-scrolling-threshold = 5;
+
+              modules-left = ["clock" "niri/workspaces" "group/hardware"];
+              modules-right = ["custom/fcitx" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
+              modules-center =
+                []
+                ++ (optional cfg.enableLyrics "custom/lyrics");
+
+              "niri/workspaces" = {
+                format = "●";
+              };
+
+              "group/hardware" = {
+                orientation = "horizontal";
+                drawer = {
+                  transition-duration = 300;
+                  transition-left-to-right = false;
+                };
+                modules = ["memory" "temperature" "cpu" "disk" "network"];
+              };
+
+              "group/system" = {
+                orientation = "horizontal";
+                drawer = {
+                  transition-duration = 300;
+                  transition-left-to-right = false;
+                };
+                modules = ["battery" "backlight" "pulseaudio"];
+              };
+
+              "power-profiles-daemon" = let
+                icon = cp: builtins.fromJSON ''"\u${cp}"'';
+              in {
+                format = "{icon}";
+                tooltip-format = "Power profile: {profile}\nDriver: {driver}";
+                tooltip = true;
+                format-icons = {
+                  default = icon "F0E7";      # nf-fa-bolt
+                  performance = icon "F135";  # nf-fa-rocket
+                  balanced = icon "F24E";     # nf-fa-balance_scale
+                  power-saver = icon "F06C";  # nf-fa-leaf
+                };
+              };
+
+              "cpu" = {
+                format = "󰻠 {usage}%";
+                tooltip = true;
+                tooltip-format = "CPU: {usage}%\n{avg_frequency} GHz";
+              };
+
+              "temperature" = {
+                hwmon-path = "";
+                thermal-zone = 0;
+                critical-threshold = 80;
+                interval = 5;
+                format = "󰔏 {temperatureC}°C";
+                format-critical = "󰔅 {temperatureC}°C";
+                tooltip-format = "Sensor: {chip}\n{temperatureC}°C";
+              };
+
+              "memory" = {
+                interval = 5;
+                format = "󰍛 {used:0.1f}G / {total:0.1f}G";
+                format-alt = "󰍛 {percentage}%";
+                tooltip-format = "RAM: {used:0.1f}G / {total:0.1f}G ({percentage}%)\nSwap: {swapUsed:0.1f}G / {swapTotal:0.1f}G";
+              };
+
+              "disk" = {
+                format = "󰋊 {free}";
+                format-alt = "󰋊 {percentage_used}% ({free})";
+                tooltip = true;
+              };
+
+              "network" = {
+                format = "󰖩  {bandwidthDownBytes}";
+                format-disconnected = "󰖪 Disconnected";
+                format-alt = "󰖩  {bandwidthUpBytes} |  {bandwidthDownBytes}";
+                format-wifi = "󰖩  {bandwidthDownBytes}";
+                format-ethernet = "󰈀  {bandwidthDownBytes}";
+                tooltip-format-wifi = "󰖩 {essid} ({signalStrength}%)\n {ipaddr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
+                tooltip-format-ethernet = "󰈀 {ifname}: {ipaddr}/{cidr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
+                tooltip-format-disconnected = "󰖪 Disconnected";
+                on-click-right = "nm-connection-editor";
+              };
+
+              "custom/wifi" = {
+                format = "󰤨";
+                tooltip = true;
+                tooltip-format = "Wi-Fi networks\nLeft-click to scan & connect";
+                on-click = pkgs.writeShellScript "waybar-wifi" ''
+                  # Get current connection for highlighting
+                  current=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
+
+                  # Build list of available networks (rescan first)
+                  nmcli device wifi rescan 2>/dev/null
+                  mapfile -t lines < <(nmcli -t -f ssid,signal,security dev wifi 2>/dev/null | sort -t: -k2 -nr | awk -F: '!seen[$1]++' | head -20)
+
+                  if [ ''${#lines[@]} -eq 0 ]; then
+                    notify-send "Wi-Fi" "No networks found."
+                    exit 0
+                  fi
+
+                  # Format for rofi: signal bars + ssid + security
+                  choices=""
+                  for line in "''${lines[@]}"; do
+                    IFS=':' read -r ssid signal security <<< "$line"
+                    [ -z "$ssid" ] && continue
+                    if [ "$ssid" = "$current" ]; then
+                      marker="*"
+                    else
+                      marker=" "
+                    fi
+                    # Signal bars
+                    if [ "$signal" -ge 80 ]; then bars="████"
+                    elif [ "$signal" -ge 60 ]; then bars="███ "
+                    elif [ "$signal" -ge 40 ]; then bars="██  "
+                    elif [ "$signal" -ge 20 ]; then bars="█   "
+                    else bars="    "
+                    fi
+                    sec=""
+                    [ -n "$security" ] && sec=" [$security]"
+                    choices+="''${marker} ''${bars} ''${ssid}''${sec}\n"
+                  done
+
+                  sel=$(echo -e "$choices" | rofi -dmenu -p "Wi-Fi" -i -no-custom 2>/dev/null)
+                  [ -z "$sel" ] && exit 0
+
+                  # Extract ssid (strip marker, bars, security)
+                  ssid=$(echo "$sel" | sed -E 's/^[* ]+ [█ ]+ //; s/ \[.*\]$//')
+                  [ -z "$ssid" ] && exit 0
+
+                  # Check if already connected
+                  if [ "$ssid" = "$current" ]; then
+                    notify-send "Wi-Fi" "Already connected to $ssid"
+                    exit 0
+                  fi
+
+                  # Try to connect (works for known networks without prompt)
+                  notify-send "Wi-Fi" "Connecting to $ssid..."
+                  if nmcli device wifi connect "$ssid" 2>/dev/null; then
+                    notify-send "Wi-Fi" "Connected to $ssid"
+                  else
+                    # Unknown network — open nm-connection-editor for password entry
+                    nm-connection-editor &
+                  fi
+                '';
+              };
+
+              "custom/bt" = {
+                format = "󰂗";
+                tooltip = true;
+                tooltip-format = "Bluetooth devices\nLeft-click to scan & connect";
+                on-click = pkgs.writeShellScript "waybar-bt" ''
+                  if ! command -v bluetoothctl >/dev/null 2>&1; then
+                    notify-send "Bluetooth" "bluetoothctl not found"
+                    exit 0
+                  fi
+
+                  # Make sure bluetooth is on and scan for a few seconds
+                  bluetoothctl power on 2>/dev/null
+                  bluetoothctl scan on 2>/dev/null &
+                  scan_pid=$!
+                  sleep 4
+                  kill $scan_pid 2>/dev/null
+                  bluetoothctl scan off 2>/dev/null
+
+                  # Get paired devices
+                  mapfile -t paired < <(bluetoothctl devices Paired 2>/dev/null | sed -E 's/^Device ([0-9A-F:]+) (.+)$/\1\t\2/')
+
+                  # Get discovered (non-paired) devices
+                  mapfile -t discovered < <(bluetoothctl devices 2>/dev/null | sed -E 's/^Device ([0-9A-F:]+) (.+)$/\1\t\2/' | while IFS=$'\t' read -r mac name; do
+                    if ! printf '%s\n' "''${paired[@]}" | grep -q "^$mac"; then
+                      printf '%s\t%s\n' "$mac" "$name"
+                    fi
+                  done)
+
+                  if [ ''${#paired[@]} -eq 0 ] && [ ''${#discovered[@]} -eq 0 ]; then
+                    notify-send "Bluetooth" "No devices found."
+                    exit 0
+                  fi
+
+                  # Build rofi list
+                  choices=""
+                  # Paired devices first
+                  for entry in "''${paired[@]}"; do
+                    IFS=$'\t' read -r mac name <<< "$entry"
+                    [ -z "$mac" ] && continue
+                    connected=$(bluetoothctl info "$mac" 2>/dev/null | grep -q 'Connected: yes' && echo '✓' || echo ' ')
+                    choices+="$connected  $name\n"
+                  done
+                  # Separator
+                  [ ''${#paired[@]} -gt 0 ] && [ ''${#discovered[@]} -gt 0 ] && choices+="─────────────\n"
+                  # Discovered devices
+                  for entry in "''${discovered[@]}"; do
+                    IFS=$'\t' read -r mac name <<< "$entry"
+                    [ -z "$mac" ] && continue
+                    choices+=" +  $name\n"
+                  done
+
+                  sel=$(echo -e "$choices" | rofi -dmenu -p "Bluetooth" -i -no-custom 2>/dev/null)
+                  [ -z "$sel" ] && exit 0
+
+                  # Skip separator
+                  [[ "$sel" == *─* ]] && exit 0
+
+                  # Parse selection
+                  action=$(echo "$sel" | cut -c1)
+                  name=$(echo "$sel" | sed -E 's/^[✓ + ]+  //')
+                  [ -z "$name" ] && exit 0
+
+                  # Find MAC by name
+                  mac=$(bluetoothctl devices 2>/dev/null | grep -i "$name" | head -1 | awk '{print $2}')
+                  [ -z "$mac" ] && exit 0
+
+                  case "$action" in
+                    ✓)
+                      # Connected — disconnect
+                      notify-send "Bluetooth" "Disconnecting $name..."
+                      bluetoothctl disconnect "$mac" 2>/dev/null
+                      ;;
+                    ' ')
+                      # Paired but not connected — connect
+                      notify-send "Bluetooth" "Connecting to $name..."
+                      bluetoothctl connect "$mac" 2>/dev/null && notify-send "Bluetooth" "Connected to $name" || notify-send "Bluetooth" "Failed to connect to $name"
+                      ;;
+                    +)
+                      # Not paired — pair, trust, connect
+                      notify-send "Bluetooth" "Pairing $name..."
+                      bluetoothctl pair "$mac" 2>/dev/null && \
+                      bluetoothctl trust "$mac" 2>/dev/null && \
+                      bluetoothctl connect "$mac" 2>/dev/null && \
+                      notify-send "Bluetooth" "Paired & connected to $name" || notify-send "Bluetooth" "Failed to pair $name"
+                      ;;
+                  esac
+                '';
+              };
+
+              "custom/fcitx" = {
+                format = "󰌌 {}";
+                return-type = "json";
+                interval = 2;
+                exec = "${fcitxStatus}/bin/fcitx-status.sh";
+                on-click = "${fcitxCycle}/bin/fcitx-cycle.sh";
+                tooltip = true;
+              };
+
+              "tray" = {
+                icon-size = 18;
+                spacing = 10;
+              };
+
+              "backlight" = {
+                format = "󰃠 {percent}%";
+                on-scroll-up = "${pkgs.brightnessctl}/bin/brightnessctl set 5%+";
+                on-scroll-down = "${pkgs.brightnessctl}/bin/brightnessctl set 5%-";
+                on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 100%";
+              };
+
+              "pulseaudio" = {
+                format = "󰕾 {volume}%";
+                format-bluetooth = "󰕾  {volume}%";
+                format-bluetooth-muted = "󰝟 {volume}%";
+                format-muted = "󰝟 {volume}%";
+                tooltip-format = "󰕾 {desc} // {volume}%";
+                scroll-step = 5;
+                on-click-right = "pavucontrol";
+                on-click = "pactl set-sink-mute 0 toggle";
+              };
+
+              "battery" = {
+                format = "{icon} {capacity}%";
+                format-charging = "󰂄 {capacity}%";
+                format-icons = ["󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹"];
+                format-plugged = "󰂄 {capacity}%";
+                states = {
+                  warning = 20;
+                  critical = 10;
+                };
+                interval = 5;
+                on-click = pkgs.writeShellScript "waybar-battery-profile" ''
+                  current=$(powerprofilesctl get 2>/dev/null | head -1 | awk '{print $3}')
+                  choice=$(rofi -dmenu -p "Power Profile" -no-custom -i -selected-row 0 <<EOF
+                  performance
+                  balanced
+                  power-saver
+                  EOF
+                  )
+                  [ -z "$choice" ] && exit 0
+                  powerprofilesctl set "$choice" 2>/dev/null
+                  notify-send "Power Profile" "Set to $choice"
+                '';
+              };
+
+              "custom/lyrics" = {
+                return-type = "json";
+                format = "{icon} {0}";
+                hide-empty-text = true;
+                format-icons = {
+                  playing = "▶";
+                  paused = "⏸";
+                  lyric = "🎵";
+                  music = "🎵";
+                };
+                exec-if = "which waybar-lyric";
+                exec = "waybar-lyric -qfpartial";
+                on-click = "waybar-lyric play-pause";
+              };
+
+              "custom/powermenu" = {
+                format = "󰐥";
+                tooltip = true;
+                tooltip-format = "Power menu";
+                on-click = pkgs.writeShellScript "waybar-powermenu" ''
+                  choice=$(rofi -dmenu -p "Power" -no-custom -i <<EOF
+                  ⏻  Shutdown
+                   Reboot
+                   Suspend
+                   Logout
+                  EOF
+                  )
+                  case "$choice" in
+                    *Shutdown*) systemctl poweroff ;;
+                    *Reboot*)   systemctl reboot ;;
+                    *Suspend*)  systemctl suspend ;;
+                    *Logout*)   niri msg action quit ;;
+                  esac
+                '';
+                on-click-right = "set-wallpaper.sh";
+              };
+            } // (lib.optionalAttrs ((osConfig.services'.desktop.displays or []) != []) {
+              output = map (d: d.name) (filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
+            }));
+          };
+        };
+      })
+    ]);
+  }

@@ -268,9 +268,7 @@ spawn-at-startup "waybar"
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy"
 
-// Start ibus-daemon for Chinese (libpinyin) input. The NixOS
-// i18n.inputMethod module sets the env vars; this runs the daemon.
-spawn-at-startup "ibus-daemon" "-x" "-r"
+// fcitx5 is started automatically by the NixOS i18n.inputMethod module.
 
 // To run a shell command (with variables, pipes, etc.), use spawn-sh-at-startup:
 // spawn-sh-at-startup "qs -c ~/source/qs/MyAwesomeShell"

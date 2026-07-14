@@ -104,8 +104,8 @@
     # Input method (CJK)
     i18n.inputMethod = {
       enable = true;
-      type = "ibus";
-      ibus.engines = with pkgs.ibus-engines; [ libpinyin ];
+      type = "fcitx5";
+      fcitx5.addons = with pkgs; [ qt6Packages.fcitx5-chinese-addons fcitx5-hangul ];
     };
 
     # Hardware (Intel graphics / video acceleration)

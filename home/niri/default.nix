@@ -8,12 +8,20 @@
   ];
 
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
-  programs.rofi.enable = true;
+  programs.rofi = {
+    enable = true;
+    theme = ./rofi.rasi;
+  };
 
   # Tools invoked by niri binds in config.kdl.
   home.packages = with pkgs; [
     brightnessctl  # F5/F6 brightness keys
   ];
+
+  programs'.waybar = {
+    enable = true;
+    enableNiriIntegration = true;
+  };
   
   home.pointerCursor = {
     enable = true;

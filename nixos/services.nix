@@ -59,6 +59,9 @@
 
   programs.niri.enable = true;
 
+  # Power management for waybar's power-profiles-daemon module.
+  services.power-profiles-daemon.enable = true;
+
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [ xdg-desktop-portal-gnome ];
