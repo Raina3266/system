@@ -64,6 +64,7 @@ in
         home.packages = with pkgs; [
           cliphist
           wl-clipboard
+          jq
         ] ++ (optional cfg.enableLyrics pkgs.waybar-lyric);
 
         systemd.user.services.cliphist = {
@@ -147,57 +148,11 @@ in
               height = 36;
               smooth-scrolling-threshold = 5;
 
-              modules-left = ["clock" "group/hardware" "group/starred"];
+              modules-left = ["clock" "group/hardware"];
               modules-right = ["custom/cliphist" "custom/timer" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
-
-              "group/starred" = {
-                orientation = "horizontal";
-                drawer = {
-                  transition-duration = 300;
-                  transition-left-to-right = false;
-                };
-                modules = [
-                  "custom/obsidian"
-                  "custom/thunar"
-                  "custom/tauon"
-                  "custom/whatsapp"
-                  "custom/gkeep"
-                ];
-              };
-
-              "custom/obsidian" = {
-                format = "󰆼";
-                tooltip = true;
-                tooltip-format = "Obsidian";
-                on-click = "obsidian &";
-              };
-              "custom/thunar" = {
-                format = "󰉋";
-                tooltip = true;
-                tooltip-format = "Thunar";
-                on-click = "thunar &";
-              };
-              "custom/tauon" = {
-                format = "󰋋";
-                tooltip = true;
-                tooltip-format = "Tauon";
-                on-click = "tauon &";
-              };
-              "custom/whatsapp" = {
-                format = "💬";
-                tooltip = true;
-                tooltip-format = "WhatsApp";
-                on-click = "whatsie &";
-              };
-              "custom/gkeep" = {
-                format = "󰚺";
-                tooltip = true;
-                tooltip-format = "Google Keep";
-                on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
-              };
 
               "clock" = {
                 # Date + ISO week number + time. Click toggles an alternate
@@ -629,6 +584,68 @@ in
                   esac
                 '';
                 on-click-right = "set-wallpaper.sh";
+              };
+            } // (lib.optionalAttrs ((osConfig.services'.desktop.displays or []) != []) {
+              output = map (d: d.name) (filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
+            }));
+
+            bottomBar = ({
+              layer = "top";
+              position = "bottom";
+              height = 36;
+              smooth-scrolling-threshold = 5;
+
+              modules-left = ["niri/workspaces" "custom/obsidian" "custom/thunar" "custom/tauon" "custom/whatsapp" "custom/gkeep" "wlr/taskbar"];
+              modules-center = [];
+              modules-right = [];
+
+              "custom/obsidian" = {
+                format = "󰆼";
+                tooltip = true;
+                tooltip-format = "Obsidian";
+                on-click = "obsidian &";
+              };
+              "custom/thunar" = {
+                format = "󰉋";
+                tooltip = true;
+                tooltip-format = "Thunar";
+                on-click = "thunar &";
+              };
+              "custom/tauon" = {
+                format = "󰋋";
+                tooltip = true;
+                tooltip-format = "Tauon";
+                on-click = "tauon &";
+              };
+              "custom/whatsapp" = {
+                format = "💬";
+                tooltip = true;
+                tooltip-format = "WhatsApp";
+                on-click = "whatsie &";
+              };
+              "custom/gkeep" = {
+                format = "󰚺";
+                tooltip = true;
+                tooltip-format = "Google Keep";
+                on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
+              };
+
+              "wlr/taskbar" = {
+                format = "{icon} {title:.20}";
+                on-click = "activate";
+                on-click-middle = "close";
+                on-click-right = "minimize";
+                tooltip-format = "{title}";
+                icon-theme = "hicolor";
+                icon-size = 18;
+                spacing = 5;
+                rewrite = {
+                  "" = "[Untitled]";
+                };
+              };
+
+              "niri/workspaces" = {
+                format = "{index} {name}";
               };
             } // (lib.optionalAttrs ((osConfig.services'.desktop.displays or []) != []) {
               output = map (d: d.name) (filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
