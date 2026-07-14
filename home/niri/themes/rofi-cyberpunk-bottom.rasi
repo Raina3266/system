@@ -1,4 +1,4 @@
-/* Cyberpunk Rofi Theme — matches waybar cyberpunk palette */
+/* Cyberpunk Rofi Theme — dropdown from bottom (for bottom bar modules) */
 /*
  * Palette:
  * bg:      #0a0a14f2  (rgba 10,10,20,0.95)
@@ -21,12 +21,12 @@ window {
     background-color: #0a0a14f2;
     border: 2px;
     border-color: #ff7edb;
-    border-radius: 10px;
+    border-radius: 10px 10px 0 0;
     padding: 20px;
     width: 500px;
     location: center;
     anchor: center;
-    y-offset: -300px;
+    y-offset: 300px;
 }
 
 /* ── Input box ──────────────────────────────────────────── */

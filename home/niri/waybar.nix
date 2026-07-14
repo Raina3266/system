@@ -595,24 +595,30 @@ in
               height = 36;
               smooth-scrolling-threshold = 5;
 
-              modules-left = ["niri/workspaces" "custom/obsidian" "custom/thunar" "custom/tauon" "custom/whatsapp" "custom/gkeep" "wlr/taskbar"];
+              modules-left = ["niri/workspaces" "custom/obsidian" "custom/thunar" "custom/tauon" "custom/whatsapp" "custom/gkeep" "custom/gcal" "custom/gphotos" "custom/thunderbird" "custom/windows"];
               modules-center = [];
               modules-right = [];
 
-              "custom/obsidian" = {
-                format = "󰆼";
-                tooltip = true;
-                tooltip-format = "Obsidian";
-                on-click = "obsidian &";
-              };
               "custom/thunar" = {
-                format = "󰉋";
+                format = "📁";
                 tooltip = true;
                 tooltip-format = "Thunar";
                 on-click = "thunar &";
               };
+              "custom/thunderbird" = {
+                format = "📧";
+                tooltip = true;
+                tooltip-format = "Thunderbird";
+                on-click = "thunderbird &";
+              };
+              "custom/obsidian" = {
+                format = "📝";
+                tooltip = true;
+                tooltip-format = "Obsidian";
+                on-click = "obsidian &";
+              };
               "custom/tauon" = {
-                format = "󰋋";
+                format = "🎵";
                 tooltip = true;
                 tooltip-format = "Tauon";
                 on-click = "tauon &";
@@ -624,24 +630,142 @@ in
                 on-click = "whatsie &";
               };
               "custom/gkeep" = {
-                format = "󰚺";
+                format = "🗒️";
                 tooltip = true;
                 tooltip-format = "Google Keep";
                 on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
               };
+              "custom/gcal" = {
+                format = "📅";
+                tooltip = true;
+                tooltip-format = "Google Calendar";
+                on-click = "google-chrome-stable --profile-directory=Default --app-id=kjbdgfilnfhdoflbpgamdcdgpehopbep &";
+              };
+              "custom/gphotos" = {
+                format = "🖼️";
+                tooltip = true;
+                tooltip-format = "Google Photos";
+                on-click = "google-chrome-stable --profile-directory=Default --app-id=ncmjhecbjeaamljdfahankockkkdmedg &";
+              };
 
-              "wlr/taskbar" = {
-                format = "{icon} {title:.20}";
-                on-click = "activate";
-                on-click-middle = "close";
-                on-click-right = "minimize";
-                tooltip-format = "{title}";
-                icon-theme = "hicolor";
-                icon-size = 18;
-                spacing = 5;
-                rewrite = {
-                  "" = "[Untitled]";
-                };
+              "custom/windows" = {
+                return-type = "json";
+                format = "{}";
+                interval = 1;
+                exec = pkgs.writeShellScript "waybar-windows" ''
+                  focused=$(niri msg -j focused-window 2>/dev/null)
+                  if [ -z "$focused" ]; then
+                    printf '{"text":"","tooltip":"No windows"}'
+                    exit 0
+                  fi
+                  ws=$(echo "$focused" | ${pkgs.jq}/bin/jq -r '.workspace_id')
+                  text=$(niri msg -j windows 2>/dev/null \
+                    | ${pkgs.jq}/bin/jq -r --argjson ws "$ws" \
+                      'def name_map:
+                         sub("dev\\.zed\\.Zed-Nightly"; "zed")
+                         | sub("tauonmb"; "tauon")
+                         | sub("com\\.ktechpit\\.whatsie"; "whatsapp")
+                         | sub("chrome-eilembjdkfgodjkcjnpgpaenohkicgjd-Default"; "google-keep")
+                         | sub("google-chrome"; "chrome")
+                         | sub("com\\.google\\.Chrome"; "chrome")
+                         | sub("org\\.gnome\\.Meld"; "meld")
+                         | sub("org\\.inkscape\\.Inkscape"; "inkscape")
+                         | sub("org\\.kde\\.kid3"; "kid3")
+                         | sub("org\\.pulseaudio\\.pavucontrol"; "pavucontrol")
+                         | sub("org\\.qbittorrent\\.qBittorrent"; "qbittorrent")
+                         | sub("org\\.shotcut\\.Shotcut"; "shotcut")
+                         | sub("com\\.obsproject\\.Studio"; "obs")
+                         | sub("dev\\.lizardbyte\\.app\\.Sunshine.*"; "sunshine")
+                         | sub("io\\.github\\.waylyrics\\.Waylyrics"; "waylyrics")
+                         | sub("io\\.github\\.qarmin\\.czkawka"; "czkawka")
+                         | sub("io\\.github\\.qarmin\\.krokiet"; "krokiet")
+                         | sub("io\\.github\\.JakubMelka\\.Pdf4qt.*"; "pdf4qt")
+                         | sub("com\\.github\\.qarmin\\.czkawka"; "czkawka")
+                         | sub("org\\.gnome\\.Screenshot"; "screenshot")
+                         | sub("OneDriveGUI"; "onedrive")
+                         | sub("wemeetapp"; "wemeet")
+                         | sub("startcenter"; "libreoffice")
+                         | sub("Handy"; "handy")
+                         | sub("org\\..*\\."; "")
+                         | sub("com\\..*\\."; "")
+                         | sub("io\\..*\\."; "")
+                         | sub("dev\\..*\\."; "")
+                         | sub(".*\\."; "");
+                       map(select(.workspace_id == $ws))
+                       | sort_by(.is_focused) | reverse
+                       | map(
+                           (if .is_focused then "▸" else " " end)
+                           + " " + ((.app_id // "unknown") | name_map)
+                           + ": "
+                           + ((.title // "[Untitled]") | .[0:20])
+                         ) | join("  │  ")
+                       | if . == "" then "" else . end')
+                  tip=$(niri msg -j windows 2>/dev/null \
+                    | ${pkgs.jq}/bin/jq -r --argjson ws "$ws" \
+                      'def name_map:
+                         sub("dev\\.zed\\.Zed-Nightly"; "Zed")
+                         | sub("tauonmb"; "Tauon")
+                         | sub("com\\.ktechpit\\.whatsie"; "Whatsapp")
+                         | sub("chrome-eilembjdkfgodjkcjnpgpaenohkicgjd-Default"; "Google-keep")
+                         | sub("google-chrome"; "Chrome")
+                         | sub("org\\..*\\."; "")
+                         | sub(".*\\."; "");
+                       map(select(.workspace_id == $ws))
+                       | sort_by(.is_focused) | reverse
+                       | .[]
+                       | (if .is_focused then "▸ " else "  " end)
+                         + ((.app_id // "unknown") | name_map) + ": " + (.title // "[Untitled]")')
+                  text_escaped=$(printf '%s' "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
+                  tip_escaped=$(printf '%s' "$tip" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/' | tr -d '\n' | sed 's/\\n$//')
+                  printf '{"text":"%s","tooltip":"%s"}' "$text_escaped" "$tip_escaped"
+                '';
+                on-click = pkgs.writeShellScript "waybar-windows-pick" ''
+                  focused=$(niri msg -j focused-window 2>/dev/null)
+                  [ -z "$focused" ] && exit 0
+                  ws=$(echo "$focused" | ${pkgs.jq}/bin/jq -r '.workspace_id')
+                  niri msg -j windows 2>/dev/null \
+                    | ${pkgs.jq}/bin/jq -r --argjson ws "$ws" \
+                      'def name_map:
+                         sub("dev\\.zed\\.Zed-Nightly"; "zed")
+                         | sub("tauonmb"; "tauon")
+                         | sub("com\\.ktechpit\\.whatsie"; "whatsapp")
+                         | sub("chrome-eilembjdkfgodjkcjnpgpaenohkicgjd-Default"; "google-keep")
+                         | sub("google-chrome"; "chrome")
+                         | sub("com\\.google\\.Chrome"; "chrome")
+                         | sub("org\\.gnome\\.Meld"; "meld")
+                         | sub("org\\.inkscape\\.Inkscape"; "inkscape")
+                         | sub("org\\.kde\\.kid3"; "kid3")
+                         | sub("org\\.pulseaudio\\.pavucontrol"; "pavucontrol")
+                         | sub("org\\.qbittorrent\\.qBittorrent"; "qbittorrent")
+                         | sub("org\\.shotcut\\.Shotcut"; "shotcut")
+                         | sub("com\\.obsproject\\.Studio"; "obs")
+                         | sub("dev\\.lizardbyte\\.app\\.Sunshine.*"; "sunshine")
+                         | sub("io\\.github\\.waylyrics\\.Waylyrics"; "waylyrics")
+                         | sub("io\\.github\\.qarmin\\.czkawka"; "czkawka")
+                         | sub("io\\.github\\.qarmin\\.krokiet"; "krokiet")
+                         | sub("io\\.github\\.JakubMelka\\.Pdf4qt.*"; "pdf4qt")
+                         | sub("com\\.github\\.qarmin\\.czkawka"; "czkawka")
+                         | sub("org\\.gnome\\.Screenshot"; "screenshot")
+                         | sub("OneDriveGUI"; "onedrive")
+                         | sub("wemeetapp"; "wemeet")
+                         | sub("startcenter"; "libreoffice")
+                         | sub("Handy"; "handy")
+                         | sub("org\\..*\\."; "")
+                         | sub("com\\..*\\."; "")
+                         | sub("io\\..*\\."; "")
+                         | sub("dev\\..*\\."; "")
+                         | sub(".*\\."; "");
+                       map(select(.workspace_id == $ws))
+                       | sort_by(.is_focused) | reverse
+                       | .[]
+                       | (if .is_focused then "▸ " else "  " end)
+                         + (.title // "[Untitled]")
+                         + "\t" + (.id|tostring)' \
+                    | rofi -dmenu -p "Windows" -i -no-custom -theme rofi-cyberpunk-bottom 2>/dev/null \
+                    | while IFS=$'\t' read -r _ id; do
+                        [ -n "$id" ] && niri msg action focus-window --id "$id" 2>/dev/null
+                      done
+                '';
               };
 
               "niri/workspaces" = {

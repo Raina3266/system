@@ -21,9 +21,15 @@
         wd=$(tr '\0' '\n' < /proc/$niri_pid/environ | grep '^WAYLAND_DISPLAY=' | cut -d= -f2-)
         [ -n "$wd" ] && export WAYLAND_DISPLAY="$wd"
       fi
-      exec ${pkgs.rofi}/bin/rofi "$@"
+      # -normal-window makes rofi a regular Wayland surface instead of a
+      # layer-shell overlay, so the compositor can dismiss it when focus
+      # moves away (i.e. clicking outside rofi closes it).
+      exec ${pkgs.rofi}/bin/rofi -normal-window "$@"
     '';
   };
+
+  # Dropdown theme for bottom bar modules — rofi appears above the bottom bar.
+  xdg.dataFile."rofi/themes/rofi-cyberpunk-bottom.rasi".source = ./themes/rofi-cyberpunk-bottom.rasi;
 
   # Tools invoked by niri binds in config.kdl.
   home.packages = with pkgs; [

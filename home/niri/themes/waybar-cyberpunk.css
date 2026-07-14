@@ -40,6 +40,8 @@ window#waybar.bottom {
 #custom-cliphist,
 #custom-timer,
 #custom-obsidian, #custom-thunar, #custom-tauon, #custom-whatsapp, #custom-gkeep,
+#custom-gcal, #custom-gphotos, #custom-thunderbird,
+#custom-windows,
 #backlight, #pulseaudio, #battery,
 #custom-powermenu,
 #tray {
@@ -111,14 +113,19 @@ window#waybar.bottom {
 
 /* ── Starred apps ───────────────────────────────────────── */
 #custom-obsidian, #custom-thunar, #custom-tauon,
-#custom-whatsapp, #custom-gkeep {
+#custom-whatsapp, #custom-gkeep,
+#custom-gcal, #custom-gphotos, #custom-thunderbird {
   color: #f29e74;
   text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
-#custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover,
-#custom-whatsapp:hover, #custom-gkeep:hover {
+#custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
+#custom-gcal:hover, #custom-gphotos:hover, #custom-thunderbird:hover {
   background-color: rgba(255, 126, 219, 0.15);
   border-color: rgba(255, 126, 219, 0.5);
+}
+#custom-windows {
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 
 /* ── Center: workspaces ─────────────────────────────────── */
@@ -221,6 +228,8 @@ window#waybar.bottom {
 #custom-cliphist:hover,
 #custom-timer:hover,
 #custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
+#custom-gcal:hover, #custom-gphotos:hover, #custom-thunderbird:hover,
+#custom-windows:hover,
 #backlight:hover, #pulseaudio:hover, #battery:hover,
 #custom-powermenu:hover, #tray:hover {
   background-color: rgba(255, 126, 219, 0.15);
