@@ -18,6 +18,10 @@
     gnomeExtensions.simple-timer
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
+
+    # Runtime deps for elephant/walker providers:
+    fd              # files provider
+    playerctl       # media control (waybar custom/media + elephant provider)
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────
@@ -84,6 +88,7 @@
     alsa.enable = true;
     alsa.support32Bit = true;
     pulse.enable = true;
+    wireplumber.enable = true;
   };
 
   # ── Desktop daemons ───────────────────────────────────────────────────

@@ -51,7 +51,13 @@ scrollbar slider {
   box-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
-/* ── Main window box ────────────────────────────────────── */
+/* ── Main window box ──────────────────────────────────────
+ * The layer-shell surface is a fullscreen overlay (all four anchors)
+ * so click-to-close works — clicks on the empty area around the
+ * box-wrapper dismiss walker. Positioning is done via margins on
+ * .box-wrapper. The default theme (top-right) is here; position
+ * variants (cyberpunk-topleft, cyberpunk-bottom) override only the
+ * margins in their own theme files. */
 .box-wrapper {
   box-shadow:
     0 0 20px rgba(255, 126, 219, 0.3),
@@ -61,6 +67,11 @@ scrollbar slider {
   padding: 20px;
   border-radius: 10px;
   border: 2px solid #ff7edb;
+  /* top-right dropdown */
+  margin-top: 40px;
+  margin-right: 40px;
+  margin-left: auto;
+  margin-bottom: auto;
 }
 
 .preview-box,

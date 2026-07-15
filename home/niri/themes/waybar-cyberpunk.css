@@ -36,11 +36,13 @@ window#waybar.bottom {
 #cpu, #temperature, #memory, #disk, #network,
 #clock,
 #custom-lyrics,
+#custom-media,
 #custom-wifi, #custom-bt,
 #custom-cliphist,
 #custom-timer,
 #custom-todo,
-#custom-agenda,
+#custom-bitwarden,
+#custom-files,
 #custom-obsidian, #custom-thunar, #custom-tauon, #custom-whatsapp, #custom-gkeep,
 #custom-gcal, #custom-gphotos, #custom-thunderbird,
 #custom-windows,
@@ -157,6 +159,20 @@ window#waybar.bottom {
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
+/* ── Center: media player ──────────────────────────────── */
+#custom-media {
+  color: #7afcff;
+  text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+}
+#custom-media.paused {
+  color: #f29e74;
+  text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-media.stopped {
+  color: #5c6776;
+  text-shadow: none;
+}
+
 /* ── Center: lyrics ─────────────────────────────────────── */
 #custom-lyrics {
   color: #7afcff;
@@ -183,6 +199,14 @@ window#waybar.bottom {
   color: #7afcff;
   text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
+#custom-bitwarden {
+  color: #f29e74;
+  text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-files {
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
 #custom-timer {
   color: #f29e74;
   text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
@@ -201,14 +225,6 @@ window#waybar.bottom {
 }
 #custom-todo.clear {
   color: #5c6776;
-}
-#custom-agenda {
-  color: #7afcff;
-  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-#custom-agenda.soon {
-  color: #ff3333;
-  text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
 }
 #backlight {
   color: #f29e74;
@@ -249,11 +265,13 @@ window#waybar.bottom {
 #cpu:hover, #temperature:hover, #memory:hover, #disk:hover, #network:hover,
 #clock:hover,
 #custom-lyrics:hover,
+#custom-media:hover,
 #custom-wifi:hover, #custom-bt:hover,
 #custom-cliphist:hover,
+#custom-bitwarden:hover,
+#custom-files:hover,
 #custom-timer:hover,
 #custom-todo:hover,
-#custom-agenda:hover,
 #custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
 #custom-gcal:hover, #custom-gphotos:hover, #custom-thunderbird:hover,
 #custom-windows:hover,
