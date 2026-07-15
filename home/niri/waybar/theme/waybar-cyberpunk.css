@@ -45,7 +45,6 @@ window#waybar.bottom {
 #custom-files,
 #custom-obsidian, #custom-thunar, #custom-tauon, #custom-whatsapp, #custom-gkeep,
 #custom-gcal, #custom-gphotos, #custom-thunderbird,
-#custom-windows,
 #backlight, #pulseaudio, #battery,
 #custom-powermenu,
 #tray {
@@ -127,11 +126,6 @@ window#waybar.bottom {
   background-color: rgba(255, 126, 219, 0.15);
   border-color: rgba(255, 126, 219, 0.5);
 }
-#custom-windows {
-  color: #7afcff;
-  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-
 /* ── Center: workspaces ─────────────────────────────────── */
 #workspaces button {
   color: #5c6776;
@@ -274,7 +268,6 @@ window#waybar.bottom {
 #custom-todo:hover,
 #custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
 #custom-gcal:hover, #custom-gphotos:hover, #custom-thunderbird:hover,
-#custom-windows:hover,
 #backlight:hover, #pulseaudio:hover, #battery:hover,
 #custom-powermenu:hover, #tray:hover {
   background-color: rgba(255, 126, 219, 0.15);
@@ -296,37 +289,29 @@ tooltip label {
   to { color: #1a1a2e; text-shadow: none; }
 }
 
-/* ── Bottom bar: taskbar ────────────────────────────────── */
-#taskbar {
-  background-color: transparent;
-  margin: 0;
-  padding: 0;
-}
-#taskbar button {
+/* ── Bottom bar: niri workspace taskbar ─────────────────── */
+/* Per-window text buttons inside the taskbar instance. These use the
+   .niri-taskbar-btn class emitted by Waybar's niri/workspaces
+   workspace-taskbar mode (PR #4997) with a local text-only patch. */
+#workspaces button .niri-taskbar-btn {
   background-color: rgba(20, 20, 40, 0.7);
   color: #cbe3e7;
-  margin: 0 3px;
-  padding: 0 10px;
-  border-radius: 6px;
+  margin: 0 2px;
+  padding: 0 12px;
+  border-radius: 4px;
   border: 1px solid rgba(255, 126, 219, 0.2);
 }
-#taskbar button.active {
+#workspaces button .niri-taskbar-btn.focused {
   background-color: rgba(255, 126, 219, 0.15);
   color: #ff7edb;
   border-color: rgba(255, 126, 219, 0.5);
   text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
 }
-#taskbar button:hover {
+#workspaces button .niri-taskbar-btn:hover {
   background-color: rgba(255, 126, 219, 0.15);
   background-image: none;
   border-color: rgba(255, 126, 219, 0.5);
   color: #ff7edb;
   text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
-}
-#taskbar button.active:hover {
-  background-color: rgba(255, 126, 219, 0.15);
-  border-color: rgba(255, 126, 219, 0.5);
-  color: #ff7edb;
-  text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
 }

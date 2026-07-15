@@ -101,11 +101,15 @@
       LC_TIME = "en_GB.UTF-8";
     };
 
-    # Input method (CJK)
+    # Input method (CJK): Chinese (pinyin), Japanese (mozc), Korean (hangul).
     i18n.inputMethod = {
       enable = true;
       type = "fcitx5";
-      fcitx5.addons = with pkgs; [ qt6Packages.fcitx5-chinese-addons fcitx5-hangul ];
+      fcitx5.addons = with pkgs; [
+        qt6Packages.fcitx5-chinese-addons
+        fcitx5-mozc
+        fcitx5-hangul
+      ];
     };
 
     # Hardware (Intel graphics / video acceleration)
@@ -143,9 +147,9 @@
       fontconfig = {
         enable = true;
         defaultFonts = {
-          sansSerif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans" "Noto Sans CJK SC" "Noto Sans CJK JP" ];
-          serif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Serif" "Noto Serif CJK SC" "Noto Serif CJK JP" ];
-          monospace = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans Mono CJK SC" ];
+          sansSerif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans" "Noto Sans CJK SC" "Noto Sans CJK JP" "Noto Sans CJK KR" ];
+          serif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Serif" "Noto Serif CJK SC" "Noto Serif CJK JP" "Noto Serif CJK KR" ];
+          monospace = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans Mono CJK SC" "Noto Sans Mono CJK KR" ];
           emoji = [ "Symbols Nerd Font Mono" "Noto Color Emoji" ];
         };
       };
