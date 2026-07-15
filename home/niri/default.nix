@@ -168,28 +168,22 @@
     };
     themes = let
       base = builtins.readFile ./themes/walker-cyberpunk.css;
+      layoutTopRight = builtins.readFile ./themes/walker-layout-top-right.xml;
+      layoutBottom = builtins.readFile ./themes/walker-layout-bottom.xml;
     in {
-      cyberpunk.style = base;
-      # Position variants — full base CSS plus a margin override so the
-      # popup anchors to a different corner. Walker themes inherit from
-      # the built-in default, not from each other, so each variant must
-      # include the complete cyberpunk stylesheet.
-      cyberpunk-topleft.style = base + ''
-        .box-wrapper {
-          margin-top: 40px;
-          margin-right: auto;
-          margin-left: 40px;
-          margin-bottom: auto;
-        }
-      '';
-      cyberpunk-bottom.style = base + ''
-        .box-wrapper {
-          margin-top: auto;
-          margin-right: auto;
-          margin-left: auto;
-          margin-bottom: 40px;
-        }
-      '';
+      # Default theme: top-right dropdown, sitting just under the top waybar.
+      # The layout XML sets valign=start halign=end on the box-wrapper so it
+      # actually anchors to the top-right (CSS margins alone can't override
+      # GTK4 alignment properties set in the default layout).
+      cyberpunk = {
+        style = base;
+        layouts."layout" = layoutTopRight;
+      };
+      # Bottom-center dropup, sitting just above the bottom waybar.
+      cyberpunk-bottom = {
+        style = base;
+        layouts."layout" = layoutBottom;
+      };
     };
   };
 

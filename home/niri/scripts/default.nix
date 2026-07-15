@@ -89,7 +89,7 @@ in
   timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
     state="${timerState}"
     if [ ! -f "$state" ]; then
-      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
+      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nMiddle-click to cancel"}'
       exit 0
     fi
     read -r end total label paused < "$state"
@@ -105,7 +105,7 @@ in
     if [ "$remaining" -le 0 ]; then
       rm -f "$state"
       ${notify} -u critical "Timer" "⏰ ${label:-Done}"
-      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
+      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nMiddle-click to cancel"}'
       exit 0
     fi
     h=$((remaining / 3600))
@@ -123,8 +123,7 @@ in
   timerSet = pkgs.writeShellScript "waybar-timer-set" ''
     state="${timerState}"
     choice=$(printf '%s\n' \
-      "1 min" "3 min" "5 min" "10 min" "15 min" \
-      "20 min" "25 min" "30 min" "45 min" "1 hour" \
+      "15 min" "20 min" "25 min" "30 min" "45 min" "1 hour" \
       "Custom…" \
       | ${walker} -d -p "Timer" 2>/dev/null)
     [ -z "$choice" ] && exit 0

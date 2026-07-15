@@ -162,10 +162,18 @@ in
             };
 
             "custom/wifi" = {
-              format = "󰤨";
+              format = "{}";
               return-type = "json";
-              exec = ''echo '{"text":"󰤨","tooltip":"Wi-Fi networks\nLeft-click to scan & connect"}' '';
-              interval = 86400;
+              exec = pkgs.writeShellScript "waybar-wifi-poll" ''
+                ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
+                if [ -n "$ssid" ]; then
+                  signal=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
+                  printf '{"text":"󰤨","tooltip":"Connected: %s (%s%%)\nLeft-click to scan & connect"}' "$ssid" "$signal"
+                else
+                  printf '{"text":"󰤪","tooltip":"Wi-Fi: Disconnected\nLeft-click to scan & connect"}'
+                fi
+              '';
+              interval = 5;
               on-click = pkgs.writeShellScript "waybar-wifi" ''
                 ${pkgs.walker}/bin/walker -m menus:wifi
               '';
@@ -173,10 +181,22 @@ in
 
             # Bluetooth — walker's built-in `bluetooth` provider (elephant).
             "custom/bt" = {
-              format = "󰂯";
+              format = "{}";
               return-type = "json";
-              exec = ''echo '{"text":"󰂯","tooltip":"Bluetooth devices\nLeft-click to scan & connect"}' '';
-              interval = 86400;
+              exec = pkgs.writeShellScript "waybar-bt-poll" ''
+                powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
+                if [ "$powered" = "yes" ]; then
+                  names=$(bluetoothctl devices Connected 2>/dev/null | sed 's/^Device [0-9A-Fa-f:]* //' | tr '\n' ',' | sed 's/,$//')
+                  if [ -n "$names" ]; then
+                    printf '{"text":"󰂯","tooltip":"Connected: %s\nLeft-click to manage"}' "$names"
+                  else
+                    printf '{"text":"󰂯","tooltip":"Bluetooth: On (no devices connected)\nLeft-click to scan & connect"}'
+                  fi
+                else
+                  printf '{"text":"󰂱","tooltip":"Bluetooth: Off\nLeft-click to turn on"}'
+                fi
+              '';
+              interval = 5;
               on-click = pkgs.writeShellScript "waybar-bt" ''
                 ${pkgs.walker}/bin/walker -m bluetooth
               '';
@@ -189,6 +209,7 @@ in
 
             "backlight" = {
               format = "󰃠 {percent}%";
+              tooltip-format = "Backlight: {percent}%";
               on-scroll-up = "${pkgs.brightnessctl}/bin/brightnessctl set 5%+";
               on-scroll-down = "${pkgs.brightnessctl}/bin/brightnessctl set 5%-";
               on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 100%";
@@ -210,13 +231,14 @@ in
               format-charging = "󰂄 {capacity}%";
               format-icons = [ "󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹" ];
               format-plugged = "󰂄 {capacity}%";
+              tooltip-format = "{timeToEmpty} remaining\n{status}";
               states = {
                 warning = 20;
                 critical = 10;
               };
               interval = 5;
               on-click = pkgs.writeShellScript "waybar-battery-profile" ''
-                choice=$(${pkgs.walker}/bin/walker -t cyberpunk-topleft -d -p "Power Profile" <<EOF
+                choice=$(${pkgs.walker}/bin/walker -d -p "Power Profile" <<EOF
                 performance
                 balanced
                 power-saver
@@ -229,17 +251,14 @@ in
             };
 
             # Clipboard history — walker's `clipboard` provider (elephant).
-            # Right-click clears non-pinned history.
+            # Right-click clears the current clipboard selection.
             "custom/cliphist" = {
               format = "󰆏";
               return-type = "json";
-              exec = ''echo '{"text":"󰆏","tooltip":"Clipboard history\nLeft-click to browse\nRight-click to clear"}' '';
+              exec = ''echo '{"text":"󰆏","tooltip":"Clipboard history"}' '';
               interval = 86400;
               on-click = pkgs.writeShellScript "waybar-cliphist" ''
                 ${pkgs.walker}/bin/walker -m clipboard
-              '';
-              on-click-right = pkgs.writeShellScript "waybar-cliphist-clear" ''
-                ${pkgs.libnotify}/bin/notify-send "Clipboard" "History cleared"
               '';
             };
 
@@ -272,7 +291,7 @@ in
             "custom/bitwarden" = {
               format = "󰒃";
               return-type = "json";
-              exec = ''echo '{"text":"󰒃","tooltip":"Bitwarden vault\nLeft-click to search"}' '';
+              exec = ''echo '{"text":"󰒃","tooltip":"Bitwarden"}' '';
               interval = 86400;
               on-click = pkgs.writeShellScript "waybar-bitwarden" ''
                 ${pkgs.walker}/bin/walker -m bitwarden
@@ -287,7 +306,7 @@ in
             "custom/files" = {
               format = "󰥢";
               return-type = "json";
-              exec = ''echo '{"text":"󰥢","tooltip":"Files\nLeft-click to search"}' '';
+              exec = ''echo '{"text":"󰥢","tooltip":"Search files"}' '';
               interval = 86400;
               on-click = pkgs.writeShellScript "waybar-files" ''
                 ${pkgs.walker}/bin/walker -m files
@@ -314,17 +333,25 @@ in
                 fi
                 artist=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{artist}}' 2>/dev/null)
                 title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
+                player=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{playerName}}' 2>/dev/null)
                 # Truncate to keep the bar tidy
-                title=$(printf '%.30s' "$title")
-                artist=$(printf '%.20s' "$artist")
-                if [ -n "$artist" ]; then
-                  text="$artist - $title"
+                title_short=$(printf '%.30s' "$title")
+                artist_short=$(printf '%.20s' "$artist")
+                if [ -n "$artist_short" ]; then
+                  text="$artist_short - $title_short"
                 else
-                  text="$title"
+                  text="$title_short"
                 fi
+                # Full tooltip with untruncated info
+                if [ -n "$artist" ]; then
+                  tooltip="$artist - $title"
+                else
+                  tooltip="$title"
+                fi
+                [ -n "$player" ] && tooltip="$tooltip\nPlayer: $player\nStatus: $status"
                 class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
-                ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" \
-                  '{text:$text, class:$class, alt:$class}'
+                ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" --arg tooltip "$tooltip" \
+                  '{text:$text, class:$class, alt:$class, tooltip:$tooltip}'
               '';
               interval = 2;
               hide-empty-text = true;
@@ -344,7 +371,6 @@ in
               on-click = pkgs.writeShellScript "waybar-powermenu" ''
                 ${pkgs.walker}/bin/walker -m menus:power
               '';
-              on-click-right = "set-wallpaper.sh";
             };
           } // barOutputs);
 
@@ -432,6 +458,7 @@ in
 
             "niri/workspaces" = {
               format = "{index} {name}";
+              tooltip-format = "Workspace {index}: {name}";
             };
           } // barOutputs);
         };
