@@ -16,7 +16,7 @@
     "group/system"
     "group/hardware"
   ];
-  modules-center = [ "custom/media" ];
+  modules-center = [ "custom/media" "custom-lyrics" ];
   modules-right = [
     "custom/timer"
     "custom/todo"

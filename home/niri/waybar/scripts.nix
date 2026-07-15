@@ -116,7 +116,7 @@ in
     else
       text=$(printf "󰔛 %d:%02d" "$m" "$s")
     fi
-    printf '{"text":"%s","tooltip":"Timer: %s"}' "$text" "${label:-running}"
+    printf '{"text":"%s","tooltip":"Timer running"}' "$text" "${label:-running}"
     ${wobTick}
   '';
 
