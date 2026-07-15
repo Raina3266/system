@@ -1,0 +1,269 @@
+/* Cyberpunk Walker Theme — matches waybar-cyberpunk.css
+ * Palette:
+ * bg:      #0a0a14f2  (rgba 10,10,20,0.95)
+ * bg-mod:  #141428b3  (rgba 20,20,40,0.7)
+ * fg:      #cbe3e7
+ * pink:    #ff7edb
+ * cyan:    #7afcff
+ * amber:   #f29e74
+ * red:     #ff3333
+ * dim:     #5c6776
+ */
+
+@define-color window_bg_color #0a0a14f2;
+@define-color accent_bg_color #ff7edb;
+@define-color theme_fg_color #cbe3e7;
+@define-color error_bg_color #ff3333;
+@define-color error_fg_color #cbe3e7;
+
+* {
+  all: unset;
+  font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+popover {
+  background: #141428b3;
+  border: 1px solid #ff7edb;
+  border-radius: 18px;
+  padding: 10px;
+  box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
+}
+
+.normal-icons {
+  -gtk-icon-size: 16px;
+}
+
+.large-icons {
+  -gtk-icon-size: 32px;
+}
+
+scrollbar {
+  opacity: 0.5;
+  background-color: rgba(20, 20, 40, 0.5);
+}
+
+scrollbar slider {
+  background-color: #ff7edb;
+  border-radius: 2px;
+  min-width: 4px;
+  box-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── Main window box ────────────────────────────────────── */
+.box-wrapper {
+  box-shadow:
+    0 0 20px rgba(255, 126, 219, 0.3),
+    0 19px 38px rgba(0, 0, 0, 0.3),
+    0 15px 12px rgba(0, 0, 0, 0.22);
+  background: #0a0a14f2;
+  padding: 20px;
+  border-radius: 10px;
+  border: 2px solid #ff7edb;
+}
+
+.preview-box,
+.elephant-hint,
+.placeholder {
+  color: #cbe3e7;
+}
+
+.box {
+}
+
+.search-container {
+  border-radius: 6px;
+}
+
+/* ── Search input ───────────────────────────────────────── */
+.input placeholder {
+  opacity: 0.5;
+  color: #5c6776;
+}
+
+.input selection {
+  background: rgba(255, 126, 219, 0.25);
+  color: #ff7edb;
+}
+
+.input {
+  caret-color: #7afcff;
+  background: #141428b3;
+  padding: 12px 16px;
+  color: #7afcff;
+  border: 1px solid rgba(255, 126, 219, 0.2);
+  border-radius: 6px;
+  font-size: 14px;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+
+.input:focus,
+.input:active {
+  border-color: rgba(255, 126, 219, 0.5);
+  box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}
+
+.content-container {
+}
+
+.placeholder {
+}
+
+.scroll {
+}
+
+.list {
+  color: #cbe3e7;
+}
+
+child {
+}
+
+/* ── List items ─────────────────────────────────────────── */
+.item-box {
+  border-radius: 6px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  color: #cbe3e7;
+}
+
+.item-quick-activation {
+  background: rgba(255, 126, 219, 0.15);
+  border: 1px solid rgba(255, 126, 219, 0.5);
+  border-radius: 5px;
+  padding: 10px;
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+child:hover .item-box {
+  background: rgba(255, 126, 219, 0.15);
+  border-color: rgba(255, 126, 219, 0.5);
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+child:selected .item-box,
+row:selected .item-box {
+  background: rgba(255, 126, 219, 0.15);
+  border: 1px solid rgba(255, 126, 219, 0.5);
+  color: #ff7edb;
+  text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+  box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}
+
+.item-text-box {
+}
+
+.item-subtext {
+  font-size: 11px;
+  color: #5c6776;
+}
+
+child:selected .item-subtext,
+row:selected .item-subtext {
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+
+.providerlist .item-subtext {
+  font-size: unset;
+  opacity: 0.75;
+}
+
+.item-image-text {
+  font-size: 28px;
+}
+
+.preview {
+  border: 1px solid rgba(255, 126, 219, 0.25);
+  border-radius: 10px;
+  color: #cbe3e7;
+}
+
+.calc .item-text {
+  font-size: 24px;
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+
+.symbols .item-image {
+  font-size: 24px;
+}
+
+.todo.done .item-text-box {
+  opacity: 0.25;
+}
+
+.todo.urgent {
+  font-size: 24px;
+  color: #ff3333;
+  text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+
+.todo.active {
+  font-weight: bold;
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+.bluetooth.disconnected {
+  opacity: 0.5;
+}
+
+.preview .large-icons {
+  -gtk-icon-size: 64px;
+}
+
+/* ── Keybinds / action hints ────────────────────────────── */
+.keybinds {
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 126, 219, 0.2);
+  font-size: 12px;
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+
+.global-keybinds {
+}
+
+.item-keybinds {
+}
+
+.keybind {
+}
+
+.keybind-button {
+  opacity: 0.5;
+}
+
+.keybind-button:hover {
+  opacity: 0.75;
+}
+
+.keybind-bind {
+  text-transform: lowercase;
+  opacity: 0.35;
+}
+
+.keybind-label {
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid #cbe3e7;
+}
+
+.error {
+  padding: 10px;
+  background: #ff3333;
+  color: #cbe3e7;
+}
+
+:not(.calc).current {
+  font-style: italic;
+}
+
+.preview-content.archlinuxpkgs,
+.preview-content.dnfpackages {
+  font-family: monospace;
+}

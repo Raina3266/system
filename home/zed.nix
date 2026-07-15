@@ -54,7 +54,6 @@
       };
 
       # ── Editor behavior ─────────────────────────────────────────────
-      autosave = "on_focus_change";
       cli_default_open_behavior = "existing_window";
       edit_predictions.mode = "subtle";
 

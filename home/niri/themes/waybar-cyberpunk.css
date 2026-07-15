@@ -39,6 +39,8 @@ window#waybar.bottom {
 #custom-wifi, #custom-bt,
 #custom-cliphist,
 #custom-timer,
+#custom-todo,
+#custom-agenda,
 #custom-obsidian, #custom-thunar, #custom-tauon, #custom-whatsapp, #custom-gkeep,
 #custom-gcal, #custom-gphotos, #custom-thunderbird,
 #custom-windows,
@@ -185,6 +187,29 @@ window#waybar.bottom {
   color: #f29e74;
   text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
+#custom-todo {
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-todo.urgent {
+  color: #ff3333;
+  text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
+}
+#custom-todo.pending {
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+#custom-todo.clear {
+  color: #5c6776;
+}
+#custom-agenda {
+  color: #7afcff;
+  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-agenda.soon {
+  color: #ff3333;
+  text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
+}
 #backlight {
   color: #f29e74;
   text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
@@ -227,6 +252,8 @@ window#waybar.bottom {
 #custom-wifi:hover, #custom-bt:hover,
 #custom-cliphist:hover,
 #custom-timer:hover,
+#custom-todo:hover,
+#custom-agenda:hover,
 #custom-obsidian:hover, #custom-thunar:hover, #custom-tauon:hover, #custom-whatsapp:hover, #custom-gkeep:hover,
 #custom-gcal:hover, #custom-gphotos:hover, #custom-thunderbird:hover,
 #custom-windows:hover,

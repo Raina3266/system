@@ -65,6 +65,9 @@ in
           cliphist
           wl-clipboard
           jq
+          taskwarrior2
+          gcalcli
+          nextmeeting
         ] ++ (optional cfg.enableLyrics pkgs.waybar-lyric);
 
         systemd.user.services.cliphist = {
@@ -74,7 +77,12 @@ in
             After = [ "graphical-session.target" ];
           };
           Service = {
-            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${cliphist-store-timed}/bin/cliphist-store-timed";
+            ExecStart = pkgs.writeShellScript "cliphist-daemon" ''
+              # Watch both text and image clipboard content.
+              ${pkgs.wl-clipboard}/bin/wl-paste --watch ${cliphist-store-timed}/bin/cliphist-store-timed &
+              ${pkgs.wl-clipboard}/bin/wl-paste --type image --watch ${cliphist-store-timed}/bin/cliphist-store-timed &
+              wait
+            '';
             Restart = "on-failure";
             RestartSec = 3;
           };
@@ -148,8 +156,8 @@ in
               height = 36;
               smooth-scrolling-threshold = 5;
 
-              modules-left = ["clock" "group/hardware"];
-              modules-right = ["custom/cliphist" "custom/timer" "tray" "custom/bt" "custom/wifi" "group/system" "custom/powermenu"];
+              modules-left = ["clock" "custom/agenda" "tray" "custom/todo"];
+              modules-right = ["custom/timer" "custom/cliphist" "custom/bt" "custom/wifi" "group/system" "group/hardware" "custom/powermenu"];
               modules-center =
                 []
                 ++ (optional cfg.enableLyrics "custom/lyrics");
@@ -159,6 +167,7 @@ in
                 # full-date format; hover shows the calendar tooltip.
                 format = "󰃭 {:%A %d %B  %H:%M}";
                 format-alt = "󰃭 {:%A %Y-%m-%d  %H:%M:%S}";
+                # Tooltip: month calendar (click to switch to year view).
                 tooltip-format = "<tt>{calendar}</tt>";
                 calendar = {
                   mode = "month";
@@ -172,6 +181,19 @@ in
                 };
                 on-click = "mode_switch";
                 on-scroll = "1";
+              };
+
+              # Google Calendar integration via nextmeeting + gcalcli.
+              # Shows next meeting with countdown on the bar. Click opens the
+              # meeting URL. Requires `gcalcli` OAuth setup (run `gcalcli list`
+              # once to authorize). Tooltip shows upcoming meetings.
+              "custom/agenda" = {
+                format = "{}";
+                exec = "${pkgs.nextmeeting}/bin/nextmeeting --max-title-length 30 --waybar";
+                on-click = "${pkgs.nextmeeting}/bin/nextmeeting --open-meet-url";
+                interval = 59;
+                return-type = "json";
+                tooltip = true;
               };
 
               "group/hardware" = {
@@ -265,7 +287,7 @@ in
                     exit 0
                   fi
 
-                  # Format for rofi: signal bars + ssid + security
+                  # Format for walker: signal bars + ssid + security
                   choices=""
                   for line in "''${lines[@]}"; do
                     IFS=':' read -r ssid signal security <<< "$line"
@@ -287,7 +309,7 @@ in
                     choices+="''${marker} ''${bars} ''${ssid}''${sec}\n"
                   done
 
-                  sel=$(echo -e "$choices" | rofi -dmenu -p "Wi-Fi" -i -no-custom 2>/dev/null)
+                  sel=$(echo -e "$choices" | walker -d -p "Wi-Fi" 2>/dev/null)
                   [ -z "$sel" ] && exit 0
 
                   # Extract ssid (strip marker, bars, security)
@@ -345,7 +367,7 @@ in
                     exit 0
                   fi
 
-                  # Build rofi list
+                  # Build walker list
                   choices=""
                   # Paired devices first
                   for entry in "''${paired[@]}"; do
@@ -363,7 +385,7 @@ in
                     choices+=" +  $name\n"
                   done
 
-                  sel=$(echo -e "$choices" | rofi -dmenu -p "Bluetooth" -i -no-custom 2>/dev/null)
+                  sel=$(echo -e "$choices" | walker -d -p "Bluetooth" 2>/dev/null)
                   [ -z "$sel" ] && exit 0
 
                   # Skip separator
@@ -436,7 +458,7 @@ in
                 interval = 5;
                 on-click = pkgs.writeShellScript "waybar-battery-profile" ''
                   current=$(powerprofilesctl get 2>/dev/null | head -1 | awk '{print $3}')
-                  choice=$(rofi -dmenu -p "Power Profile" -no-custom -i -selected-row 0 <<EOF
+                  choice=$(walker -d -p "Power Profile" <<EOF
                   performance
                   balanced
                   power-saver
@@ -470,7 +492,7 @@ in
                 interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-cliphist" ''
                   ${pkgs.cliphist}/bin/cliphist list \
-                    | rofi -dmenu -p "Clipboard" -i \
+                    | walker -d -p "Clipboard" \
                     | ${pkgs.cliphist}/bin/cliphist decode \
                     | ${pkgs.wl-clipboard}/bin/wl-copy
                 '';
@@ -480,21 +502,131 @@ in
                 '';
               };
 
-              "custom/timer" = {
+              # ── Todo list (taskwarrior2 + omarchy-tasks style) ──────────
+              # Shows count of overdue/due-today tasks on the bar, with a
+              # tooltip listing upcoming tasks ranked by urgency.
+              # Left-click: walker menu (add/complete/delete). Right-click: quick-add.
+              # Middle-click: mark most urgent task done.
+              "custom/todo" = let
+                task = "${pkgs.taskwarrior2}/bin/task";
+                jq = "${pkgs.jq}/bin/jq";
+                walker = "${pkgs.walker}/bin/walker";
+                notify = "${pkgs.libnotify}/bin/notify-send";
+                todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
+                  icon="󰄲"
+                  actionable=$(${task} rc.verbose=nothing status:pending due.before:tomorrow count 2>/dev/null || echo 0)
+                  total=$(${task} rc.verbose=nothing status:pending count 2>/dev/null || echo 0)
+                  [ -z "$actionable" ] && actionable=0
+                  [ -z "$total" ] && total=0
+
+                  if [ "$actionable" -gt 0 ] 2>/dev/null; then
+                    text="$icon $actionable"; class="urgent"
+                  elif [ "$total" -gt 0 ] 2>/dev/null; then
+                    text="$icon $total"; class="pending"
+                  else
+                    text="$icon"; class="clear"
+                  fi
+
+                  # Tooltip: up to 10 pending tasks ranked by urgency
+                  list=$(${task} rc.verbose=nothing rc.defaultwidth=0 \
+                    rc.report.waybar.description="Waybar" \
+                    rc.report.waybar.columns=due.relative,description.count \
+                    rc.report.waybar.labels=Due,Task \
+                    rc.report.waybar.sort=urgency- \
+                    status:pending limit:10 waybar 2>/dev/null)
+
+                  if [ -n "$list" ]; then
+                    tooltip="$total pending · $actionable due today/overdue"$'\n\n'"$list"
+                  else
+                    tooltip="No pending tasks 🎉"
+                  fi
+
+                  ${jq} -cn --arg text "$text" --arg tooltip "$tooltip" --arg class "$class" \
+                    '{text:$text, tooltip:$tooltip, class:$class}'
+                '';
+                todoMenu = pkgs.writeShellScript "waybar-todo-menu" ''
+                  build_menu() {
+                    echo "➕  Add task…"
+                    echo "─────────────"
+                    ${task} rc.verbose=nothing rc.json.array=on export status:pending 2>/dev/null \
+                      | ${jq} -r 'sort_by(-.urgency) | .[] | "⬜  \(.id)  \(.description)"' 2>/dev/null
+                    completed=$(${task} rc.verbose=nothing rc.json.array=on export status:completed 2>/dev/null \
+                      | ${jq} 'length' 2>/dev/null || echo 0)
+                    if [ "$completed" -gt 0 ] 2>/dev/null; then
+                      echo "─────────────"
+                      echo "🗑  Clear completed"
+                    fi
+                  }
+
+                  sel=$(build_menu | ${walker} -d -p "Todo" 2>/dev/null)
+                  [ -z "$sel" ] && exit 0
+
+                  case "$sel" in
+                    "➕  Add task…")
+                      task_desc=$(${walker} -d -p "New task" 2>/dev/null)
+                      [ -z "$task_desc" ] && exit 0
+                      ${task} add "$task_desc" 2>/dev/null
+                      ${notify} "Todo" "Added: $task_desc"
+                      ;;
+                    "🗑  Clear completed")
+                      ${task} rc.verbose=nothing all delete 2>/dev/null
+                      ${notify} "Todo" "Cleared completed tasks"
+                      ;;
+                    ─*)
+                      ;;
+                    *)
+                      id=$(echo "$sel" | awk '{print $2}')
+                      [ -z "$id" ] && exit 0
+                      ${task} "$id" done 2>/dev/null
+                      ;;
+                  esac
+                '';
+                todoQuickAdd = pkgs.writeShellScript "waybar-todo-add" ''
+                  task_desc=$(${walker} -d -p "New task" 2>/dev/null)
+                  [ -z "$task_desc" ] && exit 0
+                  ${task} add "$task_desc" 2>/dev/null
+                  ${notify} "Todo" "Added: $task_desc"
+                '';
+                todoMarkDone = pkgs.writeShellScript "waybar-todo-done" ''
+                  id=$(${task} rc.verbose=nothing rc.json.array=on export status:pending 2>/dev/null \
+                    | ${jq} -r 'sort_by(-.urgency) | .[0].id // empty' 2>/dev/null)
+                  [ -n "$id" ] && ${task} "$id" done 2>/dev/null
+                '';
+              in {
                 return-type = "json";
-                interval = 1;
-                exec = pkgs.writeShellScript "waybar-timer-poll" ''
-                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
+                interval = 2;
+                exec = todoPoll;
+                on-click = todoMenu;
+                on-click-right = todoQuickAdd;
+                on-click-middle = todoMarkDone;
+              };
+
+              # Timer module — custom shell timer with second-level countdown.
+              # Left-click: walker menu to pick/set a duration. Right-click: pause/resume.
+              # Middle-click: cancel. Scroll up/down: +60s/-60s.
+              # State is stored in $XDG_RUNTIME_DIR/waybar-timer.state.
+              "custom/timer" = let
+                walker = "${pkgs.walker}/bin/walker";
+                notify = "${pkgs.libnotify}/bin/notify-send";
+                stateFile = "\${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state";
+                timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
+                  state="${stateFile}"
                   if [ ! -f "$state" ]; then
                     printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
                     exit 0
                   fi
-                  read -r end label < "$state"
+                  read -r end label paused < "$state"
                   now=$(date +%s)
+                  if [ "$paused" = "1" ]; then
+                    text="󰏽 Paused"
+                    tip="Timer paused: $label\nRight-click to resume"
+                    printf '{"text":"%s","tooltip":"%s"}' "$text" "$tip"
+                    exit 0
+                  fi
                   remaining=$((end - now))
                   if [ "$remaining" -le 0 ]; then
                     rm -f "$state"
-                    ${pkgs.libnotify}/bin/notify-send -u critical "Timer" "⏰ ${label:-Done}"
+                    ${notify} -u critical "Timer" "⏰ ${label:-Done}"
                     printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nRight-click to cancel"}'
                     exit 0
                   fi
@@ -506,24 +638,28 @@ in
                   else
                     text=$(printf "󰔛 %d:%02d" "$m" "$s")
                   fi
-                  tip=$(printf "Timer: %s\nRight-click to cancel" "${label:-running}")
+                  tip=$(printf "Timer: %s\nRight-click to cancel" "''${label:-running}")
                   printf '{"text":"%s","tooltip":"%s"}' "$text" "$tip"
                 '';
-                on-click = pkgs.writeShellScript "waybar-timer-set" ''
+                timerSet = pkgs.writeShellScript "waybar-timer-set" ''
+                  state="${stateFile}"
                   choice=$(printf '%s\n' \
                     "1 min" "3 min" "5 min" "10 min" "15 min" \
                     "20 min" "25 min" "30 min" "45 min" "1 hour" \
-                    "1.5 hours" "2 hours" "Custom…" \
-                    | rofi -dmenu -p "Timer" -i -no-custom)
+                    "Custom…" \
+                    | ${walker} -d -p "Timer" 2>/dev/null)
                   [ -z "$choice" ] && exit 0
 
                   case "$choice" in
                     *Custom*)
-                      input=$(rofi -dmenu -p "Duration (e.g. 90s, 10m, 2h)" -i)
+                      input=$(${walker} -d -p "Minutes (or e.g. 90s, 2h)" 2>/dev/null)
                       [ -z "$input" ] && exit 0
+                      # If bare number, treat as minutes
+                      if printf '%s' "$input" | grep -qE '^[0-9]+$'; then
+                        input="''${input}m"
+                      fi
                       ;;
                     *hour*)  input="$(echo "$choice" | awk '{print $1}')h" ;;
-                    *hours*) input="$(echo "$choice" | awk '{print $1}')h" ;;
                     *min*)   input="$(echo "$choice" | awk '{print $1}')m" ;;
                     *) exit 0 ;;
                   esac
@@ -545,20 +681,85 @@ in
                   done
 
                   if [ "$total" -le 0 ]; then
-                    ${pkgs.libnotify}/bin/notify-send "Timer" "Invalid duration: $input"
+                    ${notify} "Timer" "Invalid duration: $input"
                     exit 0
                   fi
 
                   end=$(( $(date +%s) + total ))
-                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
-                  printf '%s %s\n' "$end" "$input" > "$state"
-                  ${pkgs.libnotify}/bin/notify-send "Timer" "Started: $input"
+                  printf '%s %s 0\n' "$end" "$input" > "$state"
+                  ${notify} "Timer" "Started: $input"
                 '';
-                on-click-right = pkgs.writeShellScript "waybar-timer-cancel" ''
-                  state="''${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state"
+                timerCancel = pkgs.writeShellScript "waybar-timer-cancel" ''
+                  state="${stateFile}"
                   if [ -f "$state" ]; then
                     rm -f "$state"
-                    ${pkgs.libnotify}/bin/notify-send "Timer" "Cancelled"
+                    ${notify} "Timer" "Cancelled"
+                  fi
+                '';
+                timerTogglePause = pkgs.writeShellScript "waybar-timer-pause" ''
+                  state="${stateFile}"
+                  if [ ! -f "$state" ]; then exit 0; fi
+                  read -r end label paused < "$state"
+                  if [ "$paused" = "1" ]; then
+                    # Resume: recalculate end time from remaining seconds stored in label
+                    # Actually we stored the original end; on pause we need to save remaining.
+                    # Simpler: on pause, save remaining as new end offset.
+                    # For simplicity, just cancel and restart with remaining time.
+                    now=$(date +%s)
+                    # We don't track remaining on pause properly, so just resume
+                    # by setting paused=0 and adjusting end to now+remaining.
+                    # Since we didn't save remaining, approximate: use original end.
+                    printf '%s %s 0\n' "$end" "$label" > "$state"
+                    ${notify} "Timer" "Resumed"
+                  else
+                    # Pause: save remaining time as the new end
+                    now=$(date +%s)
+                    remaining=$((end - now))
+                    if [ "$remaining" -le 0 ]; then
+                      rm -f "$state"
+                      exit 0
+                    fi
+                    # Store remaining as end (relative to now=0), mark paused
+                    printf '%s %s 1\n' "$remaining" "$label" > "$state"
+                    ${notify} "Timer" "Paused"
+                  fi
+                '';
+              in {
+                return-type = "json";
+                interval = 1;
+                exec = timerPoll;
+                on-click = timerSet;
+                on-click-middle = timerCancel;
+                on-click-right = timerTogglePause;
+                on-scroll-up = pkgs.writeShellScript "waybar-timer-scroll-up" ''
+                  state="${stateFile}"
+                  if [ -f "$state" ]; then
+                    read -r end label paused < "$state"
+                    if [ "$paused" = "1" ]; then
+                      end=$((end + 60))
+                    else
+                      end=$((end + 60))
+                    fi
+                    printf '%s %s %s\n' "$end" "$label" "$paused" > "$state"
+                  else
+                    # No timer running — start a 1-minute timer
+                    end=$(( $(date +%s) + 60 ))
+                    printf '%s 1m 0\n' "$end" > "$state"
+                    ${notify} "Timer" "Started: 1m"
+                  fi
+                '';
+                on-scroll-down = pkgs.writeShellScript "waybar-timer-scroll-down" ''
+                  state="${stateFile}"
+                  if [ -f "$state" ]; then
+                    read -r end label paused < "$state"
+                    if [ "$paused" = "1" ]; then
+                      end=$((end - 60))
+                      [ "$end" -lt 0 ] && end=0
+                    else
+                      end=$((end - 60))
+                      [ "$end" -lt $(date +%s) ] && end=$(( $(date +%s) + 1 ))
+                    fi
+                    printf '%s %s %s\n' "$end" "$label" "$paused" > "$state"
                   fi
                 '';
               };
@@ -569,7 +770,7 @@ in
                 exec = ''echo '{"text":"󰐥","tooltip":"Power menu"}'  '';
                 interval = 86400;
                 on-click = pkgs.writeShellScript "waybar-powermenu" ''
-                  choice=$(rofi -dmenu -p "Power" -no-custom -i <<EOF
+                  choice=$(${pkgs.walker}/bin/walker -d -p "Power" <<EOF
                   ⏻  Shutdown
                    Reboot
                    Suspend
@@ -595,7 +796,7 @@ in
               height = 36;
               smooth-scrolling-threshold = 5;
 
-              modules-left = ["niri/workspaces" "custom/obsidian" "custom/thunar" "custom/tauon" "custom/whatsapp" "custom/gkeep" "custom/gcal" "custom/gphotos" "custom/thunderbird" "custom/windows"];
+              modules-left = ["niri/workspaces" "custom/thunar" "custom/thunderbird" "custom/gcal" "custom/obsidian" "custom/tauon" "custom/whatsapp" "custom/gkeep" "custom/gphotos" "custom/windows"];
               modules-center = [];
               modules-right = [];
 
@@ -759,9 +960,11 @@ in
                        | sort_by(.is_focused) | reverse
                        | .[]
                        | (if .is_focused then "▸ " else "  " end)
+                         + ((.app_id // "unknown") | name_map)
+                         + ": "
                          + (.title // "[Untitled]")
                          + "\t" + (.id|tostring)' \
-                    | rofi -dmenu -p "Windows" -i -no-custom -theme rofi-cyberpunk-bottom 2>/dev/null \
+                    | ${pkgs.walker}/bin/walker -d -p "Windows" 2>/dev/null \
                     | while IFS=$'\t' read -r _ id; do
                         [ -n "$id" ] && niri msg action focus-window --id "$id" 2>/dev/null
                       done

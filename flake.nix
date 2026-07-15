@@ -23,6 +23,16 @@
     };
 
     zed.url = "github:zed-industries/zed/nightly";
+
+    nextmeeting = {
+      url = "github:chmouel/nextmeeting?dir=packaging";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    walker = {
+      url = "github:abenz1267/walker";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -40,6 +50,10 @@
         inherit system;
         overlays = [
           nixGL.overlay
+          (final: prev: {
+            nextmeeting = inputs.nextmeeting.packages.${system}.default;
+            walker = inputs.walker.packages.${system}.default;
+          })
         ];
         config = {
           allowUnfree = true;

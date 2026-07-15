@@ -1,5 +1,6 @@
 {
   pkgs,
+  inputs,
   ...
 }:
 {
@@ -11,6 +12,7 @@
     ./ocr.nix
     ./toolchains.nix
     ./zed.nix
+    inputs.walker.homeManagerModules.default
   ];
 
   home = {
