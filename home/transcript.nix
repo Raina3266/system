@@ -189,7 +189,6 @@ Transcript:
         settings_schema_version = 1;
         show_tray_icon = true;
         show_whats_new_on_update = true;
-        show_hidden = true;
         sound_theme = "marimba";
         start_hidden = true;
         transcribe_accelerator = "auto";

@@ -18,9 +18,8 @@
   ];
   modules-center = [ "custom/media" ];
   modules-right = [
-    "custom/bitwarden"
-    "custom/todo"
     "custom/timer"
+    "custom/todo"
     "custom/cliphist"
     "custom/files"
     "custom/bt"
@@ -269,17 +268,6 @@
     on-scroll-down = scripts.timerScrollDown;
   };
 
-  # Bitwarden — walker's `bitwarden` provider (elephant + rbw).
-  "custom/bitwarden" = {
-    format = "󰒃";
-    return-type = "json";
-    exec = ''echo '{"text":"󰒃","tooltip":"Bitwarden"}' '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-bitwarden" ''
-      ${pkgs.walker}/bin/walker -m bitwarden
-    '';
-  };
-
   # Files — elephant `files` provider (fd-backed file search).
   "custom/files" = {
     format = "󰥢";
@@ -292,10 +280,11 @@
   };
 
   # Media player (center, appears only when playing). Polls playerctl
-  # for metadata. Waybar hides the module when the text is empty
-  # (hide-empty-text). Left-click: play/pause, right-click: next,
-  # scroll up/down: prev/next.
+  # for metadata. Hidden entirely when no player is running via the
+  # `stopped` CSS class (display:none). Left-click: play/pause,
+  # right-click: next, scroll up/down: prev/next.
   "custom/media" = {
+    hide-empty = true;
     format = "{icon} {}";
     format-icons = {
       "Playing" = "▶";
@@ -330,7 +319,6 @@
         '{text:$text, class:$class, alt:$class, tooltip:$tooltip}'
     '';
     interval = 2;
-    hide-empty-text = true;
     on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
     on-click-right = "${pkgs.playerctl}/bin/playerctl next";
     on-scroll-up = "${pkgs.playerctl}/bin/playerctl next";

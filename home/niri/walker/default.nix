@@ -239,18 +239,7 @@
       };
   };
 
-  # Configure rbw (Bitwarden CLI) to use the GTK pinentry for
-  # master-password prompts. Elephant's bitwarden provider calls rbw
-  # under the hood, so this also covers vault unlocks from walker.
-  # Run `rbw config email your@email@example.com` to set your email.
-  xdg.configFile."rbw/config.json".text = builtins.toJSON {
-    email = "cgl0326@outlook.com";
-    pinentry = "pinentry-gtk-2";
-  };
-
   home.packages = with pkgs; [
-    rbw # Bitwarden CLI — used by elephant's bitwarden provider
     wtype # Wayland typing — used by bitwarden provider's autotype
-    pinentry-gtk2 # PIN prompt for rbw login (GTK2 works under Wayland)
   ];
 }

@@ -165,9 +165,13 @@ window#waybar.bottom {
 #custom-media.stopped {
   color: #5c6776;
   text-shadow: none;
+  background-color: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
 }
 
-/* ── Center: lyrics ─────────────────────────────────────── */
+/* ── Center: lyric ─────────────────────────────────────── */
 #custom-lyrics {
   color: #7afcff;
   text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
@@ -290,16 +294,25 @@ tooltip label {
 }
 
 /* ── Bottom bar: niri workspace taskbar ─────────────────── */
-/* Per-window text buttons inside the taskbar instance. These use the
-   .niri-taskbar-btn class emitted by Waybar's niri/workspaces
-   workspace-taskbar mode (PR #4997) with a local text-only patch. */
-#workspaces button .niri-taskbar-btn {
+/* Per-window buttons inside the taskbar instance. Each button shows an
+   app icon + text label (app name: title). Buttons are homogeneous and
+   expand to fill available width so they squeeze when there are too
+   many windows. The text ellipsizes when squeezed. */
+
+#workspaces.taskbar button {
+  border: none;
+  background-color: transparent;
+}
+#workspaces.taskbar button .niri-taskbar-btn {
   background-color: rgba(20, 20, 40, 0.7);
   color: #cbe3e7;
-  margin: 0 2px;
-  padding: 0 12px;
+  margin: 0 1px;
+  padding: 0 4px;
   border-radius: 4px;
   border: 1px solid rgba(255, 126, 219, 0.2);
+}
+#workspaces.taskbar button .niri-taskbar-btn label {
+  margin-left: 2px;
 }
 #workspaces button .niri-taskbar-btn.focused {
   background-color: rgba(255, 126, 219, 0.15);

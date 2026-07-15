@@ -78,43 +78,16 @@
     tooltip-format = "Workspace {index}: {name}";
   };
 
-  # Per-window taskbar — shows text labels for windows on the current
-  # workspace only. Click to focus, middle-click to close. Uses a local
-  # Waybar patch (text-only) to render text instead of icons. Requires
-  # Waybar master (PR #4997); see the waybar overlay in flake.nix.
+  # Per-window taskbar — shows app icon + text title for windows on
+  # the current workspace only. Click to focus, middle-click to close.
   "niri/workspaces#taskbar" = {
     current-only = true;
-    format-window-separator = " ";
-    window-rewrite-default = "{app_id}";
-    window-rewrite = {
-      "app_id<dev.zed.Zed-Nightly>" = "zed";
-      "app_id<tauonmb>" = "tauon";
-      "app_id<com.ktechpit.whatsie>" = "whatsapp";
-      "app_id<chrome-eilembjdkfgodjkcjnpgpaenohkicgjd-Default>" = "gkeep";
-      "app_id<google-chrome>" = "chrome";
-      "app_id<com.google.Chrome>" = "chrome";
-      "app_id<org.gnome.Meld>" = "meld";
-      "app_id<org.inkscape.Inkscape>" = "inkscape";
-      "app_id<org.kde.kid3>" = "kid3";
-      "app_id<org.pulseaudio.pavucontrol>" = "pavucontrol";
-      "app_id<org.qbittorrent.qBittorrent>" = "qbittorrent";
-      "app_id<org.shotcut.Shotcut>" = "shotcut";
-      "app_id<com.obsproject.Studio>" = "obs";
-      "app_id<dev.lizardbyte.app.Sunshine.*>" = "sunshine";
-      "app_id<io.github.waylyrics.Waylyrics>" = "waylyrics";
-      "app_id<io.github.qarmin.czkawka>" = "czkawka";
-      "app_id<io.github.qarmin.krokiet>" = "krokiet";
-      "app_id<io.github.JakubMelka.Pdf4qt.*>" = "pdf4qt";
-      "app_id<com.github.qarmin.czkawka>" = "czkawka";
-      "app_id<org.gnome.Screenshot>" = "screenshot";
-      "app_id<OneDriveGUI>" = "onedrive";
-      "app_id<wemeetapp>" = "wemeet";
-      "app_id<startcenter>" = "libreoffice";
-      "app_id<Handy>" = "handy";
-    };
+    hide-empty = true;
+    format-window-separator = "  ";
+    window-rewrite-default = "";
     workspace-taskbar = {
       enable = true;
-      text-only = true;
+      icon-size = 20;
     };
   };
 }

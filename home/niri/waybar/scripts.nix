@@ -35,7 +35,7 @@ in
   todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
     icon="󰄲"
     if [ ! -f "${todoFile}" ]; then
-      printf '{"text":"%s","tooltip":"No tasks 🎉","class":"clear"}' "$icon"
+      printf '{"text":"%s","tooltip":"Todo","class":"clear"}' "$icon"
       exit 0
     fi
 
@@ -89,15 +89,15 @@ in
   timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
     state="${timerState}"
     if [ ! -f "$state" ]; then
-      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nMiddle-click to cancel"}'
+      printf '{"text":"󰔛","tooltip":"Timer"}'
       exit 0
     fi
     read -r end total label paused < "$state"
     now=$(date +%s)
     if [ "$paused" = "1" ]; then
       remaining=$end
-      text=$(printf "󰏽 %d:%02d" $((remaining/60)) $((remaining%60)))
-      printf '{"text":"%s","tooltip":"Timer paused: %s\nRight-click to resume"}' "$text" "${label:-paused}"
+      text=$(printf " 󰔛 %d:%02d " $((remaining/60)) $((remaining%60)))
+      printf '{"text":"%s","tooltip":"Timer paused"}' "$text" "${label:-paused}"
       ${wobTick}
       exit 0
     fi
@@ -105,7 +105,7 @@ in
     if [ "$remaining" -le 0 ]; then
       rm -f "$state"
       ${notify} -u critical "Timer" "⏰ ${label:-Done}"
-      printf '{"text":"󰔛","tooltip":"Timer\nLeft-click to set\nMiddle-click to cancel"}'
+      printf '{"text":"󰔛","tooltip":"Timer"}'
       exit 0
     fi
     h=$((remaining / 3600))
@@ -116,7 +116,7 @@ in
     else
       text=$(printf "󰔛 %d:%02d" "$m" "$s")
     fi
-    printf '{"text":"%s","tooltip":"Timer: %s\nRight-click to pause\nMiddle-click to cancel"}' "$text" "${label:-running}"
+    printf '{"text":"%s","tooltip":"Timer: %s"}' "$text" "${label:-running}"
     ${wobTick}
   '';
 
@@ -207,11 +207,13 @@ in
       read -r end total label paused < "$state"
       end=$((end + 60))
       printf '%s %s %s %s\n' "$end" "$total" "$label" "$paused" > "$state"
+      ${wobTick}
     else
       # No timer running — start a 1-minute timer
       end=$(( $(date +%s) + 60 ))
       printf '%s 60 1m 0\n' "$end" > "$state"
       ${notify} "Timer" "Started: 1m"
+      ${wobTick}
     fi
   '';
 
@@ -227,6 +229,7 @@ in
         [ "$end" -lt $(date +%s) ] && end=$(( $(date +%s) + 1 ))
       fi
       printf '%s %s %s %s\n' "$end" "$total" "$label" "$paused" > "$state"
+      ${wobTick}
     fi
   '';
 
