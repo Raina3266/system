@@ -310,7 +310,7 @@ window#waybar.bottom {
 #workspaces {
     border: none;
     background-color: transparent;
-    margin:  0 2px;
+    margin: 0 2px;
 }
 #workspaces button {
     color: #5c6776;
@@ -389,19 +389,20 @@ tooltip label {
    many windows. The text ellipsizes when squeezed. */
 
 #workspaces.taskbar button {
-  border: none;
-  background-color: transparent;
+    border: none;
+    background-color: transparent;
 }
 #workspaces.taskbar button .niri-taskbar-btn {
     background-color: rgba(20, 20, 40, 0.7);
     color: #cbe3e7;
-    margin: 0 4px;
-    padding: 0 4px;
+    margin: 0 1px;
+    padding: 0 8px;
     border-radius: 4px;
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #workspaces.taskbar button .niri-taskbar-btn label {
     margin-left: 2px;
+    font-size: 15px;
 }
 #workspaces button .niri-taskbar-btn.focused {
     background-color: rgba(255, 126, 219, 0.15);
@@ -409,9 +410,9 @@ tooltip label {
     border-color: rgba(255, 126, 219, 0.5);
 }
 #workspaces button .niri-taskbar-btn:hover {
-    background-color: rgba(255, 126, 219, 0.15);
+    background-color: transparent;
     background-image: none;
     border-color: rgba(255, 126, 219, 0.5);
-    box-shadow: 0 0 2px rgba(255, 126, 219, 0.2);
-    text-shadow: 0 0 2px rgba(255, 126, 219, 0.6);
+    box-shadow: rgba(20, 20, 40, 0.7);
+    text-shadow: rgba(20, 20, 40, 0.7);
 }

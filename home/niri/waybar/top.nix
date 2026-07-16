@@ -319,6 +319,8 @@
   # Previous track button. Hidden when no player is running.
   "custom/media-prev" = {
     format = "⏮";
+    return-type = "json";
+    exec = ''echo '{"text":"⏮","tooltip":"Previous track"}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl previous";
@@ -327,6 +329,8 @@
   # Next track button. Hidden when no player is running.
   "custom/media-next" = {
     format = "⏭";
+    return-type = "json";
+    exec = ''echo '{"text":"⏭","tooltip":"Next track"}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl next";
@@ -387,7 +391,7 @@
     return-type = "json";
     format = "{icon} {0}";
     format-icons = {
-      playing = "▶";
+      playing = "󰝚";
       paused = "⏸";
       lyric = "";
       music = "󰝚";
