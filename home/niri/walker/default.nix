@@ -134,17 +134,14 @@
         actions = {
           todo = [
             { action = "save"; default = true; bind = "Return"; after = "AsyncClearReload"; }
-            { action = "save_next"; label = "save & new"; bind = "shift Return"; after = "AsyncClearReload"; }
             { action = "delete"; label = "delete"; bind = "Delete"; after = "AsyncClearReload"; }
             { action = "done"; label = "done"; bind = "ctrl Return"; after = "Nothing"; }
-            { action = "change_category"; bind = "ctrl y"; label = "change category"; after = "Nothing"; }
+            { action = "change_category"; label = "category"; bind = "ctrl y"; after = "Nothing"; }
             { action = "clear"; label = "clear done"; bind = "ctrl x"; after = "AsyncClearReload"; }
-            { action = "create"; bind = "ctrl a"; after = "AsyncClearReload"; }
-            { action = "search"; bind = "ctrl a"; after = "AsyncClearReload"; }
+            { action = "create"; label = "new task"; bind = "ctrl a"; after = "AsyncClearReload"; }
           ];
           desktopapplications = [
             { action = "start"; default = true; bind = "Return"; }
-            { action = "start:keep"; label = "open+next"; bind = "shift Return"; after = "KeepOpen"; }
             { action = "new_instance"; label = "new instance"; bind = "ctrl Return"; }
             { action = "new_instance:keep"; label = "new+next"; bind = "ctrl alt Return"; after = "KeepOpen"; }
             { action = "pin"; bind = "ctrl p"; after = "AsyncReload"; }
@@ -155,12 +152,8 @@
           clipboard = [
             { action = "copy"; default = true; bind = "Return"; }
             { action = "remove"; bind = "ctrl d"; after = "AsyncClearReload"; }
-            { action = "remove_all"; label = "clear"; bind = "ctrl shift d"; after = "AsyncClearReload"; }
             { action = "show_images_only"; label = "only images"; bind = "ctrl i"; after = "AsyncClearReload"; }
             { action = "show_text_only"; label = "only text"; bind = "ctrl i"; after = "AsyncClearReload"; }
-            { action = "show_combined"; label = "show all"; bind = "ctrl i"; after = "AsyncClearReload"; }
-            { action = "pause"; bind = "ctrl shift p"; }
-            { action = "unpause"; bind = "ctrl shift p"; }
             { action = "unpin"; bind = "ctrl p"; after = "AsyncClearReload"; }
             { action = "pin"; bind = "ctrl p"; after = "AsyncClearReload"; }
             { action = "edit"; bind = "ctrl o"; }
@@ -172,7 +165,6 @@
             { action = "copypath"; label = "copy path"; bind = "ctrl shift c"; }
             { action = "copyfile"; label = "copy file"; bind = "ctrl c"; }
             { action = "localsend"; label = "localsend"; bind = "ctrl l"; }
-            { action = "refresh_index"; label = "reload"; bind = "ctrl r"; after = "AsyncReload"; }
           ];
           calc = [
             { action = "copy"; default = true; bind = "Return"; }

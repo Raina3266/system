@@ -95,8 +95,8 @@
     PerScreenDPI=True
     UseDarkTheme=False
     Theme=cyberpunk
-    Font="Sans 15"
-    MenuFont="Sans 15"
+    Font="Sans 14"
+    MenuFont="Sans 14"
   '';
 
   home.pointerCursor = {

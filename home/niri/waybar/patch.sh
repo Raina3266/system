@@ -30,25 +30,17 @@ perl -0777 -i -pe 's/    data\[prop\]\.asBool\(\) \? button_\.show\(\) : button_
 # Do NOT re-show the workspace label — just hide everything.
 # Box is left-aligned with hexpand=false so it takes only its natural
 # width — buttons stay at natural size when there are few tabs.
-perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(false);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
+perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(true);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
   src/modules/niri/workspace.cpp
 
-# 4. Let taskbar buttons shrink when the bar overflows.
-# Upstream packs each button with pack_start(*btn, false, false, 0)
-# which means buttons don't expand — they overflow off-screen when
-# there are too many. Change to expand+fill so buttons can shrink and
-# share the available space.
-sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_start(*btn, true, true, 0);|' \
-  src/modules/niri/workspace.cpp
-
-# 5. Render icon + text title in each taskbar button.
+# 4. Render icon + text title in each taskbar button.
 # Upstream shows either an icon OR a 3-char fallback. Replace with:
 # an icon (if available) followed by just the window title (truncated
 # to 20 chars). No app_id prefix — just the title. If the title is
 # empty, fall back to the rewritten app name.
 # Keep each button's minimum width equal to its displayed title length,
 # capped at 20 characters by the truncation below.
-REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 2);
+REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 3);
     btn_box->set_halign(Gtk::ALIGN_START);
     auto pixbuf = loadIcon(app_id, icon_size);
     if (pixbuf) {
@@ -81,6 +73,7 @@ REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HO
     }
     auto* lbl = Gtk::make_managed<Gtk::Label>(label_text);
     lbl->set_ellipsize(Pango::ELLIPSIZE_END);
+    lbl->set_xalign(0.0);
     lbl->set_single_line_mode(true);
     int min_chars = (int)label_text.length();
     if (min_chars > 20) min_chars = 20;

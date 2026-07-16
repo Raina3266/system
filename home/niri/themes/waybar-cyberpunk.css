@@ -237,11 +237,11 @@ window#waybar.bottom {
     color: #cbe3e7;
 }
 #custom-wifi {
-    color: #7afcff;
+    color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 #custom-bt {
-    color: #7afcff;
+    color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 #custom-cliphist {
@@ -257,7 +257,7 @@ window#waybar.bottom {
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 #custom-todo {
-    color: #7afcff;
+    color: #f29e74;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 #custom-todo.urgent {
@@ -272,7 +272,7 @@ window#waybar.bottom {
     color: #5c6776;
 }
 #backlight {
-    color: #f29e74;
+    color: #7afcff;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 #pulseaudio {
@@ -297,7 +297,7 @@ window#waybar.bottom {
     animation: blink 1s steps(2) infinite;
 }
 #clock {
-    color: #ff7edb;
+    color: #7afcff;
     text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
 }
 #custom-powermenu {

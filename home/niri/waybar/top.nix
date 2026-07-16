@@ -16,9 +16,10 @@
     "group/hardware"
   ];
   modules-center = [
-    "group/media-control"
+    "custom/media-prev"
     "custom/media"
     "custom/lyrics"
+    "custom/media-next"
   ];
   modules-right = [
     "tray"
@@ -277,7 +278,10 @@
       ${pkgs.walker}/bin/walker -m todo
     '';
     on-click-right = pkgs.writeShellScript "waybar-todo-add" ''
-      ${pkgs.walker}/bin/walker -m todo
+      ${pkgs.walker}/bin/walker -m todo --search ""
+    '';
+    on-click-middle = pkgs.writeShellScript "waybar-todo-clear-done" ''
+      ${pkgs.walker}/bin/walker -m todo -a clear
     '';
   };
 
@@ -304,24 +308,11 @@
     '';
   };
 
-  # Media controls group: prev | track info (play/pause) | next.
-  # All three hide when no player is running (via exec-if on the prev/next
-  # modules, and the stopped CSS class on custom/media). Grouped so they
-  # sit together as a single unit in the center.
-  "group/media-control" = {
-    orientation = "horizontal";
-    modules = [
-      "custom/media-prev"
-      "custom/media-next"
-      "custom/media"
-    ];
-  };
-
   # Previous track button. Hidden when no player is running.
   "custom/media-prev" = {
     format = "⏮";
     return-type = "json";
-    exec = ''echo '{"text":"⏮","tooltip":"Previous track"}' '';
+    exec = ''echo '{"text":"⏮⏮",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl previous";
@@ -331,7 +322,7 @@
   "custom/media-next" = {
     format = "⏭";
     return-type = "json";
-    exec = ''echo '{"text":"⏭","tooltip":"Next track"}' '';
+    exec = ''echo '{"text":"⏭⏭",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl next";
@@ -398,7 +389,7 @@
     format = "{icon} {0}";
     format-icons = {
       playing = "󰝚";
-      paused = "⏸";
+      paused = "󰝚";
       lyric = "";
       music = "󰝚";
     };

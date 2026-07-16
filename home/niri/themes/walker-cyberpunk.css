@@ -62,6 +62,7 @@ scrollbar slider {
  * only, so the popup shrinks to fit small menus and grows up to the cap.
  */
 .box-wrapper {
+  max-width: 900px;
   box-shadow:
     0 0 20px rgba(255, 126, 219, 0.3),
     0 19px 38px rgba(0, 0, 0, 0.3),
