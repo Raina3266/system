@@ -25,6 +25,9 @@
       "@wheel"
     ];
 
+    # Keep successful sudo authentication cached for 10 minutes.
+    security.sudo.extraConfig = "Defaults timestamp_timeout=10";
+
     # User account & home-manager
     users.users.raina = {
       isNormalUser = true;
