@@ -24,16 +24,16 @@ perl -0777 -i -pe 's/    data\[prop\]\.asBool\(\) \? button_\.show\(\) : button_
   src/modules/niri/workspace.cpp
 
 # 3. Hide the taskbar box when there are no windows on the workspace.
-perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(true);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
+perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(false);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
   src/modules/niri/workspace.cpp
 
 # 4. Let taskbar buttons shrink when the bar overflows.
-sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_start(*btn, true, true, 0);|' \
+sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_start(*btn, false, true, 0);|' \
   src/modules/niri/workspace.cpp
 
 # 5. Render icon + text title in each taskbar button.
 cat > /tmp/waybar-replacement.txt << 'ENDREPLACEMENT'
-    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 3);
+    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 0);
     btn_box->set_halign(Gtk::ALIGN_START);
     auto pixbuf = loadIcon(app_id, icon_size);
     if (pixbuf) {
@@ -61,18 +61,30 @@ cat > /tmp/waybar-replacement.txt << 'ENDREPLACEMENT'
             last_separator - first_separator - separator.length());
       }
     }
-    auto strip_prefix = [&](const std::string& name) {
+    auto ci_eq = [](const std::string& a, const std::string& b) {
+      if (a.size() != b.size()) return false;
+      for (size_t i = 0; i < a.size(); i++)
+        if (std::tolower(a[i]) != std::tolower(b[i])) return false;
+      return true;
+    };
+    std::string rewrite = manager_.getRewrite(app_id, title);
+    auto strip_segment = [&](const std::string& name) {
       if (name.empty()) return;
       std::string prefix = name + separator;
       if (label_text.length() > prefix.length() &&
-          label_text.compare(0, prefix.length(), prefix) == 0) {
+          ci_eq(label_text.substr(0, prefix.length()), prefix)) {
         label_text = label_text.substr(prefix.length());
+        return;
+      }
+      std::string suffix = separator + name;
+      if (label_text.length() > suffix.length() &&
+          ci_eq(label_text.substr(label_text.length() - suffix.length()), suffix)) {
+        label_text = label_text.substr(0, label_text.length() - suffix.length());
       }
     };
-    strip_prefix(app_id);
-    std::string rewrite = manager_.getRewrite(app_id, title);
+    strip_segment(app_id);
     if (!rewrite.empty() && rewrite != "?" && rewrite != app_id) {
-      strip_prefix(rewrite);
+      strip_segment(rewrite);
     }
     int char_count = 0;
     size_t trunc_pos = 0;

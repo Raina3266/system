@@ -310,9 +310,9 @@
 
   # Previous track button. Hidden when no player is running.
   "custom/media-prev" = {
-    format = "⏮⏮";
+    format = "⏮";
     return-type = "json";
-    exec = ''echo '{"text":"⏮⏮",}' '';
+    exec = ''echo '{"text":"⏮",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl previous";
@@ -320,7 +320,7 @@
 
   # Next track button. Hidden when no player is running.
   "custom/media-next" = {
-    format = "⏭⏭";
+    format = "⏭";
     return-type = "json";
     exec = ''echo '{"text":"⏭",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
