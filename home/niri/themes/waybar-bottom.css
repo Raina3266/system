@@ -1,0 +1,80 @@
+/* ── Bottom bar: niri workspaces + taskbar ────────────────── */
+
+#workspaces {
+    border: none;
+    background-color: transparent;
+    margin: 0 2px;
+}
+#workspaces button {
+    color: #5c6776;
+    padding: 0 4px;
+    margin: 0 0px;
+    background-color: rgba(20, 20, 40, 0.7);
+    border: 3px solid rgba(255, 126, 219, 0.2);
+    border-radius: 6px;
+}
+#workspaces button.active,
+#workspaces button.focused {
+    color: #7afcff;
+}
+#workspaces button.urgent {
+    color: #ff3333;
+}
+#workspaces button:hover {
+    background-color: transparent;
+    background-image: none;
+    border-color: rgba(255, 126, 219, 0.5);
+}
+
+/* ── Starred apps ───────────────────────────────────────── */
+#custom-obsidian,
+#custom-thunar,
+#custom-tauon,
+#custom-whatsapp,
+#custom-gkeep,
+#custom-gcal,
+#custom-gphotos,
+#custom-thunderbird {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-obsidian:hover,
+#custom-thunar:hover,
+#custom-tauon:hover,
+#custom-whatsapp:hover,
+#custom-gkeep:hover,
+#custom-gcal:hover,
+#custom-gphotos:hover,
+#custom-thunderbird:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    border-color: rgba(255, 126, 219, 0.5);
+}
+
+/* ── Taskbar buttons ───────────────────────────────────── */
+#workspaces.taskbar button {
+    border: none;
+    background-color: transparent;
+}
+#workspaces.taskbar button .niri-taskbar-btn {
+    background-color: rgba(20, 20, 40, 0.7);
+    color: #cbe3e7;
+    margin: 0 1px;
+    padding: 0 12px;
+    border-radius: 4px;
+    border: 2px solid rgba(255, 126, 219, 0.2);
+}
+#workspaces.taskbar button label {
+    margin-left: 5px;
+    font-size: 16px;
+    font-weight: bold;
+}
+#workspaces button .niri-taskbar-btn.focused {
+    background-color: rgba(255, 126, 219, 0.15);
+    color: #7afcff;
+    border-color: rgba(255, 126, 219, 0.5);
+}
+#workspaces button .niri-taskbar-btn:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    border-color: rgba(255, 126, 219, 0.5);
+}

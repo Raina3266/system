@@ -1,0 +1,53 @@
+/* ── Top-center: media player, lyrics ──────────────────────── */
+
+/* ── Media player ──────────────────────────────────────── */
+#custom-media {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+}
+#custom-media.paused {
+    color: #f29e74;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-media.stopped {
+    color: #5c6776;
+    text-shadow: none;
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* prev/next buttons */
+#custom-media-prev,
+#custom-media-next {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+    padding: 0 4px;
+    font-size: 18px;
+}
+#custom-media-prev:hover,
+#custom-media-next:hover {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── Lyrics ───────────────────────────────────────────── */
+#custom-lyrics {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+}
+#custom-lyrics.paused {
+    color: #5c6776;
+    border: none;
+    background-color: transparent;
+    text-shadow: none;
+}

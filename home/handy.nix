@@ -40,6 +40,7 @@
     # ignored.
     rm -rf ~/.local/share/com.pais.handy/CacheStorage
     rm -rf ~/.local/share/com.pais.handy/WebKitCache
+    rm -rf ~/.local/share/com.pais.handy/storage
 
     mkdir -p ~/.local/share/com.pais.handy
     cat > ~/.local/share/com.pais.handy/settings_store.json << 'HANDY_EOF'
