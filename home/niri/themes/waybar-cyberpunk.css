@@ -396,13 +396,13 @@ tooltip label {
     background-color: rgba(20, 20, 40, 0.7);
     color: #cbe3e7;
     margin: 0 1px;
-    padding: 0 8px;
+    padding: 0 12px;
     border-radius: 4px;
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 /* Window-title text inside each niri taskbar button. */
 #workspaces.taskbar button label {
-    margin-left: 2px;
+    margin-left: 5px;
     font-size: 16px;
 }
 #workspaces button .niri-taskbar-btn.focused {

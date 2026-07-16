@@ -322,7 +322,7 @@
     format = "⏮";
     return-type = "json";
     exec = ''echo '{"text":"⏮","tooltip":"Previous track"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -q '^Playing$'";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl previous";
   };
@@ -332,7 +332,7 @@
     format = "⏭";
     return-type = "json";
     exec = ''echo '{"text":"⏭","tooltip":"Next track"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -q '^Playing$'";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl next";
   };
@@ -356,8 +356,8 @@
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
-      # Hide when Tauon is the active player (taskbar shows its info).
-      if echo "$players" | grep -qi tauon; then
+      # Hide when Tauon or kid3 is the active player (taskbar shows its info).
+      if echo "$players" | grep -qiE 'tauon|kid3'; then
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
@@ -402,7 +402,7 @@
       lyric = "";
       music = "󰝚";
     };
-    exec-if = "which waybar-lyric";
+    exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
     exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
     on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
   };

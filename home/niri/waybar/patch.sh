@@ -48,7 +48,7 @@ sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_sta
 # empty, fall back to the rewritten app name.
 # Keep each button's minimum width equal to its displayed title length,
 # capped at 20 characters by the truncation below.
-REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 5);
+REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 2);
     btn_box->set_halign(Gtk::ALIGN_START);
     auto pixbuf = loadIcon(app_id, icon_size);
     if (pixbuf) {
