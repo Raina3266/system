@@ -20,27 +20,20 @@ sed -i 's|  std::string getIcon(const std::string\& value, const Json::Value\& w
   include/modules/niri/workspaces.hpp
 
 # 2. Fix visibility: make hide-empty work together with current-only.
-# Upstream uses if/else-if so current-only takes precedence and
-# hide-empty is never checked. Replace the single-line ternary with
-# a block that also checks hide-empty + active_window_id.
 perl -0777 -i -pe 's/    data\[prop\]\.asBool\(\) \? button_\.show\(\) : button_\.hide\(\);/    bool should_show = data[prop].asBool();\n    if (should_show \&\& cfg["hide-empty"].asBool() \&\& data["active_window_id"].isNull() \&\& !data["is_focused"].asBool()) {\n      should_show = false;\n    }\n    should_show ? button_.show() : button_.hide();/' \
   src/modules/niri/workspace.cpp
 
 # 3. Hide the taskbar box when there are no windows on the workspace.
-# Do NOT re-show the workspace label — just hide everything.
-# Box is left-aligned with hexpand=false so it takes only its natural
-# width — buttons stay at natural size when there are few tabs.
 perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(true);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
   src/modules/niri/workspace.cpp
 
-# 4. Render icon + text title in each taskbar button.
-# Upstream shows either an icon OR a 3-char fallback. Replace with:
-# an icon (if available) followed by just the window title (truncated
-# to 20 chars). No app_id prefix — just the title. If the title is
-# empty, fall back to the rewritten app name.
-# Keep each button's minimum width equal to its displayed title length,
-# capped at 20 characters by the truncation below.
-REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 3);
+# 4. Let taskbar buttons shrink when the bar overflows.
+sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_start(*btn, true, true, 0);|' \
+  src/modules/niri/workspace.cpp
+
+# 5. Render icon + text title in each taskbar button.
+cat > /tmp/waybar-replacement.txt << 'ENDREPLACEMENT'
+    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 3);
     btn_box->set_halign(Gtk::ALIGN_START);
     auto pixbuf = loadIcon(app_id, icon_size);
     if (pixbuf) {
@@ -68,18 +61,47 @@ REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HO
             last_separator - first_separator - separator.length());
       }
     }
-    if (label_text.length() > 20) {
-      label_text = label_text.substr(0, 20);
+    auto strip_prefix = [&](const std::string& name) {
+      if (name.empty()) return;
+      std::string prefix = name + separator;
+      if (label_text.length() > prefix.length() &&
+          label_text.compare(0, prefix.length(), prefix) == 0) {
+        label_text = label_text.substr(prefix.length());
+      }
+    };
+    strip_prefix(app_id);
+    std::string rewrite = manager_.getRewrite(app_id, title);
+    if (!rewrite.empty() && rewrite != "?" && rewrite != app_id) {
+      strip_prefix(rewrite);
+    }
+    int char_count = 0;
+    size_t trunc_pos = 0;
+    while (trunc_pos < label_text.size() && char_count < 20) {
+      unsigned char c = label_text[trunc_pos];
+      if (c < 0x80) trunc_pos += 1;
+      else if ((c & 0xE0) == 0xC0) trunc_pos += 2;
+      else if ((c & 0xF0) == 0xE0) trunc_pos += 3;
+      else if ((c & 0xF8) == 0xF0) trunc_pos += 4;
+      else trunc_pos += 1;
+      char_count++;
+    }
+    if (trunc_pos < label_text.size()) {
+      label_text = label_text.substr(0, trunc_pos);
     }
     auto* lbl = Gtk::make_managed<Gtk::Label>(label_text);
     lbl->set_ellipsize(Pango::ELLIPSIZE_END);
     lbl->set_xalign(0.0);
     lbl->set_single_line_mode(true);
-    int min_chars = (int)label_text.length();
+    int min_chars = char_count;
     if (min_chars > 20) min_chars = 20;
+    if (min_chars < 5) min_chars = 5;
     lbl->set_width_chars(min_chars);
-    btn_box->pack_start(*lbl, true, true, 0);
-    btn->add(*btn_box);'
+    btn_box->pack_start(*lbl, false, false, 0);
+    btn->add(*btn_box);
+ENDREPLACEMENT
 
-perl -0777 -i -pe "s/    auto pixbuf = loadIcon\\(app_id, icon_size\\);\\n    if \\(pixbuf\\) \\{\\n      auto\\* img = Gtk::make_managed<Gtk::Image>\\(pixbuf\\);\\n      btn->add\\(\\*img\\);\\n    \\} else \\{\\n      std::string fallback = app_id.empty\\(\\) \\? title : app_id;\\n      if \\(!fallback.empty\\(\\)\\) \\{\\n        fallback = fallback.substr\\(0, 3\\);\\n      \\} else \\{\\n        fallback = \"\\?\";\\n      \\}\\n      auto\\* lbl = Gtk::make_managed<Gtk::Label>\\(fallback\\);\\n      btn->add\\(\\*lbl\\);\\n    \\}/$REPLACEMENT/" \
+REPLACEMENT=$(cat /tmp/waybar-replacement.txt)
+rm /tmp/waybar-replacement.txt
+
+perl -0777 -i -pe "s/    auto pixbuf = loadIcon\\(app_id, icon_size\\);\n    if \\(pixbuf\\) \\{\\n      auto\\* img = Gtk::make_managed<Gtk::Image>\\(pixbuf\\);\\n      btn->add\\(\\*img\\);\\n    \\} else \\{\\n      std::string fallback = app_id.empty\\(\\) \\? title : app_id;\\n      if \\(!fallback.empty\\(\\)\\) \\{\\n        fallback = fallback.substr\\(0, 3\\);\\n      \\} else \\{\\n        fallback = \"\\?\";\\n      \\}\\n      auto\\* lbl = Gtk::make_managed<Gtk::Label>\\(fallback\\);\\n      btn->add\\(\\*lbl\\);\\n    \\}/$REPLACEMENT/" \
   src/modules/niri/workspace.cpp
