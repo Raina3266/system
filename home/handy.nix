@@ -94,8 +94,8 @@
         onboarding_completed = true;
         ort_accelerator = "auto";
         overlay_position = "bottom";
-        overlay_style = "none";
-        paste_delay_ms = 60;
+        overlay_style = "minimal";
+        paste_delay_ms = 30;
         paste_method = "clipboard";
         post_process_api_keys = {
           anthropic = "";

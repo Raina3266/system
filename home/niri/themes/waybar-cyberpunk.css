@@ -11,11 +11,6 @@
  * dim:     #5c6776
  */
 
-@import "waybar-top-left.css";
-@import "waybar-top-center.css";
-@import "waybar-top-right.css";
-@import "waybar-bottom.css";
-
 * {
     font-family:
         "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
