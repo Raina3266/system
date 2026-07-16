@@ -46,6 +46,47 @@ sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_sta
 # an icon (if available) followed by just the window title (truncated
 # to 20 chars). No app_id prefix — just the title. If the title is
 # empty, fall back to the rewritten app name.
+# Keep each button's minimum width equal to its displayed title length,
+# capped at 20 characters by the truncation below.
+REPLACEMENT='    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 5);
+    btn_box->set_halign(Gtk::ALIGN_START);
+    auto pixbuf = loadIcon(app_id, icon_size);
+    if (pixbuf) {
+      auto* img = Gtk::make_managed<Gtk::Image>(pixbuf);
+      btn_box->pack_start(*img, false, false, 0);
+    }
+    std::string label_text = title;
+    if (label_text.empty() || label_text == app_id) {
+      label_text = manager_.getRewrite(app_id, title);
+      if (label_text.empty() || label_text == "?" || label_text == app_id) {
+        label_text = "?";
+      }
+    }
+    const std::string separator = " - ";
+    const auto first_separator = label_text.find(separator);
+    const auto last_separator = label_text.rfind(separator);
+    if (first_separator != std::string::npos &&
+        last_separator != first_separator &&
+        last_separator > first_separator + separator.length()) {
+      const std::string outer_prefix = label_text.substr(0, first_separator);
+      const std::string outer_suffix = label_text.substr(last_separator + separator.length());
+      if (!outer_prefix.empty() && outer_prefix == outer_suffix) {
+        label_text = label_text.substr(
+            first_separator + separator.length(),
+            last_separator - first_separator - separator.length());
+      }
+    }
+    if (label_text.length() > 20) {
+      label_text = label_text.substr(0, 20);
+    }
+    auto* lbl = Gtk::make_managed<Gtk::Label>(label_text);
+    lbl->set_ellipsize(Pango::ELLIPSIZE_END);
+    lbl->set_single_line_mode(true);
+    int min_chars = (int)label_text.length();
+    if (min_chars > 20) min_chars = 20;
+    lbl->set_width_chars(min_chars);
+    btn_box->pack_start(*lbl, true, true, 0);
+    btn->add(*btn_box);'
 
-perl -0777 -i -pe 's/    auto pixbuf = loadIcon\(app_id, icon_size\);\n    if \(pixbuf\) \{\n      auto\* img = Gtk::make_managed<Gtk::Image>\(pixbuf\);\n      btn->add\(\*img\);\n    \} else \{\n      std::string fallback = app_id.empty\(\) \? title : app_id;\n      if \(!fallback.empty\(\)\) \{\n        fallback = fallback.substr\(0, 3\);\n      \} else \{\n        fallback = "\?";\n      \}\n      auto\* lbl = Gtk::make_managed<Gtk::Label>\(fallback\);\n      btn->add\(\*lbl\);\n    \}/    auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 5);\n    btn_box->set_halign(Gtk::ALIGN_START);\n    auto pixbuf = loadIcon(app_id, icon_size);\n    if (pixbuf) {\n      auto* img = Gtk::make_managed<Gtk::Image>(pixbuf);\n      btn_box->pack_start(*img, false, false, 0);\n    }\n    std::string label_text = title;\n    if (label_text.empty() || label_text == app_id) {\n      label_text = manager_.getRewrite(app_id, title);\n      if (label_text.empty() || label_text == "?" || label_text == app_id) {\n        label_text = "?";\n      }\n    }\n    const std::string separator = " - ";\n    const auto first_separator = label_text.find(separator);\n    const auto last_separator = label_text.rfind(separator);\n    if (first_separator != std::string::npos &&\n        last_separator != first_separator &&\n        last_separator > first_separator + separator.length()) {\n      const std::string outer_prefix = label_text.substr(0, first_separator);\n      const std::string outer_suffix = label_text.substr(last_separator + separator.length());\n      if (!outer_prefix.empty() && outer_prefix == outer_suffix) {\n        label_text = label_text.substr(\n            first_separator + separator.length(),\n            last_separator - first_separator - separator.length());\n      }\n    }\n    if (label_text.length() > 20) {\n      label_text = label_text.substr(0, 20);\n    }\n    auto* lbl = Gtk::make_managed<Gtk::Label>(label_text);\n    lbl->set_ellipsize(Pango::ELLIPSIZE_END);\n    lbl->set_single_line_mode(true);\n    int title_len = (int)label_text.length();\n    if (title_len > 20) title_len = 20;\n    int min_chars = (title_len >= 10) ? (title_len - 2) : 1;\n    lbl->set_width_chars(min_chars);\n    btn_box->pack_start(*lbl, true, true, 0);\n    btn->add(*btn_box);/' \
+perl -0777 -i -pe "s/    auto pixbuf = loadIcon\\(app_id, icon_size\\);\\n    if \\(pixbuf\\) \\{\\n      auto\\* img = Gtk::make_managed<Gtk::Image>\\(pixbuf\\);\\n      btn->add\\(\\*img\\);\\n    \\} else \\{\\n      std::string fallback = app_id.empty\\(\\) \\? title : app_id;\\n      if \\(!fallback.empty\\(\\)\\) \\{\\n        fallback = fallback.substr\\(0, 3\\);\\n      \\} else \\{\\n        fallback = \"\\?\";\\n      \\}\\n      auto\\* lbl = Gtk::make_managed<Gtk::Label>\\(fallback\\);\\n      btn->add\\(\\*lbl\\);\\n    \\}/$REPLACEMENT/" \
   src/modules/niri/workspace.cpp

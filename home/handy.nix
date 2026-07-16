@@ -3,20 +3,19 @@
 # Uses clipboard paste method (wl-copy) + wtype for typing, which works on
 # both niri and GNOME Wayland (both support virtual-keyboard-v1 + wl-copy).
 #
-# The settings are written via an activation script ONLY on first install
-# (when no settings file exists yet). This is deliberate: handy manages its
-# own settings file at runtime — it reads it on startup and writes to it on
-# every settings change. If the activation script overwrites the file on
-# every `nixos-rebuild switch`, handy's in-memory state gets out of sync
-# with the file, and it resets `selected_model` to empty — breaking
-# transcription with "Model not found". The downloaded model itself lives
-# in the HuggingFace cache (~/.cache/huggingface/hub), which persists across
-# reboots on the /home btrfs subvolume, so it only needs to be downloaded
-# once.
+# Handy stores settings in two places:
+#   1. settings_store.json — the "source of truth" on disk
+#   2. Tauri WebView local storage — a cached copy that the UI reads/writes
 #
-# To change settings after install, either edit them in handy's UI, or
-# delete ~/.local/share/com.pais.handy/settings_store.json and re-run
-# `nixos-rebuild switch` to regenerate from the defaults below.
+# The WebView cache silently overrides the JSON file on startup.  To make
+# Nix-managed settings actually take effect, the activation script must:
+#   - Stop Handy (so it doesn't write stale state back)
+#   - Wipe the WebView cache (so Handy falls through to the JSON file)
+#   - Write the JSON file
+#
+# The downloaded model lives in the HuggingFace cache
+# (~/.cache/huggingface/hub), which persists across reboots on the /home
+# btrfs subvolume, so it only needs to be downloaded once.
 {
   pkgs,
   config,
@@ -30,9 +29,20 @@
   ];
 
   home.activation.handySettings = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-    if [ ! -f ~/.local/share/com.pais.handy/settings_store.json ]; then
-      mkdir -p ~/.local/share/com.pais.handy
-      cat > ~/.local/share/com.pais.handy/settings_store.json << 'HANDY_EOF'
+    # Stop handy before touching its settings, otherwise it will
+    # overwrite the file on exit with its in-memory (stale) state.
+    pkill -x handy 2>/dev/null || true
+    sleep 0.5
+
+    # Wipe the Tauri WebView local-storage cache.  Handy's WebView
+    # caches settings there and silently overrides settings_store.json
+    # on startup.  Without clearing this, changes to the JSON file are
+    # ignored.
+    rm -rf ~/.local/share/com.pais.handy/CacheStorage
+    rm -rf ~/.local/share/com.pais.handy/WebKitCache
+
+    mkdir -p ~/.local/share/com.pais.handy
+    cat > ~/.local/share/com.pais.handy/settings_store.json << 'HANDY_EOF'
       ${builtins.toJSON {
         settings = {
         always_on_microphone = false;
@@ -217,6 +227,5 @@ Transcript:
       };
     }}
     HANDY_EOF
-    fi
   '';
 }

@@ -5,7 +5,7 @@
 {
   layer = "top";
   position = "bottom";
-  height = 40;
+  height = 42;
   smooth-scrolling-threshold = 5;
 
   modules-left = [

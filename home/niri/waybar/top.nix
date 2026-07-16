@@ -16,7 +16,8 @@
     "group/hardware"
   ];
   modules-center = [
-    "group/media"
+    "group/media-control"
+    "custom/media"
     "custom/lyrics"
   ];
   modules-right = [
@@ -307,12 +308,12 @@
   # All three hide when no player is running (via exec-if on the prev/next
   # modules, and the stopped CSS class on custom/media). Grouped so they
   # sit together as a single unit in the center.
-  "group/media" = {
+  "group/media-control" = {
     orientation = "horizontal";
     modules = [
       "custom/media-prev"
-      "custom/media"
       "custom/media-next"
+      "custom/media"
     ];
   };
 
@@ -321,7 +322,7 @@
     format = "⏮";
     return-type = "json";
     exec = ''echo '{"text":"⏮","tooltip":"Previous track"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -q '^Playing$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl previous";
   };
@@ -331,7 +332,7 @@
     format = "⏭";
     return-type = "json";
     exec = ''echo '{"text":"⏭","tooltip":"Next track"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -q '^Playing$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl next";
   };
@@ -352,6 +353,11 @@
     exec = pkgs.writeShellScript "waybar-media-poll" ''
       players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
       if [ -z "$players" ]; then
+          printf '{"text":"","class":"stopped"}'
+          exit 0
+      fi
+      # Hide when Tauon is the active player (taskbar shows its info).
+      if echo "$players" | grep -qi tauon; then
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
