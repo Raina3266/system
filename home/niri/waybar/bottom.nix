@@ -87,7 +87,7 @@
     window-rewrite-default = "";
     workspace-taskbar = {
       enable = true;
-      icon-size = 20;
+      icon-size = 22;
     };
   };
 }

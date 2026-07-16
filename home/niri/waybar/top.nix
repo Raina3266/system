@@ -12,16 +12,18 @@
 
   modules-left = [
     "clock"
-    "tray"
     "group/system"
     "group/hardware"
   ];
-  modules-center = [ "custom/media" "custom-lyrics" ];
+  modules-center = [
+    "custom/lyric"
+  ];
   modules-right = [
     "custom/timer"
     "custom/todo"
     "custom/cliphist"
     "custom/files"
+    "tray"
     "custom/bt"
     "custom/wifi"
     "custom/powermenu"
@@ -69,7 +71,7 @@
       transition-left-to-right = true;
     };
     modules = [
-      "battery"
+      "custom/battery"
       "backlight"
       "pulseaudio"
     ];
@@ -99,7 +101,7 @@
 
   "temperature" = {
     hwmon-path = "";
-    thermal-zone = 0;
+    thermal-zone = 7;
     critical-threshold = 80;
     interval = 5;
     format = "󰔏 {temperatureC}°C";
@@ -139,9 +141,9 @@
       ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
       if [ -n "$ssid" ]; then
         signal=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
-        printf '{"text":"󰤨","tooltip":"Connected: %s (%s%%)\nLeft-click to scan & connect"}' "$ssid" "$signal"
+        printf '{"text":"󰤨","tooltip":"Connected: %s (%s%%)"}' "$ssid" "$signal"
       else
-        printf '{"text":"󰤪","tooltip":"Wi-Fi: Disconnected\nLeft-click to scan & connect"}'
+        printf '{"text":"󰤪","tooltip":"Wi-Fi: Disconnected"}'
       fi
     '';
     interval = 5;
@@ -159,12 +161,12 @@
       if [ "$powered" = "yes" ]; then
         names=$(bluetoothctl devices Connected 2>/dev/null | sed 's/^Device [0-9A-Fa-f:]* //' | tr '\n' ',' | sed 's/,$//')
         if [ -n "$names" ]; then
-          printf '{"text":"󰂯","tooltip":"Connected: %s\nLeft-click to manage"}' "$names"
+          printf '{"text":"󰂯","tooltip":"Connected: %s"}' "$names"
         else
-          printf '{"text":"󰂯","tooltip":"Bluetooth: On (no devices connected)\nLeft-click to scan & connect"}'
+          printf '{"text":"󰂯","tooltip":"Bluetooth: On (no devices connected)"}'
         fi
       else
-        printf '{"text":"󰂱","tooltip":"Bluetooth: Off\nLeft-click to turn on"}'
+        printf '{"text":"󰂱","tooltip":"Bluetooth: Off"}'
       fi
     '';
     interval = 5;
@@ -188,47 +190,68 @@
 
   "pulseaudio" = {
     format = "󰕾 {volume}%";
-    format-bluetooth = "󰕾  {volume}%";
+    format-bluetooth = "󰕾 {volume}%";
     format-bluetooth-muted = "󰝟 {volume}%";
     format-muted = "󰝟 {volume}%";
-    tooltip-format = "󰕾 {desc} // {volume}%";
+    tooltip-format = "Volume: {volume}%";
     scroll-step = 5;
     on-click-right = "pavucontrol";
     on-click = "pactl set-sink-mute 0 toggle";
   };
 
-  "battery" = {
-    format = "{icon} {capacity}%";
-    format-charging = "󰂄 {capacity}%";
-    format-icons = [
-      "󰁺"
-      "󰁻"
-      "󰁼"
-      "󰁽"
-      "󰁾"
-      "󰁿"
-      "󰂀"
-      "󰂁"
-      "󰂂"
-      "󰁹"
-    ];
-    format-plugged = "󰂄 {capacity}%";
-    tooltip-format = "{timeToEmpty} remaining\n{status}";
-    states = {
-      warning = 20;
-      critical = 10;
-    };
+  "custom/battery" = {
+    return-type = "json";
     interval = 5;
-    on-click = pkgs.writeShellScript "waybar-battery-profile" ''
-      choice=$(${pkgs.walker}/bin/walker -d -p "Power Profile" <<EOF
-      performance
-      balanced
-      power-saver
-      EOF
-      )
-      [ -z "$choice" ] && exit 0
-      powerprofilesctl set "$choice" 2>/dev/null
-      notify-send "Power Profile" "Set to $choice"
+    exec = pkgs.writeShellScript "waybar-battery-poll" ''
+      bat=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1)
+      if [ -z "$bat" ]; then
+        printf '{"text":"","class":"clear"}'
+        exit 0
+      fi
+  
+      capacity=$(cat "$bat/capacity" 2>/dev/null)
+      status=$(cat "$bat/status" 2>/dev/null)  # Charging / Discharging / Full / Not charging
+      profile=$(powerprofilesctl get 2>/dev/null)
+  
+      icons=("󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹")
+      idx=$(( capacity / 10 ))
+      [ "$idx" -gt 9 ] && idx=9
+      icon="''${icons[$idx]}"
+  
+      case "$status" in
+        Charging|"Not charging")
+          icon="󰂄"
+          class="charging"
+          ;;
+        Full)
+          icon="󰂄"
+          class="full"
+          ;;
+        *)
+          class="discharging"
+          if [ "$capacity" -le 10 ]; then
+            class="critical"
+          elif [ "$capacity" -le 20 ]; then
+            class="warning"
+          fi
+          ;;
+      esac
+  
+      tooltip="$status | Profile: $profile"
+  
+      ${pkgs.jq}/bin/jq -cn --arg text "$icon $capacity%" --arg tooltip "$tooltip" --arg class "$class" \
+        '{text:$text, tooltip:$tooltip, class:$class}'
+    '';
+    on-click = pkgs.writeShellScript "waybar-battery-cycle" ''
+      current=$(powerprofilesctl get 2>/dev/null)
+      case "$current" in
+        performance) next="balanced" ;;
+        balanced) next="power-saver" ;;
+        power-saver) next="performance" ;;
+        *) next="balanced" ;;
+      esac
+      powerprofilesctl set "$next" 2>/dev/null
+      notify-send "Power Profile" "Set to $next"
     '';
   };
 
@@ -285,7 +308,7 @@
   # right-click: next, scroll up/down: prev/next.
   "custom/media" = {
     hide-empty = true;
-    format = "{icon} {}";
+    format = "{icon} {text}";
     format-icons = {
       "Playing" = "▶";
       "Paused" = "⏸";
@@ -293,11 +316,13 @@
     };
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-media-poll" ''
-      status=$(${pkgs.playerctl}/bin/playerctl status 2>/dev/null)
-      if [ -z "$status" ]; then
-        printf '{"text":"","class":"stopped"}'
-        exit 0
+      players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
+      if [ -z "$players" ]; then
+          printf '{"text":"","class":"stopped"}'
+          exit 0
       fi
+      status=$(${pkgs.playerctl}/bin/playerctl status 2>/dev/null)
+      [ -z "$status" ] && status="Stopped"
       artist=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{artist}}' 2>/dev/null)
       title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
       player=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{playerName}}' 2>/dev/null)
@@ -323,6 +348,33 @@
     on-click-right = "${pkgs.playerctl}/bin/playerctl next";
     on-scroll-up = "${pkgs.playerctl}/bin/playerctl next";
     on-scroll-down = "${pkgs.playerctl}/bin/playerctl previous";
+  };
+
+  # Lyrics (center). Hidden when no player is running, shown otherwise.
+  # Placeholder: shows the track title. Swap the exec script for a real
+  # lyric source (waylyrics/MPRIS/etc.) when available.
+  "custom/lyric" = {
+    hide-empty = true;
+    format = "{}";
+    return-type = "json";
+    exec = pkgs.writeShellScript "waybar-lyric-poll" ''
+      players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
+      if [ -z "$players" ]; then
+          printf '{"text":"","class":"stopped"}'
+          exit 0
+      fi
+      status=$(${pkgs.playerctl}/bin/playerctl status 2>/dev/null)
+      [ -z "$status" ] && status="Stopped"
+      title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
+      class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
+      text="$title"
+      if [ -z "$text" ]; then
+        text="♪"
+      fi
+      ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" \
+        '{text:$text, class:$class, tooltip:$text}'
+    '';
+    interval = 2;
   };
 
   "custom/powermenu" = {

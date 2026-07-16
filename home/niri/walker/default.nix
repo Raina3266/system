@@ -2,7 +2,7 @@
 #
 # Replaces rofi — Walker is a GTK4 Wayland launcher that supports
 # click-outside-to-close (unlike rofi on Wayland). Uses elephant's
-# built-in clipboard/todo/bitwarden/files providers instead of custom
+# built-in clipboard/todo/files providers instead of custom
 # shell scripts.
 { pkgs, ... }:
 {
@@ -35,8 +35,6 @@
         todo.list = "No tasks";
         bluetooth.input = "Bluetooth";
         bluetooth.list = "No devices found";
-        bitwarden.input = "Search vault…";
-        bitwarden.list = "No matching entries";
         windows.input = "Search windows…";
         windows.list = "No open windows";
         files.input = "Search files…";
@@ -75,10 +73,6 @@
           {
             provider = "bluetooth";
             prefix = "bt:";
-          }
-          {
-            provider = "bitwarden";
-            prefix = "pw:";
           }
           {
             provider = "providerlist";
@@ -200,15 +194,6 @@
           ];
           providerlist = [
             { action = "activate"; default = true; bind = "Return"; after = "ClearReload"; }
-          ];
-          bitwarden = [
-            { action = "copypassword"; label = "copy password"; default = true; bind = "Return"; }
-            { action = "typepassword"; label = "type password"; default = true; bind = "ctrl p"; }
-            { action = "copyusername"; label = "copy username"; bind = "shift Return"; }
-            { action = "typeusername"; label = "type username"; bind = "ctrl u"; }
-            { action = "copyotp"; label = "copy 2fa"; bind = "ctrl Return"; }
-            { action = "typeotp"; label = "type 2fa"; bind = "ctrl t"; }
-            { action = "syncvault"; label = "sync"; bind = "ctrl s"; }
           ];
           bluetooth = [
             { action = "find"; bind = "ctrl f"; after = "AsyncClearReload"; }
@@ -371,9 +356,8 @@
     };
     themes =
       let
-        base = builtins.readFile ./theme/walker-cyberpunk.css;
-        layoutTopRight = builtins.readFile ./theme/walker-layout-top-right.xml;
-        layoutBottom = builtins.readFile ./theme/walker-layout-bottom.xml;
+        base = builtins.readFile ../themes/walker-cyberpunk.css;
+        layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
       in
       {
         # Default theme: top-right dropdown, sitting just under the top waybar.
@@ -384,15 +368,10 @@
           style = base;
           layouts."layout" = layoutTopRight;
         };
-        # Bottom-center dropup, sitting just above the bottom waybar.
-        cyberpunk-bottom = {
-          style = base;
-          layouts."layout" = layoutBottom;
-        };
       };
   };
 
   home.packages = with pkgs; [
-    wtype # Wayland typing — used by bitwarden provider's autotype
+    wtype # Wayland typing
   ];
 }

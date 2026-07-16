@@ -1,0 +1,378 @@
+/* Cyberpunk Waybar Theme */
+/*
+ * Palette:
+ * bg:      rgba(10, 10, 20, 0.85)
+ * bg-mod:  rgba(20, 20, 40, 0.7)
+ * fg:      #cbe3e7
+ * pink:    #ff7edb
+ * cyan:    #7afcff
+ * amber:   #f29e74
+ * red:     #ff3333
+ * dim:     #5c6776
+ */
+
+* {
+    font-family:
+        "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
+        "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+window#waybar {
+    background-color: rgba(10, 10, 20, 0.85);
+    color: #cbe3e7;
+    border-bottom: 2px solid #ff7edb;
+    box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
+}
+
+/* Bottom bar: pink line on top instead of bottom */
+window#waybar.bottom {
+    border-bottom: none;
+    border-top: 2px solid #ff7edb;
+    box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
+}
+
+/* ── Module base ─────────────────────────────────────────── */
+#workspaces,
+#cpu,
+#temperature,
+#memory,
+#disk,
+#network,
+#clock,
+#custom-lyrics,
+#custom-media,
+#custom-wifi,
+#custom-bt,
+#custom-cliphist,
+#custom-timer,
+#custom-todo,
+#custom-files,
+#custom-obsidian,
+#custom-thunar,
+#custom-tauon,
+#custom-whatsapp,
+#custom-gkeep,
+#custom-gcal,
+#custom-gphotos,
+#custom-thunderbird,
+#backlight,
+#pulseaudio,
+#custom-battery,
+#custom-powermenu,
+#tray {
+    background-color: rgba(20, 20, 40, 0.7);
+    margin: 0 3px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 126, 219, 0.2);
+}
+
+/* ── Group containers (transparent, no box) ────────────────── */
+#group-hardware,
+#group-system {
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* Ensure all modules inside groups get box styling */
+#group-hardware > widget,
+#group-system > widget {
+    background-color: rgba(20, 20, 40, 0.7);
+    margin: 0 3px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 126, 219, 0.2);
+}
+
+/* ── Left: neon cyan/pink ────────────────────────────────── */
+#cpu {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#temperature {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#temperature.critical {
+    color: #ff3333;
+    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
+    animation: blink 1s steps(2) infinite;
+}
+#memory {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#disk {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#network {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#network.disconnected {
+    color: #ff3333;
+    text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+
+/* ── Group headers ───────────────────────────────────────── */
+#group-hardware {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#group-system {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+
+/* ── Starred apps ───────────────────────────────────────── */
+#custom-obsidian,
+#custom-thunar,
+#custom-tauon,
+#custom-whatsapp,
+#custom-gkeep,
+#custom-gcal,
+#custom-gphotos,
+#custom-thunderbird {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-obsidian:hover,
+#custom-thunar:hover,
+#custom-tauon:hover,
+#custom-whatsapp:hover,
+#custom-gkeep:hover,
+#custom-gcal:hover,
+#custom-gphotos:hover,
+#custom-thunderbird:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    border-color: rgba(255, 126, 219, 0.5);
+}
+
+/* ── Center: media player ──────────────────────────────── */
+#custom-media {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+}
+#custom-media.paused {
+    color: #f29e74;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-media.stopped {
+    color: #5c6776;
+    text-shadow: none;
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Center: lyric ─────────────────────────────────────── */
+#custom-lyrics {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+}
+#custom-lyrics.paused {
+    color: #5c6776;
+    border: none;
+    background-color: transparent;
+    text-shadow: none;
+}
+
+/* ── Right: amber/pink utilities ────────────────────────── */
+#tray {
+    color: #cbe3e7;
+}
+#custom-wifi {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-bt {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-cliphist {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-files {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-timer {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-todo {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#custom-todo.urgent {
+    color: #ff3333;
+    text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
+}
+#custom-todo.pending {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+#custom-todo.clear {
+    color: #5c6776;
+}
+#backlight {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#pulseaudio {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#pulseaudio.muted {
+    color: #5c6776;
+    text-shadow: none;
+}
+#battery {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#battery.warning:not(.charging) {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#battery.critical:not(.charging) {
+    color: #ff3333;
+    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
+    animation: blink 1s steps(2) infinite;
+}
+#clock {
+    color: #ff7edb;
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+}
+#custom-powermenu {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── bottom ────────────────────────── */
+
+#workspaces {
+    border: none;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+}
+#workspaces button {
+    color: #5c6776;
+    padding: 0 4px;
+    margin: 0 3px;
+    background-color: rgba(20, 20, 40, 0.7);
+    border: 3px solid rgba(255, 126, 219, 0.2);
+    border-radius: 6px;
+}
+#workspaces button.active,
+#workspaces button.focused {
+    color: #ff7edb;
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+}
+#workspaces button.urgent {
+    color: #ff3333;
+    text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+#workspaces button:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    border-color: rgba(255, 126, 219, 0.5);
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}
+
+/* ── Hover effect ───────────────────────────────────────── */
+#workspaces button:hover,
+#cpu:hover,
+#temperature:hover,
+#memory:hover,
+#disk:hover,
+#network:hover,
+#clock:hover,
+#custom-wifi:hover,
+#custom-bt:hover,
+#custom-cliphist:hover,
+#custom-files:hover,
+#custom-timer:hover,
+#custom-todo:hover,
+#custom-obsidian:hover,
+#custom-thunar:hover,
+#custom-tauon:hover,
+#custom-whatsapp:hover,
+#custom-gkeep:hover,
+#custom-gcal:hover,
+#custom-gphotos:hover,
+#custom-thunderbird:hover,
+#backlight:hover,
+#pulseaudio:hover,
+#battery:hover,
+#custom-powermenu:hover,
+#tray:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    border-color: rgba(255, 126, 219, 0.5);
+}
+
+/* ── Calendar tooltip ───────────────────────────────────── */
+tooltip {
+    background-color: rgba(10, 10, 20, 0.95);
+    border: 1px solid #ff7edb;
+    border-radius: 6px;
+    box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
+}
+tooltip label {
+    color: #cbe3e7;
+}
+
+@keyframes blink {
+    to {
+        color: #1a1a2e;
+        text-shadow: none;
+    }
+}
+
+/* ── Bottom bar: niri workspace taskbar ─────────────────── */
+/* Per-window buttons inside the taskbar instance. Each button shows an
+   app icon + text label (app name: title). Buttons are homogeneous and
+   expand to fill available width so they squeeze when there are too
+   many windows. The text ellipsizes when squeezed. */
+
+#workspaces.taskbar button .niri-taskbar-btn {
+    background-color: rgba(20, 20, 40, 0.7);
+    color: #cbe3e7;
+    margin: 0 1px;
+    padding: 0 4px;
+    border-radius: 4px;
+    border: 2px solid rgba(255, 126, 219, 0.2);
+}
+#workspaces.taskbar button .niri-taskbar-btn label {
+    margin-left: 2px;
+}
+#workspaces button .niri-taskbar-btn.focused {
+    background-color: rgba(255, 126, 219, 0.15);
+    color: #ff7edb;
+    border-color: rgba(255, 126, 219, 0.5);
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+}
+#workspaces button .niri-taskbar-btn:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    border-color: rgba(255, 126, 219, 0.5);
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}

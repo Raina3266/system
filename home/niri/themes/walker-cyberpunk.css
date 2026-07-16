@@ -54,9 +54,8 @@ scrollbar slider {
 /* ── Main window box ──────────────────────────────────────
  * Positioning (valign/halign) is controlled by the layout XML, not CSS —
  * GTK4 alignment properties in XML override any CSS margins. The
- * layout XML for each theme sets the box-wrapper alignment:
- *   cyberpunk        → valign=start, halign=end   (top-right)
- *   cyberpunk-bottom → valign=end,   halign=center (bottom-center)
+ * layout XML sets the box-wrapper alignment:
+ *   cyberpunk → valign=start, halign=end   (top-right)
  */
 .box-wrapper {
   box-shadow:

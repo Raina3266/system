@@ -13,9 +13,30 @@
   programs'.waybar.enable = true;
 
   # Tools invoked by niri binds in config.kdl.
+  # Includes mediactl — a wrapper around playerctl that targets the
+  # right player when multiple MPRIS players are running (e.g. VLC +
+  # Chromium). Prefers a player that is currently Playing; falls back
+  # to the most recently active player. Usage: mediactl <play-pause|next|previous|stop>
   home.packages = with pkgs; [
     brightnessctl # F5/F6 brightness keys
     wob # Wayland overlay progress bar — used by the timer
+    (writeShellScriptBin "mediactl" ''
+      cmd="$1"
+      players=$(${playerctl}/bin/playerctl -l 2>/dev/null)
+      [ -z "$players" ] && exit 0
+      target=""
+      for p in $players; do
+        st=$(${playerctl}/bin/playerctl -p "$p" status 2>/dev/null)
+        if [ "$st" = "Playing" ]; then
+          target="$p"
+          break
+        fi
+      done
+      # Fall back to the first listed player (playerctl -l orders by
+      # most recent activity).
+      [ -z "$target" ] && target=$(echo "$players" | head -n1)
+      exec ${playerctl}/bin/playerctl -p "$target" "$cmd"
+    '')
   ];
 
   # wob daemon — reads integer percentages from $XDG_RUNTIME_DIR/wob.sock

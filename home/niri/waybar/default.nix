@@ -54,7 +54,7 @@ in
       programs.waybar = {
         enable = true;
         systemd.enable = true;
-        style = ./theme/waybar-cyberpunk.css;
+        style = ../themes/waybar-cyberpunk.css;
 
         settings = {
           inherit topBar bottomBar;
