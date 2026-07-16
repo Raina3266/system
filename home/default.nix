@@ -69,6 +69,10 @@
     # downloads / torrent
     qbittorrent
     clash-verge-rev
+
+    gnomeExtensions.simple-timer
+    gnomeExtensions.clipboard-history
+    gnomeExtensions.astra-monitor
   ];
 
   programs.thunderbird = {

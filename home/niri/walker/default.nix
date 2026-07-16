@@ -63,6 +63,9 @@
           "websearch"
         ];
         empty = [ "desktopapplications" ];
+        # Skip the preview pane (right-hand box) for the clipboard
+        # provider — the entry list on the left stays as-is.
+        ignore_preview = [ "clipboard" ];
         prefixes = [
           {
             provider = "clipboard";
@@ -423,5 +426,6 @@
 
   home.packages = with pkgs; [
     wtype # Wayland typing
+    fd # files provider (elephant/walker)
   ];
 }

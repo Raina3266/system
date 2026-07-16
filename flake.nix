@@ -60,10 +60,10 @@
         overlays = [
           nixGL.overlay
           (final: prev: {
-            # Waybar from master (for niri/workspaces workspace-taskbar mode,
-            # PR #4997) with local patches for hide-empty + current-only
-            # and homogeneous button layout. Re-evaluate whether this
-            # overlay is still needed each time nixpkgs bumps waybar.
+            # Waybar master includes workspace-taskbar from merged PR #4997,
+            # but it is not in the latest stable release yet. Keep the local
+            # patches for hide-empty + current-only until upstream includes
+            # those fixes or nixpkgs carries a suitable Waybar version.
             waybar = inputs.waybar.packages.${system}.default.overrideAttrs (old: {
               nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.perl ];
               postPatch = (old.postPatch or "") + ''

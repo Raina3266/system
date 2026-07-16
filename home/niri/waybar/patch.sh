@@ -33,10 +33,14 @@ perl -0777 -i -pe 's/    data\[prop\]\.asBool\(\) \? button_\.show\(\) : button_
 # Do NOT re-show the workspace label — just hide everything.
 # hexpand=true fills the available bar width; halign=START keeps
 # content left-aligned so few tabs don't stretch.
-perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.set_hexpand(true);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
+perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
+    src/modules/niri/workspace.cpp
+
+# 4. Keep the taskbar box expanded while left-aligning its contents.
+sed -i 's|    taskbar_box_\.show();|    taskbar_box_.set_hexpand(true);\n    taskbar_box_.set_halign(Gtk::ALIGN_START);\n    taskbar_box_.show();|' \
   src/modules/niri/workspace.cpp
 
-# 4. Render icon + text title in each taskbar button.
+# 5. Render icon + text title in each taskbar button.
 # Upstream shows either an icon OR a 3-char fallback. Replace with:
 # an icon (if available) followed by the window title (truncated to
 # 20 chars). Before truncation, the title is cleaned up:

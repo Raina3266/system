@@ -17,9 +17,13 @@
   # right player when multiple MPRIS players are running (e.g. VLC +
   # Chromium). Prefers a player that is currently Playing; falls back
   # to the most recently active player. Usage: mediactl <play-pause|next|previous|stop>
+  # Also includes xwayland-satellite (spawned at startup by config.kdl)
+  # for rootless XWayland so legacy X11 apps work under niri.
   home.packages = with pkgs; [
     brightnessctl # F5/F6 brightness keys
     wob # Wayland overlay progress bar — used by the timer
+    xwayland-satellite # rootless XWayland for X11 apps
+    xrandr # for X11 apps that query display layout
     (writeShellScriptBin "mediactl" ''
       cmd="$1"
       players=$(${playerctl}/bin/playerctl -l 2>/dev/null)
@@ -91,8 +95,8 @@
     PerScreenDPI=True
     UseDarkTheme=False
     Theme=cyberpunk
-    Font="Sans 16"
-    MenuFont="Sans 16"
+    Font="Sans 15"
+    MenuFont="Sans 15"
   '';
 
   home.pointerCursor = {

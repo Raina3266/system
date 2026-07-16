@@ -1,13 +1,27 @@
-{ pkgs, config, ... }:
-
 # Handy speech-to-text configuration.
 #
 # Uses clipboard paste method (wl-copy) + wtype for typing, which works on
 # both niri and GNOME Wayland (both support virtual-keyboard-v1 + wl-copy).
 #
-# The settings are written via an activation script (not a symlink) so handy
-# can still write to the file at runtime. On every NixOS switch, the file is
-# overwritten with the defaults below — edit this file to change settings.
+# The settings are written via an activation script ONLY on first install
+# (when no settings file exists yet). This is deliberate: handy manages its
+# own settings file at runtime — it reads it on startup and writes to it on
+# every settings change. If the activation script overwrites the file on
+# every `nixos-rebuild switch`, handy's in-memory state gets out of sync
+# with the file, and it resets `selected_model` to empty — breaking
+# transcription with "Model not found". The downloaded model itself lives
+# in the HuggingFace cache (~/.cache/huggingface/hub), which persists across
+# reboots on the /home btrfs subvolume, so it only needs to be downloaded
+# once.
+#
+# To change settings after install, either edit them in handy's UI, or
+# delete ~/.local/share/com.pais.handy/settings_store.json and re-run
+# `nixos-rebuild switch` to regenerate from the defaults below.
+{
+  pkgs,
+  config,
+  ...
+}:
 {
   home.packages = with pkgs; [
     handy
@@ -16,10 +30,11 @@
   ];
 
   home.activation.handySettings = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-    mkdir -p ~/.local/share/com.pais.handy
-    cat > ~/.local/share/com.pais.handy/settings_store.json << 'HANDY_EOF'
-    ${builtins.toJSON {
-      settings = {
+    if [ ! -f ~/.local/share/com.pais.handy/settings_store.json ]; then
+      mkdir -p ~/.local/share/com.pais.handy
+      cat > ~/.local/share/com.pais.handy/settings_store.json << 'HANDY_EOF'
+      ${builtins.toJSON {
+        settings = {
         always_on_microphone = false;
         app_language = "en-GB";
         append_trailing_space = false;
@@ -60,7 +75,7 @@
         external_script_path = null;
         extra_recording_buffer_ms = 0;
         history_limit = 5;
-        keyboard_implementation = "tauri";
+        keyboard_implementation = "wtype";
         lazy_stream_close = false;
         log_level = "debug";
         model_unload_timeout = "min5";
@@ -202,5 +217,6 @@ Transcript:
       };
     }}
     HANDY_EOF
+    fi
   '';
 }

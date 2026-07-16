@@ -15,13 +15,6 @@
     sushi
     ffmpegthumbnailer
     gdk-pixbuf
-    gnomeExtensions.simple-timer
-    gnomeExtensions.clipboard-history
-    gnomeExtensions.astra-monitor
-
-    # Runtime deps for elephant/walker providers:
-    fd              # files provider
-    playerctl       # media control (waybar custom/media + elephant provider)
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────

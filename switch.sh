@@ -3,7 +3,7 @@ set -euxo pipefail
 
 git add -A
 
-nixos-rebuild build --flake .
+sudo nixos-rebuild build --flake .
 sudo nixos-rebuild switch --flake .
 
 # nix shell nixpkgs#git --extra-experimental-features nix-command --extra-experimental-features flakes

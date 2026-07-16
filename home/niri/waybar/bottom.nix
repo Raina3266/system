@@ -18,10 +18,8 @@
     "custom/whatsapp"
     "custom/gkeep"
     "custom/gphotos"
-     "niri/workspaces#taskbar" 
+    "niri/workspaces#taskbar"
   ];
-  modules-center = [ ];
-  modules-right = [ ];
 
   "custom/thunar" = {
     format = "📁";
@@ -81,6 +79,7 @@
   # Per-window taskbar — shows app icon + text title for windows on
   # the current workspace only. Click to focus, middle-click to close.
   "niri/workspaces#taskbar" = {
+    expand = true;
     current-only = true;
     hide-empty = true;
     format-window-separator = "  ";

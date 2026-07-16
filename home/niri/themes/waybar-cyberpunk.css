@@ -310,8 +310,7 @@ window#waybar.bottom {
 #workspaces {
     border: none;
     background-color: transparent;
-    margin:  0 3px;
-    padding: 0;
+    margin:  0 2px;
 }
 #workspaces button {
     color: #5c6776;
@@ -394,6 +393,10 @@ tooltip label {
    expand to fill available width so they squeeze when there are too
    many windows. The text ellipsizes when squeezed. */
 
+#workspaces.taskbar button {
+  border: none;
+  background-color: transparent;
+}
 #workspaces.taskbar button .niri-taskbar-btn {
     background-color: rgba(20, 20, 40, 0.7);
     color: #cbe3e7;
@@ -416,6 +419,5 @@ tooltip label {
     background-image: none;
     border-color: rgba(255, 126, 219, 0.5);
     color: #ff7edb;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
     box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
