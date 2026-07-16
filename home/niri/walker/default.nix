@@ -4,8 +4,10 @@
 # click-outside-to-close (unlike rofi on Wayland). Uses elephant's
 # built-in clipboard/todo/files providers instead of custom
 # shell scripts.
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 {
+  imports = [ inputs.walker.homeManagerModules.default ];
+
   programs.walker = {
     enable = true;
     runAsService = true;
