@@ -44,8 +44,8 @@
             name = "Transcribe";
           };
           transcribe_with_post_process = {
-            current_binding = "ctrl+shift+space";
-            default_binding = "ctrl+shift+space";
+            current_binding = "mod+alt+space";
+            default_binding = "mod+alt+space";
             description = "Converts your speech into text and applies AI post-processing.";
             id = "transcribe_with_post_process";
             name = "Transcribe with Post-Processing";

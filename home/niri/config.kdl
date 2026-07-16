@@ -75,7 +75,7 @@ layout {
 }
 
 spawn-at-startup "xwayland-satellite"
-spawn-at-startup "handy"
+spawn-at-startup "handy" "--start-hidden"
 // fcitx5 is started by the NixOS i18n.inputMethod module.
 
 hotkey-overlay {
@@ -139,6 +139,8 @@ binds {
     F6 hotkey-overlay-title="Brightness Up"   { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
     F7 hotkey-overlay-title="Switch Window"   { focus-window-down; }
     F8 hotkey-overlay-title="Do Not Disturb"  { spawn-sh "makoctl set-mode dnd 2>/dev/null || swaync-client -t 2>/dev/null || true"; }
+    F10 hotkey-overlay-title="Media Play"     { spawn-sh "mediactl play-pause"; }
+    F11 hotkey-overlay-title="Media Pause"    { spawn-sh "mediactl play-pause"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }

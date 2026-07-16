@@ -21,16 +21,26 @@ let
 
     # First-run detection: if no lock file exists yet, do a --resync
     # to establish the baseline. Otherwise run a normal two-way sync.
+    #
+    # --check-access is a steady-state safety feature: it aborts unless
+    # matching RCLONE_TEST files exist on both sides. It is *enforced
+    # during --resync too* (per the rclone docs), so it would block the
+    # very first resync from ever completing — a deadlock, since the
+    # lock file that marks "first run done" is only written by a
+    # successful run. We therefore disable --check-access on the first
+    # (resync) run, and enable it for every subsequent normal sync.
     if [ ! -f "${bisyncStateDir}/bisync.lck" ]; then
       resync_flag="--resync"
+      check_access_flag=""
     else
       resync_flag=""
+      check_access_flag="--check-access"
     fi
 
     exec ${pkgs.rclone}/bin/rclone bisync \
       "${musicDir_local}" "${musicRemote}" \
       --workdir "${bisyncStateDir}" \
-      --check-access \
+      $check_access_flag \
       --conflict-resolve newer \
       --conflict-suffix conflict \
       --resilient \
@@ -126,8 +136,11 @@ in
     #
     # IMPORTANT: the very first run must be a --resync to establish the
     # baseline. The ExecStartPre below detects a missing lock file (i.e.
-    # bisync has never completed successfully) and runs `--resync` once.
-    # Subsequent runs are normal two-way syncs.
+    # bisync has never completed successfully) and runs `--resync` once
+    # *without* --check-access (which would otherwise deadlock the first
+    # run, since --check-access is enforced during --resync and there are
+    # no RCLONE_TEST files yet). Subsequent runs are normal two-way syncs
+    # with --check-access enabled for safety.
     #
     # to view status:  systemctl --user status rclone-bisync-music.service
     # to view errors:  journalctl --user-unit rclone-bisync-music.service
@@ -173,7 +186,7 @@ in
         WantedBy = [ "timers.target" ];
       };
       Timer = {
-        OnBootSec = "2min";
+        OnBootSec = "1min";
         OnUnitActiveSec = "1h";
         Persistent = true;
       };

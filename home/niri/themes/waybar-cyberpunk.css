@@ -43,6 +43,8 @@ window#waybar.bottom {
 #clock,
 #custom-lyrics,
 #custom-media,
+#custom-media-prev,
+#custom-media-next,
 #custom-wifi,
 #custom-bt,
 #custom-cliphist,
@@ -92,6 +94,31 @@ window#waybar.bottom {
 #cpu {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#temperature {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#temperature.critical {
+    color: #ff3333;
+    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
+    animation: blink 1s steps(2) infinite;
+}
+#memory {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#disk {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#network {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+}
+#network.disconnected {
+    color: #ff3333;
+    text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
 }
 #temperature {
     color: #f29e74;
@@ -173,6 +200,22 @@ window#waybar.bottom {
     border: none;
     margin: 0;
     padding: 0;
+}
+
+/* prev/next buttons — match the media module's cyan glow. */
+#custom-media-prev,
+#custom-media-next {
+    color: #7afcff;
+    border: none;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
+    padding: 0 4px;
+}
+
+#custom-media-prev:hover,
+#custom-media-next:hover {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
 /* ── Center: lyric ─────────────────────────────────────── */
@@ -267,7 +310,7 @@ window#waybar.bottom {
 #workspaces {
     border: none;
     background-color: transparent;
-    margin: 0;
+    margin:  0 3px;
     padding: 0;
 }
 #workspaces button {

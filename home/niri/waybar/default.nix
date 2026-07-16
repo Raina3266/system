@@ -29,37 +29,40 @@ in
     enableNiriIntegration = lib.mkEnableOption "Niri workspace switcher";
   };
 
-  config = lib.mkIf (pkgs.stdenv.isLinux && cfg.enable) (lib.mkMerge [
-    {
-      home.packages = with pkgs; [
-        wl-clipboard
-        jq
-        playerctl
-      ];
+  config = lib.mkIf (pkgs.stdenv.isLinux && cfg.enable) (
+    lib.mkMerge [
+      {
+        home.packages = with pkgs; [
+          waybar-lyric
+          wl-clipboard
+          jq
+          playerctl
+        ];
 
-      systemd.user.services.waybar = {
-        Unit = {
-          # Only run under niri — GNOME/Mutter lacks layer-shell support
-          # and waybar would crash-loop there.
-          ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+        systemd.user.services.waybar = {
+          Unit = {
+            # Only run under niri — GNOME/Mutter lacks layer-shell support
+            # and waybar would crash-loop there.
+            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+          };
+          Service = {
+            Restart = lib.mkForce "on-failure";
+            RestartSec = 3;
+          };
         };
-        Service = {
-          Restart = lib.mkForce "on-failure";
-          RestartSec = 3;
-        };
-      };
-    }
+      }
 
-    (lib.mkIf (osConfig != null) {
-      programs.waybar = {
-        enable = true;
-        systemd.enable = true;
-        style = ../themes/waybar-cyberpunk.css;
+      (lib.mkIf (osConfig != null) {
+        programs.waybar = {
+          enable = true;
+          systemd.enable = true;
+          style = ../themes/waybar-cyberpunk.css;
 
-        settings = {
-          inherit topBar bottomBar;
+          settings = {
+            inherit topBar bottomBar;
+          };
         };
-      };
-    })
-  ]);
+      })
+    ]
+  );
 }

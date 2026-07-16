@@ -56,6 +56,10 @@ scrollbar slider {
  * GTK4 alignment properties in XML override any CSS margins. The
  * layout XML sets the box-wrapper alignment:
  *   cyberpunk → valign=start, halign=end   (top-right)
+ *
+ * Sizing is also content-driven via the layout XML: BoxWrapper has no
+ * fixed width/height-request, and Scroll caps growth with max-content-*
+ * only, so the popup shrinks to fit small menus and grows up to the cap.
  */
 .box-wrapper {
   box-shadow:
@@ -63,7 +67,7 @@ scrollbar slider {
     0 19px 38px rgba(0, 0, 0, 0.3),
     0 15px 12px rgba(0, 0, 0, 0.22);
   background: #0a0a14f2;
-  padding: 20px;
+  padding: 12px;
   border-radius: 10px;
   border: 2px solid #ff7edb;
 }
@@ -72,9 +76,6 @@ scrollbar slider {
 .elephant-hint,
 .placeholder {
   color: #cbe3e7;
-}
-
-.box {
 }
 
 .search-container {
@@ -95,7 +96,7 @@ scrollbar slider {
 .input {
   caret-color: #7afcff;
   background: #141428b3;
-  padding: 12px 16px;
+  padding: 10px 14px;
   color: #7afcff;
   border: 1px solid rgba(255, 126, 219, 0.2);
   border-radius: 6px;
@@ -109,26 +110,14 @@ scrollbar slider {
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
-.content-container {
-}
-
-.placeholder {
-}
-
-.scroll {
-}
-
 .list {
   color: #cbe3e7;
-}
-
-child {
 }
 
 /* ── List items ─────────────────────────────────────────── */
 .item-box {
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   color: #cbe3e7;
 }
@@ -158,9 +147,6 @@ row:selected .item-box {
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
-.item-text-box {
-}
-
 .item-subtext {
   font-size: 11px;
   color: #5c6776;
@@ -185,6 +171,12 @@ row:selected .item-subtext {
   border: 1px solid rgba(255, 126, 219, 0.25);
   border-radius: 10px;
   color: #cbe3e7;
+}
+
+/* Scrolled window wrapping the preview. Caps the preview area so large
+   PDF/image previews can't expand the whole popup. */
+.preview-scroll {
+  border-radius: 10px;
 }
 
 .calc .item-text {
@@ -228,15 +220,6 @@ row:selected .item-subtext {
   font-size: 12px;
   color: #7afcff;
   text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-
-.global-keybinds {
-}
-
-.item-keybinds {
-}
-
-.keybind {
 }
 
 .keybind-button {

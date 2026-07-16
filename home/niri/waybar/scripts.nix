@@ -105,6 +105,13 @@ in
     if [ "$remaining" -le 0 ]; then
       rm -f "$state"
       ${notify} -u critical "Timer" "⏰ ${label:-Done}"
+      # Beep: 880Hz sine wave for 0.3s, played in background so the
+      # poll loop isn't blocked. Uses ffplay (ffmpeg) with a lavfi
+      # sine source; -nodisp hides the video window, -autoexit quits
+      # after the tone finishes.
+      (
+        ${pkgs.ffmpeg}/bin/ffplay -nodisp -autoexit -f lavfi -i "sine=frequency=880:duration=1" >/dev/null 2>&1
+      ) &
       printf '{"text":"󰔛","tooltip":"Timer"}'
       exit 0
     fi

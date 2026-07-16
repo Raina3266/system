@@ -16,14 +16,15 @@
     "group/hardware"
   ];
   modules-center = [
-    "custom/lyric"
+    "group/media"
+    "custom/lyrics"
   ];
   modules-right = [
-    "custom/timer"
-    "custom/todo"
+    "tray"
     "custom/cliphist"
     "custom/files"
-    "tray"
+    "custom/timer"
+    "custom/todo"
     "custom/bt"
     "custom/wifi"
     "custom/powermenu"
@@ -302,6 +303,35 @@
     '';
   };
 
+  # Media controls group: prev | track info (play/pause) | next.
+  # All three hide when no player is running (via exec-if on the prev/next
+  # modules, and the stopped CSS class on custom/media). Grouped so they
+  # sit together as a single unit in the center.
+  "group/media" = {
+    orientation = "horizontal";
+    modules = [
+      "custom/media-prev"
+      "custom/media"
+      "custom/media-next"
+    ];
+  };
+
+  # Previous track button. Hidden when no player is running.
+  "custom/media-prev" = {
+    format = "⏮";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
+    interval = 2;
+    on-click = "${pkgs.playerctl}/bin/playerctl previous";
+  };
+
+  # Next track button. Hidden when no player is running.
+  "custom/media-next" = {
+    format = "⏭";
+    exec-if = "${pkgs.playerctl}/bin/playerctl -l 2>/dev/null | grep -q .";
+    interval = 2;
+    on-click = "${pkgs.playerctl}/bin/playerctl next";
+  };
+
   # Media player (center, appears only when playing). Polls playerctl
   # for metadata. Hidden entirely when no player is running via the
   # `stopped` CSS class (display:none). Left-click: play/pause,
@@ -345,36 +375,26 @@
     '';
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
-    on-click-right = "${pkgs.playerctl}/bin/playerctl next";
-    on-scroll-up = "${pkgs.playerctl}/bin/playerctl next";
-    on-scroll-down = "${pkgs.playerctl}/bin/playerctl previous";
   };
 
-  # Lyrics (center). Hidden when no player is running, shown otherwise.
-  # Placeholder: shows the track title. Swap the exec script for a real
-  # lyric source (waylyrics/MPRIS/etc.) when available.
-  "custom/lyric" = {
-    hide-empty = true;
-    format = "{}";
+  # Lyrics (center). Real-time synced lyrics via waybar-lyric, which
+  # fetches from LrcLib / embedded lyrics / .lrc files / MPRIS and emits
+  # waybar JSON. Hidden when no player is running (waybar-lyric outputs
+  # empty text, and hide-empty-text hides the module).
+  # Left-click toggles play/pause via waybar-lyric's subcommand.
+  "custom/lyrics" = {
+    hide-empty-text = true;
     return-type = "json";
-    exec = pkgs.writeShellScript "waybar-lyric-poll" ''
-      players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
-      if [ -z "$players" ]; then
-          printf '{"text":"","class":"stopped"}'
-          exit 0
-      fi
-      status=$(${pkgs.playerctl}/bin/playerctl status 2>/dev/null)
-      [ -z "$status" ] && status="Stopped"
-      title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
-      class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
-      text="$title"
-      if [ -z "$text" ]; then
-        text="♪"
-      fi
-      ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" \
-        '{text:$text, class:$class, tooltip:$text}'
-    '';
-    interval = 2;
+    format = "{icon} {0}";
+    format-icons = {
+      playing = "▶";
+      paused = "⏸";
+      lyric = "";
+      music = "󰝚";
+    };
+    exec-if = "which waybar-lyric";
+    exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
+    on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
   };
 
   "custom/powermenu" = {

@@ -18,7 +18,7 @@
     "custom/whatsapp"
     "custom/gkeep"
     "custom/gphotos"
-    "niri/workspaces#taskbar"
+     "niri/workspaces#taskbar" 
   ];
   modules-center = [ ];
   modules-right = [ ];
@@ -74,8 +74,8 @@
 
   # Workspace switcher — shows index + name for each workspace.
   "niri/workspaces" = {
-    format = "{index} {name}";
-    tooltip-format = "Workspace {index}: {name}";
+    format = " {index} ";
+    tooltip-format = "Workspace";
   };
 
   # Per-window taskbar — shows app icon + text title for windows on
