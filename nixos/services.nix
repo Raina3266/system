@@ -15,6 +15,7 @@
     sushi
     ffmpegthumbnailer
     gdk-pixbuf
+    nemo-with-extensions
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────
@@ -65,12 +66,6 @@
   };
 
   # File manager
-  programs.thunar.enable = true;
-  programs.xfconf.enable = true;
-  programs.thunar.plugins = with pkgs; [
-    thunar-volman
-    thunar-media-tags-plugin
-  ];
   services.tumbler.enable = true; # Thumbnail support for images
 
   # ── Sound (PipeWire) ──────────────────────────────────────────────────

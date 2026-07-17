@@ -22,7 +22,7 @@ in
 
   modules-left = [
     "niri/workspaces"
-    "custom/thunar"
+    "custom/nemo"
     "custom/thunderbird"
     "custom/gcal"
     "custom/obsidian"
@@ -33,7 +33,7 @@ in
     "niri/workspaces#taskbar"
   ];
 
-  "custom/thunar" = starredApp "Thunar" "📁" "thunar";
+  "custom/nemo" = starredApp "Nemo" "📁" "nemo";
   "custom/thunderbird" = starredApp "Thunderbird" "📧" "thunderbird";
   "custom/obsidian" = starredApp "Obsidian" "📝" "obsidian";
   "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
