@@ -1,4 +1,21 @@
 { pkgs, scripts }:
+let
+  # Static icon + tooltip that never updates (interval = 1 day) and
+  # launches walker on click. Used for cliphist / files / powermenu.
+  staticLauncher =
+    name: icon: tooltip: walkerArgs:
+    {
+      format = "<span size='x-large'>${icon}</span>";
+      return-type = "json";
+      exec = pkgs.writeShellScript "waybar-${name}-poll" ''
+        printf '{"text":"<span size='"'"'x-large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
+      '';
+      interval = 86400;
+      on-click = pkgs.writeShellScript "waybar-${name}" ''
+        ${pkgs.walker}/bin/walker ${walkerArgs}
+      '';
+    };
+in
 {
   "custom/audio-sink" = {
     format = "<span size='x-large'>󰕾</span>";
@@ -27,29 +44,9 @@
     spacing = 10;
   };
 
-  "custom/cliphist" = {
-    format = "<span size='x-large'>󰕛</span>";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-cliphist-poll" ''
-      printf '{"text":"<span size='"'"'x-large'"'"'>󰕛</span>","tooltip":"Clipboard history"}'
-    '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-cliphist" ''
-      ${pkgs.walker}/bin/walker -m clipboard
-    '';
-  };
+  "custom/cliphist" = staticLauncher "cliphist" "󰕛" "Clipboard history" "-m clipboard";
 
-  "custom/files" = {
-    format = "<span size='x-large'>󰥢</span>";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-files-poll" ''
-      printf '{"text":"<span size='"'"'x-large'"'"'>󰥢</span>","tooltip":"Search files"}'
-    '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-files" ''
-      ${pkgs.walker}/bin/walker -m files
-    '';
-  };
+  "custom/files" = staticLauncher "files" "󰥢" "Search files" "-m files";
 
   "custom/timer" = {
     return-type = "json";
@@ -105,14 +102,13 @@
     format = "{}";
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-wifi-poll" ''
-      on_icon="<span size='x-large'>󰤨</span>"
-      off_icon="<span size='x-large'>󰤨</span>"
+      icon="<span size='x-large'>󰤨</span>"
       ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
       if [ -n "$ssid" ]; then
         signal=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
-        printf '{"text":"%s","tooltip":"Connected: %s (%s%%)"}' "$on_icon" "$ssid" "$signal"
+        printf '{"text":"%s","tooltip":"Connected: %s (%s%%)"}' "$icon" "$ssid" "$signal"
       else
-        printf '{"text":"%s","tooltip":"Wi-Fi: Disconnected"}' "$off_icon"
+        printf '{"text":"%s","tooltip":"Wi-Fi: Disconnected"}' "$icon"
       fi
     '';
     interval = 5;
@@ -121,15 +117,5 @@
     '';
   };
 
-  "custom/powermenu" = {
-    format = "<span size='x-large'>󰐥</span>";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-powermenu-poll" ''
-      printf '{"text":"<span size='"'"'x-large'"'"'>󰐥</span>","tooltip":"Power menu"}'
-    '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-powermenu" ''
-      ${pkgs.walker}/bin/walker -m menus:power
-    '';
-  };
+  "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-m menus:power";
 }

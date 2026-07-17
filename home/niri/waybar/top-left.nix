@@ -1,4 +1,11 @@
 { pkgs }:
+let
+  # Shared drawer config for the system/hardware groups.
+  drawer = {
+    transition-duration = 300;
+    transition-left-to-right = true;
+  };
+in
 {
   "clock" = {
     format = "󰃭 {:%A %d %B  %H:%M}";
@@ -20,10 +27,7 @@
 
   "group/system" = {
     orientation = "horizontal";
-    drawer = {
-      transition-duration = 300;
-      transition-left-to-right = true;
-    };
+    inherit drawer;
     modules = [
       "custom/battery"
       "backlight"
@@ -33,10 +37,7 @@
 
   "group/hardware" = {
     orientation = "horizontal";
-    drawer = {
-      transition-duration = 300;
-      transition-left-to-right = true;
-    };
+    inherit drawer;
     modules = [
       "temperature"
       "memory"
@@ -161,20 +162,4 @@
     tooltip-format-disconnected = "󰖪 Disconnected";
     on-click-right = "nm-connection-editor";
   };
-
-  "power-profiles-daemon" =
-    let
-      icon = cp: builtins.fromJSON ''"\u${cp}"'';
-    in
-    {
-      format = "{icon}";
-      tooltip-format = "Power profile: {profile}\nDriver: {driver}";
-      tooltip = true;
-      format-icons = {
-        default = icon "F0E7";
-        performance = icon "F135";
-        balanced = icon "F24E";
-        power-saver = icon "F06C";
-      };
-    };
 }

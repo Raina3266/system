@@ -2,6 +2,18 @@
 # icons) + starred-app launcher buttons.
 # Returns the bottomBar attrset (without bar outputs — merged by default.nix).
 { }:
+let
+  # Starred-app launcher button: emoji icon + tooltip + background launch.
+  starredApp = name: icon: cmd: {
+    format = icon;
+    tooltip = true;
+    tooltip-format = name;
+    on-click = "${cmd} &";
+  };
+
+  # Google Chrome PWA launcher by app id.
+  chromeApp = name: icon: appId: starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
+in
 {
   layer = "top";
   position = "bottom";
@@ -21,54 +33,14 @@
     "niri/workspaces#taskbar"
   ];
 
-  "custom/thunar" = {
-    format = "📁";
-    tooltip = true;
-    tooltip-format = "Thunar";
-    on-click = "thunar &";
-  };
-  "custom/thunderbird" = {
-    format = "📧";
-    tooltip = true;
-    tooltip-format = "Thunderbird";
-    on-click = "thunderbird &";
-  };
-  "custom/obsidian" = {
-    format = "📝";
-    tooltip = true;
-    tooltip-format = "Obsidian";
-    on-click = "obsidian &";
-  };
-  "custom/tauon" = {
-    format = "🎵";
-    tooltip = true;
-    tooltip-format = "Tauon";
-    on-click = "tauon &";
-  };
-  "custom/whatsapp" = {
-    format = "💬";
-    tooltip = true;
-    tooltip-format = "WhatsApp";
-    on-click = "whatsie &";
-  };
-  "custom/gkeep" = {
-    format = "🗒️";
-    tooltip = true;
-    tooltip-format = "Google Keep";
-    on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
-  };
-  "custom/gcal" = {
-    format = "📅";
-    tooltip = true;
-    tooltip-format = "Google Calendar";
-    on-click = "google-chrome-stable --profile-directory=Default --app-id=kjbdgfilnfhdoflbpgamdcdgpehopbep &";
-  };
-  "custom/gphotos" = {
-    format = "🖼️";
-    tooltip = true;
-    tooltip-format = "Google Photos";
-    on-click = "google-chrome-stable --profile-directory=Default --app-id=ncmjhecbjeaamljdfahankockkkdmedg &";
-  };
+  "custom/thunar" = starredApp "Thunar" "📁" "thunar";
+  "custom/thunderbird" = starredApp "Thunderbird" "📧" "thunderbird";
+  "custom/obsidian" = starredApp "Obsidian" "📝" "obsidian";
+  "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
+  "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
+  "custom/gkeep" = chromeApp "Google Keep" "🗒️" "eilembjdkfgodjkcjnpgpaenohkicgjd";
+  "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
+  "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
 
   # Workspace switcher — shows index + name for each workspace.
   "niri/workspaces" = {

@@ -26,7 +26,6 @@ in
 {
   options.programs'.waybar = {
     enable = lib.mkEnableOption "waybar";
-    enableNiriIntegration = lib.mkEnableOption "Niri workspace switcher";
   };
 
   config = lib.mkIf (pkgs.stdenv.isLinux && cfg.enable) (

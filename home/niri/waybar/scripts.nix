@@ -229,11 +229,10 @@ in
     state="${timerState}"
     if [ -f "$state" ]; then
       read -r end total label paused < "$state"
+      end=$((end - 60))
       if [ "$paused" = "1" ]; then
-        end=$((end - 60))
         [ "$end" -lt 0 ] && end=0
       else
-        end=$((end - 60))
         [ "$end" -lt $(date +%s) ] && end=$(( $(date +%s) + 1 ))
       fi
       printf '%s %s %s %s\n' "$end" "$total" "$label" "$paused" > "$state"

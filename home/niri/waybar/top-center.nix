@@ -1,13 +1,18 @@
 { pkgs }:
-{
-  "custom/media-prev" = {
-    format = "<span size='x-large'>⏮</span>";
+let
+  # prev/next media button: large glyph, only shown when a player is
+  # Playing or Paused. Click runs the given playerctl subcommand.
+  mediaButton = glyph: cmd: {
+    format = "<span size='x-large'>${glyph}</span>";
     return-type = "json";
-    exec = ''echo '{"text":"⏮",}' '';
+    exec = ''echo '{"text":"${glyph}",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl previous";
+    on-click = "${pkgs.playerctl}/bin/playerctl ${cmd}";
   };
+in
+{
+  "custom/media-prev" = mediaButton "⏮" "previous";
 
   "custom/media" = {
     hide-empty = true;
@@ -69,12 +74,5 @@
     on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
   };
 
-  "custom/media-next" = {
-    format = "<span size='x-large'>⏭</span>";
-    return-type = "json";
-    exec = ''echo '{"text":"⏭",}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
-    interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl next";
-  };
+  "custom/media-next" = mediaButton "⏭" "next";
 }

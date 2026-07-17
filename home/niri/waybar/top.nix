@@ -4,7 +4,7 @@
 let
   left = import ./top-left.nix { inherit pkgs; };
   center = import ./top-center.nix { inherit pkgs; };
-  right = import ./top-right.nix { inherit pkgs; scripts = scripts; };
+  right = import ./top-right.nix { inherit pkgs scripts; };
 in
 {
   layer = "top";
