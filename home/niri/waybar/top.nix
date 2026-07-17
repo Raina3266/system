@@ -1,10 +1,10 @@
 # Top waybar: clock, tray, hardware/system groups, media, utilities.
 # Returns the topBar attrset (without bar outputs — merged by default.nix).
-{ pkgs, scripts }:
+{ pkgs }:
 let
   left = import ./top-left.nix { inherit pkgs; };
   center = import ./top-center.nix { inherit pkgs; };
-  right = import ./top-right.nix { inherit pkgs scripts; };
+  right = import ./top-right.nix { inherit pkgs; };
 in
 {
   layer = "top";

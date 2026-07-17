@@ -10,7 +10,6 @@
 # Each plugin must also be add()'ed in init.lua before it can be referenced.
 {
   pkgs,
-  lib,
   ...
 }:
 let
@@ -19,6 +18,10 @@ let
   yp = pkgs.yaziPlugins;
 in
 {
+  home.sessionVariables = {
+    TERMINAL = "ghostty";
+  };
+
   programs.yazi = {
     enable = true;
     enableFishIntegration = true;
@@ -51,17 +54,17 @@ in
     # ──────────────────────────────────────────────────────────────────────
     plugins = {
       # 1. Advanced & Specialized Previews
-      "mime-ext" = yp.mime-ext;       # fast mime detection by extension
+      "mime-ext" = yp.mime-ext; # fast mime detection by extension
       "rich-preview" = yp.rich-preview; # rich previews for various types
-      "glow" = yp.glow;               # markdown rendering
-      "miller" = yp.miller;           # CSV/TSV/JSON tabular preview
-      "mediainfo" = yp.mediainfo;     # media metadata preview
-      "duckdb" = yp.duckdb;           # SQL/Parquet/CSV via duckdb
-      "lsar" = yp.lsar;               # archive contents listing
-      "office" = yp.office;           # .docx/.xlsx/.pptx preview
-      "piper" = yp.piper;             # pipe any shell command as previewer
-      "allmytoes" = yp.allmytoes;     # freedesktop thumbnail generation
-      "convert" = yp.convert;         # image format conversion
+      "glow" = yp.glow; # markdown rendering
+      "miller" = yp.miller; # CSV/TSV/JSON tabular preview
+      "mediainfo" = yp.mediainfo; # media metadata preview
+      "duckdb" = yp.duckdb; # SQL/Parquet/CSV via duckdb
+      "lsar" = yp.lsar; # archive contents listing
+      "office" = yp.office; # .docx/.xlsx/.pptx preview
+      "piper" = yp.piper; # pipe any shell command as previewer
+      "allmytoes" = yp.allmytoes; # freedesktop thumbnail generation
+      "convert" = yp.convert; # image format conversion
 
       # 2. Smart File Manipulation & Integration
       "smart-filter" = yp.smart-filter;
@@ -69,17 +72,17 @@ in
       "smart-paste" = yp.smart-paste;
       "bookmarks" = yp.bookmarks;
       "full-border" = yp.full-border;
-      "ouch" = yp.ouch;               # archive compress/extract
+      "ouch" = yp.ouch; # archive compress/extract
       "rsync" = yp.rsync;
       "sudo" = yp.sudo;
       "diff" = yp.diff;
 
       # 3. UI Customization & Quality of Life
-      "yatline" = yp.yatline;         # custom header/status lines
-      "git" = yp.git;                 # git status in listings
-      "githead" = yp.githead;         # git branch in header
+      "yatline" = yp.yatline; # custom header/status lines
+      "git" = yp.git; # git status in listings
+      "githead" = yp.githead; # git branch in header
       "toggle-pane" = yp.toggle-pane;
-      "zoom" = yp.zoom;               # zoom preview pane
+      "zoom" = yp.zoom; # zoom preview pane
       "relative-motions" = yp.relative-motions;
       "jump-to-char" = yp.jump-to-char;
       "easyjump" = yp.easyjump;
@@ -125,24 +128,62 @@ in
             group = "mime";
           }
           # 3. Git status fetcher (feeds the `git` linemode + githead).
-          { url = "*"; run = "git"; group = "git"; }
-          { url = "*/"; run = "git"; group = "git"; }
+          {
+            url = "*";
+            run = "git";
+            group = "git";
+          }
+          {
+            url = "*/";
+            run = "git";
+            group = "git";
+          }
         ];
         # 1. Specialized previewers.
         prepend_previewers = [
-          { mime = "text/markdown"; run = "glow"; }
-          { mime = "text/csv"; run = "miller"; }
-          { mime = "application/json"; run = "miller"; }
+          {
+            mime = "text/markdown";
+            run = "glow";
+          }
+          {
+            mime = "text/csv";
+            run = "miller";
+          }
+          {
+            mime = "application/json";
+            run = "miller";
+          }
           # Office documents
-          { mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"; run = "office"; }
-          { mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; run = "office"; }
-          { mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"; run = "office"; }
+          {
+            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            run = "office";
+          }
+          {
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            run = "office";
+          }
+          {
+            mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            run = "office";
+          }
           # Archives (lsar lists contents)
-          { mime = "application/{,g}zip"; run = "lsar"; }
-          { mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}"; run = "lsar"; }
+          {
+            mime = "application/{,g}zip";
+            run = "lsar";
+          }
+          {
+            mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}";
+            run = "lsar";
+          }
           # Data files via duckdb
-          { mime = "application/vnd.ms-excel"; run = "duckdb"; }
-          { url = "*.parquet"; run = "duckdb"; }
+          {
+            mime = "application/vnd.ms-excel";
+            run = "duckdb";
+          }
+          {
+            url = "*.parquet";
+            run = "duckdb";
+          }
         ];
       };
     };

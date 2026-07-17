@@ -2,7 +2,8 @@
 #
 # The top bar (clock, hardware, media, utilities) and bottom bar
 # (niri workspace taskbar + launcher buttons) live in separate files
-# for readability. Polling scripts (todo, timer) are in scripts.nix.
+# for readability. Polling scripts (todo, timer) live in top-right.nix,
+# next to the modules that use them.
 {
   pkgs,
   lib,
@@ -12,7 +13,6 @@
 }:
 let
   cfg = config.programs'.waybar;
-  scripts = import ./scripts.nix { inherit pkgs; };
 
   # Outputs to attach the bars to: every non-auxiliary display declared
   # in osConfig.services'.desktop.displays (if any).
@@ -20,7 +20,7 @@ let
     output = map (d: d.name) (lib.filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
   };
 
-  topBar = (import ./top.nix { inherit pkgs scripts; }) // barOutputs;
+  topBar = (import ./top.nix { inherit pkgs; }) // barOutputs;
   bottomBar = (import ./bottom.nix { }) // barOutputs;
 in
 {

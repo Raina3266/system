@@ -134,11 +134,15 @@
         actions = {
           todo = [
             { action = "save"; default = true; bind = "Return"; after = "AsyncClearReload"; }
-            { action = "delete"; label = "delete"; bind = "Delete"; after = "AsyncClearReload"; }
+            { action = "save_next"; label = "save & new"; bind = "shift Return"; after = "AsyncClearReload"; }
+            { action = "delete"; bind = "ctrl d"; after = "AsyncClearReload"; }
             { action = "active"; default = true; bind = "Return"; after = "Nothing"; }
             { action = "inactive"; default = true; bind = "Return"; after = "Nothing"; }
-            { action = "done"; label = "done"; bind = "ctrl Return"; after = "Nothing"; }
-            { action = "search"; label = "search"; bind = "ctrl a"; after = "AsyncClearReload"; }
+            { action = "done"; bind = "ctrl f"; after = "Nothing"; }
+            { action = "change_category"; bind = "ctrl y"; label = "change category"; after = "Nothing"; }
+            { action = "clear"; bind = "ctrl x"; after = "AsyncClearReload"; }
+            { action = "create"; bind = "ctrl a"; after = "AsyncClearReload"; }
+            { action = "search"; bind = "ctrl s"; after = "AsyncClearReload"; }
           ];
           desktopapplications = [
             { action = "start"; default = true; bind = "Return"; }

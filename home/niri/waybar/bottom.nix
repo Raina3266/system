@@ -22,23 +22,23 @@ in
 
   modules-left = [
     "niri/workspaces"
-    "custom/nemo"
     "custom/thunderbird"
     "custom/gcal"
+    "custom/gkeep"
+    "custom/gphotos"
     "custom/obsidian"
     "custom/tauon"
     "custom/whatsapp"
-    "custom/gkeep"
-    "custom/gphotos"
+    "custom/yazi"
     "niri/workspaces#taskbar"
   ];
 
-  "custom/nemo" = starredApp "Nemo" "📁" "nemo";
+  "custom/yazi" = starredApp "Yazi" "🐤" "ghostty -e yazi";
   "custom/thunderbird" = starredApp "Thunderbird" "📧" "thunderbird";
-  "custom/obsidian" = starredApp "Obsidian" "📝" "obsidian";
-  "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
+  "custom/obsidian" = starredApp "Obsidian" "💎" "obsidian";
+  "custom/tauon" = starredApp "Tauon" "🎙️" "tauon";
   "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
-  "custom/gkeep" = chromeApp "Google Keep" "🗒️" "eilembjdkfgodjkcjnpgpaenohkicgjd";
+  "custom/gkeep" = chromeApp "Google Keep" "📝" "eilembjdkfgodjkcjnpgpaenohkicgjd";
   "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
   "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
 

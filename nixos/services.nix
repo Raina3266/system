@@ -59,14 +59,12 @@
 
   # Power management for waybar's power-profiles-daemon module.
   services.power-profiles-daemon.enable = true;
+  services.tumbler.enable = true; # Thumbnail support for images
 
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [ xdg-desktop-portal-gnome ];
   };
-
-  # File manager
-  services.tumbler.enable = true; # Thumbnail support for images
 
   # ── Sound (PipeWire) ──────────────────────────────────────────────────
   services.pulseaudio.enable = false;
