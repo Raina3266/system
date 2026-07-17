@@ -23,15 +23,6 @@
 
   programs.home-manager.enable = true;
 
-  # Restore Tauon layout and config from repo on every rebuild.
-  home.activation.restoreTauonLayout =
-    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      tauonDir="$HOME/.local/share/TauonMusicBox"
-      install -d -m 700 "$tauonDir"
-      install -m 600 ${./tauon/window.p} "$tauonDir/window.p"
-      install -m 600 ${./tauon/tauon.conf} "$tauonDir/tauon.conf"
-    '';
-
   home.packages = with pkgs; [
     # browsers
     google-chrome

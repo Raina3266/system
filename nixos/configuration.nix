@@ -127,6 +127,7 @@
       LIBVA_DRIVER_NAME = "iHD"; # Force intel-media-driver
       # Tell Electron apps (Discord, etc.) to use the Wayland backend
       # instead of X11/Xwayland.
+      TERMINAL = "ghostty";
       ELECTRON_OZONE_PLATFORM_HINT = "wayland";
     };
 

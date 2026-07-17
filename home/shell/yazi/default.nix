@@ -18,10 +18,6 @@ let
   yp = pkgs.yaziPlugins;
 in
 {
-  home.sessionVariables = {
-    TERMINAL = "ghostty";
-  };
-
   programs.yazi = {
     enable = true;
     enableFishIntegration = true;
