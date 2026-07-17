@@ -33,7 +33,7 @@ in
   # tasks ranked by urgency. Left/right-click open walker's todo
   # provider (add/complete/delete/activate).
   todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
-    icon="󰄲"
+    icon="<span size='x-large'>󰄲</span>"
     if [ ! -f "${todoFile}" ]; then
       printf '{"text":"%s","tooltip":"Todo","class":"clear"}' "$icon"
       exit 0
@@ -51,9 +51,9 @@ in
     } END{print c+0}' "${todoFile}")
 
     if [ "$actionable" -gt 0 ] 2>/dev/null; then
-      text="$icon $actionable"; class="urgent"
+      text="$icon <span size='medium'>$actionable</span>"; class="urgent"
     elif [ "$pending" -gt 0 ] 2>/dev/null; then
-      text="$icon $pending"; class="pending"
+      text="$icon <span size='medium'>$pending</span>"; class="pending"
     else
       text="$icon"; class="clear"
     fi
@@ -88,15 +88,16 @@ in
   # waybar.nix.
   timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
     state="${timerState}"
+    icon="<span size='x-large'>󰔛</span>"
     if [ ! -f "$state" ]; then
-      printf '{"text":"󰔛","tooltip":"Timer"}'
+      printf '{"text":"%s","tooltip":"Timer"}' "$icon"
       exit 0
     fi
     read -r end total label paused < "$state"
     now=$(date +%s)
     if [ "$paused" = "1" ]; then
       remaining=$end
-      text=$(printf " 󰔛 %d:%02d " $((remaining/60)) $((remaining%60)))
+      text=$(printf " %s <span size='medium'>%d:%02d</span>" "$icon" $((remaining/60)) $((remaining%60)))
       printf '{"text":"%s","tooltip":"Timer paused"}' "$text" "${label:-paused}"
       ${wobTick}
       exit 0
@@ -112,16 +113,16 @@ in
       (
         ${pkgs.ffmpeg}/bin/ffplay -nodisp -autoexit -f lavfi -i "sine=frequency=880:duration=1" >/dev/null 2>&1
       ) &
-      printf '{"text":"󰔛","tooltip":"Timer"}'
+      printf '{"text":"%s","tooltip":"Timer"}' "$icon"
       exit 0
     fi
     h=$((remaining / 3600))
     m=$(((remaining % 3600) / 60))
     s=$((remaining % 60))
     if [ "$h" -gt 0 ]; then
-      text=$(printf "󰔛 %d:%02d:%02d" "$h" "$m" "$s")
+      text=$(printf "%s <span size='medium'>%d:%02d:%02d</span>" "$icon" "$h" "$m" "$s")
     else
-      text=$(printf "󰔛 %d:%02d" "$m" "$s")
+      text=$(printf "%s <span size='medium'>%d:%02d</span>" "$icon" "$m" "$s")
     fi
     printf '{"text":"%s","tooltip":"Timer running"}' "$text" "${label:-running}"
     ${wobTick}

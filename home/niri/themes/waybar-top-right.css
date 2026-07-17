@@ -1,45 +1,56 @@
 /* ── Top-right: tray, utilities ──────────────────────────── */
 
 #custom-audio-sink {
-    color: #7afcff;
+    color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #tray {
     color: #7afcff;
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-wifi {
-    color: #7afcff;
+    color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-bt {
-    color: #7afcff;
+    color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-cliphist {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-files {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-timer {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-todo {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-todo.urgent {
     color: #ff3333;
     text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-todo.pending {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-powermenu {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }

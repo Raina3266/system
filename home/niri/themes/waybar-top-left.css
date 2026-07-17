@@ -4,10 +4,12 @@
 #group-hardware {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #group-system {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
 /* ── Hardware group ─────────────────────────────────────── */
@@ -72,4 +74,5 @@
 #clock {
     color: #7afcff;
     text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }

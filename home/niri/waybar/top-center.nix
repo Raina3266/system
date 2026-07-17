@@ -1,7 +1,7 @@
 { pkgs }:
 {
   "custom/media-prev" = {
-    format = "⏮";
+    format = "<span size='x-large'>⏮</span>";
     return-type = "json";
     exec = ''echo '{"text":"⏮",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
@@ -70,7 +70,7 @@
   };
 
   "custom/media-next" = {
-    format = "⏭";
+    format = "<span size='x-large'>⏭</span>";
     return-type = "json";
     exec = ''echo '{"text":"⏭",}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";

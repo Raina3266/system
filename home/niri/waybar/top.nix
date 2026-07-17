@@ -27,11 +27,11 @@ in
     "tray"
     "custom/cliphist"
     "custom/files"
-    "custom/timer"
     "custom/todo"
-    "custom/audio-sink"
+    "custom/timer"
     "custom/bt"
     "custom/wifi"
+    "custom/audio-sink"
     "custom/powermenu"
   ];
 } // left // center // right
