@@ -278,6 +278,7 @@
 
         function GetEntries()
           local entries = {}
+          local sinks = {}
 
           local h = io.popen("wpctl status 2>/dev/null | sed -n '/. Sinks:/,/. Sources:/p' | grep -P '[0-9]+\\.'")
           if h then
@@ -286,14 +287,48 @@
               local id = line:match("(%d+)%.")
               local desc = line:match("%d+%.%s+(.-)%s*%[vol:")
               if id and desc then
-                local marker = is_default and "✓" or " "
-                table.insert(entries, {
-                  Text = marker .. "  " .. desc,
-                  Value = "wpctl set-default " .. id,
-                })
+                table.insert(sinks, { id = id, desc = desc, is_default = is_default })
               end
             end
             h:close()
+          end
+
+          -- Strip the longest common word-prefix shared by all
+          -- descriptions (usually the card name), so only the
+          -- distinguishing suffix (Speaker, Headphones, HDMI ...) shows.
+          if #sinks > 1 then
+            local words = {}
+            for w in sinks[1].desc:gmatch("%S+") do
+              table.insert(words, w)
+            end
+            local common = #words
+            for i = 2, #sinks do
+              local w2 = {}
+              for w in sinks[i].desc:gmatch("%S+") do
+                table.insert(w2, w)
+              end
+              local j = 0
+              while j < common and j < #w2 and words[j + 1] == w2[j + 1] do
+                j = j + 1
+              end
+              common = j
+            end
+            if common > 0 then
+              local prefix = table.concat(words, " ", 1, common) .. " "
+              for _, s in ipairs(sinks) do
+                if s.desc:sub(1, #prefix) == prefix then
+                  s.desc = s.desc:sub(#prefix + 1)
+                end
+              end
+            end
+          end
+
+          for _, s in ipairs(sinks) do
+            local marker = s.is_default and "✓" or " "
+            table.insert(entries, {
+              Text = marker .. "  " .. s.desc,
+              Value = "wpctl set-default " .. s.id,
+            })
           end
 
           if #entries == 0 then
