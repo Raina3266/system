@@ -135,19 +135,16 @@
           todo = [
             { action = "save"; default = true; bind = "Return"; after = "AsyncClearReload"; }
             { action = "delete"; label = "delete"; bind = "Delete"; after = "AsyncClearReload"; }
+            { action = "active"; default = true; bind = "Return"; after = "Nothing"; }
+            { action = "inactive"; default = true; bind = "Return"; after = "Nothing"; }
             { action = "done"; label = "done"; bind = "ctrl Return"; after = "Nothing"; }
-            { action = "change_category"; label = "category"; bind = "ctrl y"; after = "Nothing"; }
-            { action = "clear"; label = "clear done"; bind = "ctrl x"; after = "AsyncClearReload"; }
-            { action = "create"; label = "new task"; bind = "ctrl a"; after = "AsyncClearReload"; }
+            { action = "search"; label = "search"; bind = "ctrl a"; after = "AsyncClearReload"; }
           ];
           desktopapplications = [
             { action = "start"; default = true; bind = "Return"; }
             { action = "new_instance"; label = "new instance"; bind = "ctrl Return"; }
-            { action = "new_instance:keep"; label = "new+next"; bind = "ctrl alt Return"; after = "KeepOpen"; }
             { action = "pin"; bind = "ctrl p"; after = "AsyncReload"; }
             { action = "unpin"; bind = "ctrl p"; after = "AsyncReload"; }
-            { action = "pinup"; bind = "ctrl n"; after = "AsyncReload"; }
-            { action = "pindown"; bind = "ctrl m"; after = "AsyncReload"; }
           ];
           clipboard = [
             { action = "copy"; default = true; bind = "Return"; }
@@ -157,7 +154,6 @@
             { action = "unpin"; bind = "ctrl p"; after = "AsyncClearReload"; }
             { action = "pin"; bind = "ctrl p"; after = "AsyncClearReload"; }
             { action = "edit"; bind = "ctrl o"; }
-            { action = "localsend"; bind = "ctrl l"; }
           ];
           files = [
             { action = "open"; default = true; bind = "Return"; }
@@ -271,6 +267,45 @@
       };
       # Power menu — replaces the old walker-dmenu powermenu script.
       # Invoked via `walker -m menus:power`.
+      provider.menus.lua."audio-sink" = ''
+        Name = "audio-sink"
+        NamePretty = "Audio Output"
+        Icon = "audio-card"
+        Action = "sh -c '%VALUE%'"
+        HideFromProviderlist = false
+        Description = "Switch audio output device"
+        SearchName = true
+
+        function GetEntries()
+          local entries = {}
+
+          local h = io.popen("wpctl status 2>/dev/null | sed -n '/. Sinks:/,/. Sources:/p' | grep -P '[0-9]+\\.'")
+          if h then
+            for line in h:lines() do
+              local is_default = line:find("%*") ~= nil
+              local id = line:match("(%d+)%.")
+              local desc = line:match("%d+%.%s+(.-)%s*%[vol:")
+              if id and desc then
+                local marker = is_default and "✓" or " "
+                table.insert(entries, {
+                  Text = marker .. "  " .. desc,
+                  Value = "wpctl set-default " .. id,
+                })
+              end
+            end
+            h:close()
+          end
+
+          if #entries == 0 then
+            table.insert(entries, {
+              Text = "No audio sinks found",
+              Value = "true",
+            })
+          end
+
+          return entries
+        end
+      '';
       provider.menus.toml."power" = {
         name = "power";
         name_pretty = "Power";

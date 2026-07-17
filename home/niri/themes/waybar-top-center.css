@@ -29,8 +29,8 @@
     border: none;
     background-color: transparent;
     text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
-    padding: 0 4px;
-    font-size: 18px;
+    padding: 0 0px;
+    font-size: 25px;
 }
 #custom-media-prev:hover,
 #custom-media-next:hover {

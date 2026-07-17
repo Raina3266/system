@@ -47,6 +47,7 @@ window#waybar.bottom {
 #custom-media-next,
 #custom-wifi,
 #custom-bt,
+#custom-audio-sink,
 #custom-cliphist,
 #custom-timer,
 #custom-todo,
@@ -116,6 +117,7 @@ window#waybar.bottom {
 #pulseaudio:hover,
 #battery:hover,
 #custom-powermenu:hover,
+#custom-audio-sink:hover,
 #tray:hover {
     background-color: rgba(255, 126, 219, 0.15);
     border-color: rgba(255, 126, 219, 0.5);

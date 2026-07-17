@@ -56,13 +56,16 @@ in
         programs.waybar = {
           enable = true;
           systemd.enable = true;
-          style = pkgs.concatTextFile "waybar-cyberpunk" [
-            ../themes/waybar-cyberpunk.css
-            ../themes/waybar-top-left.css
-            ../themes/waybar-top-center.css
-            ../themes/waybar-top-right.css
-            ../themes/waybar-bottom.css
-          ];
+          style = pkgs.concatTextFile {
+            name = "waybar-cyberpunk";
+            files = [
+              ../themes/waybar-cyberpunk.css
+              ../themes/waybar-top-left.css
+              ../themes/waybar-top-center.css
+              ../themes/waybar-top-right.css
+              ../themes/waybar-bottom.css
+            ];
+          };
 
           settings = {
             inherit topBar bottomBar;

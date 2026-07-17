@@ -1,5 +1,26 @@
 { pkgs, scripts }:
 {
+  "custom/audio-sink" = {
+    format = "󰓃";
+    return-type = "json";
+    interval = 5;
+    exec = pkgs.writeShellScript "waybar-audio-sink-poll" ''
+      default_sink=$(${pkgs.wireplumber}/bin/wpctl status 2>/dev/null | grep -A1 "Audio" | grep -oP 'id: \K[^,]+' | head -1)
+      if [ -z "$default_sink" ]; then
+        printf '{"text":"󰓃","tooltip":"Audio output"}'
+        exit 0
+      fi
+      description=$(${pkgs.wireplumber}/bin/wpctl status 2>/dev/null | grep -A5 "$default_sink" | grep -oP 'description: "\K[^"]+' | head -1)
+      if [ -z "$description" ]; then
+        description="$default_sink"
+      fi
+      printf '{"text":"󰓃","tooltip":"Audio: %s"}' "$description"
+    '';
+    on-click = pkgs.writeShellScript "waybar-audio-sink-switch" ''
+      ${pkgs.walker}/bin/walker -m menus:audio-sink
+    '';
+  };
+
   "tray" = {
     icon-size = 18;
     spacing = 10;

@@ -29,6 +29,7 @@ in
     "custom/files"
     "custom/timer"
     "custom/todo"
+    "custom/audio-sink"
     "custom/bt"
     "custom/wifi"
     "custom/powermenu"
