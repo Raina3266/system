@@ -21,7 +21,7 @@ let
   };
 
   topBar = (import ./top.nix { inherit pkgs; }) // barOutputs;
-  bottomBar = (import ./bottom.nix { }) // barOutputs;
+  bottomBar = (import ./bottom.nix { inherit pkgs; }) // barOutputs;
 in
 {
   options.programs'.waybar = {

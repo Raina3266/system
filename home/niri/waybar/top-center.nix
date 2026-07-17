@@ -1,5 +1,86 @@
 { pkgs }:
 let
+  walker = "${pkgs.walker}/bin/walker";
+  jq = "${pkgs.jq}/bin/jq";
+
+  todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
+
+  # ── Todo list (walker's built-in `todo` provider) ────────────────
+  # Shows the current top-priority task's text (truncated) plus a
+  # pending count on the bar; tooltip lists upcoming tasks ranked by
+  # urgency. Left/right-click open walker's todo provider
+  # (add/complete/delete/activate).
+  todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
+    icon="<span size='x-large'>󰄲 </span>"
+    if [ ! -f "${todoFile}" ]; then
+      printf '{"text":"%s","tooltip":"Todo","class":"clear"}' "$icon"
+      exit 0
+    fi
+
+    # Count pending (state=pending or urgent) tasks.
+    pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {c++} END{print c+0}' "${todoFile}")
+
+    if [ "$pending" -eq 0 ] 2>/dev/null; then
+      text="$icon <span size='medium'>Add a task!</span>"
+      ${jq} -cn --arg text "$text" --arg tooltip "No pending tasks 🎉" --arg class "clear" \
+        '{text:$text, tooltip:$tooltip, class:$class}'
+      exit 0
+    fi
+
+    # Count tasks scheduled for today or overdue.
+    actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") && $6!="" {
+      cmd="date -d \"" $6 "\" +%s 2>/dev/null"
+      cmd | getline ts; close(cmd)
+      cmd="date -d \"today 23:59:59\" +%s"
+      cmd | getline eod; close(cmd)
+      if (ts!="" && ts+0 <= eod+0) c++
+    } END{print c+0}' "${todoFile}")
+
+    # Current top-priority task: urgent-state tasks first, then the
+    # pending/urgent task with the nearest scheduled time, then the
+    # first pending/urgent task in file order.
+    current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
+      urgent = ($3=="urgent") ? 0 : 1
+      ts = 9999999999
+      if ($6!="") {
+        cmd="date -d \"" $6 "\" +%s 2>/dev/null"
+        cmd | getline t; close(cmd)
+        if (t!="") ts = t+0
+      }
+      key = urgent * 10000000000 + ts
+      if (!found || key < best) { found=1; best=key; text=$2 }
+    } END{print text}' "${todoFile}")
+
+    # Truncate the current task for the bar so it stays compact next
+    # to the count badge.
+    current_short=$(printf '%s' "$current" | cut -c1-24)
+    if [ "''${#current}" -gt 24 ]; then
+      current_short="$current_short…"
+    fi
+
+    if [ "$actionable" -gt 0 ] 2>/dev/null; then
+      class="urgent"
+    else
+      class="pending"
+    fi
+
+    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($pending)</span>"
+
+    # Tooltip: up to 10 pending tasks (text + scheduled time).
+    list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
+      if ($6!="") {
+        print "⬜  " $2 "  (" $6 ")"
+      } else {
+        print "⬜  " $2
+      }
+    }' "${todoFile}" | head -10)
+
+    tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"
+
+    ${jq} -cn --arg text "$text" --arg tooltip "$tooltip" --arg class "$class" \
+      '{text:$text, tooltip:$tooltip, class:$class}'
+  '';
+
   # prev/next media button: large glyph, only shown when a player is
   # Playing or Paused. Click runs the given playerctl subcommand.
   mediaButton = glyph: cmd: {
@@ -75,4 +156,19 @@ in
   };
 
   "custom/media-next" = mediaButton "⏭" "next";
+
+  "custom/todo" = {
+    return-type = "json";
+    interval = 2;
+    exec = todoPoll;
+    on-click = pkgs.writeShellScript "waybar-todo-open" ''
+      ${walker} -m todo
+    '';
+    on-click-right = pkgs.writeShellScript "waybar-todo-add" ''
+      ${walker} -m todo --search ""
+    '';
+    on-click-middle = pkgs.writeShellScript "waybar-todo-clear-done" ''
+      ${walker} -m todo -a clear
+    '';
+  };
 }

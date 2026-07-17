@@ -2,9 +2,7 @@
 let
   walker = "${pkgs.walker}/bin/walker";
   notify = "${pkgs.libnotify}/bin/notify-send";
-  jq = "${pkgs.jq}/bin/jq";
 
-  todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
   timerState = "\${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state";
 
   # wob FIFO — the wob daemon reads integer percentages from here and
@@ -39,55 +37,6 @@ let
         ${walker} ${walkerArgs}
       '';
     };
-
-  # ── Todo list (walker's built-in `todo` provider) ────────────────
-  # Shows count of pending tasks on the bar; tooltip lists upcoming
-  # tasks ranked by urgency. Left/right-click open walker's todo
-  # provider (add/complete/delete/activate).
-  todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
-    icon="<span size='x-large'>󰄲</span>"
-    if [ ! -f "${todoFile}" ]; then
-      printf '{"text":"%s","tooltip":"Todo","class":"clear"}' "$icon"
-      exit 0
-    fi
-
-    # Count pending (state=pending or urgent) tasks.
-    pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {c++} END{print c+0}' "${todoFile}")
-    # Count tasks scheduled for today or overdue.
-    actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") && $6!="" {
-      cmd="date -d \"" $6 "\" +%s 2>/dev/null"
-      cmd | getline ts; close(cmd)
-      cmd="date -d \"today 23:59:59\" +%s"
-      cmd | getline eod; close(cmd)
-      if (ts!="" && ts+0 <= eod+0) c++
-    } END{print c+0}' "${todoFile}")
-
-    if [ "$actionable" -gt 0 ] 2>/dev/null; then
-      text="$icon <span size='medium'>$actionable</span>"; class="urgent"
-    elif [ "$pending" -gt 0 ] 2>/dev/null; then
-      text="$icon <span size='medium'>$pending</span>"; class="pending"
-    else
-      text="$icon"; class="clear"
-    fi
-
-    # Tooltip: up to 10 pending tasks (text + scheduled time).
-    list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
-      if ($6!="") {
-        print "⬜  " $2 "  (" $6 ")"
-      } else {
-        print "⬜  " $2
-      }
-    }' "${todoFile}" | head -10)
-
-    if [ -n "$list" ]; then
-      tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"
-    else
-      tooltip="No pending tasks 🎉"
-    fi
-
-    ${jq} -cn --arg text "$text" --arg tooltip "$tooltip" --arg class "$class" \
-      '{text:$text, tooltip:$tooltip, class:$class}'
-  '';
 
   # ── Timer module (wob visualizer) ────────────────────────────────
   # State lives in $XDG_RUNTIME_DIR/waybar-timer.state as
@@ -292,21 +241,6 @@ in
     on-click-right = timerTogglePause;
     on-scroll-up = timerScrollUp;
     on-scroll-down = timerScrollDown;
-  };
-
-  "custom/todo" = {
-    return-type = "json";
-    interval = 2;
-    exec = todoPoll;
-    on-click = pkgs.writeShellScript "waybar-todo-open" ''
-      ${walker} -m todo
-    '';
-    on-click-right = pkgs.writeShellScript "waybar-todo-add" ''
-      ${walker} -m todo --search ""
-    '';
-    on-click-middle = pkgs.writeShellScript "waybar-todo-clear-done" ''
-      ${walker} -m todo -a clear
-    '';
   };
 
   "custom/bt" = {

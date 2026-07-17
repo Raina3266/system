@@ -122,7 +122,7 @@
                     <!-- Cap the preview area so a large PDF/image preview
                          can't expand the whole popup. The preview renders
                          within this box and scrolls if it overflows. -->
-                    <property name="max-content-width">400</property>
+                    <property name="max-content-width">200</property>
                     <property name="max-content-height">400</property>
                     <property name="propagate-natural-height">true</property>
                     <property name="propagate-natural-width">true</property>

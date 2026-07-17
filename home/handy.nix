@@ -53,6 +53,12 @@
       Description = "Handy — speech-to-text";
       ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
       PartOf = [ "graphical-session.target" ];
+      # PartOf alone doesn't order startup after the target — it only
+      # propagates stop/restart. Without this, Handy can start before niri
+      # (which sets WAYLAND_DISPLAY) finishes and reaches the target, so
+      # ConditionEnvironment intermittently fails right after boot — which
+      # is exactly what leaves Handy not running after a reboot.
+      After = [ "graphical-session.target" ];
     };
     Service = {
       ExecStart = "${pkgs.handy}/bin/handy --start-hidden";

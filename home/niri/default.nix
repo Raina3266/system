@@ -52,6 +52,11 @@
       Description = "wob — Wayland overlay bar";
       ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
       PartOf = [ "graphical-session.target" ];
+      # PartOf alone doesn't order startup after the target — it only
+      # propagates stop/restart. Without this, wob can start before niri
+      # (which sets WAYLAND_DISPLAY) finishes and reaches the target,
+      # so ConditionEnvironment intermittently fails right after boot.
+      After = [ "graphical-session.target" ];
     };
     Service = {
       ExecStart = "${pkgs.wob}/bin/wob";

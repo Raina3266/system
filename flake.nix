@@ -14,14 +14,6 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixGL.url = "github:nix-community/nixGL";
 
-    waybar = {
-      # Tracks Waybar master for the niri/workspaces `workspace-taskbar` mode
-      # (PR #4997, merged 2026-07-03, not yet in any release). Re-evaluate
-      # whether this overlay is still needed each time nixpkgs bumps waybar.
-      url = "github:Alexays/Waybar/d4a44172106e26ddc5e95e007202113d3141d03a";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -60,16 +52,6 @@
         overlays = [
           nixGL.overlay
           (final: prev: {
-            # Waybar master includes workspace-taskbar from merged PR #4997,
-            # but it is not in the latest stable release yet. Keep the local
-            # patches for hide-empty + current-only until upstream includes
-            # those fixes or nixpkgs carries a suitable Waybar version.
-            waybar = inputs.waybar.packages.${system}.default.overrideAttrs (old: {
-              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.perl ];
-              postPatch = (old.postPatch or "") + ''
-                bash ${./home/niri/waybar/patch.sh}
-              '';
-            });
             walker = inputs.walker.packages.${system}.default;
           })
         ];

@@ -22,12 +22,12 @@ in
     "custom/media"
     "custom/lyrics"
     "custom/media-next"
+    "custom/todo"
   ];
   modules-right = [
     "tray"
-    "custom/cliphist"
     "custom/files"
-    "custom/todo"
+    "custom/cliphist"
     "custom/timer"
     "custom/bt"
     "custom/wifi"
