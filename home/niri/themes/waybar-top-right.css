@@ -1,56 +1,54 @@
 /* ── Top-right: tray, utilities ──────────────────────────── */
 
-#custom-audio-sink {
-    color: #ff7edb;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
+/* All top-right modules share a 2px pink border (overrides the 1px
+   base border from waybar-cyberpunk.css). */
+#custom-audio-sink,
+#tray,
+#custom-wifi,
+#custom-bt,
+#custom-cliphist,
+#custom-files,
+#custom-timer,
+#custom-todo,
+#custom-powermenu {
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
-#tray {
-    color: #7afcff;
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
-#custom-wifi {
-    color: #ff7edb;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
+
+/* Pink text + cyan glow */
+#custom-audio-sink,
+#custom-wifi,
 #custom-bt {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
 }
-#custom-cliphist {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
-#custom-files {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
-#custom-timer {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
+
+/* Cyan text + cyan glow */
+#custom-cliphist,
+#custom-files,
 #custom-todo {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
 }
+
+#tray {
+    color: #7afcff;
+}
+
+#custom-timer {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+
+#custom-powermenu {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
 #custom-todo.urgent {
     color: #ff3333;
     text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 #custom-todo.pending {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
-#custom-powermenu {
-    color: #ff7edb;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
 }

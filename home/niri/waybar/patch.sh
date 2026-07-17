@@ -6,8 +6,7 @@
 # Patches:
 #   1. Make getRewrite() public so Workspace can call it for text labels.
 #   2. Fix hide-empty to work together with current-only.
-#   3. Hide the taskbar box when there are no windows (no label re-show).
-#      Box left-aligned, no hexpand — natural size when few tabs.
+#   3. Hide the taskbar box when there are no windows
 #   4. Buttons shrink when overflowing.
 #   5. Render icon + text title (20 chars) in each taskbar button.
 
@@ -24,7 +23,7 @@ perl -0777 -i -pe 's/    data\[prop\]\.asBool\(\) \? button_\.show\(\) : button_
   src/modules/niri/workspace.cpp
 
 # 3. Hide the taskbar box when there are no windows on the workspace.
-perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      box_.set_hexpand(false);\n      taskbar_box_.set_hexpand(true);\n      taskbar_box_.set_halign(Gtk::ALIGN_START);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
+perl -0777 -i -pe 's/    rebuildTaskbar\(my_windows\);\n    taskbar_box_\.show\(\);\n    label_\.hide\(\);/    rebuildTaskbar(my_windows);\n    if (my_windows.empty()) {\n      taskbar_box_.hide();\n      label_.hide();\n    } else {\n      box_.set_hexpand(false);\n      box_.set_halign(Gtk::ALIGN_FILL);\n      taskbar_box_.set_hexpand(false);\n      taskbar_box_.set_halign(Gtk::ALIGN_FILL);\n      taskbar_box_.show();\n      label_.hide();\n    }/' \
   src/modules/niri/workspace.cpp
 
 # 4. Let taskbar buttons shrink when the bar overflows.
@@ -34,7 +33,8 @@ sed -i 's|taskbar_box_.pack_start(\*btn, false, false, 0);|taskbar_box_.pack_sta
 # 5. Render icon + text title in each taskbar button.
 cat > /tmp/waybar-replacement.txt << 'ENDREPLACEMENT'
     auto* btn_box = Gtk::make_managed<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 0);
-    btn_box->set_halign(Gtk::ALIGN_START);
+    btn_box->set_halign(Gtk::ALIGN_FILL);
+    btn_box->set_hexpand(false);
     auto pixbuf = loadIcon(app_id, icon_size);
     if (pixbuf) {
       auto* img = Gtk::make_managed<Gtk::Image>(pixbuf);

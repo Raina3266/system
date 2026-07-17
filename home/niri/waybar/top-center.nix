@@ -50,7 +50,7 @@ in
       else
         tooltip="$title"
       fi
-      [ -n "$player" ] && tooltip="$tooltip\nPlayer: $player\nStatus: $status"
+      [ -n "$player" ] && tooltip="$tooltip\\nPlayer: $player"
       class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
       ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" --arg tooltip "$tooltip" \
         '{text:$text, class:$class, alt:$class, tooltip:$tooltip}'

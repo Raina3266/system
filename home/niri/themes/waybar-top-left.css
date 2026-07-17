@@ -1,11 +1,7 @@
 /* ── Top-left: clock, system group, hardware group ───────── */
 
 /* ── Group headers ───────────────────────────────────────── */
-#group-hardware {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-    border: 2px solid rgba(255, 126, 219, 0.2);
-}
+#group-hardware,
 #group-system {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
@@ -13,7 +9,11 @@
 }
 
 /* ── Hardware group ─────────────────────────────────────── */
-#cpu {
+#cpu,
+#memory,
+#disk,
+#network,
+#pulseaudio {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
@@ -26,18 +26,6 @@
     text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
     animation: blink 1s steps(2) infinite;
 }
-#memory {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-#disk {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-#network {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
 #network.disconnected {
     color: #ff3333;
     text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
@@ -48,23 +36,19 @@
     color: #7afcff;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
-#pulseaudio {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
 #pulseaudio.muted {
     color: #5c6776;
     text-shadow: none;
 }
-#battery {
+#custom-battery {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
-#battery.warning:not(.charging) {
+#custom-battery.warning:not(.charging) {
     color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
-#battery.critical:not(.charging) {
+#custom-battery.critical:not(.charging) {
     color: #ff3333;
     text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
     animation: blink 1s steps(2) infinite;

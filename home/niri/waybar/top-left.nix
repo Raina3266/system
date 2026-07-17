@@ -77,9 +77,9 @@ in
           ;;
         *)
           class="discharging"
-          if [ "$capacity" -le 10 ]; then
+          if [ "$capacity" -le 15 ]; then
             class="critical"
-          elif [ "$capacity" -le 20 ]; then
+          elif [ "$capacity" -le 25 ]; then
             class="warning"
           fi
           ;;
