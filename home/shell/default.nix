@@ -2,6 +2,7 @@
 {
   imports = [
     ./nvim
+    ./yazi
     ./git.nix
     ./terminal.nix
     ./tmux.nix
@@ -20,14 +21,10 @@
       bat
       tree
       yq
-      fzf
       bottom
       killall
       lsof
       coreutils
-      ffmpeg
-      mediainfo
-      exiftool
     ];
 
     programs.fish.enable = true;

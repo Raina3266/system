@@ -8,10 +8,6 @@ let
   isNixOS = nixosConfig != null;
 in
 {
-  programs.yazi = {
-    enable = true;
-  };
-
   programs.kitty = {
     enable = true;
   };

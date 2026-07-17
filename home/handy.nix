@@ -12,6 +12,26 @@
 #   - Stop Handy (so it doesn't write stale state back)
 #   - Wipe the WebView cache (so Handy falls through to the JSON file)
 #   - Write the JSON file
+#   - Restart Handy so the new settings take effect immediately
+#
+# Handy is managed as a systemd user service (like wob in
+# home/niri/default.nix) instead of a niri `spawn-at-startup` entry.
+# Two bugs combined to silently corrupt settings_store.json back to
+# blank defaults, both fixed by this setup:
+#   1. `pkill -x handy` never matched the running process — Nix wraps
+#      GUI binaries, so the actual process name is something like
+#      `.handy-wrapped`, not `handy`. The "stop it first" step was a
+#      silent no-op (swallowed by `|| true`), so every activation wiped
+#      the WebView cache out from under a *still-running* Handy. Handy
+#      would later flush its now-corrupted in-memory state back to
+#      settings_store.json, clobbering the config below.
+#   2. `spawn-at-startup "handy"` in niri's config raced this activation
+#      script on every boot, with no guaranteed ordering between them.
+# `systemctl --user stop handy.service` reliably stops the actual
+# managed process (fixing #1), and WantedBy=graphical-session.target
+# starts Handy only once the user's systemd session comes up — always
+# after this activation script has already run at the system level
+# (fixing #2).
 #
 # The downloaded model lives in the HuggingFace cache
 # (~/.cache/huggingface/hub), which persists across reboots on the /home
@@ -28,11 +48,39 @@
     wl-clipboard
   ];
 
+  systemd.user.services.handy = {
+    Unit = {
+      Description = "Handy — speech-to-text";
+      ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${pkgs.handy}/bin/handy --start-hidden";
+      Restart = "on-failure";
+      RestartSec = 3;
+      # Bound how long activation can block on `systemctl --user stop`
+      # below if Handy ever hangs on SIGTERM.
+      TimeoutStopSec = 10;
+    };
+    Install = {
+      WantedBy = [ "graphical-session.target" ];
+    };
+  };
+
   home.activation.handySettings = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-    # Stop handy before touching its settings, otherwise it will
-    # overwrite the file on exit with its in-memory (stale) state.
-    pkill -x handy 2>/dev/null || true
-    sleep 0.5
+    # Stop the systemd-managed instance before touching its settings,
+    # otherwise it will overwrite the file on exit with its in-memory
+    # (stale) state. Fails harmlessly if the unit doesn't exist yet
+    # (first activation ever) or isn't running.
+    ${pkgs.systemd}/bin/systemctl --user stop handy.service 2>/dev/null || true
+
+    # Fallback for an instance still running outside systemd's
+    # supervision (e.g. one left over from the old niri
+    # spawn-at-startup, before this file managed it as a service).
+    # Matches on the full command line since Nix-wrapped binaries
+    # don't run under the plain "handy" process name that `pkill -x`
+    # requires.
+    ${pkgs.procps}/bin/pkill -f '/bin/handy --start-hidden' 2>/dev/null || true
 
     # Wipe the Tauri WebView local-storage cache.  Handy's WebView
     # caches settings there and silently overrides settings_store.json
@@ -228,5 +276,12 @@ Transcript:
       };
     }}
     HANDY_EOF
+
+    # (Re)start the service now that the correct settings are in place.
+    # `reloadSystemd` (which runs later via sd-switch) only restarts units
+    # whose *definition* changed between generations, so a plain
+    # `home-manager switch` with no unit changes wouldn't otherwise bring
+    # Handy back up after the `stop` above.
+    ${pkgs.systemd}/bin/systemctl --user start handy.service 2>/dev/null || true
   '';
 }

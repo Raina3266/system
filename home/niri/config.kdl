@@ -75,8 +75,10 @@ layout {
 }
 
 spawn-at-startup "xwayland-satellite"
-spawn-at-startup "handy" "--start-hidden"
 // fcitx5 is started by the NixOS i18n.inputMethod module.
+// Handy is started as a systemd user service (see home/handy.nix) so it
+// launches strictly after home-manager activation has written its
+// settings file — spawn-at-startup here raced with activation on boot.
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
 
 hotkey-overlay {

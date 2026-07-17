@@ -36,7 +36,6 @@
     # browsers
     google-chrome
     firefox
-    yazi
 
     # communication
     slack

@@ -20,6 +20,7 @@
   # Also includes xwayland-satellite (spawned at startup by config.kdl)
   # for rootless XWayland so legacy X11 apps work under niri.
   home.packages = with pkgs; [
+    swaybg
     brightnessctl # F5/F6 brightness keys
     wob # Wayland overlay progress bar — used by the timer
     xwayland-satellite # rootless XWayland for X11 apps
