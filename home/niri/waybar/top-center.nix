@@ -93,21 +93,29 @@ in
     };
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-media-poll" ''
-      players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
-      if [ -z "$players" ]; then
+      all_players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
+      if [ -z "$all_players" ]; then
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
-      if echo "$players" | grep -qiE 'tauon|kid3'; then
+      # Pick the first active player that isn't tauon or kid3
+      player_name=$(echo "$all_players" | grep -ivE 'tauon|kid3' | head -1)
+      if [ -z "$player_name" ]; then
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
-      status=$(${pkgs.playerctl}/bin/playerctl status 2>/dev/null)
+      status=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" status 2>/dev/null)
       [ -z "$status" ] && status="Stopped"
-      artist=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{artist}}' 2>/dev/null)
-      title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
-      player=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{playerName}}' 2>/dev/null)
-      
+      artist=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{artist}}' 2>/dev/null)
+      title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{title}}' 2>/dev/null)
+      player=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{playerName}}' 2>/dev/null)
+      # VLC often leaves title empty for video files — fall back to URL, then clean it up
+      [ -z "$title" ] && title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata xesam:url 2>/dev/null)
+      case "$title" in
+        /*|file://*)
+          title=$(basename "$title" | ${pkgs.gnused}/bin/sed 's/%20/ /g; s/\.[^.]*$//')
+          ;;
+      esac
       title_short=$(printf '%s' "$title" | cut -c1-40)
       artist_short=$(printf '%s' "$artist" | cut -c1-20)
       if [ -n "$artist_short" ]; then
