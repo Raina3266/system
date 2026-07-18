@@ -9,7 +9,7 @@
     linemode = "size";
     show_symlink = true;
     # Add more vertical space for file list (middle pane gets more height)
-    ratio = [ 1 4 3 ];
+    ratio = [ 3 3 3 ];
   };
 
   # Plugin feature flags (read by plugins via ya.db).

@@ -2,6 +2,7 @@
 
 -- ── 1. Smart File Manipulation & Integration ─────────────────────────────
 require("full-border"):setup()
+require("duckdb"):setup()
 require("smart-enter"):setup { open_multi = true }
 require("bookmarks"):setup {}
 

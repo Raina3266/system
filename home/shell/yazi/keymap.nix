@@ -8,15 +8,27 @@
       run = "open --interactive";
       desc = "Open with...";
     }
-    # bookmarks — open bookmark page
-    {
-      on = "b";
-      run = "plugin bookmarks";
-      desc = "Open bookmarks";
-    }
-    # bookmarks — save current position as a bookmark
+    # bookmarks — jump to a bookmark
     {
       on = "B";
+      run = "plugin bookmarks jump";
+      desc = "Jump to bookmark";
+    }
+    # bookmarks — delete a bookmark
+    {
+      on = [
+        "b"
+        "d"
+      ];
+      run = "plugin bookmarks delete";
+      desc = "Delete bookmark";
+    }
+    # bookmarks — delete all bookmarks
+    {
+      on = [
+        "b"
+        "b"
+      ];
       run = "plugin bookmarks save";
       desc = "Save bookmark";
     }

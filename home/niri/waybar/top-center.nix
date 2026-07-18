@@ -109,11 +109,12 @@ in
       artist=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{artist}}' 2>/dev/null)
       title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{title}}' 2>/dev/null)
       player=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{playerName}}' 2>/dev/null)
-      # VLC often leaves title empty for video files — fall back to URL, then clean it up
+      # Some players (e.g. VLC) leave title empty for video files — fall back to filename
       [ -z "$title" ] && title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata xesam:url 2>/dev/null)
       case "$title" in
-        /*|file://*)
-          title=$(basename "$title" | ${pkgs.gnused}/bin/sed 's/%20/ /g; s/\.[^.]*$//')
+        file://*|/*)
+          path="''${title#file://}"
+          title=$(basename -- "$(printf '%b' "''${path//%/\\x}")")
           ;;
       esac
       title_short=$(printf '%s' "$title" | cut -c1-40)
