@@ -83,9 +83,14 @@ in
   "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
 
   # Workspace switcher — shows index + name for each workspace.
+  # Middle-click moves the clicked workspace up; right-click moves it down.
+  # (niri has no close-workspace action, so middle-click reorders instead.)
+  # The workspace is focused first so niri's move acts on the right one.
   "niri/workspaces" = {
     format = " {index} ";
-    tooltip-format = "Workspace";
+    tooltip-format = "Middle-click: move up  |  Right-click: move down";
+    on-click-middle = "niri msg action focus-workspace {index} && niri msg action move-workspace-up";
+    on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";
   };
 
   # Per-window taskbar — shows app icon + title for windows on the current
@@ -102,7 +107,7 @@ in
 
     icon_size = 25;
     icon_spacing = 8;
-    min_button_width = 50;
+    min_button_width = 100;
     max_button_width = 220;
     # Fall back to the eDP-1 logical width; overridden per-output below to
     # match each display's actual logical resolution (see niri/config.kdl).
@@ -162,12 +167,12 @@ in
     # Speaker icon on windows currently playing audio; click to mute.
     # Disabled: libpulse's glib-mainloop integration has a known
     # double-free bug in its timer teardown ("glib_time_free: assndicator = {
-    # audio_indicator = {
-    #   enabled = true;
-    #   playing_icon = " 󰕾 ";
-    #   muted_icon = " 󰖁 ";
-    #   clickable = true;
-    # };
+    audio_indicator = {
+      enabled = true;
+      playing_icon = "󰕾";
+      muted_icon = "󰖁";
+      clickable = true;
+    };
 
     # Urgency-hint highlighting when an app requests attention.
     notifications = {

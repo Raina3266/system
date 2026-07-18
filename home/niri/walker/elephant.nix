@@ -7,6 +7,40 @@
     auto_cleanup = 4320;
     max_items = 1000;
   };
+  # Todo provider — task list stored in ~/.cache/elephant/todo.csv.
+  # These are the defaults; declared explicitly so they're documented
+  # here and can be tweaked. The popup only lists entries when tasks
+  # exist — when empty, type a name and press Return to create one.
+  provider.todo.settings = {
+    # Minutes before/after a scheduled time during which a task is
+    # shown as urgent (red). Notifications fire at the scheduled time.
+    urgent_time_frame = 30;
+    # Lower other players' volume while a task notification plays.
+    duck_player_volumes = true;
+    # Show creation time in the subtext when no other time info exists.
+    show_creation_time = false;
+    # Time format for subtext (Go time layout).
+    time_format = "02-Jan 15:04";
+    # Categories: prefix a query with `prefix` to file the new task
+    # under that category (e.g. `w:fix report`). Cycling an existing
+    # task's category is bound to ctrl+y (change_category).
+    categories = [
+      {
+        name = "work";
+        prefix = "w:";
+      }
+      {
+        name = "personal";
+        prefix = "p:";
+      }
+    ];
+    # Notification shown when a scheduled task's time arrives.
+    # %TASK% is replaced with the task's text. (These fields are
+    # squashed into the top level of the todo settings upstream, not
+    # nested under a "notification" key.)
+    title = "Task Due";
+    body = "🔔 %TASK%";
+  };
   # Power menu — replaces the old walker-dmenu powermenu script.
   # Invoked via `walker -m menus:power`.
   provider.menus.lua."audio-sink" = ''

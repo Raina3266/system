@@ -20,8 +20,12 @@
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 #temperature {
-    color: #f29e74;
+    color: #7afcff;
     background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.8);
+}
+#temperature.warning {
+    color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 #temperature.critical {
@@ -50,6 +54,10 @@
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 #custom-battery.warning:not(.charging) {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+#custom-battery.low:not(.charging) {
     color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }

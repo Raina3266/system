@@ -1,6 +1,7 @@
 { pkgs }:
 let
   walker = "${pkgs.walker}/bin/walker";
+  elephant = "${pkgs.elephant}/bin/elephant";
   jq = "${pkgs.jq}/bin/jq";
 
   todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
@@ -8,8 +9,8 @@ let
   # ── Todo list (walker's built-in `todo` provider) ────────────────
   # Shows the current top-priority task's text (truncated) plus a
   # pending count on the bar; tooltip lists upcoming tasks ranked by
-  # urgency. Left/right-click open walker's todo provider
-  # (add/complete/delete/activate).
+  # urgency. Any click opens walker's todo provider — type a task
+  # name, then Return to save (ctrl x clears done, ctrl d deletes).
   todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
     icon="<span size='x-large'>󰄲 </span>"
     if [ ! -f "${todoFile}" ]; then
@@ -19,6 +20,9 @@ let
 
     # Count pending (state=pending or urgent) tasks.
     pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {c++} END{print c+0}' "${todoFile}")
+
+    # Count all tasks (any state) — shown as the badge number on the bar.
+    total=$(awk -F';' 'NR>1 {c++} END{print c+0}' "${todoFile}")
 
     if [ "$pending" -eq 0 ] 2>/dev/null; then
       text="$icon <span size='medium'>Add a task!</span>"
@@ -53,8 +57,8 @@ let
 
     # Truncate the current task for the bar so it stays compact next
     # to the count badge.
-    current_short=$(printf '%s' "$current" | cut -c1-24)
-    if [ "''${#current}" -gt 24 ]; then
+    current_short=$(printf '%s' "$current" | cut -c1-40)
+    if [ "''${#current}" -gt 40 ]; then
       current_short="$current_short…"
     fi
 
@@ -64,15 +68,11 @@ let
       class="pending"
     fi
 
-    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($pending)</span>"
+    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>"
 
-    # Tooltip: up to 10 pending tasks (text + scheduled time).
+    # Tooltip: up to 10 pending tasks (text only, no scheduled time).
     list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
-      if ($6!="") {
-        print "⬜  " $2 "  (" $6 ")"
-      } else {
-        print "⬜  " $2
-      }
+      print "⬜  " $2
     }' "${todoFile}" | head -10)
 
     tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"
@@ -142,6 +142,7 @@ in
 
   "custom/lyrics" = {
     hide-empty-text = true;
+    signal = 8;
     return-type = "json";
     format = "{icon} {0}";
     format-icons = {
@@ -161,14 +162,22 @@ in
     return-type = "json";
     interval = 2;
     exec = todoPoll;
-    on-click = pkgs.writeShellScript "waybar-todo-open" ''
-      ${walker} -m todo
+    # Click handlers for different todo modes:
+    #   left click   → open in SEARCH mode (browse existing tasks)
+    #   right click  → open in CREATE mode (add new tasks)
+    #   middle click → mark current active task as done
+    # The popup uses the `cyberpunk-center` theme so it drops down from
+    # the top-center of the screen rather than the top-right.
+    on-click = pkgs.writeShellScript "waybar-todo-search" ''
+      ${elephant} activate "todo;;search;;" || true
+      exec ${walker} -t cyberpunk-center -m todo
     '';
-    on-click-right = pkgs.writeShellScript "waybar-todo-add" ''
-      ${walker} -m todo --search ""
+    on-click-right = pkgs.writeShellScript "waybar-todo-create" ''
+      ${elephant} activate "todo;;create;;" || true
+      exec ${walker} -t cyberpunk-center -m todo
     '';
-    on-click-middle = pkgs.writeShellScript "waybar-todo-clear-done" ''
-      ${walker} -m todo -a clear
+    on-click-middle = pkgs.writeShellScript "waybar-todo-done" ''
+      ${elephant} activate "todo;;done;;" || true
     '';
   };
 }

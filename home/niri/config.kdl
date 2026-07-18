@@ -76,9 +76,7 @@ layout {
 
 spawn-at-startup "xwayland-satellite"
 // fcitx5 is started by the NixOS i18n.inputMethod module.
-// Handy is started as a systemd user service (see home/handy.nix) so it
-// launches strictly after home-manager activation has written its
-// settings file — spawn-at-startup here raced with activation on boot.
+spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
 
 hotkey-overlay {
@@ -276,7 +274,9 @@ binds {
     Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn-sh "walker -m clipboard"; }
 
     // Toggle Handy speech-to-text (SIGUSR2 to the running instance).
-    Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-n" "handy"; }
+    // -f matches the full command line: Nix-wrapped binaries run as
+    // `.handy-wrapped`, so plain `pkill -n handy` never matched.
+    Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-f" "/bin/handy --start-hidden"; }
 
     // Toggle EN/CN (fcitx5): keyboard-gb ↔ pinyin.
     Mod+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "current=$(/run/current-system/sw/bin/fcitx5-remote -n 2>/dev/null); if [ \"$current\" = 'pinyin' ]; then /run/current-system/sw/bin/fcitx5-remote -s keyboard-gb; else /run/current-system/sw/bin/fcitx5-remote -s pinyin; fi"; }

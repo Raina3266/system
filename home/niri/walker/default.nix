@@ -18,7 +18,7 @@
       single_click_activation = true;
       # Hide the F1–F4 quick-activation buttons in the popup.
       hide_quick_activation = true;
-      preview.content_fit = "scale-down";
+      preview.content_fit = "contain";
       # Layer-shell anchoring: keep the default fullscreen overlay (all
       # four anchors) so click-to-close works — clicks on the empty area
       # around the box-wrapper dismiss walker. The box-wrapper itself is
@@ -156,6 +156,10 @@
       let
         base = builtins.readFile ../themes/walker-cyberpunk.css;
         layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
+        layoutTopCenter = builtins.readFile ../themes/walker-layout-top-center.xml;
+        # item_todo.xml override: shrinks the hardcoded 48px "+" create-entry
+        # icon to 16px. Applies to both themes.
+        itemTodo = builtins.readFile ../themes/walker-item-todo.xml;
       in
       {
         # Default theme: top-right dropdown, sitting just under the top waybar.
@@ -165,6 +169,15 @@
         cyberpunk = {
           style = base;
           layouts."layout" = layoutTopRight;
+          layouts."item_todo" = itemTodo;
+        };
+        # Top-center variant, used by popups launched with `-t cyberpunk-center`
+        # (currently just the waybar todo module). Same styling; only the
+        # box-wrapper alignment differs (halign=center).
+        cyberpunk-center = {
+          style = base;
+          layouts."layout" = layoutTopCenter;
+          layouts."item_todo" = itemTodo;
         };
       };
   };

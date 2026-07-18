@@ -81,6 +81,8 @@ in
             class="critical"
           elif [ "$capacity" -le 25 ]; then
             class="warning"
+          elif [ "$capacity" -lt 50 ]; then
+            class="low"
           fi
           ;;
       esac
@@ -125,10 +127,11 @@ in
   "temperature" = {
     hwmon-path = "";
     thermal-zone = 7;
+    warning-threshold = 50;
     critical-threshold = 80;
     interval = 5;
-    format = "󰔏 {temperatureC}°C";
-    format-critical = "󰔅 {temperatureC}°C";
+    format = "󰄏 {temperatureC}°C";
+    format-critical = "󰄅 {temperatureC}°C";
     tooltip-format = "Sensor: {chip}\n{temperatureC}°C";
   };
 

@@ -27,10 +27,10 @@ let
   staticLauncher =
     name: icon: tooltip: walkerArgs:
     {
-      format = "<span size='x-large'>${icon}</span>";
+      format = "<span size='large'>${icon}</span>";
       return-type = "json";
       exec = pkgs.writeShellScript "waybar-${name}-poll" ''
-        printf '{"text":"<span size='"'"'x-large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
+        printf '{"text":"<span size='"'"'large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
       '';
       interval = 86400;
       on-click = pkgs.writeShellScript "waybar-${name}" ''
@@ -48,7 +48,7 @@ let
   # percentage. The waybar module is just a launcher icon.
   timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
     state="${timerState}"
-    icon="<span size='x-large'>󰔛</span>"
+    icon="<span size='large'>󰔛</span>"
     if [ ! -f "$state" ]; then
       printf '{"text":"%s","tooltip":"Timer"}' "$icon"
       exit 0
@@ -202,11 +202,11 @@ let
 in
 {
   "custom/audio-sink" = {
-    format = "<span size='x-large'>󰕾</span>";
+    format = "<span size='large'>󰕾</span>";
     return-type = "json";
     interval = 5;
     exec = pkgs.writeShellScript "waybar-audio-sink-poll" ''
-      icon="<span size='x-large'>󰕾</span>"
+      icon="<span size='large'>󰕾</span>"
       default_sink=$(${pkgs.wireplumber}/bin/wpctl status 2>/dev/null | grep -A1 "Audio" | grep -oP 'id: \K[^,]+' | head -1)
       if [ -z "$default_sink" ]; then
         printf '{"text":"%s","tooltip":"Audio output"}' "$icon"
@@ -247,8 +247,8 @@ in
     format = "{}";
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-bt-poll" ''
-      on_icon="<span size='x-large'>󰂯</span>"
-      off_icon="<span size='x-large'>󰂱</span>"
+      on_icon="<span size='large'>󰂯</span>"
+      off_icon="<span size='large'>󰂱</span>"
       powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
       if [ "$powered" = "yes" ]; then
         names=$(bluetoothctl devices Connected 2>/dev/null | sed 's/^Device [0-9A-Fa-f:]* //' | tr '\n' ',' | sed 's/,$//')
@@ -271,7 +271,7 @@ in
     format = "{}";
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-wifi-poll" ''
-      icon="<span size='x-large'>󰤨</span>"
+      icon="<span size='large'>󰤨</span>"
       ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
       if [ -n "$ssid" ]; then
         signal=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
