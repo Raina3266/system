@@ -4,7 +4,6 @@
 # handy from resetting them on package upgrades.
 {
   pkgs,
-  config,
   lib,
   ...
 }:

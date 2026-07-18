@@ -1,6 +1,5 @@
 {
   pkgs,
-  lib,
   ...
 }:
 {
@@ -56,6 +55,7 @@
     pavucontrol
     obs-studio
     inkscape
+    gimp
     shotcut
     sunshine
     kid3

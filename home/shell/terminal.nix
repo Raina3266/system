@@ -27,6 +27,7 @@ in
     settings = {
       command = "fish";
       theme = "Bright Lights";
+      adjust-cell-height = "20%";
     };
   };
 }

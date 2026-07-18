@@ -50,8 +50,6 @@
         "mail.shell.checkDefaultClient" = false;
         # Hide the folder-pane account central items (RSS, newsgroups, chat).
         "mail.folderpane.mode" = "compact";
-        # Disable the new mail toast notifications (we keep the badge).
-        "mail.biff.show_alert" = false;
         # Don't show the donate / fund-raising banners.
         "app.donation.eoy.version" = 9999;
         # Don't remember passwords in Thunderbird's password manager.

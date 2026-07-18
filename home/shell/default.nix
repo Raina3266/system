@@ -34,6 +34,10 @@
       echo "hello from `programs.fish.interactiveShellInit`"
       source ~/.secrets.fish &>/dev/null || true
     '';
+    programs.fish.shellAbbrs = {
+      # Quick access to yazi bookmarks (press 'b' after launch)
+      yb = "yazi";
+    };
 
     programs.atuin = {
       enable = true;
