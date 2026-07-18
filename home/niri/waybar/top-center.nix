@@ -6,11 +6,7 @@ let
 
   todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
 
-  # ── Todo list (walker's built-in `todo` provider) ────────────────
-  # Shows the current top-priority task's text (truncated) plus a
-  # pending count on the bar; tooltip lists upcoming tasks ranked by
-  # urgency. Any click opens walker's todo provider — type a task
-  # name, then Return to save (ctrl x clears done, ctrl d deletes).
+  # Todo module: shows current task + count, tooltip lists pending tasks
   todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
     icon="<span size='x-large'>󰄲 </span>"
     if [ ! -f "${todoFile}" ]; then
@@ -18,10 +14,7 @@ let
       exit 0
     fi
 
-    # Count pending (state=pending or urgent) tasks.
     pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {c++} END{print c+0}' "${todoFile}")
-
-    # Count all tasks (any state) — shown as the badge number on the bar.
     total=$(awk -F';' 'NR>1 {c++} END{print c+0}' "${todoFile}")
 
     if [ "$pending" -eq 0 ] 2>/dev/null; then
@@ -31,7 +24,6 @@ let
       exit 0
     fi
 
-    # Count tasks scheduled for today or overdue.
     actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") && $6!="" {
       cmd="date -d \"" $6 "\" +%s 2>/dev/null"
       cmd | getline ts; close(cmd)
@@ -40,9 +32,7 @@ let
       if (ts!="" && ts+0 <= eod+0) c++
     } END{print c+0}' "${todoFile}")
 
-    # Current top-priority task: urgent-state tasks first, then the
-    # pending/urgent task with the nearest scheduled time, then the
-    # first pending/urgent task in file order.
+    # Get top-priority task (urgent first, then by schedule, then file order)
     current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
       urgent = ($3=="urgent") ? 0 : 1
       ts = 9999999999
@@ -55,8 +45,7 @@ let
       if (!found || key < best) { found=1; best=key; text=$2 }
     } END{print text}' "${todoFile}")
 
-    # Truncate the current task for the bar so it stays compact next
-    # to the count badge.
+    # Truncate to 40 chars
     current_short=$(printf '%s' "$current" | cut -c1-40)
     if [ "''${#current}" -gt 40 ]; then
       current_short="$current_short…"
@@ -70,7 +59,7 @@ let
 
     text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>"
 
-    # Tooltip: up to 10 pending tasks (text only, no scheduled time).
+    # Tooltip: pending task list
     list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
       print "⬜  " $2
     }' "${todoFile}" | head -10)
@@ -81,8 +70,7 @@ let
       '{text:$text, tooltip:$tooltip, class:$class}'
   '';
 
-  # prev/next media button: large glyph, only shown when a player is
-  # Playing or Paused. Click runs the given playerctl subcommand.
+  # Media control buttons
   mediaButton = glyph: cmd: {
     format = "<span size='x-large'>${glyph}</span>";
     return-type = "json";
@@ -119,6 +107,7 @@ in
       artist=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{artist}}' 2>/dev/null)
       title=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{title}}' 2>/dev/null)
       player=$(${pkgs.playerctl}/bin/playerctl metadata --format '{{playerName}}' 2>/dev/null)
+      
       title_short=$(printf '%s' "$title" | cut -c1-40)
       artist_short=$(printf '%s' "$artist" | cut -c1-20)
       if [ -n "$artist_short" ]; then
@@ -162,12 +151,7 @@ in
     return-type = "json";
     interval = 2;
     exec = todoPoll;
-    # Click handlers for different todo modes:
-    #   left click   → open in SEARCH mode (browse existing tasks)
-    #   right click  → open in CREATE mode (add new tasks)
-    #   middle click → mark current active task as done
-    # The popup uses the `cyberpunk-center` theme so it drops down from
-    # the top-center of the screen rather than the top-right.
+    # left=search, right=create, middle=mark done
     on-click = pkgs.writeShellScript "waybar-todo-search" ''
       ${elephant} activate "todo;;search;;" || true
       exec ${walker} -t cyberpunk-center -m todo

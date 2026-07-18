@@ -5,14 +5,10 @@ let
 
   timerState = "\${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state";
 
-  # wob FIFO — the wob daemon reads integer percentages from here and
-  # renders an overlay progress bar. See systemd.user.services.wob in
-  # default.nix.
+  # wob progress bar FIFO
   wobFifo = "\${XDG_RUNTIME_DIR:-/tmp}/wob.sock";
 
-  # Inlined into each timer script: writes the current remaining
-  # percentage to wob. No-op if wob isn't running (no FIFO). Expects
-  # shell vars $remaining and $total to be set by the caller.
+  # Update wob progress bar (expects $remaining and $total vars)
   wobTick = ''
     if [ -p "${wobFifo}" ] && [ "$total" -gt 0 ] 2>/dev/null; then
       pct=$(( ("$remaining" * 100) / "$total" ))
@@ -22,8 +18,7 @@ let
     fi
   '';
 
-  # Static icon + tooltip that never updates (interval = 1 day) and
-  # launches walker on click. Used for cliphist / files / powermenu.
+  # Static launcher icons
   staticLauncher =
     name: icon: tooltip: walkerArgs:
     {
@@ -38,14 +33,8 @@ let
       '';
     };
 
-  # ── Timer module (wob visualizer) ────────────────────────────────
-  # State lives in $XDG_RUNTIME_DIR/waybar-timer.state as
-  # "<end_epoch> <total_seconds> <label> <paused>". While paused,
-  # `end` holds remaining seconds (total still tracks the original).
-  #
-  # The countdown is visualized by wob (a Wayland overlay bar) via a
-  # FIFO at $XDG_RUNTIME_DIR/wob.sock. Each tick writes the remaining
-  # percentage. The waybar module is just a launcher icon.
+  # Timer with wob visualization
+  # State: "<end_epoch> <total_seconds> <label> <paused>"
   timerPoll = pkgs.writeShellScript "waybar-timer-poll" ''
     state="${timerState}"
     icon="<span size='large'>󰔛</span>"
@@ -66,10 +55,7 @@ let
     if [ "$remaining" -le 0 ]; then
       rm -f "$state"
       ${notify} -u critical "Timer" "⏰ ${label:-Done}"
-      # Beep: 880Hz sine wave for 0.3s, played in background so the
-      # poll loop isn't blocked. Uses ffplay (ffmpeg) with a lavfi
-      # sine source; -nodisp hides the video window, -autoexit quits
-      # after the tone finishes.
+      # Play completion beep
       (
         ${pkgs.ffmpeg}/bin/ffplay -nodisp -autoexit -f lavfi -i "sine=frequency=880:duration=1" >/dev/null 2>&1
       ) &
@@ -100,7 +86,7 @@ let
       *Custom*)
         input=$(${walker} -d -p "Minutes (or e.g. 90s, 2h)" 2>/dev/null)
         [ -z "$input" ] && exit 0
-        # If bare number, treat as minutes
+        # Bare number = minutes
         if printf '%s' "$input" | grep -qE '^[0-9]+$'; then
           input="''${input}m"
         fi
@@ -110,7 +96,7 @@ let
       *) exit 0 ;;
     esac
 
-    # Parse durations like 90s, 10m, 2h, or 1h30m
+    # Parse duration (90s, 10m, 2h, 1h30m)
     total=0
     rest="$input"
     while [ -n "$rest" ]; do
@@ -140,7 +126,7 @@ let
     state="${timerState}"
     if [ -f "$state" ]; then
       rm -f "$state"
-      # Clear the wob bar.
+      # Clear wob
       [ -p "${wobFifo}" ] && printf '0\n' > "${wobFifo}" 2>/dev/null &
       ${notify} "Timer" "Cancelled"
     fi
@@ -151,13 +137,13 @@ let
     if [ ! -f "$state" ]; then exit 0; fi
     read -r end total label paused < "$state"
     if [ "$paused" = "1" ]; then
-      # Resume: `end` holds remaining seconds; compute new epoch.
+      # Resume: convert remaining to new epoch
       now=$(date +%s)
       newend=$((now + end))
       printf '%s %s %s 0\n' "$newend" "$total" "$label" > "$state"
       ${notify} "Timer" "Resumed"
     else
-      # Pause: store remaining seconds in place of end.
+      # Pause: store remaining in end field
       now=$(date +%s)
       remaining=$((end - now))
       if [ "$remaining" -le 0 ]; then
@@ -177,7 +163,7 @@ let
       printf '%s %s %s %s\n' "$end" "$total" "$label" "$paused" > "$state"
       ${wobTick}
     else
-      # No timer running — start a 1-minute timer
+      # No timer - start 1m
       end=$(( $(date +%s) + 60 ))
       printf '%s 60 1m 0\n' "$end" > "$state"
       ${notify} "Timer" "Started: 1m"
