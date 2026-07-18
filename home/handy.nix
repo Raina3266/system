@@ -77,15 +77,15 @@ let
           name = "Transcribe";
         };
         transcribe_with_post_process = {
-          current_binding = "ctrl+shift+space";
-          default_binding = "ctrl+shift+space";
+          current_binding = "mod+alt+space";
+          default_binding = "mod+alt+space";
           description = "Converts your speech into text and applies AI post-processing.";
           id = "transcribe_with_post_process";
           name = "Transcribe with Post-Processing";
         };
       };
       clamshell_microphone = null;
-      clipboard_handling = "dont_modify";
+      clipboard_handling = "paste";
       custom_filler_words = null;
       custom_words = [ ];
       debug_mode = false;
@@ -93,17 +93,17 @@ let
       external_script_path = null;
       extra_recording_buffer_ms = 0;
       history_limit = 5;
-      keyboard_implementation = "tauri";
+      keyboard_implementation = "wtype";
       lazy_stream_close = false;
       log_level = "debug";
       model_unload_timeout = "min5";
       mute_while_recording = false;
-      onboarding_completed = false;
+      onboarding_completed = true;
       ort_accelerator = "auto";
       overlay_position = "bottom";
       overlay_style = "minimal";
-      paste_delay_ms = 60;
-      paste_method = "direct";
+      paste_delay_ms = 30;
+      paste_method = "clipboard";
       post_process_api_keys = {
         anthropic = "";
         bedrock_mantle = "";
@@ -204,7 +204,7 @@ let
       recording_retention_period = "preserve_limit";
       selected_language = "auto";
       selected_microphone = null;
-      selected_model = "";
+      selected_model = "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf";
       selected_output_device = null;
       settings_schema_version = 1;
       show_tray_icon = true;
@@ -214,7 +214,7 @@ let
       transcribe_accelerator = "auto";
       transcribe_gpu_device = -1;
       translate_to_english = false;
-      typing_tool = "auto";
+      typing_tool = "wtype";
       update_checks_enabled = true;
       vad_enabled = true;
       whats_new_last_seen_version = "0.9.0";
