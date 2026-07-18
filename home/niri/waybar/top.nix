@@ -9,7 +9,7 @@ in
 {
   layer = "top";
   position = "top";
-  height = 36;
+  height = 40;
   smooth-scrolling-threshold = 5;
 
   modules-left = [

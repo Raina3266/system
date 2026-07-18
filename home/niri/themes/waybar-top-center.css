@@ -5,7 +5,6 @@
     color: #7afcff;
     border: none;
     background-color: transparent;
-    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
 }
 #custom-media.paused {
     color: #f29e74;
@@ -28,12 +27,10 @@
     color: #7afcff;
     border: none;
     background-color: transparent;
-    text-shadow: 0 0 8px rgba(122, 252, 255, 0.6);
 }
 #custom-media-prev:hover,
 #custom-media-next:hover {
     color: #ff7edb;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
 /* ── Lyrics ────────────────────────────────────── */

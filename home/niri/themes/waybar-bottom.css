@@ -63,13 +63,12 @@
     background-color: transparent;
 }
 .niri-window-buttons button {
-    background-color: rgba(20, 20, 40, 0.7);
+    background-color: transparent;
     color: #7afcff;
-    margin: 0 1px;
     padding-left: 10px;
     padding-right: 10px;
     border-radius: 6px;
-    border: 2px solid rgba(255, 126, 219, 0.4);
+    border: 1px solid rgba(255, 126, 219, 0.4);
 }
 .niri-window-buttons button label {
     font-size: 16px;
@@ -81,10 +80,11 @@
 }
 .niri-window-buttons button:hover {
     background-color: rgba(255, 126, 219, 0.15);
-    color: #7afcff;
+    color: #ff7edb;
     background-image: none;
     border-color: rgba(255, 126, 219, 0.8);
-    box-shadow: 0 0 10px rgba(255, 126, 219, 0.6);
+    text-shadow: 0 0 5px rgba(122, 252, 255, 0.15);
+    box-shadow: 0 0 5px rgba(255, 126, 219, 0.6);
 }
 .niri-window-buttons button.urgent {
     background-color: rgba(255, 51, 51, 0.3);

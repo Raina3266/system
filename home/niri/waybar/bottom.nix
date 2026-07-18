@@ -57,11 +57,10 @@ in
 {
   layer = "top";
   position = "bottom";
-  height = 42;
+  height = 40;
   smooth-scrolling-threshold = 5;
-  expand-left = true;
 
-  modules-left = [
+  modules-center = [
     "niri/workspaces"
     "custom/thunderbird"
     "custom/gcal"
@@ -101,10 +100,10 @@ in
     truncate_titles = true;
     show_tooltip = true;
 
-    icon_size = 20;
+    icon_size = 25;
     icon_spacing = 8;
     min_button_width = 50;
-    max_button_width = 250;
+    max_button_width = 220;
     # Fall back to the eDP-1 logical width; overridden per-output below to
     # match each display's actual logical resolution (see niri/config.kdl).
     max_taskbar_width = 1350;
@@ -117,7 +116,7 @@ in
     max_taskbar_width_per_output = {
       "eDP-1" = 1350; # 1920x1200 @ scale 1
       "DP-8" = 2000; # 2560x1440 @ scale 1
-      "DP-7" = 1800; # 2560x2880 @ scale 1.25 -> 2048 logical
+      "DP-7" = 1700; # 2560x2880 @ scale 1.25 -> 2048 logical
     };
 
     # Size each button to mirror its window's on-screen width in the niri
