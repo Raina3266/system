@@ -106,9 +106,9 @@ in
     show_tooltip = true;
 
     icon_size = 25;
-    icon_spacing = 8;
-    min_button_width = 100;
-    max_button_width = 220;
+    icon_spacing = 5;
+    min_button_width = 120;
+    max_button_width = 200;
     # Fall back to the eDP-1 logical width; overridden per-output below to
     # match each display's actual logical resolution (see niri/config.kdl).
     max_taskbar_width = 1350;
@@ -167,12 +167,12 @@ in
     # Speaker icon on windows currently playing audio; click to mute.
     # Disabled: libpulse's glib-mainloop integration has a known
     # double-free bug in its timer teardown ("glib_time_free: assndicator = {
-    audio_indicator = {
-      enabled = true;
-      playing_icon = "󰕾";
-      muted_icon = "󰖁";
-      clickable = true;
-    };
+    # audio_indicator = {
+    #   enabled = true;
+    #   playing_icon = "󰕾 ";
+    #   muted_icon = "󰖁 ";
+    #   clickable = true;
+    # };
 
     # Urgency-hint highlighting when an app requests attention.
     notifications = {

@@ -46,7 +46,7 @@ let
     } END{print text}' "${todoFile}")
 
     # Truncate to 40 chars
-    current_short=$(printf '%s' "$current" | cut -c1-40)
+    current_short=$(printf '%s' "$current" | cut -c1-30)
     if [ "''${#current}" -gt 40 ]; then
       current_short="$current_short…"
     fi
@@ -131,14 +131,13 @@ in
 
   "custom/lyrics" = {
     hide-empty-text = true;
-    signal = 8;
     return-type = "json";
     format = "{icon} {0}";
     format-icons = {
-      playing = "󰝚";
-      paused = "󰝚";
+      playing = "󰝚 ";
+      paused = "󰝚 ";
       lyric = "";
-      music = "󰝚";
+      music = "󰝚 ";
     };
     exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
     exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";

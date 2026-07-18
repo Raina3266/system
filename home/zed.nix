@@ -23,6 +23,7 @@
       "html"
       "kdl"
       "nix"
+      "lua"
       "toml"
       "crates-lsp"           # Cargo.toml dependency info, version hints, features
       "make"                 # Makefile syntax (often used in Rust projects)

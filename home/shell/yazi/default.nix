@@ -37,12 +37,18 @@ in
       exiftool
       mediainfo
       glow # markdown rendering (used by glow plugin)
-      miller # CSV/TSV/JSON (used by miller plugin)
       duckdb # data files (used by duckdb plugin)
       chafa # image preview fallback in terminal
       catdoc # .doc preview
       xlsx2csv # spreadsheet preview
       fontpreview # font preview
+
+      # Plugin runtime dependencies
+      trash-cli # recycle-bin plugin
+      zip # compress plugin (.zip)
+      p7zip # compress plugin (.7z, password-protected zip)
+      util-linux # mount plugin (lsblk, eject)
+      udisks # mount plugin (udisksctl)
     ];
 
     # ──────────────────────────────────────────────────────────────────────
@@ -53,7 +59,6 @@ in
       "mime-ext" = yp.mime-ext; # fast mime detection by extension
       "rich-preview" = yp.rich-preview; # rich previews for various types
       "glow" = yp.glow; # markdown rendering
-      "miller" = yp.miller; # CSV/TSV/JSON tabular preview
       "mediainfo" = yp.mediainfo; # media metadata preview
       "duckdb" = yp.duckdb; # SQL/Parquet/CSV via duckdb
       "lsar" = yp.lsar; # archive contents listing
@@ -79,15 +84,25 @@ in
       "githead" = yp.githead; # git branch in header
       "toggle-pane" = yp.toggle-pane;
       "zoom" = yp.zoom; # zoom preview pane
-      "relative-motions" = yp.relative-motions;
+
       "jump-to-char" = yp.jump-to-char;
       "easyjump" = yp.easyjump;
+
+      # File/system operations & integrations
+      "mount" = yp.mount; # disk mount/unmount/eject manager
+      "yafg" = yp.yafg; # ripgrep+fzf content search
+      "recycle-bin" = yp.recycle-bin; # trash management
+      "compress" = yp.compress; # archive creation
+      "chmod" = yp.chmod; # chmod selected files
+
+      # UI Customization
+      "starship" = yp.starship; # starship prompt in header
     };
 
     # ──────────────────────────────────────────────────────────────────────
-    # init.lua — register every plugin so it can be referenced from keymap.
+    # main.lua — register every plugin so it can be referenced from keymap.
     # ──────────────────────────────────────────────────────────────────────
-    initLua = ./init.lua;
+    initLua = ./main.lua;
 
     # ──────────────────────────────────────────────────────────────────────
     # yazi.toml — built-in config + plugin feature flags.
@@ -143,11 +158,11 @@ in
           }
           {
             mime = "text/csv";
-            run = "miller";
+            run = "duckdb";
           }
           {
             mime = "application/json";
-            run = "miller";
+            run = "duckdb";
           }
           # Office documents
           {
@@ -182,11 +197,133 @@ in
           }
         ];
       };
+      
+      # ──────────────────────────────────────────────────────────────────────
+      # File opener configuration
+      # ──────────────────────────────────────────────────────────────────────
+      opener.text_editor = [
+        { run = "zed \"$@\""; desc = "Edit in Zed"; for = "linux"; }
+      ];
+      opener.media_player = [
+        { run = "vlc \"$@\""; desc = "Play in VLC"; for = "linux"; }
+      ];
+      opener.pdf_viewer = [
+        { run = "google-chrome \"$@\""; desc = "Open in Chrome"; for = "linux"; }
+      ];
+      opener.office_suite = [
+        { run = "onlyoffice-desktopeditors \"$@\""; desc = "Edit in OnlyOffice"; for = "linux"; }
+      ];
+      
+      # File type associations
+      open.prepend_rules = [
+        # Text files - Zed
+        { mime = "text/*"; use = "text_editor"; }
+        { url = "*.{txt,md,json,yaml,yml,toml,conf,config,log,sh,py,rs,js,ts,html,css,xml,svg,nix,lua}"; use = "text_editor"; }
+        
+        # Media files - VLC
+        { mime = "video/*"; use = "media_player"; }
+        { mime = "audio/*"; use = "media_player"; }
+        { url = "*.{mp4,mkv,avi,mov,mp3,flac,wav,ogg,m4a,webm,3gp,wmv,flv,m4v,ogv}"; use = "media_player"; }
+        
+        # PDF files - Chrome
+        { mime = "application/pdf"; use = "pdf_viewer"; }
+        { url = "*.pdf"; use = "pdf_viewer"; }
+        
+        # Office documents - OnlyOffice
+        { mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"; use = "office_suite"; }  # .docx
+        { mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; use = "office_suite"; }  # .xlsx
+        { mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"; use = "office_suite"; }  # .pptx
+        { mime = "application/msword"; use = "office_suite"; }  # .doc
+        { mime = "application/vnd.ms-powerpoint"; use = "office_suite"; }  # .ppt
+        { mime = "application/vnd.ms-excel"; use = "office_suite"; }  # .xls
+        { url = "*.{doc,docx,ppt,pptx,csv,xls,xlsx,odt,ods,odp}"; use = "office_suite"; }
+      ];
     };
 
     # ──────────────────────────────────────────────────────────────────────
     # theme.toml — UI customization (filetype colors, etc.)
     # ──────────────────────────────────────────────────────────────────────
     theme = import ./theme.nix;
+
+
+
+    # ──────────────────────────────────────────────────────────────────────
+    # keymap.toml — plugin key bindings.
+    # Chords are used to avoid shadowing single-key defaults.
+    # ──────────────────────────────────────────────────────────────────────
+    keymap = {
+      mgr.prepend_keymap = [
+        # mount — disk mount manager
+        {
+          on = "M";
+          run = "plugin mount";
+          desc = "Mount manager";
+        }
+        # yafg — fuzzy grep file contents
+        {
+          on = [
+            "F"
+            "G"
+          ];
+          run = "plugin yafg";
+          desc = "Grep file contents (rg+fzf)";
+        }
+        # recycle-bin — trash menu
+        {
+          on = [
+            "R"
+            "b"
+          ];
+          run = "plugin recycle-bin";
+          desc = "Open Recycle Bin menu";
+        }
+        # compress — archive selected files
+        {
+          on = [
+            "c"
+            "a"
+            "a"
+          ];
+          run = "plugin compress";
+          desc = "Archive selected files";
+        }
+        {
+          on = [
+            "c"
+            "a"
+            "p"
+          ];
+          run = "plugin compress -p";
+          desc = "Archive (password)";
+        }
+        {
+          on = [
+            "c"
+            "a"
+            "h"
+          ];
+          run = "plugin compress -ph";
+          desc = "Archive (password+header)";
+        }
+        {
+          on = [
+            "c"
+            "a"
+            "l"
+          ];
+          run = "plugin compress -l";
+          desc = "Archive (compression level)";
+        }
+        # chmod — change file mode
+        {
+          on = [
+            "c"
+            "m"
+          ];
+          run = "plugin chmod";
+          desc = "Chmod on selected files";
+        }
+      ];
+    };
   };
 }

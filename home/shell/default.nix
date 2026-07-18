@@ -18,6 +18,8 @@
     };
 
     home.packages = with pkgs; [
+      ffmpeg
+      fzf
       bat
       tree
       yq

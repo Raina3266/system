@@ -11,7 +11,7 @@ in
   position = "top";
   height = 40;
   smooth-scrolling-threshold = 5;
-
+  expand-center = true;
   modules-left = [
     "clock"
     "group/system"
@@ -34,4 +34,7 @@ in
     "custom/audio-sink"
     "custom/powermenu"
   ];
-} // left // center // right
+}
+// left
+// center
+// right

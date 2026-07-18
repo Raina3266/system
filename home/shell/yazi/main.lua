@@ -1,4 +1,4 @@
--- Yazi init.lua — plugin setup.
+-- Yazi main.lua — plugin setup.
 
 -- ── 1. Smart File Manipulation & Integration ─────────────────────────────
 require("full-border"):setup()
@@ -8,8 +8,9 @@ require("bookmarks"):setup {}
 -- ── 2. UI Customization & Quality of Life ────────────────────────────────
 require("git"):setup { order = 1500 }
 require("githead"):setup()
-require("relative-motions"):setup {
-  show_numbers = "relative",
-  show_motion = true,
-  enter_mode = "first",
-}
+require("starship"):setup()
+
+-- ── 3. File Operations & Integrations ────────────────────────────────────
+require("recycle-bin"):setup()
+require("yafg"):setup { editor = "nvim" }
+

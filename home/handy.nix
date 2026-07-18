@@ -13,7 +13,7 @@ let
     settings = {
       # Core functionality
       push_to_talk = true;
-      keyboard_implementation = "wtype"; 
+      keyboard_implementation = "tauri"; 
       clipboard_handling = "dont_modify";
       paste_method = "direct";
       selected_model = "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf";
@@ -62,7 +62,7 @@ let
       # Schema and setup
       settings_schema_version = 1;
       onboarding_completed = true;
-      autostart_enabled = true;
+      autostart_enabled = false;
       
       # Default values for unused features
       always_on_microphone = false;
