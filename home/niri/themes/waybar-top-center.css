@@ -53,11 +53,3 @@
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
-#custom-todo.urgent {
-    color: #ff3333;
-    text-shadow: 0 0 6px rgba(255, 51, 51, 0.5);
-}
-#custom-todo.pending {
-    color: #f29e74;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-}

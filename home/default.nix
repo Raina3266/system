@@ -7,11 +7,9 @@
     ./niri
     ./shell
     ./thunderbird.nix
-    ./handy.nix
     ./cloud.nix
     ./ocr.nix
     ./toolchains.nix
-    ./zed.nix
   ];
 
   home = {
@@ -22,11 +20,18 @@
 
   programs.home-manager.enable = true;
 
+  programs.zed-editor.enable = true;
+
   home.packages = with pkgs; [
     # browsers
     google-chrome
     firefox
 
+    # handy
+    handy
+    wtype
+    wl-clipboard
+    
     # communication
     slack
     discord

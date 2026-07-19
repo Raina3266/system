@@ -105,8 +105,8 @@ in
     truncate_titles = true;
     show_tooltip = true;
 
-    icon_size = 26;
-    icon_spacing = 6;
+    icon_size = 22;
+    icon_spacing = 10;
     min_button_width = 120;
     max_button_width = 200;
     # Fall back to the eDP-1 logical width; overridden per-output below to

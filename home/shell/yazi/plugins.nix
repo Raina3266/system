@@ -78,7 +78,6 @@ in
     fd
     ripgrep
     zoxide
-    fzf
     exiftool
     mediainfo
     bat # syntax highlighting

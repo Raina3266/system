@@ -39,7 +39,7 @@ output "DP-7" {
 }
 
 overview {
-    zoom 0.75
+    zoom 0.4
 }
 
 layer-rule {
