@@ -13,7 +13,7 @@
 #   dim:    #5c6776  muted text
 let
   bg = "#0a0a14";
-  bgmod = "#141428";
+  bgmod = "#0E0616";
   white = "#ffffff";
   fg = "#cbe3e7";
   pink = "#ff7edb";

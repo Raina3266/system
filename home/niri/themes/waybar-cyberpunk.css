@@ -20,9 +20,8 @@
 }
 
 window#waybar {
-    background-color: #190326;
+    background-color: #0E0616;
     border-bottom: 2px solid #ff7edb;
-    box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
 }
 
 /* Bottom bar: pink line on top instead of bottom */
@@ -123,7 +122,7 @@ window#waybar.bottom {
 
 /* ── Calendar tooltip ───────────────────────────────────── */
 tooltip {
-    background-color: #190326;
+    background-color: #0E0616;
     border: 1px solid #ff7edb;
     border-radius: 6px;
     box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
