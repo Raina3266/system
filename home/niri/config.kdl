@@ -39,7 +39,7 @@ output "DP-7" {
 }
 
 overview {
-    zoom 0.5
+    zoom 0.75
 }
 
 layer-rule {
@@ -49,7 +49,7 @@ layer-rule {
 
 layout {
     gaps 16
-    
+
     background-color "transparent"
 
     center-focused-column "never"
@@ -151,8 +151,6 @@ binds {
     F6 hotkey-overlay-title="Brightness Up"   { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
     F7 hotkey-overlay-title="Switch Window"   { focus-window-down; }
     F8 hotkey-overlay-title="Do Not Disturb"  { spawn-sh "makoctl set-mode dnd 2>/dev/null || swaync-client -t 2>/dev/null || true"; }
-    F10 hotkey-overlay-title="Media Play"     { spawn-sh "mediactl play-pause"; }
-    F11 hotkey-overlay-title="Media Pause"    { spawn-sh "mediactl play-pause"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }
@@ -285,9 +283,7 @@ binds {
     Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn-sh "walker -m clipboard"; }
 
     // Toggle Handy speech-to-text (SIGUSR2 to the running instance).
-    // -f matches the full command line: Nix-wrapped binaries run as
-    // `.handy-wrapped`, so plain `pkill -n handy` never matched.
-    Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" { spawn "pkill" "-USR2" "-f" "/bin/handy --start-hidden"; }
+    Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" {  spawn "pkill" "-USR2" "-n" "handy"; }
 
     // Toggle EN/CN (fcitx5): keyboard-gb ↔ pinyin.
     Mod+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "current=$(/run/current-system/sw/bin/fcitx5-remote -n 2>/dev/null); if [ \"$current\" = 'pinyin' ]; then /run/current-system/sw/bin/fcitx5-remote -s keyboard-gb; else /run/current-system/sw/bin/fcitx5-remote -s pinyin; fi"; }
