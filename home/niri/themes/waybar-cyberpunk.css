@@ -1,7 +1,7 @@
 /* Cyberpunk Waybar Theme */
 /*
  * Palette:
- * bg:      rgba(10, 10, 20, 0.85)
+ * bg:      #190326
  * bg-mod:  rgba(20, 20, 40, 0.7)
  * fg:      #cbe3e7
  * pink:    #ff7edb
@@ -20,8 +20,7 @@
 }
 
 window#waybar {
-    background-color: rgba(10, 10, 20, 0.85);
-    color: #cbe3e7;
+    background-color: #190326;
     border-bottom: 2px solid #ff7edb;
     box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
 }
@@ -65,7 +64,7 @@ window#waybar.bottom {
 #custom-battery,
 #custom-powermenu,
 #tray {
-    background-color: rgba(20, 20, 40, 0.7);
+    background-color: #190326;
     margin: 0 3px;
     padding: 0 10px;
     border-radius: 6px;
@@ -84,7 +83,7 @@ window#waybar.bottom {
 /* Ensure all modules inside groups get box styling */
 #group-hardware > widget,
 #group-system > widget {
-    background-color: rgba(20, 20, 40, 0.7);
+    background-color: #190326;
     margin: 0 3px;
     padding: 0 10px;
     border-radius: 6px;
@@ -124,7 +123,7 @@ window#waybar.bottom {
 
 /* ── Calendar tooltip ───────────────────────────────────── */
 tooltip {
-    background-color: rgba(10, 10, 20, 0.95);
+    background-color: #190326;
     border: 1px solid #ff7edb;
     border-radius: 6px;
     box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);

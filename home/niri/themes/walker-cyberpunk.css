@@ -24,7 +24,7 @@
 }
 
 popover {
-  background: #141428b3;
+  background: #190326;
   border: 1px solid #ff7edb;
   border-radius: 18px;
   padding: 10px;
@@ -67,16 +67,15 @@ scrollbar slider {
     0 0 20px rgba(255, 126, 219, 0.3),
     0 19px 38px rgba(0, 0, 0, 0.3),
     0 15px 12px rgba(0, 0, 0, 0.22);
-  background: #0a0a14f2;
+  background: #190326;
   padding: 12px;
   border-radius: 10px;
   border: 2px solid #ff7edb;
 }
 
-.preview-box,
 .elephant-hint,
 .placeholder {
-  color: #cbe3e7;
+  color: #7afcff;
 }
 
 .search-container {
@@ -166,6 +165,23 @@ row:selected .item-subtext {
 
 .item-image-text {
   font-size: 28px;
+}
+
+.preview-box {
+    min-width: 300px;
+    min-height: 300px;
+    max-width: 300px;
+    max-height: 300px;
+}
+
+.preview-stack {
+    padding: 8px;
+}
+
+.preview image,
+.preview picture {
+    min-width: 200px;
+    min-height: 200px;
 }
 
 .preview {

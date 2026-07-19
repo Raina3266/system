@@ -23,7 +23,7 @@ let
   green = "#6af6a8";   
   yellow = "#ffe66d";  
   navy = "#5c7cfa";    
-  purple = "#c792ea";  
+  purple = "#7b2ff7";  
   amber = "#f29e74";   
 in
 {
