@@ -23,7 +23,7 @@
       run = "plugin bookmarks delete";
       desc = "Delete bookmark";
     }
-    # bookmarks — delete all bookmarks
+    # bookmarks — add a bookmark
     {
       on = [
         "b"

@@ -14,45 +14,81 @@
 let
   bg = "#0a0a14";
   bgmod = "#141428";
+  white = "#ffffff";
   fg = "#cbe3e7";
   pink = "#ff7edb";
   cyan = "#7afcff";
-  amber = "#f29e74";
   red = "#ff3333";
   dim = "#5c6776";
+  green = "#6af6a8";   
+  yellow = "#ffe66d";  
+  navy = "#5c7cfa";    
+  purple = "#c792ea";  
+  amber = "#f29e74";   
 in
 {
   # ── Filetype rules ──────────────────────────────────────────────────────
   filetype.rules = [
-    # Media
-    { mime = "image/*"; fg = cyan; }
-    { mime = "video/*"; fg = amber; }
+    # ── Directories ──
+    { url = "*/"; fg = cyan; bold = true; }
+
+    # ── Images ──
+    { mime = "image/*"; fg = green; }
+
+    # ── Video ──
+    { mime = "video/*"; fg = yellow; }
+
+    # ── Audio ──
     { mime = "audio/*"; fg = amber; }
-    # Archives (red — caution color)
-    { mime = "application/{,g}zip"; fg = red; }
-    { mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}"; fg = red; }
-    # Documents
-    { mime = "application/pdf"; fg = cyan; }
-    { mime = "application/vnd.openxmlformats-*"; fg = pink; }
-    # Code & data
-    { mime = "text/*"; fg = cyan; }
-    { mime = "application/json"; fg = pink; }
-    { mime = "application/javascript"; fg = pink; }
-    # Fallbacks
-    { url = "*"; fg = dim; }
-    { url = "*/"; fg = cyan; }
+
+    # ── PDF ──
+    { mime = "application/pdf"; fg = purple; }
+
+    # ── Office documents & spreadsheets ──
+    { mime = "application/vnd.openxmlformats-*"; fg = navy; }
+    { mime = "application/vnd.ms-*"; fg = navy; }
+    { mime = "application/vnd.oasis.opendocument.*"; fg = navy; }
+    { mime = "text/csv"; fg = navy; }
+
+    # ── Archives (cyan — caution) ──
+    { mime = "application/{,g}zip"; fg = cyan; }
+    { mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}"; fg = cyan; }
+    { mime = "application/java-archive"; fg = cyan; }
+
+    # ── Code & scripts ──
+    { mime = "text/*"; fg = white; }
+    { mime = "application/javascript"; fg = white; }
+    { mime = "application/x-shellscript"; fg = white; }
+    { mime = "application/x-python"; fg = white; }
+    { mime = "application/x-rust"; fg = white; }
+
+    # ── Data & markup formats ──
+    { mime = "application/json"; fg = white; }
+    { mime = "application/toml"; fg = white; }
+    { mime = "application/yaml"; fg = white; }
+    { mime = "application/xml"; fg = white; }
+    { mime = "text/markdown"; fg = white; }
+    { mime = "text/html"; fg = white; }
+    { mime = "text/css"; fg = white; }
+
+    # ── Executables & binaries ──
+    { mime = "application/x-executable"; fg = dim; }
+    { mime = "application/x-sharedlib"; fg = dim; }
+
+    # ── Fallback ──
+    { url = "*"; fg = fg; }
   ];
 
   # ── Manager ─────────────────────────────────────────────────────────────
   mgr = {
     cwd = { fg = cyan; bold = true; };
-    find_keyword = { fg = pink; bold = true; };
-    find_position = { fg = cyan; };
+    find_keyword = { fg = red; bold = true; };
+    find_position = { fg = red; };
     marker_copied = { fg = cyan; };
-    marker_cut = { fg = red; };
-    marker_selected = { fg = pink; };
+    marker_cut = { fg = pink; };
+    marker_selected = { fg = red; };
     count_copied = { fg = cyan; };
-    count_cut = { fg = red; };
+    count_cut = { fg = pink; };
     count_selected = { fg = pink; };
     border_symbol = "│";
     border_style = { fg = pink; };
@@ -60,9 +96,8 @@ in
 
   # ── Indicator bar ───────────────────────────────────────────────────────
   indicator = {
-    parent = { fg = dim; };
-    current = { fg = pink; };
-    preview = { fg = cyan; };
+    parent = { fg = bgmod; bg = pink; bold = true; };
+    current = { fg = bgmod; bg = pink; bold = true; };
   };
 
   # ── Tabs ────────────────────────────────────────────────────────────────

@@ -47,17 +47,26 @@
     ];
     # 1. Specialized previewers.
     prepend_previewers = [
+      # rich-preview: markdown, CSV, JSON, Jupyter, reStructuredText
       {
-        mime = "text/markdown";
-        run = "glow";
+        url = "*.md";
+        run = "rich-preview";
       }
       {
-        mime = "text/csv";
-        run = "duckdb";
+        url = "*.rst";
+        run = "rich-preview";
       }
       {
-        mime = "application/json";
-        run = "duckdb";
+        url = "*.ipynb";
+        run = "rich-preview";
+      }
+      {
+        url = "*.csv";
+        run = "rich-preview";
+      }
+      {
+        url = "*.json";
+        run = "rich-preview";
       }
       # Office documents
       {
@@ -100,7 +109,7 @@
   # "open"); the rest only show up in the "Open with..." (<Enter>) menu.
   opener.text_editor = [
     {
-      run = "zed \"$@\"";
+      run = "zed --new-window \"$@\"";
       desc = "Edit in Zed";
       for = "linux";
     }

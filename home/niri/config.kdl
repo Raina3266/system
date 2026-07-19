@@ -38,8 +38,19 @@ output "DP-7" {
     position x=2560 y=0
 }
 
+overview {
+    zoom 0.5
+}
+
+layer-rule {
+    match namespace="^wallpaper$"
+    place-within-backdrop true
+}
+
 layout {
     gaps 16
+    
+    background-color "transparent"
 
     center-focused-column "never"
 

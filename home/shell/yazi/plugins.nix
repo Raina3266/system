@@ -16,13 +16,6 @@ let
   # The yaziPlugins bundle ships plugins matching the yazi package version.
   # Using it (rather than fetching plugins ad-hoc) avoids version drift.
   yp = pkgs.yaziPlugins;
-
-  # Patch glow: nixpkgs 2025-06-13 uses :args() but yazi 26.5.6 only has :arg()
-  glow-patched = pkgs.runCommand "glow.yazi-patched" { } ''
-    cp -r ${yp.glow} $out
-    chmod -R u+w $out
-    substituteInPlace $out/main.lua --replace-fail ':args(' ':arg('
-  '';
 in
 {
   # ──────────────────────────────────────────────────────────────────────
@@ -30,7 +23,6 @@ in
   # ──────────────────────────────────────────────────────────────────────
   plugins = {
     # 1. Advanced & Specialized Previews
-    "glow" = glow-patched; # markdown rendering (patched: :args→:arg for yazi 26.5.6)
     "mime-ext" = yp.mime-ext; # fast mime detection by extension
     "rich-preview" = yp.rich-preview; # rich previews for various types
 
@@ -89,7 +81,7 @@ in
     fzf
     exiftool
     mediainfo
-    glow # markdown rendering (used by glow plugin)
+    bat # syntax highlighting
     rich-cli # markdown/json/csv rendering (used by rich-preview plugin)
     duckdb # data files (used by duckdb plugin)
     chafa # image preview fallback in terminal

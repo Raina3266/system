@@ -12,7 +12,7 @@ let
     settings = {
       # Core functionality
       push_to_talk = true;
-      keyboard_implementation = "tauri"; 
+      keyboard_implementation = "wtype"; 
       clipboard_handling = "dont_modify";
       paste_method = "direct";
       selected_model = "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf";
