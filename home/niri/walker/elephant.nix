@@ -210,7 +210,12 @@
             local sec = ""
             if security and security ~= "" then sec = " [" .. security .. "]" end
             local text = marker .. "  " .. bars .. "  " .. ssid .. sec
-            local value = "nmcli device wifi connect \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || (notify-send 'Wi-Fi' 'Connecting to " .. ssid .. "...'; nm-connection-editor &)"
+            local value = ""
+            if saved[ssid] then
+              value = "nmcli connection up \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
+            else
+              value = "nmcli device wifi connect \"" .. ssid .. "\" --ask 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
+            end
 
             local actions = {}
             -- forget: available on any saved network (connected or not).

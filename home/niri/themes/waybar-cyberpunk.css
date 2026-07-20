@@ -39,7 +39,8 @@ window#waybar.bottom {
 #disk,
 #network,
 #clock,
-#custom-lyrics,
+    #custom-ycal,
+    #custom-lyrics,
 #custom-media,
 #custom-media-prev,
 #custom-media-next,
@@ -97,7 +98,8 @@ window#waybar.bottom {
 #disk:hover,
 #network:hover,
 #clock:hover,
-#custom-wifi:hover,
+    #custom-ycal:hover,
+    #custom-wifi:hover,
 #custom-bt:hover,
 #custom-cliphist:hover,
 #custom-files:hover,
@@ -129,6 +131,11 @@ tooltip {
 }
 tooltip label {
     color: #cbe3e7;
+}
+
+#custom-ycal.has-events {
+    background-color: rgba(255, 51, 51, 0.12);
+    border-color: rgba(255, 51, 51, 0.55);
 }
 
 @keyframes blink {

@@ -109,7 +109,7 @@
   # "open"); the rest only show up in the "Open with..." (<Enter>) menu.
   opener.text_editor = [
     {
-      run = "zed --new-window \"$@\"";
+      run = "zeditor --new-window \"$@\"";
       desc = "Edit in Zed";
       for = "linux";
     }

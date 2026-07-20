@@ -74,3 +74,11 @@
     text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
+
+/* ── Calendar (ycal) ───────────────────────────────────── */
+#custom-ycal {
+    color: #7afcff;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+    border: 2px solid rgba(255, 126, 219, 0.2);
+}

@@ -113,6 +113,7 @@
   # These actions only exist on wifi entries, so the buttons only
   # appear there; other menus (power, etc.) are unaffected.
   menus = [
+    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "disconnect"; label = "disconnect"; bind = "ctrl d"; after = "AsyncClearReload"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
   ];

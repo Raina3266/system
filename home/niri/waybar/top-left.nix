@@ -5,24 +5,15 @@ let
     transition-duration = 300;
     transition-left-to-right = true;
   };
+
+  ycal = import ./waybar-ycal.nix { inherit pkgs; };
 in
 {
-  "clock" = {
-    format = "󰃭 {:%A %d %B  %H:%M}";
-    format-alt = "󰃭 {:%A %Y-%m-%d  %H:%M:%S}";
-    tooltip-format = "<tt>{calendar}</tt>";
-    calendar = {
-      mode = "month";
-      mode-switcher = true;
-      format = {
-        months = "<span color='#ff7edb'><b>{}</b></span>";
-        weekdays = "<span color='#7afcff'><b>{}</b></span>";
-        days = "<span color='#cbe3e7'>{}</span>";
-        today = "<span color='#ff3333'><b><u>{}</u></b></span>";
-      };
-    };
-    on-click = "mode_switch";
-    on-scroll = "1";
+  "custom/ycal" = {
+    return-type = "json";
+    interval = 60;
+    exec = ycal.ycalBarExec;
+    on-click = ycal.ycalToggle;
   };
 
   "group/system" = {

@@ -62,7 +62,6 @@ scrollbar slider {
  * only, so the popup shrinks to fit small menus and grows up to the cap.
  */
 .box-wrapper {
-  max-width: 800px;
   background: #0E0616;
   padding: 12px;
   border-radius: 6px;
@@ -166,8 +165,6 @@ row:selected .item-subtext {
 .preview-box {
     min-width: 300px;
     min-height: 300px;
-    max-width: 300px;
-    max-height: 300px;
 }
 
 .preview-stack {

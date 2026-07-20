@@ -60,7 +60,7 @@ in
   height = 40;
   smooth-scrolling-threshold = 5;
 
-  modules-center = [
+  modules-left = [
     "niri/workspaces"
     "custom/thunderbird"
     "custom/gcal"

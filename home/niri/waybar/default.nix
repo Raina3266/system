@@ -13,6 +13,7 @@
 }:
 let
   cfg = config.programs'.waybar;
+  ycal = import ./waybar-ycal.nix { inherit pkgs; };
 
   # Outputs to attach the bars to: every non-auxiliary display declared
   # in osConfig.services'.desktop.displays (if any).
@@ -33,6 +34,7 @@ in
       {
         home.packages = with pkgs; [
           waybar-lyric
+          ycal.waybarYcal
           wl-clipboard
           jq
           playerctl
@@ -48,6 +50,21 @@ in
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
           };
+        };
+
+        systemd.user.services.waybar-ycal = {
+          Unit = {
+            Description = "waybar-ycal — Google Calendar + Tasks popup";
+            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${ycal.waybarYcal}/bin/waybar-ycal-popup";
+            Restart = lib.mkForce "on-failure";
+            RestartSec = 3;
+          };
+          Install = { WantedBy = [ "graphical-session.target" ]; };
         };
       }
 

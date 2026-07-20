@@ -216,8 +216,6 @@ in
 
   "custom/cliphist" = staticLauncher "cliphist" "󰕛" "Clipboard history" "-m clipboard";
 
-  "custom/files" = staticLauncher "files" "󰥢" "Search files" "-m files";
-
   "custom/timer" = {
     return-type = "json";
     interval = 1;

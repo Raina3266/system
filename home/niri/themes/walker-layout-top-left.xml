@@ -14,14 +14,14 @@
         </style>
         <property name="overflow">hidden</property>
         <property name="orientation">horizontal</property>
-        <!-- top-right: aligned to top-end so it drops down from the top-right corner -->
+        <!-- top-left: aligned to top-start so it drops down from the top-left corner -->
         <property name="valign">start</property>
-        <property name="halign">end</property>
+        <property name="halign">start</property>
         <property name="margin-top">40</property>
-        <property name="margin-end">8</property>
-        <!-- No fixed width/height-request: the popup shrinks to fit its
-             contents (a 4-item power menu stays small; a long wifi list
-             grows). Growth is capped by max-content-* on the Scroll below. -->
+        <property name="margin-start">8</property>
+        <!-- No fixed width/height-request: the popup shrinks to fit its contents
+             (a 4-item power menu stays small; a long wifi list grows). Growth is
+             capped by max-content-* on the Scroll below. -->
         <child>
           <object class="GtkBox" id="Box">
             <style>

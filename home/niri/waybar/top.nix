@@ -13,7 +13,7 @@ in
   smooth-scrolling-threshold = 5;
   expand-center = true;
   modules-left = [
-    "clock"
+    "custom/ycal"
     "group/system"
     "group/hardware"
   ];
@@ -26,7 +26,6 @@ in
   ];
   modules-right = [
     "tray"
-    "custom/files"
     "custom/cliphist"
     "custom/timer"
     "custom/bt"

@@ -39,7 +39,7 @@ output "DP-7" {
 }
 
 overview {
-    zoom 0.4
+    zoom 0.3
 }
 
 layer-rule {
@@ -118,11 +118,11 @@ binds {
 
     // Launchers / session.
     Mod+T hotkey-overlay-title="Open a Terminal: ghostty" { spawn "ghostty"; }
-    Mod+D hotkey-overlay-title="Run an Application: walker" { spawn "walker"; }
+    Mod+F hotkey-overlay-title="Run an Application: walker" { spawn "walker"; }
     Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+Shift+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
-    Mod+Z hotkey-overlay-title="Open Zed" { spawn "zed"; }
+    Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
 
     // Volume / mic (PipeWire + WirePlumber). Work while locked.
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
@@ -257,10 +257,10 @@ binds {
     Mod+Ctrl+Shift+R { switch-preset-window-height; }
     Mod+Ctrl+R { reset-window-height; }
 
-    Mod+F       { maximize-column; }
-    Mod+Shift+F { fullscreen-window; }
+    Mod+W      { maximize-column; }
+    Mod+Shift+W { fullscreen-window; }
     Mod+M { maximize-window-to-edges; }
-    Mod+Ctrl+F { expand-column-to-available-width; }
+    Mod+Ctrl+W { expand-column-to-available-width; }
 
     Mod+C     { center-column; }
     Mod+Ctrl+C { center-visible-columns; }
@@ -272,7 +272,7 @@ binds {
 
     Mod+V       { toggle-window-floating; }
     Mod+Shift+V { switch-focus-between-floating-and-tiling; }
-    Mod+W { toggle-column-tabbed-display; }
+    Mod+D { toggle-column-tabbed-display; }
 
     Print       { screenshot; }
     Ctrl+Print  { screenshot-screen; }

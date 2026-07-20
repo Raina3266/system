@@ -25,6 +25,7 @@
     wob # Wayland overlay progress bar — used by the timer
     xwayland-satellite # rootless XWayland for X11 apps
     xrandr # for X11 apps that query display layout
+    networkmanagerapplet # graphical NetworkManager secret agent / Wi-Fi password dialogs
     (writeShellScriptBin "mediactl" ''
       cmd="$1"
       players=$(${playerctl}/bin/playerctl -l 2>/dev/null)
@@ -43,6 +44,43 @@
       exec ${playerctl}/bin/playerctl -p "$target" "$cmd"
     '')
   ];
+
+  # Bluetooth auto-confirm agent — registers a NoInputNoOutput BlueZ
+  # agent that auto-accepts pairing requests. Without this, Walker's
+  # bluetooth provider hangs at "Pairing..." because bluetoothctl pair
+  # (one-shot) has no agent to confirm the request.
+  systemd.user.services.bt-agent = {
+    Unit = {
+      Description = "Bluetooth auto-confirm agent";
+      ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent -c NoInputNoOutput";
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
+    Install = { WantedBy = [ "graphical-session.target" ]; };
+  };
+
+  # NetworkManager applet — runs as a secret agent so graphical password
+  # prompts appear when connecting to new Wi-Fi networks. The --indicator
+  # flag keeps it out of the system tray while still handling requests.
+  systemd.user.services.nm-applet = {
+    Unit = {
+      Description = "NetworkManager applet / secret agent";
+      ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet --indicator";
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
+    Install = { WantedBy = [ "graphical-session.target" ]; };
+  };
 
   # wob daemon — reads integer percentages from $XDG_RUNTIME_DIR/wob.sock
   # and renders an overlay progress bar. The timer scripts write to this

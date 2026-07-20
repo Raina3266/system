@@ -157,6 +157,7 @@
         base = builtins.readFile ../themes/walker-cyberpunk.css;
         layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
         layoutTopCenter = builtins.readFile ../themes/walker-layout-top-center.xml;
+        layoutTopLeft = builtins.readFile ../themes/walker-layout-top-left.xml;
         # item_todo.xml override: shrinks the hardcoded 48px "+" create-entry
         # icon to 16px. Applies to both themes.
         itemTodo = builtins.readFile ../themes/walker-item-todo.xml;
@@ -177,6 +178,14 @@
         cyberpunk-center = {
           style = base;
           layouts."layout" = layoutTopCenter;
+          layouts."item_todo" = itemTodo;
+        };
+        # Top-left variant, for popups that should anchor to the top-left
+        # corner (e.g. waybar-ycal). Same styling; only the box-wrapper
+        # alignment differs (halign=start).
+        cyberpunk-left = {
+          style = base;
+          layouts."layout" = layoutTopLeft;
           layouts."item_todo" = itemTodo;
         };
       };
