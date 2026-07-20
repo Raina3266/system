@@ -51,13 +51,13 @@
   # (one-shot) has no agent to confirm the request.
   systemd.user.services.bt-agent = {
     Unit = {
-      Description = "Bluetooth auto-confirm agent";
+      Description = "Bluetooth DisplayYesNo agent";
       ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
       PartOf = [ "graphical-session.target" ];
       After = [ "graphical-session.target" ];
     };
     Service = {
-      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent -c NoInputNoOutput";
+      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent -c DisplayYesNo";
       Restart = "on-failure";
       RestartSec = 3;
     };
@@ -142,6 +142,14 @@
     Font="Sans 14"
     MenuFont="Sans 14"
   '';
+
+  # Global GTK theme — applies the cyberpunk palette to all GTK apps,
+  # including nm-applet's Wi-Fi password dialogs and connection editor.
+  # Palette matches waybar/walker/fcitx5 themes (see ./themes/).
+  gtk = {
+    enable = true;
+    # gtk4.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
+  };
 
   home.pointerCursor = {
     enable = true;

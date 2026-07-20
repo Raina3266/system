@@ -80,9 +80,17 @@
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
   ];
+  
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
+      # Web
+      "text/html" = "google-chrome.desktop";
+      "x-scheme-handler/http" = "google-chrome.desktop";
+      "x-scheme-handler/https" = "google-chrome.desktop";
+      "x-scheme-handler/about" = "google-chrome.desktop";
+      "x-scheme-handler/unknown" = "google-chrome.desktop";
+      
       # PDF
       "application/pdf" = [ "google-chrome.desktop" ];
 

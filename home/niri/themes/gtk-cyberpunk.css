@@ -1,0 +1,172 @@
+/* Cyberpunk GTK theme — matches waybar/walker/fcitx5 palette.
+ * Applied globally via home-manager gtk.gtk{3,4}.extraCss so all GTK
+ * apps (including nm-applet's Wi-Fi password dialogs and connection
+ * editor) pick up the palette.
+ *
+ * Palette:
+ * bg:      #0E0616
+ * bg-mod:  #141428b3  (rgba 20,20,40,0.7)
+ * fg:      #cbe3e7
+ * pink:    #ff7edb
+ * cyan:    #7afcff
+ * amber:   #f29e74
+ * red:     #ff3333
+ * dim:     #5c6776
+ */
+
+/* ── Window / dialog backgrounds ───────────────────────── */
+window,
+dialog,
+messagedialog,
+window.background {
+  background-color: #0E0616;
+  color: #cbe3e7;
+}
+
+headerbar,
+.titlebar {
+  background-color: #190326;
+  color: #cbe3e7;
+  border-bottom: 1px solid rgba(255, 126, 219, 0.3);
+}
+
+/* ── Text ──────────────────────────────────────────────── */
+label,
+textview,
+treeview,
+viewport {
+  color: #ff7edb;
+  font-size: 16px;
+}
+
+dim-label {
+  color: #5c6776;
+}
+
+/* ── Entry / input ─────────────────────────────────────── */
+entry,
+spinbutton {
+  background-color: #141428b3;
+  color: #7afcff;
+  caret-color: #7afcff;
+  border: 1px solid rgba(255, 126, 219, 0.3);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+entry:focus,
+spinbutton:focus {
+  border-color: rgba(255, 126, 219, 0.6);
+  box-shadow: 0 0 8px rgba(255, 126, 219, 0.2);
+}
+
+entry selection {
+  background-color: rgba(255, 126, 219, 0.25);
+  color: #ff7edb;
+}
+
+/* ── Buttons ───────────────────────────────────────────── */
+button {
+  background-color: transparent;
+  color: #7afcff;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 126, 219, 0.4);
+}
+
+button label {
+  font-size: 16px;
+}
+
+button:hover {
+  background-color: rgba(255, 126, 219, 0.15);
+  background-image: none;
+  border-color: rgba(255, 126, 219, 0.8);
+  color: #cbe3e7;
+}
+
+button:checked,
+button:active,
+button.suggested-action {
+  background-color: rgba(255, 126, 219, 0.15);
+  color: #ff7edb;
+  border-color: rgba(255, 126, 219, 0.5);
+}
+
+button.destructive-action {
+  background-color: rgba(255, 51, 51, 0.3);
+  color: #ff3333;
+  border-color: rgba(255, 51, 51, 0.6);
+}
+
+/* ── Lists / scrolls ───────────────────────────────────── */
+list,
+scrolledwindow,
+stack,
+stacksidebar {
+  background-color: #0E0616;
+}
+
+separator {
+  background-color: rgba(255, 126, 219, 0.2);
+}
+
+scrollbar slider {
+  background-color: #ff7edb;
+  border-radius: 2px;
+  min-width: 4px;
+  min-height: 4px;
+}
+
+/* ── Checkboxes / radios ───────────────────────────────── */
+check,
+radio {
+  background-color: #141428b3;
+  border-color: rgba(255, 126, 219, 0.4);
+  color: #ff7edb;
+}
+
+check:checked,
+radio:checked {
+  background-color: rgba(255, 126, 219, 0.2);
+  border-color: #ff7edb;
+}
+
+/* ── Tooltips ──────────────────────────────────────────── */
+tooltip {
+  background-color: #0E0616;
+  border: 1px solid #ff7edb;
+  border-radius: 6px;
+  box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
+}
+
+tooltip label {
+  color: #cbe3e7;
+}
+
+/* ── Popovers (nm-applet dropdown menus) ───────────────── */
+/* In GTK4 the visible surface is the `contents` child (GtkPopoverContents),
+ * which paints its own opaque background on top of `popover`. Without a
+ * dark color-scheme set via dconf, GTK4 falls back to Adwaita's light bg
+ * there — so we override `contents` explicitly to keep the cyberpunk bg. */
+popover,
+popover.background,
+popover > contents,
+popover.background > contents {
+  background-color: #0E0616;
+  color: #0E0616;
+  border: 1px solid rgba(255, 126, 219, 0.4);
+  border-radius: 6px;
+  box-shadow: 0 0 20px rgba(255, 126, 219, 0.2);
+}
+
+popover list row:hover {
+  background-color: rgba(255, 126, 219, 0.15);
+  color: #ff7edb;
+}
+
+popover list row:selected {
+  background-color: rgba(255, 126, 219, 0.2);
+  color: #ff7edb;
+}
