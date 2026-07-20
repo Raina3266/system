@@ -119,14 +119,6 @@
     Name=pinyin
     Layout=
 
-    [Groups/0/Items/2]
-    Name=mozc
-    Layout=
-
-    [Groups/0/Items/3]
-    Name=hangul
-    Layout=
-
     [GroupOrder]
     0="Default"
   '';
@@ -148,7 +140,18 @@
   # Palette matches waybar/walker/fcitx5 themes (see ./themes/).
   gtk = {
     enable = true;
-    # gtk4.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
+    font = {
+      name = "JetBrainsMono Nerd Font";
+      size = 12;
+    };
+    gtk3.extraConfig = {
+      gtk-application-prefer-dark-theme = 1;
+    };
+    gtk4.extraConfig = {
+      gtk-application-prefer-dark-theme = 1;
+    };
+    gtk3.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
+    gtk4.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
   };
 
   home.pointerCursor = {
