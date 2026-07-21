@@ -37,29 +37,37 @@ popover.background > contents,
 menu.menu,
 window.popup,
 window.popup menu {
-    font-size: 16px;
     background-color: #0e0616;
+    background-image: linear-gradient(to bottom,
+                                      rgba(255, 126, 219, 0.03),
+                                      rgba(20, 20, 40, 0.0));
     color: #cbe3e7;
-    border-radius: 6px;
-    border: 1px solid #ff7edb;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 126, 219, 0.5);
+    box-shadow:
+        0 0 0 1px rgba(255, 126, 219, 0.1),
+        0 8px 24px rgba(0, 0, 0, 0.6),
+        0 0 24px rgba(255, 126, 219, 0.15);
+    padding-top: 5px;
+    padding-bottom: 5px;
 }
 
 menuitem {
     color: #cbe3e7;
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding: 8px 14px;
+    border-left: 2px solid transparent;
 }
 
 popover list row:hover,
 menuitem:hover {
     color: #0e0616;
-    border: 1px solid rgba(255, 126, 219, 0.4);
     background-color: #ff7edb;
+    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
 }
 
 popover list row:selected,
 menuitem:selected {
     color: #0e0616;
-    border: 1px solid rgba(255, 126, 219, 0.4);
     background-color: #ff7edb;
+    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
 }
