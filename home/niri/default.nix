@@ -140,10 +140,7 @@
   # Palette matches waybar/walker/fcitx5 themes (see ./themes/).
   gtk = {
     enable = true;
-    font = {
-      name = "JetBrainsMono Nerd Font";
-      size = 12;
-    };
+
     gtk3.extraConfig = {
       gtk-application-prefer-dark-theme = 1;
     };

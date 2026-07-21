@@ -27,7 +27,7 @@ headerbar,
 .titlebar {
     background-color: #0e0616;
     color: #cbe3e7;
-    border-bottom: 1px solid rgba(255, 126, 219, 0.3);
+    border: 1px solid rgba(255, 126, 219, 0.3);
 }
 /* ── Popovers & menus (nm-applet dropdown, GTK3 & GTK4) ──*/
 popover,
@@ -37,31 +37,29 @@ popover.background > contents,
 menu.menu,
 window.popup,
 window.popup menu {
+    font-size: 16px;
     background-color: #0e0616;
     color: #cbe3e7;
-    border-radius: 2px;
+    border-radius: 6px;
     border: 1px solid #ff7edb;
 }
 
 menuitem {
-    background-color: #0e0616;
-    border: 1px solid #ff7edb;
     color: #cbe3e7;
-    font-size: 14pt;
-}
-
-menuitem label {
-    font-size: 12pt;
+    padding-top: 8px;
+    padding-bottom: 8px;
 }
 
 popover list row:hover,
-menuitem:hover,
-menuitem:hover label {
-    color: #ff7edb;
+menuitem:hover {
+    color: #0e0616;
+    border: 1px solid rgba(255, 126, 219, 0.4);
+    background-color: #ff7edb;
 }
 
 popover list row:selected,
-menuitem:selected,
-menuitem:selected label {
-    color: #ff7edb;
+menuitem:selected {
+    color: #0e0616;
+    border: 1px solid rgba(255, 126, 219, 0.4);
+    background-color: #ff7edb;
 }
