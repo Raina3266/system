@@ -1,6 +1,6 @@
 { pkgs, ... }:
 {
-  home.packages = with pkgs; [ thunderbird ];
+  home.packages = with pkgs; [ birdtray ];
 
   programs.thunderbird = {
     enable = true;

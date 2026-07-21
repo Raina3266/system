@@ -89,6 +89,7 @@ spawn-at-startup "xwayland-satellite"
 // fcitx5 is started by the NixOS i18n.inputMethod module.
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
+spawn-at-startup "birdtray"
 
 hotkey-overlay {
     // skip-at-startup
