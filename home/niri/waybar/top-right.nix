@@ -251,24 +251,5 @@ in
     '';
   };
 
-  "custom/wifi" = {
-    format = "{}";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-wifi-poll" ''
-      icon="<span size='large'>󰤨</span>"
-      ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
-      if [ -n "$ssid" ]; then
-        signal=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
-        printf '{"text":"%s","tooltip":"Connected: %s (%s%%)"}' "$icon" "$ssid" "$signal"
-      else
-        printf '{"text":"%s","tooltip":"Wi-Fi: Disconnected"}' "$icon"
-      fi
-    '';
-    interval = 5;
-    on-click = pkgs.writeShellScript "waybar-wifi" ''
-      ${walker} -m menus:wifi
-    '';
-  };
-
   "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-m menus:power";
 }

@@ -71,7 +71,7 @@
     { action = "remove"; bind = "ctrl d"; after = "AsyncReload"; }
     { action = "trust"; bind = "ctrl t"; after = "AsyncReload"; }
     { action = "untrust"; bind = "ctrl t"; after = "AsyncReload"; }
-    { action = "pair"; bind = "Return"; after = "AsyncReload"; }
+    { action = "pair"; default = true; bind = "Return"; after = "AsyncReload"; }
     { action = "connect"; default = true; bind = "Return"; after = "AsyncReload"; }
     { action = "disconnect"; default = true; bind = "Return"; after = "AsyncReload"; }
     { action = "power_on"; label = "Power On"; bind = "ctrl e"; after = "AsyncReload"; }

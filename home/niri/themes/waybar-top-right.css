@@ -4,7 +4,6 @@
    base border from waybar-cyberpunk.css). */
 #custom-audio-sink,
 #tray,
-#custom-wifi,
 #custom-bt,
 #custom-cliphist,
 #custom-files,
@@ -17,7 +16,6 @@
 
 /* Pink text + cyan glow */
 #custom-audio-sink,
-#custom-wifi,
 #custom-bt {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);

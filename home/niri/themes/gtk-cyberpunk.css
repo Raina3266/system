@@ -15,20 +15,42 @@
  */
 
 /* ── Window / dialog backgrounds ───────────────────────── */
-window,
-dialog,
-messagedialog,
-window.background {
-    background-color: #0e0616;
-    color: #cbe3e7;
-}
-
 headerbar,
 .titlebar {
     background-color: #0e0616;
     color: #cbe3e7;
     border: 1px solid rgba(255, 126, 219, 0.3);
+    border-bottom: 1px solid rgba(255, 126, 219, 0.4);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(255, 126, 219, 0.08);
+    padding: 6px 10px;
 }
+
+headerbar:backdrop,
+.titlebar:backdrop {
+    background-color: #0a0410;
+    color: #5c6776;
+    box-shadow: none;
+    border-color: rgba(255, 126, 219, 0.15);
+}
+
+headerbar .title,
+headerbar .subtitle,
+.titlebar .title,
+.titlebar .subtitle {
+    color: #cbe3e7;
+    padding: 0 4px;
+}
+
+headerbar .subtitle,
+.titlebar .subtitle {
+    color: #7afcff;
+    font-size: 0.9em;
+    opacity: 0.85;
+}
+
+/* GTK4 window controls (close/min/max buttons in headerbar) */
 /* ── Popovers & menus (nm-applet dropdown, GTK3 & GTK4) ──*/
 popover,
 popover.background,
@@ -38,9 +60,11 @@ menu.menu,
 window.popup,
 window.popup menu {
     background-color: #0e0616;
-    background-image: linear-gradient(to bottom,
-                                      rgba(255, 126, 219, 0.03),
-                                      rgba(20, 20, 40, 0.0));
+    background-image: linear-gradient(
+        to bottom,
+        rgba(255, 126, 219, 0.03),
+        rgba(20, 20, 40, 0)
+    );
     color: #cbe3e7;
     border-radius: 8px;
     border: 1px solid rgba(255, 126, 219, 0.5);
@@ -60,14 +84,25 @@ menuitem {
 
 popover list row:hover,
 menuitem:hover {
-    color: #0e0616;
-    background-color: #ff7edb;
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    border-left-color: rgba(255, 126, 219, 0.8);
     box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+}
+
+popover list row:hover > label,
+menuitem:hover > label {
+    color: #7afcff;
 }
 
 popover list row:selected,
 menuitem:selected {
-    color: #0e0616;
-    background-color: #ff7edb;
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
     box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+}
+
+popover list row:selected > label,
+menuitem:selected > label {
+    color: #7afcff;
 }

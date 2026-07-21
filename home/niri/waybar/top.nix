@@ -28,7 +28,6 @@ in
     "custom/cliphist"
     "custom/timer"
     "custom/bt"
-    "custom/wifi"
     "custom/audio-sink"
     "tray"
     "custom/powermenu"
