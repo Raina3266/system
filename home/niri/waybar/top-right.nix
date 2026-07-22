@@ -246,8 +246,24 @@ in
       fi
     '';
     interval = 5;
+    # Left-click: open walker's bluetooth provider to pair/connect/etc.
+    # Right-click: toggle power directly via bluetoothctl. This bypasses a
+    # walker bug where the "Power On" keybind-hint button never fires when
+    # bluetooth is off -- elephant's bluetooth provider returns an empty
+    # device list while off, so walker has nothing selected and its click
+    # handler (which only activates on a *selected* list item) never runs.
     on-click = pkgs.writeShellScript "waybar-bt" ''
       ${walker} -m bluetooth
+    '';
+    on-click-right = pkgs.writeShellScript "waybar-bt-toggle-power" ''
+      powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
+      if [ "$powered" = "yes" ]; then
+        bluetoothctl power off
+        notify-send "Bluetooth" "Powered off"
+      else
+        bluetoothctl power on
+        notify-send "Bluetooth" "Powered on"
+      fi
     '';
   };
 

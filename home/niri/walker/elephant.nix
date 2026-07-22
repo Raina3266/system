@@ -214,7 +214,13 @@
             if saved[ssid] then
               value = "nmcli connection up \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
             else
-              value = "nmcli device wifi connect \"" .. ssid .. "\" --ask 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
+              -- No --ask here: nmcli would try to prompt on its own (nonexistent)
+              -- stdin/tty and hang/fail silently since this runs headless under
+              -- elephant. Omitting --ask makes NetworkManager instead ask any
+              -- registered secret agent for the password -- nm-applet (running
+              -- as a user service, see ../default.nix) is one, and pops up its
+              -- native GTK password dialog.
+              value = "nmcli device wifi connect \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
             end
 
             local actions = {}

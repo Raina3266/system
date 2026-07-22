@@ -51,8 +51,8 @@ in
     mediactl
   ];
 
-  # Bluetooth auto-confirm agent — registers a NoInputNoOutput BlueZ
-  # agent that auto-accepts pairing requests. Without this, Walker's
+  # Bluetooth auto-confirm agent — registers a DisplayYesNo BlueZ agent
+  # that auto-accepts pairing/confirmation requests. Without this, Walker's
   # bluetooth provider hangs at "Pairing..." because bluetoothctl pair
   # (one-shot) has no agent to confirm the request.
   systemd.user.services.bt-agent = {
@@ -62,7 +62,10 @@ in
       After = [ "graphical-session.target" ];
     };
     Service = {
-      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=NoInputNoOutput";
+      # DisplayYesNo (not NoInputNoOutput) so SSP passkey-confirmation
+      # devices (keyboards, many earbuds, phones) can pair too; bt-agent
+      # auto-answers "yes". NoInputNoOutput hangs them at "Pairing...".
+      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=DisplayYesNo";
       Restart = "on-failure";
     };
     Install = {
