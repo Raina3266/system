@@ -166,7 +166,7 @@ in
 
     # Speaker icon on windows currently playing audio; click to mute.
     # Disabled: libpulse's glib-mainloop integration has a known
-    # double-free bug in its timer teardown ("glib_time_free: assndicator = {
+    # double-free bug in its timer teardown that crashes waybar.
     # audio_indicator = {
     #   enabled = true;
     #   playing_icon = "󰕾 ";

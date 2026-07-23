@@ -13,7 +13,7 @@
 }:
 let
   cfg = config.programs'.waybar;
-  ycal = import ./waybar-ycal.nix { inherit pkgs; };
+  ycal = import ./calender.nix { inherit pkgs; };
 
   # Outputs to attach the bars to: every non-auxiliary display declared
   # in osConfig.services'.desktop.displays (if any).

@@ -6,7 +6,7 @@ let
     transition-left-to-right = true;
   };
 
-  ycal = import ./waybar-ycal.nix { inherit pkgs; };
+  ycal = import ./calender.nix { inherit pkgs; };
 in
 {
   "custom/ycal" = {
@@ -116,7 +116,6 @@ in
   };
 
   "temperature" = {
-    hwmon-path = "";
     thermal-zone = 7;
     warning-threshold = 50;
     critical-threshold = 80;

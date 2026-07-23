@@ -74,7 +74,7 @@ let
   mediaButton = glyph: cmd: {
     format = "<span size='x-large'>${glyph}</span>";
     return-type = "json";
-    exec = ''echo '{"text":"${glyph}",}' '';
+    exec = ''printf '{"text":"${glyph}"}' '';
     exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
     interval = 2;
     on-click = "${pkgs.playerctl}/bin/playerctl ${cmd}";

@@ -38,8 +38,6 @@
         clipboard.list = "Clipboard is empty";
         todo.input = "Add or search a task…";
         todo.list = "No tasks";
-        bluetooth.input = "Bluetooth";
-        bluetooth.list = "No devices found";
         windows.input = "Search windows…";
         windows.list = "No open windows";
         files.input = "Search files…";
@@ -62,7 +60,6 @@
         # Without these, walker shows nothing when opened plain.
         default = [
           "desktopapplications"
-          "bluetooth"
           "clipboard"
           "files"
           "todo"
@@ -77,10 +74,6 @@
           {
             provider = "todo";
             prefix = "!";
-          }
-          {
-            provider = "bluetooth";
-            prefix = "bt:";
           }
           {
             provider = "providerlist";
@@ -151,7 +144,7 @@
       };
     };
     # Elephant provider configuration (merged into elephant's config).
-    elephant = import ./elephant.nix;
+    elephant = import ./elephant.nix { inherit pkgs; };
     themes =
       let
         base = builtins.readFile ../themes/walker-cyberpunk.css;

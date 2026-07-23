@@ -25,11 +25,11 @@ in
     "custom/todo"
   ];
   modules-right = [
+    "tray"
     "custom/cliphist"
     "custom/timer"
     "custom/bt"
     "custom/audio-sink"
-    "tray"
     "custom/powermenu"
   ];
 }

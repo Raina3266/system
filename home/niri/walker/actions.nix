@@ -66,17 +66,6 @@
   providerlist = [
     { action = "activate"; default = true; bind = "Return"; after = "ClearReload"; }
   ];
-  bluetooth = [
-    { action = "find"; bind = "ctrl f"; after = "AsyncClearReload"; }
-    { action = "remove"; bind = "ctrl d"; after = "AsyncReload"; }
-    { action = "trust"; bind = "ctrl t"; after = "AsyncReload"; }
-    { action = "untrust"; bind = "ctrl t"; after = "AsyncReload"; }
-    { action = "pair"; default = true; bind = "Return"; after = "AsyncReload"; }
-    { action = "connect"; default = true; bind = "Return"; after = "AsyncReload"; }
-    { action = "disconnect"; default = true; bind = "Return"; after = "AsyncReload"; }
-    { action = "power_on"; label = "Power On"; bind = "ctrl e"; after = "AsyncReload"; }
-    { action = "power_off"; label = "Power Off"; bind = "ctrl e"; after = "AsyncReload"; }
-  ];
   playerctl = [
     { action = "pause"; label = "pause"; bind = "Return"; after = "Nothing"; default = true; }
     { action = "play"; label = "play"; bind = "Return"; after = "Nothing"; default = true; }
@@ -116,6 +105,7 @@
     { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "disconnect"; label = "disconnect"; bind = "ctrl d"; after = "AsyncClearReload"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
+    { action = "rescan"; label = "rescan"; bind = "ctrl r"; after = "AsyncClearReload"; }
   ];
   dmenu = [ { action = "select"; default = true; bind = "Return"; } ];
 }

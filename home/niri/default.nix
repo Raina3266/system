@@ -95,7 +95,7 @@ in
 
   # wob daemon — reads integer percentages from $XDG_RUNTIME_DIR/wob.sock
   # and renders an overlay progress bar. The timer scripts write to this
-  # FIFO to visualize the countdown. See waybar/scripts.nix.
+  # FIFO to visualize the countdown. See waybar/timer.nix.
   systemd.user.services.wob = {
     Unit = {
       Description = "wob — Wayland overlay bar";

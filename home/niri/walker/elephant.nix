@@ -1,5 +1,6 @@
 # Elephant provider configuration (merged into elephant's config),
 # for walker's `elephant` option.
+{ pkgs }:
 {
   # Keep clipboard history tidy: prune entries older than 3 days
   # (4320 minutes), matching the previous cliphist behaviour.
@@ -141,6 +142,12 @@
       }
     ];
   };
+  # Bluetooth menu — D-Bus (gdbus) based; replaces elephant's built-in
+  # bluetooth provider, whose bluetoothctl one-shot "pair" races the
+  # persistent bt-agent and hangs at "Pairing...". See bluetooth.nix.
+  # Invoked via `walker -m menus:bluetooth`.
+  provider.menus.lua."bluetooth" = (import ./bluetooth.nix { inherit pkgs; }).menuLua;
+
   # Wi-Fi menu — dynamic Lua menu that scans available networks
   # via nmcli and connects on selection. Invoked via
   # `walker -m menus:wifi`.

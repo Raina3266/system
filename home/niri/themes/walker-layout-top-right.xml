@@ -17,7 +17,7 @@
         <!-- top-right: aligned to top-end so it drops down from the top-right corner -->
         <property name="valign">start</property>
         <property name="halign">end</property>
-        <property name="margin-top">42</property>
+        <property name="margin-top">45</property>
         <property name="margin-end">8</property>
         <!-- No fixed width/height-request: the popup shrinks to fit its
              contents (a 4-item power menu stays small; a long wifi list

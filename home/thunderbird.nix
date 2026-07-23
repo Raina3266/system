@@ -1,6 +1,20 @@
 { pkgs, ... }:
 {
-  home.packages = with pkgs; [ birdtray ];
+  home.packages = with pkgs; [
+    # Birdtray under X11 (xwayland-satellite): Qt5's Wayland platform
+    # plugin never reports a system tray as available on niri, so
+    # birdtray's QSystemTrayIcon::isSystemTrayAvailable() loop times out
+    # after 60s with "system tray cannot be controlled". The xcb backend
+    # detects waybar's StatusNotifierWatcher via XWayland just fine.
+    (symlinkJoin {
+      name = "birdtray-xcb";
+      paths = [ birdtray ];
+      nativeBuildInputs = [ makeWrapper ];
+      postBuild = ''
+        wrapProgram $out/bin/birdtray --set QT_QPA_PLATFORM xcb
+      '';
+    })
+  ];
 
   programs.thunderbird = {
     enable = true;
