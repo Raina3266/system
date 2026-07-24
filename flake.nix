@@ -24,16 +24,9 @@
 
     zed.url = "github:zed-industries/zed/nightly";
 
-    elephant = {
-      url = "github:abenz1267/elephant";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    walker = {
-      url = "github:abenz1267/walker";
-      inputs.elephant.follows = "elephant";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # walker/elephant come from nixpkgs and are configured through
+    # home-manager's upstream services.walker / services.elephant
+    # modules, so no flake inputs are needed for them.
   };
 
   outputs =
@@ -51,9 +44,6 @@
         inherit system;
         overlays = [
           nixGL.overlay
-          (final: prev: {
-            walker = inputs.walker.packages.${system}.default;
-          })
         ];
         config = {
           allowUnfree = true;
