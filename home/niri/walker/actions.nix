@@ -106,6 +106,12 @@
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
   ];
   "menus:bluetooth" = [
+    # menus:default MUST be declared here, or walker panics on click
+    # (activate_default in src/ui/window.rs:469 .unwrap()s a default=true
+    # action; without this entry there is none, so clicking any
+    # bluetooth entry SIGABRTs walker). Every other menu declares it;
+    # bluetooth was just missing it.
+    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
     { action = "rescan"; label = "scan"; bind = "ctrl r"; after = "AsyncClearReload"; }
     { action = "power_off"; label = "power"; bind = "ctrl e"; after = "AsyncClearReload"; }

@@ -5,41 +5,49 @@
  *
  * Palette:
  * bg:      #0E0616
- * bg-mod:  #141428b3  (rgba 20,20,40,0.7)
- * fg:      #cbe3e7
+ * fg:      #ffffff
  * pink:    #ff7edb
  * cyan:    #7afcff
- * amber:   #f29e74
  * red:     #ff3333
  * dim:     #5c6776
  */
 
 /* ── Window / dialog backgrounds ───────────────────────── */
+window,
+dialog,
+window.background,
+window.dialog,
+.solid-csd,
+.csd {
+    background-color: #0E0616;
+    color: #ffffff;
+}
+
 headerbar,
 .titlebar {
-    background-color: #0e0616;
-    color: #cbe3e7;
-    border: 1px solid rgba(255, 126, 219, 0.3);
-    border-bottom: 1px solid rgba(255, 126, 219, 0.4);
+    background-color: #0E0616;
+    color: #ffffff;
+    border: 1px solid #ff7edb;
+    border-bottom: 1px solid #ff7edb;
     box-shadow:
         0 2px 8px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(255, 126, 219, 0.08);
+        0 4px 16px rgba(255, 126, 219, 0.3);
     padding: 6px 10px;
 }
 
 headerbar:backdrop,
 .titlebar:backdrop {
-    background-color: #0a0410;
-    color: #5c6776;
+    background-color: #0E0616;
+    color: #ffffff;
     box-shadow: none;
-    border-color: rgba(255, 126, 219, 0.15);
+    border-color: rgba(255, 126, 219, 0.5);
 }
 
 headerbar .title,
 headerbar .subtitle,
 .titlebar .title,
 .titlebar .subtitle {
-    color: #cbe3e7;
+    color: #ffffff;
     padding: 0 4px;
 }
 
@@ -47,10 +55,115 @@ headerbar .subtitle,
 .titlebar .subtitle {
     color: #7afcff;
     font-size: 0.9em;
-    opacity: 0.85;
+    opacity: 0.95;
 }
 
-/* GTK4 window controls (close/min/max buttons in headerbar) */
+/* ── Icons: cyan everywhere ────────────────────────────── */
+image,
+image:disabled,
+button image,
+headerbar image,
+.titlebar image {
+    color: #7afcff;
+    -gtk-icon-palette: foreground #7afcff, success #7afcff, warning #7afcff, error #ff3333;
+}
+
+/* ── Buttons & generic borders: pink ───────────────────── */
+button,
+entry,
+combobox,
+spinbutton,
+notebook header,
+paned > separator,
+frame > border,
+.frame {
+    border-color: #ff7edb;
+    color: #ffffff;
+}
+
+button:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+}
+
+button:hover > label {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── Views, lists, trees, sidebars ─────────────────────── */
+view,
+list,
+treeview,
+.sidebar,
+sidebar list,
+placessidebar,
+filechooser listview,
+columnview {
+    background-color: #0E0616;
+    color: #ffffff;
+    border-color: #ff7edb;
+}
+
+view:hover,
+list row:hover,
+treeview:hover,
+.sidebar row:hover,
+placessidebar row:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+}
+
+view:hover label,
+list row:hover label,
+treeview:hover,
+.sidebar row:hover label,
+placessidebar row:hover label {
+    color: #7afcff;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+view:selected,
+view:selected:focus,
+list row:selected,
+treeview:selected,
+.sidebar row:selected,
+placessidebar row:selected,
+flowboxchild:selected,
+iconview:selected {
+    background-color: rgba(255, 126, 219, 0.15);
+    box-shadow:
+        inset 0 0 12px rgba(122, 252, 255, 0.2),
+        0 0 10px rgba(255, 126, 219, 0.2);
+}
+
+view:selected label,
+list row:selected label,
+treeview:selected,
+.sidebar row:selected label,
+placessidebar row:selected label,
+flowboxchild:selected label,
+iconview:selected label {
+    color: #ff7edb;
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+}
+
+/* ── Entries / text fields ─────────────────────────────── */
+entry,
+textview,
+textview text,
+spinbutton {
+    background-color: rgba(255, 126, 219, 0.08);
+    caret-color: #7afcff;
+    color: #ffffff;
+}
+
+entry:focus,
+textview:focus {
+    border-color: #7afcff;
+    box-shadow: 0 0 8px rgba(122, 252, 255, 0.3);
+}
+
 /* ── Popovers & menus (nm-applet dropdown, GTK3 & GTK4) ──*/
 popover,
 popover.background,
@@ -59,18 +172,17 @@ popover.background > contents,
 menu.menu,
 window.popup,
 window.popup menu {
-    background-image: #0e0616;
-    color: #cbe3e7;
+    background-color: #0E0616;
+    color: #ffffff;
     border-radius: 15px;
-    border: 1px solid rgba(255, 126, 219, 0.5);
+    border: 1px solid #ff7edb;
     padding-top: 5px;
     padding-bottom: 5px;
 }
 
 menuitem {
-    color: #cbe3e7;
+    color: #ffffff;
     padding: 8px 14px;
-    border-left: 2px solid transparent;
 }
 
 popover list row:hover,
@@ -82,7 +194,7 @@ menuitem:hover {
 
 popover list row:hover > label,
 menuitem:hover > label {
-    color: #7afcff;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
 popover list row:selected,
@@ -94,9 +206,34 @@ menuitem:selected {
 
 popover list row:selected > label,
 menuitem:selected > label {
-    color: #7afcff;
+    color: #ff7edb;
+    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
 }
+
 menuitem:disabled > label {
     color: grey;
     opacity: 0.75;
 }
+
+/* ── Scrollbars & misc pink accents ────────────────────── */
+scrollbar slider {
+    background-color: rgba(255, 126, 219, 0.5);
+}
+
+scrollbar slider:hover {
+    background-color: #ff7edb;
+}
+
+separator {
+    background-color: rgba(255, 126, 219, 0.5);
+}
+
+switch:checked {
+    background-color: #ff7edb;
+}
+
+progressbar progress,
+levelbar block.filled {
+    background-color: #7afcff;
+}
+
