@@ -95,17 +95,30 @@
     { action = "menus:parent"; label = "back"; bind = "Escape"; after = "Nothing"; }
     { action = "erase_history"; label = "clear hist"; bind = "ctrl h"; after = "AsyncReload"; }
   ];
-  # Per-entry actions for menus. Walker registers the menus provider
-  # under the name "menus" (from `elephant listproviders`), NOT
-  # "menus:wifi" — so keybinds for custom per-entry actions
-  # (disconnect/forget on wifi entries) must live under "menus".
-  # These actions only exist on wifi entries, so the buttons only
-  # appear there; other menus (power, etc.) are unaffected.
-  menus = [
+  # Per-entry actions for menus. Elephant >= 2.x registers each menu as
+  # its own provider (menus:wifi, menus:bluetooth, ...) — walker looks
+  # up provider actions by that full name, so each menu needs its own
+  # section. Actions not present on an entry are simply not shown, so
+  # per-menu sections stay precise.
+  "menus:wifi" = [
     { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "disconnect"; label = "disconnect"; bind = "ctrl d"; after = "AsyncClearReload"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
-    { action = "rescan"; label = "rescan"; bind = "ctrl r"; after = "AsyncClearReload"; }
+  ];
+  "menus:bluetooth" = [
+    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
+    { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
+    # Short labels: the hint buttons live in a right-aligned box and
+    # overflow off the left edge of narrow windows — long labels push
+    # earlier buttons out of view.
+    { action = "rescan"; label = "scan"; bind = "ctrl r"; after = "AsyncClearReload"; }
+    { action = "power_off"; label = "power"; bind = "ctrl e"; after = "AsyncClearReload"; }
+  ];
+  "menus:audio-sink" = [
+    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
+  ];
+  "menus:power" = [
+    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
   ];
   dmenu = [ { action = "select"; default = true; bind = "Return"; } ];
 }

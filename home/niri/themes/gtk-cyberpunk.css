@@ -65,7 +65,7 @@ window.popup menu {
         rgba(20, 20, 40, 0)
     );
     color: #cbe3e7;
-    border-radius: 20px;
+    border-radius: 15px;
     border: 1px solid rgba(255, 126, 219, 0.5);
     padding-top: 5px;
     padding-bottom: 5px;
@@ -99,4 +99,8 @@ menuitem:selected {
 popover list row:selected > label,
 menuitem:selected > label {
     color: #7afcff;
+}
+menuitem:disabled > label {
+    color: grey;
+    opacity: 0.75;
 }

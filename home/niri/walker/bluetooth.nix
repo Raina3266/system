@@ -25,14 +25,22 @@ let
   # It temporarily registers its pairing agent while running, but
   # unregisters on exit; we never pair during a scan, so the
   # persistent bt-agent is unaffected.
-  btscan = pkgs.writeShellScript "btscan" ''
+  #
+  # writeShellScriptBin (not writeShellScript) so the store path is
+  # a directory with bin/btscan — the menu Lua below calls
+  # "${btscan}/bin/btscan", and writeShellScript would put the script
+  # directly at ...-btscan (a file), making /bin/btscan "Not a directory"
+  # and silently no-op'ing every bluetooth menu action.
+  btscan = pkgs.writeShellScriptBin "btscan" ''
     secs="''${1:-4}"
     ${pkgs.bluez}/bin/bluetoothctl --timeout "$secs" scan on >/dev/null 2>&1
   '';
 
   # btctl <verb> [args...] — small D-Bus helper used as the Value of
   # every menu entry (runs headless under elephant).
-  btctl = pkgs.writeShellScript "btctl" ''
+  # writeShellScriptBin for the same reason as btscan above: the Lua
+  # calls "${btctl}/bin/btctl ...".
+  btctl = pkgs.writeShellScriptBin "btctl" ''
     set -u
     dev_path() { printf '/org/bluez/hci0/dev_%s' "$(printf '%s' "$1" | tr ':' '_')"; }
 
@@ -123,9 +131,12 @@ inherit btctl btscan;
       if not h then return "" end
       local out = h:read("*a") or ""
       h:close()
-      -- gdbus prints "(<value>,)" — strip wrapping punctuation and quotes.
+      -- gdbus prints "(<value>,)" — strip wrapping punctuation and
+      -- either quote style (gdbus uses '...' normally but "..." when
+      -- the string itself contains a single quote, e.g. "Raina's").
       local v = out:match("%(<(.-)>,?%)") or ""
       v = v:gsub("^'(.*)'$", "%1")
+      v = v:gsub('^"(.*)"$', "%1")
       return v
     end
 
@@ -159,6 +170,7 @@ inherit btctl btscan;
         table.insert(entries, {
           Text = "󰂲  Bluetooth is off — Power On",
           Value = "${btctl}/bin/btctl power on",
+          Actions = { rescan = "${btscan}/bin/btscan 4" },
         })
         return entries
       end
@@ -192,32 +204,25 @@ inherit btctl btscan;
         local subtext = state
         if rssi ~= "" then subtext = subtext .. " · rssi " .. rssi end
 
+        -- Per-entry actions, shown as clickable hint buttons (bottom
+        -- right) when the entry is selected. Labels come from
+        -- actions.nix (forget / rescan / power_off).
+        local safe_name = name:gsub('[\"]', "")
         local actions = {
-          rescan = "true", -- menu re-runs GetEntries on reload
+          rescan = "${btscan}/bin/btscan 4",
+          power_off = "${btctl}/bin/btctl power off",
         }
         if paired then
-          actions.forget = "${btctl}/bin/btctl forget " .. mac .. " \"" .. name:gsub('[\"]', "") .. "\""
+          actions.forget = "${btctl}/bin/btctl forget " .. mac .. " \"" .. safe_name .. "\""
         end
 
         table.insert(entries, {
           Text = marker .. "  " .. name,
           Subtext = subtext,
           Value = "${btctl}/bin/btctl " .. default_verb .. " " .. mac
-            .. " \"" .. name:gsub('[\"]', "") .. "\"",
+            .. " \"" .. safe_name .. "\"",
           Actions = actions,
         })
-
-        -- Clickable forget row right under each paired device. The
-        -- keybind-hint button (ctrl+f) works too, but only when the
-        -- entry is selected; a separate list row is always clickable.
-        if paired then
-          table.insert(entries, {
-            Text = "    ✖  Forget " .. name,
-            Value = "${btctl}/bin/btctl forget " .. mac
-              .. " \"" .. name:gsub('[\"]', "") .. "\"",
-            Actions = { rescan = "true" },
-          })
-        end
       end
 
       if #entries == 0 then
@@ -225,13 +230,12 @@ inherit btctl btscan;
           Text = "No devices found",
           Subtext = "Put the device in pairing mode, then press ctrl+r",
           Value = "true",
+          Actions = {
+            rescan = "${btscan}/bin/btscan 4",
+            power_off = "${btctl}/bin/btctl power off",
+          },
         })
       end
-
-      table.insert(entries, {
-        Text = "󰂱  Power Off",
-        Value = "${btctl}/bin/btctl power off",
-      })
 
       return entries
     end

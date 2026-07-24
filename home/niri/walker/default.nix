@@ -60,10 +60,8 @@
         # Without these, walker shows nothing when opened plain.
         default = [
           "desktopapplications"
-          "clipboard"
           "files"
-          "todo"
-          "menus"
+          "calc"
         ];
         empty = [ "desktopapplications" ];
         prefixes = [
@@ -151,9 +149,6 @@
         layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
         layoutTopCenter = builtins.readFile ../themes/walker-layout-top-center.xml;
         layoutTopLeft = builtins.readFile ../themes/walker-layout-top-left.xml;
-        # item_todo.xml override: shrinks the hardcoded 48px "+" create-entry
-        # icon to 16px. Applies to both themes.
-        itemTodo = builtins.readFile ../themes/walker-item-todo.xml;
       in
       {
         # Default theme: top-right dropdown, sitting just under the top waybar.
@@ -163,23 +158,15 @@
         cyberpunk = {
           style = base;
           layouts."layout" = layoutTopRight;
-          layouts."item_todo" = itemTodo;
         };
-        # Top-center variant, used by popups launched with `-t cyberpunk-center`
-        # (currently just the waybar todo module). Same styling; only the
-        # box-wrapper alignment differs (halign=center).
         cyberpunk-center = {
           style = base;
           layouts."layout" = layoutTopCenter;
-          layouts."item_todo" = itemTodo;
+          layouts."item_todo" = layoutTopCenter;
         };
-        # Top-left variant, for popups that should anchor to the top-left
-        # corner (e.g. waybar-ycal). Same styling; only the box-wrapper
-        # alignment differs (halign=start).
         cyberpunk-left = {
           style = base;
           layouts."layout" = layoutTopLeft;
-          layouts."item_todo" = itemTodo;
         };
       };
   };
