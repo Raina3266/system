@@ -156,8 +156,14 @@
     { action = "power_on"; label = "power on"; default = true; bind = "Return"; after = "AsyncClearReload"; }
     { action = "power_off"; label = "power off"; bind = "ctrl x"; after = "AsyncClearReload"; }
   ];
+  # Volume/mute keep the menu open and re-query so the bars update in
+  # place; picking a default device closes it.
   "menus:audio-sink" = [
-    { action = "menus:default"; label = "select"; default = true; bind = "Return"; after = "Close"; }
+    { action = "set_default"; label = "select"; default = true; bind = "Return"; after = "Close"; }
+    { action = "vol_up"; label = "+volume"; bind = "ctrl y"; after = "AsyncReload"; }
+    { action = "vol_down"; label = "-volume"; bind = "ctrl n"; after = "AsyncReload"; }
+    { action = "toggle_mute"; label = "mute"; bind = "ctrl m"; after = "AsyncReload"; }
+    { action = "toggle_kind"; label = "in/out"; bind = "ctrl t"; after = "AsyncClearReload"; }
   ];
   "menus:power" = [
     { action = "menus:default"; label = "run"; default = true; bind = "Return"; after = "Close"; }
