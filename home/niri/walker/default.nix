@@ -33,7 +33,6 @@ let
     single_click_activation = true;
     # Hide the F1–F4 quick-activation buttons in the popup.
     hide_quick_activation = true;
-    preview.content_fit = "contain";
     # Layer-shell anchoring: keep the default fullscreen overlay (all
     # four anchors) so click-to-close works — clicks on the empty area
     # around the box-wrapper dismiss walker. The box-wrapper itself is
@@ -160,9 +159,8 @@ let
   base = builtins.readFile ../themes/walker-cyberpunk.css;
   layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
   layoutTopCenter = builtins.readFile ../themes/walker-layout-top-center.xml;
-  layoutTopLeft = builtins.readFile ../themes/walker-layout-top-left.xml;
 
-  # `services.walker.theme` only models one theme, so the alternates are
+  # `services.walker.theme` only models one theme, so the alternate is
   # written out with the same file layout the module would produce.
   mkTheme =
     name:
@@ -174,18 +172,14 @@ let
       layoutName: content: lib.nameValuePair "walker/themes/${name}/${layoutName}.xml" { text = content; }
     ) layouts;
 
-  extraThemes =
-    mkTheme "cyberpunk-center" {
-      style = base;
-      layouts = {
-        "layout" = layoutTopCenter;
-        "item_todo" = layoutTopCenter;
-      };
-    }
-    // mkTheme "cyberpunk-left" {
-      style = base;
-      layouts."layout" = layoutTopLeft;
+  # Used by the waybar todo button (`walker -t cyberpunk-center -m todo`).
+  extraThemes = mkTheme "cyberpunk-center" {
+    style = base;
+    layouts = {
+      "layout" = layoutTopCenter;
+      "item_todo" = layoutTopCenter;
     };
+  };
 
   # ── elephant ──────────────────────────────────────────────
   # ./elephant.nix keeps the shape the upstream flake module expected
@@ -223,11 +217,13 @@ in
     # pointing at its own store path, so the provider .so files no
     # longer need to be linked into ~/.config/elephant/providers.
     #
-    # The provider list is pinned to the set that was previously
-    # installed. Building all of them would additionally pull in
+    # The provider list is pinned: building all of them would pull in
     # aptpackages/archlinuxpkgs/dnfpackages (useless here, but they
-    # would still show up in the providerlist) plus protonpass and
-    # wireplumber.
+    # would still show up in the providerlist) plus protonpass.
+    #
+    # wireplumber needs `pw-dump` and `wpctl` on elephant's PATH or it
+    # disables itself at load; both come from pkgs.wireplumber, added
+    # to home.packages below.
     package = pkgs.elephant.override {
       enabledProviders = [
         "1password"
@@ -250,6 +246,7 @@ in
         "unicode"
         "websearch"
         "windows"
+        "wireplumber"
       ];
     };
   };
@@ -300,5 +297,6 @@ in
   home.packages = with pkgs; [
     wtype # Wayland typing
     fd # files provider (elephant/walker)
+    wireplumber # wpctl/pw-dump — wireplumber provider + audio menu
   ];
 }
