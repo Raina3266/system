@@ -106,11 +106,7 @@
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
   ];
   "menus:bluetooth" = [
-    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
-    # Short labels: the hint buttons live in a right-aligned box and
-    # overflow off the left edge of narrow windows — long labels push
-    # earlier buttons out of view.
     { action = "rescan"; label = "scan"; bind = "ctrl r"; after = "AsyncClearReload"; }
     { action = "power_off"; label = "power"; bind = "ctrl e"; after = "AsyncClearReload"; }
   ];

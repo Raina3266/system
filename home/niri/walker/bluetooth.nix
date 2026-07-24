@@ -167,10 +167,26 @@ inherit btctl btscan;
 
       local powered = prop("/org/bluez/hci0", "org.bluez.Adapter1", "Powered")
       if powered ~= "true" then
+        local value = "${btctl}/bin/btctl power on"
         table.insert(entries, {
-          Text = "󰂲  Bluetooth is off — Power On",
-          Value = "${btctl}/bin/btctl power on",
-          Actions = { rescan = "${btscan}/bin/btscan 4" },
+          Text = "Bluetooth is off",
+          Value = value,
+          -- menus:default MUST be present in Actions whenever the entry
+          -- has other actions, or walker panics on click. Walker's
+          -- activate_default (src/ui/window.rs:469) filters the
+          -- provider's configured actions down to those whose name
+          -- appears in the entry's Actions map, then .unwrap()s a
+          -- default=true match. menus:default is the only one marked
+          -- default; if it's filtered out (because the entry only
+          -- exposes rescan/power_off/forget), the unwrap panics and
+          -- walker SIGABRTs — so clicking a device does nothing.
+          -- Elephant resolves menus:default by falling through to the
+          -- menu's Action template (sh -c '%VALUE%'), so the value
+          -- here is the same command as Value.
+          Actions = {
+            ["menus:default"] = value,
+            rescan = "${btscan}/bin/btscan 4",
+          },
         })
         return entries
       end
@@ -206,9 +222,14 @@ inherit btctl btscan;
 
         -- Per-entry actions, shown as clickable hint buttons (bottom
         -- right) when the entry is selected. Labels come from
-        -- actions.nix (forget / rescan / power_off).
+        -- actions.nix (forget / rescan / power_off). menus:default is
+        -- included so walker's default-action lookup succeeds (see
+        -- the comment on the "Power On" entry above).
         local safe_name = name:gsub('[\"]', "")
+        local value = "${btctl}/bin/btctl " .. default_verb .. " " .. mac
+          .. " \"" .. safe_name .. "\""
         local actions = {
+          ["menus:default"] = value,
           rescan = "${btscan}/bin/btscan 4",
           power_off = "${btctl}/bin/btctl power off",
         }
@@ -219,8 +240,7 @@ inherit btctl btscan;
         table.insert(entries, {
           Text = marker .. "  " .. name,
           Subtext = subtext,
-          Value = "${btctl}/bin/btctl " .. default_verb .. " " .. mac
-            .. " \"" .. safe_name .. "\"",
+          Value = value,
           Actions = actions,
         })
       end
@@ -231,6 +251,7 @@ inherit btctl btscan;
           Subtext = "Put the device in pairing mode, then press ctrl+r",
           Value = "true",
           Actions = {
+            ["menus:default"] = "true",
             rescan = "${btscan}/bin/btscan 4",
             power_off = "${btctl}/bin/btctl power off",
           },

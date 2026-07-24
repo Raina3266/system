@@ -231,6 +231,15 @@
             end
 
             local actions = {}
+            -- menus:default MUST be present whenever the entry has other
+            -- actions, or walker panics on click (activate_default in
+            -- src/ui/window.rs:469 filters configured actions to those
+            -- in the entry's Actions map, then .unwrap()s a default=true
+            -- match; menus:default is the only default, so if it's
+            -- filtered out walker SIGABRTs). Elephant resolves
+            -- menus:default via the menu's Action template
+            -- (sh -c '%VALUE%'), so the value here matches Value.
+            actions["menus:default"] = value
             -- forget: available on any saved network (connected or not).
             -- Uses the connection profile name, which for wifi is usually
             -- the SSID but may differ; look it up to be safe.
