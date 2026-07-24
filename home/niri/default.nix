@@ -47,6 +47,7 @@ in
     wob # Wayland overlay progress bar — used by the timer
     xwayland-satellite # rootless XWayland for X11 apps
     xrandr # for X11 apps that query display layout
+    snixembed # SNI→XEmbed bridge so Qt5-xcb apps (birdtray) see a tray
     networkmanagerapplet # graphical NetworkManager secret agent / Wi-Fi password dialogs
     mediactl
   ];

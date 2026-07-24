@@ -24,14 +24,41 @@
     { action = "pin"; bind = "ctrl p"; after = "AsyncReload"; }
     { action = "unpin"; bind = "ctrl p"; after = "AsyncReload"; }
   ];
+  # pin / unpin / remove / remove_all are DISABLED via `unset` because
+  # they deadlock elephant (2.22.0 and master as of 2026-07). Their
+  # handlers in internal/providers/clipboard/clipboard.go take the
+  # provider mutex and then call saveToFile(), which locks the same
+  # non-reentrant sync.Mutex again:
+  #
+  #   case ActionPin:
+  #     mu.Lock()
+  #     ...
+  #       saveToFile()   // -> mu.Lock() again, blocks forever
+  #
+  # The activation goroutine wedges holding mu, so every later Query()
+  # blocks too and the clipboard appears permanently empty until
+  # elephant is restarted. (cleanup() in setup.go gets this right by
+  # calling saveToFileLocked() instead — that one-word change is the
+  # upstream fix, not yet reported.)
+  #
+  # `unset` is required rather than just omitting them: walker merges
+  # this section over its built-in defaults per action name, so deleted
+  # entries would otherwise be reinstated from resources/config.toml.
+  # Walker only renders/binds an action present in BOTH the config and
+  # the item, so unsetting here makes the deadlock unreachable.
+  #
+  # To restore them, drop the four `unset` entries below (and ideally
+  # patch elephant first).
   clipboard = [
     { action = "copy"; default = true; bind = "Return"; }
-    { action = "remove"; bind = "ctrl d"; after = "AsyncClearReload"; }
     { action = "show_images_only"; label = "only images"; bind = "ctrl i"; after = "AsyncClearReload"; }
     { action = "show_text_only"; label = "only text"; bind = "ctrl i"; after = "AsyncClearReload"; }
-    { action = "unpin"; bind = "ctrl p"; after = "AsyncClearReload"; }
-    { action = "pin"; bind = "ctrl p"; after = "AsyncClearReload"; }
+    { action = "show_combined"; label = "show all"; bind = "ctrl i"; after = "AsyncClearReload"; }
     { action = "edit"; bind = "ctrl o"; }
+    { action = "pin"; unset = true; }
+    { action = "unpin"; unset = true; }
+    { action = "remove"; unset = true; }
+    { action = "remove_all"; unset = true; }
   ];
   files = [
     { action = "open"; default = true; bind = "Return"; }
@@ -89,9 +116,14 @@
     { action = "start"; label = "start"; default = true; bind = "Return"; }
     { action = "start_new"; label = "start blank"; bind = "ctrl Return"; }
   ];
+  # Applied to any reported action a provider's own section doesn't
+  # declare. `menus:default` is what elephant synthesizes for menu
+  # entries that carry no Actions table of their own (e.g. the power and
+  # audio-sink menus, which drive everything off their top-level
+  # `action`) -- it means "run this entry's command", hence the label.
   fallback = [
     { action = "menus:open"; label = "open"; after = "Nothing"; }
-    { action = "menus:default"; label = "run"; after = "Close"; }
+    { action = "menus:default"; label = "run"; default = true; bind = "Return"; after = "Close"; }
     { action = "menus:parent"; label = "back"; bind = "Escape"; after = "Nothing"; }
     { action = "erase_history"; label = "clear hist"; bind = "ctrl h"; after = "AsyncReload"; }
   ];
@@ -101,26 +133,34 @@
   # section. Actions not present on an entry are simply not shown, so
   # per-menu sections stay precise.
   "menus:wifi" = [
-    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
+    { action = "menus:default"; label = "connect"; default = true; bind = "Return"; after = "Close"; }
     { action = "disconnect"; label = "disconnect"; bind = "ctrl d"; after = "AsyncClearReload"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
   ];
+  # Which buttons actually appear is decided per entry by the Actions
+  # table in bluetooth.nix (e.g. power_on only on the "Bluetooth is off"
+  # entry, pair only on unpaired ones); this section only supplies their
+  # labels, keybinds and after-behaviour. Walker drops any action listed
+  # here that the selected entry doesn't report.
+
   "menus:bluetooth" = [
-    # menus:default MUST be declared here, or walker panics on click
-    # (activate_default in src/ui/window.rs:469 .unwrap()s a default=true
-    # action; without this entry there is none, so clicking any
-    # bluetooth entry SIGABRTs walker). Every other menu declares it;
-    # bluetooth was just missing it.
-    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
     { action = "forget"; label = "forget"; bind = "ctrl f"; after = "AsyncClearReload"; }
-    { action = "rescan"; label = "scan"; bind = "ctrl r"; after = "AsyncClearReload"; }
-    { action = "power_off"; label = "power"; bind = "ctrl e"; after = "AsyncClearReload"; }
+    # scan and list coexist on an entry while scanning, so they need
+    # distinct keys (unlike the mutually-exclusive pin/unpin pattern,
+    # where walker picks whichever the entry actually reports).
+    { action = "list"; label = "list"; bind = "ctrl l"; after = "AsyncClearReload"; }
+    { action = "scan"; label = "scan"; bind = "ctrl s"; after = "AsyncClearReload"; }
+    { action = "connect"; label = "connect"; default = true; bind = "Return"; after = "AsyncClearReload"; }
+    { action = "disconnect"; label = "disconnect"; default = true; bind = "Return"; after = "AsyncClearReload"; }
+    { action = "pair"; label = "pair"; default = true; bind = "Return"; after = "AsyncClearReload"; }
+    { action = "power_on"; label = "power on"; default = true; bind = "Return"; after = "AsyncClearReload"; }
+    { action = "power_off"; label = "power off"; bind = "ctrl x"; after = "AsyncClearReload"; }
   ];
   "menus:audio-sink" = [
-    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
+    { action = "menus:default"; label = "select"; default = true; bind = "Return"; after = "Close"; }
   ];
   "menus:power" = [
-    { action = "menus:default"; default = true; bind = "Return"; after = "Close"; }
+    { action = "menus:default"; label = "run"; default = true; bind = "Return"; after = "Close"; }
   ];
   dmenu = [ { action = "select"; default = true; bind = "Return"; } ];
 }

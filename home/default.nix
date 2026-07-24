@@ -84,6 +84,12 @@
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
+      # File manager
+      "inode/directory" = [ "nemo.desktop" ];
+
+      # Terminal
+      "x-scheme-handler/terminal" = [ "com.mitchellh.ghostty.desktop" ];
+
       # Web
       "text/html" = "google-chrome.desktop";
       "x-scheme-handler/http" = "google-chrome.desktop";

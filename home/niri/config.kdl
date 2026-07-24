@@ -86,9 +86,10 @@ layout {
 }
 
 spawn-at-startup "xwayland-satellite"
+spawn-at-startup "snixembed"
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
-spawn-at-startup "env" "GDK_BACKEND=x11" "birdtray"
+spawn-at-startup "birdtray"
 
 hotkey-overlay {
     // skip-at-startup

@@ -28,8 +28,8 @@ in
     "tray"
     "custom/cliphist"
     "custom/timer"
-    "custom/bt"
     "custom/audio-sink"
+    "custom/bt"
     "custom/powermenu"
   ];
 }

@@ -7,6 +7,7 @@
   provider.clipboard.settings = {
     auto_cleanup = 4320;
     max_items = 1000;
+    pinned_on_top = true;
   };
   # Todo provider — task list stored in ~/.cache/elephant/todo.csv.
   # These are the defaults; declared explicitly so they're documented

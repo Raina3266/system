@@ -21,9 +21,8 @@ let
   red = "#ff3333";
   dim = "#5c6776";
   green = "#6af6a8";   
-  yellow = "#ffe66d";  
-  navy = "#5c7cfa";    
-  purple = "#7b2ff7";  
+  yellow = "#ffe66d";     
+  purple = "#c200fb";  
   amber = "#f29e74";   
 in
 {
@@ -34,6 +33,7 @@ in
 
     # ── Images ──
     { mime = "image/*"; fg = green; }
+    { url = "*.{bmp,webp,svg,ico,tif,tiff,heic,heif,avif,jxl,cr2,cr3,nef,arw,dng,raw,orf,rw2}"; fg = green; }
 
     # ── Video ──
     { mime = "video/*"; fg = yellow; }
@@ -45,10 +45,11 @@ in
     { mime = "application/pdf"; fg = purple; }
 
     # ── Office documents & spreadsheets ──
-    { mime = "application/vnd.openxmlformats-*"; fg = navy; }
-    { mime = "application/vnd.ms-*"; fg = navy; }
-    { mime = "application/vnd.oasis.opendocument.*"; fg = navy; }
-    { mime = "text/csv"; fg = navy; }
+    { mime = "application/vnd.openxmlformats-*"; fg = purple; }
+    { mime = "application/vnd.ms-*"; fg = purple; }
+    { mime = "application/msword"; fg = purple; }
+    { mime = "application/vnd.oasis.opendocument.*"; fg = purple; }
+    { url = "*.{doc,docx,ppt,pptx,xls,xlsx,csv,odt,ods,odp}"; fg = purple; }
 
     # ── Archives (cyan — caution) ──
     { mime = "application/{,g}zip"; fg = cyan; }
@@ -98,6 +99,7 @@ in
   indicator = {
     parent = { fg = bgmod; bg = pink; bold = true; };
     current = { fg = bgmod; bg = pink; bold = true; };
+    preview = { fg = bgmod; bg = pink; bold = false; };
   };
 
   # ── Tabs ────────────────────────────────────────────────────────────────
