@@ -46,7 +46,7 @@
   # Audio menu — lists both outputs (sinks) and inputs (sources) with
   # their current volume, and allows switching the default device,
   # adjusting per-device volume and toggling mute.
-  # Invoked via `walker -m menus:audio-sink`.
+  # Invoked via `walker -m menus:audio`.
   #
   # Return   select as default device
   # ctrl y   volume +5%      ctrl n   volume -5%
@@ -55,8 +55,8 @@
   # The elephant `wireplumber` provider (au:) covers similar ground,
   # but keeps outputs and inputs in one flat list; this menu groups
   # them and is what the waybar speaker button opens.
-  provider.menus.lua."audio-sink" = ''
-    Name = "audio-sink"
+  provider.menus.lua."audio" = ''
+    Name = "audio"
     NamePretty = "Audio Devices"
     Icon = "audio-card"
     Description = "Switch audio output/input device and set volume"
@@ -167,19 +167,6 @@
         list = devices("Sinks", "Sources")
       end
       trim_common_prefix(list)
-
-      -- Header doubles as the switch between the two lists, so the
-      -- other kind is reachable by mouse as well as by ctrl t.
-      table.insert(entries, {
-        Text = inputs and "󰍬  Inputs" or "󰕾  Outputs",
-        Subtext = inputs and "show outputs" or "show inputs",
-        Icon = inputs and "audio-input-microphone" or "audio-volume-high",
-        Value = "true",
-        Actions = {
-          toggle_kind = "lua:ToggleKind",
-          set_default = "lua:ToggleKind",
-        },
-      })
 
       for _, d in ipairs(list) do
         local marker = d.is_default and "✓" or " "
