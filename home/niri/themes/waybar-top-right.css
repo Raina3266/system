@@ -14,14 +14,9 @@
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
-/* Pink text + cyan glow */
-#custom-audio,
-#custom-bt {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-
 /* Cyan text + cyan glow */
+#custom-audio,
+#custom-bt,
 #custom-cliphist,
 #custom-files {
     color: #7afcff;
@@ -32,6 +27,7 @@
     color: #7afcff;
 }
 
+/* Cyan text, amber glow */
 #custom-timer {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);

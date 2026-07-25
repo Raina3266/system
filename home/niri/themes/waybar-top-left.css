@@ -1,6 +1,7 @@
-/* ── Top-left: clock, system group, hardware group ───────── */
+/* ── Top-left: clock, system group, hardware group ─────────
+ * Boxes/margins come from waybar-cyberpunk.css; this file only sets
+ * colour, glow and the 2px border on the outer containers. */
 
-/* ── Group headers ───────────────────────────────────────── */
 #group-hardware,
 #group-system {
     background-color: transparent;
@@ -9,73 +10,57 @@
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
-/* ── Hardware group ─────────────────────────────────────── */
+/* ── Hardware + system modules ──────────────────────────── */
 #cpu,
 #memory,
 #disk,
 #network,
-#pulseaudio {
-    color: #7afcff;
-    background-color: transparent;
-    text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
-}
-#temperature {
-    color: #7afcff;
-    background-color: transparent;
-    text-shadow: 0 0 8px rgba(122, 252, 255, 0.8);
-}
-#temperature.warning {
-    color: #f29e74;
-    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-}
-#temperature.critical {
-    color: #ff3333;
-    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
-    animation: blink 1s steps(2) infinite;
-}
-#network.disconnected {
-    color: #ff3333;
-    text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
-}
-
-/* ── System group ──────────────────────────────────────── */
-#backlight {
-    color: #7afcff;
-    background-color: transparent;
-    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-}
-#pulseaudio.muted {
-    color: #5c6776;
-    text-shadow: none;
-}
+#pulseaudio,
 #custom-battery {
     color: #7afcff;
     background-color: transparent;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
-#custom-battery.warning:not(.charging) {
-    color: #f29e74;
+
+#backlight {
+    color: #7afcff;
+    background-color: transparent;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
+
+#temperature {
+    color: #7afcff;
+    background-color: transparent;
+    text-shadow: 0 0 8px rgba(122, 252, 255, 0.8);
+}
+
+/* ── Alert states ───────────────────────────────────────── */
+#temperature.warning,
+#custom-battery.warning:not(.charging),
 #custom-battery.low:not(.charging) {
     color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
+
+#temperature.critical,
 #custom-battery.critical:not(.charging) {
     color: #ff3333;
     text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
     animation: blink 1s steps(2) infinite;
 }
 
-/* ── Clock ──────────────────────────────────────────────── */
-#clock {
-    color: #7afcff;
-    background-color: transparent;
-    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
-    border: 2px solid rgba(255, 126, 219, 0.2);
+#network.disconnected {
+    color: #ff3333;
+    text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
 }
 
-/* ── Calendar (ycal) ───────────────────────────────────── */
+#pulseaudio.muted {
+    color: #5c6776;
+    text-shadow: none;
+}
+
+/* ── Clock + calendar (ycal) ────────────────────────────── */
+#clock,
 #custom-ycal {
     color: #7afcff;
     background-color: transparent;

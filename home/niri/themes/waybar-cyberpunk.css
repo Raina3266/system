@@ -1,8 +1,6 @@
-/* Cyberpunk Waybar Theme */
-/*
+/* 
  * Palette:
  * bg:      #190326
- * bg-mod:  rgba(20, 20, 40, 0.7)
  * fg:      #cbe3e7
  * pink:    #ff7edb
  * cyan:    #7afcff
@@ -31,7 +29,11 @@ window#waybar.bottom {
     box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
 }
 
-/* ── Module base ─────────────────────────────────────────── */
+/* ── Module base ───────────────────────────────────────────
+ * Modules are listed by id; `#group-* > widget` covers the same
+ * styling for modules nested inside a group container, whose ids
+ * Waybar doesn't always expose. Per-bar files override colour and
+ * border on top of this; margin/padding/radius come from here. */
 #workspaces,
 #cpu,
 #temperature,
@@ -39,8 +41,8 @@ window#waybar.bottom {
 #disk,
 #network,
 #clock,
-    #custom-ycal,
-    #custom-lyrics,
+#custom-ycal,
+#custom-lyrics,
 #custom-media,
 #custom-media-prev,
 #custom-media-next,
@@ -62,24 +64,7 @@ window#waybar.bottom {
 #pulseaudio,
 #custom-battery,
 #custom-powermenu,
-#tray {
-    background-color: #190326;
-    margin: 0 3px;
-    padding: 0 10px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 126, 219, 0.2);
-}
-
-/* ── Group containers (transparent, no box) ────────────────── */
-#group-hardware,
-#group-system {
-    background-color: transparent;
-    border: none;
-    margin: 0;
-    padding: 0;
-}
-
-/* Ensure all modules inside groups get box styling */
+#tray,
 #group-hardware > widget,
 #group-system > widget {
     background-color: #190326;
@@ -87,6 +72,15 @@ window#waybar.bottom {
     padding: 0 10px;
     border-radius: 6px;
     border: 1px solid rgba(255, 126, 219, 0.2);
+}
+
+/* Group containers themselves stay invisible */
+#group-hardware,
+#group-system {
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
 }
 
 /* ── Hover effect ───────────────────────────────────────── */
@@ -97,8 +91,9 @@ window#waybar.bottom {
 #disk:hover,
 #network:hover,
 #clock:hover,
-    #custom-ycal:hover,
+#custom-ycal:hover,
 #custom-bt:hover,
+#custom-audio:hover,
 #custom-cliphist:hover,
 #custom-files:hover,
 #custom-timer:hover,
@@ -114,28 +109,30 @@ window#waybar.bottom {
 #backlight:hover,
 #pulseaudio:hover,
 #custom-powermenu:hover,
-#custom-audio:hover,
 #tray:hover {
     background-color: rgba(255, 126, 219, 0.15);
     border-color: rgba(255, 126, 219, 0.5);
 }
 
-/* ── Calendar tooltip ───────────────────────────────────── */
+/* ── Tooltips ───────────────────────────────────────────── */
 tooltip {
     background-color: #0E0616;
     border: 1px solid #ff7edb;
     border-radius: 6px;
     box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
 }
+
 tooltip label {
     color: #cbe3e7;
 }
 
+/* Calendar with events today: red accent */
 #custom-ycal.has-events {
     background-color: rgba(255, 51, 51, 0.12);
     border-color: rgba(255, 51, 51, 0.55);
 }
 
+/* Used by the .critical states in waybar-top-left.css */
 @keyframes blink {
     to {
         color: #1a1a2e;
