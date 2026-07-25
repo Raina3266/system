@@ -10,7 +10,11 @@
         "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
         "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
+}
+.niri-window-buttons button label {
+    font-weight: 500;
+    font-size: 16px;
 }
 
 window#waybar.top {
@@ -85,13 +89,19 @@ window#waybar.bottom {
 }
 
 #custom-todo {
-    padding-left: 50px;
+    margin-left: 50px;
     color: #ff7edb;
 }
 
 #custom-media-prev,
-#custom-media-next {
+#custom-media-next,
+.scroll-arrow-left,
+.scroll-arrow-right {
     color: rgba(122, 252, 255, 0.6);
+    margin-top: 2px;
+    margin-left: 5px;
+    margin-right: 5px;
+    padding: 3px;
 }
 
 #custom-media.paused,
@@ -113,7 +123,6 @@ window#waybar.bottom {
 #custom-cliphist:hover,
 #custom-files:hover,
 #custom-timer:hover,
-#custom-todo:hover,
 #custom-obsidian:hover,
 #custom-yazi:hover,
 #custom-tauon:hover,
@@ -125,7 +134,11 @@ window#waybar.bottom {
 #backlight:hover,
 #pulseaudio:hover,
 #custom-powermenu:hover,
-#tray:hover {
+#tray:hover,
+.niri-window-buttons button:hover,
+.scroll-arrow-left:hover,
+.scroll-arrow-right:hover {
+    background-image: none;
     background-color: rgba(255, 126, 219, 0.1);
     border-color: rgba(255, 126, 219, 0.5);
 }

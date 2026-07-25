@@ -1,8 +1,5 @@
 /* Bottom bar: niri workspaces + taskbar */
 
-#workspaces {
-    margin: 0 2px;
-}
 #workspaces button {
     color: #5c6776;
     padding: 0 4px;
@@ -13,34 +10,6 @@
 #workspaces button.active,
 #workspaces button.focused {
     color: #7afcff;
-}
-#workspaces button:hover {
-    background-image: none;
-    border-color: rgba(255, 126, 219, 0.5);
-}
-
-/* Starred apps */
-#custom-obsidian,
-#custom-yazi,
-#custom-tauon,
-#custom-whatsapp,
-#custom-gkeep,
-#custom-gcal,
-#custom-gphotos,
-#custom-thunderbird {
-    border: 1px solid rgba(255, 126, 219, 0.4);
-    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-}
-#custom-obsidian:hover,
-#custom-yazi:hover,
-#custom-tauon:hover,
-#custom-whatsapp:hover,
-#custom-gkeep:hover,
-#custom-gcal:hover,
-#custom-gphotos:hover,
-#custom-thunderbird:hover {
-    background-color: rgba(255, 126, 219, 0.15);
-    border-color: rgba(255, 126, 219, 0.5);
 }
 
 /* Taskbar (niri_window_buttons): class selector (no #cffi id)
@@ -55,23 +24,12 @@
     border-radius: 6px;
     border: 1px solid rgba(255, 126, 219, 0.4);
 }
-.niri-window-buttons button label {
-    font-size: 16px;
-}
+
 .niri-window-buttons button.focused {
     background-color: rgba(255, 126, 219, 0.15);
     font-weight: bold;
     color: #7afcff;
     border-color: rgba(255, 126, 219, 0.5);
-}
-.niri-window-buttons button:hover {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    border-color: rgba(255, 126, 219, 0.8);
-}
-.niri-window-buttons button.urgent {
-    background-color: rgba(255, 51, 51, 0.3);
-    border-color: rgba(255, 51, 51, 0.6);
 }
 .niri-window-buttons button.selected {
     background-color: rgba(122, 252, 255, 0.15);
@@ -87,18 +45,4 @@
 .niri-window-buttons .audio-indicator {
     color: #f29e74;
     margin-left: 4px;
-}
-.scroll-arrow-left,
-.scroll-arrow-right {
-    color: #5c6776;
-    margin-top: 2px;
-    margin-left: 5px;
-    margin-right: 5px;
-    padding: 3px;
-}
-.scroll-arrow-left:hover,
-.scroll-arrow-right:hover {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    color: #ff7edb;
 }
