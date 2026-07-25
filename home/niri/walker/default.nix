@@ -10,6 +10,7 @@
 {
   pkgs,
   lib,
+  config,
   ...
 }:
 let
@@ -73,28 +74,35 @@ let
     };
   };
 
-  # Theme files
-  base = builtins.readFile ../themes/walker.css;
-  layoutTopRight = builtins.readFile ../themes/walker-top-right.xml;
-  layoutTopCenter = builtins.readFile ../themes/walker-top-center.xml;
-
-  # services.walker.theme supports one theme; alternate written manually
-  mkTheme =
+  # Theme files are symlinked out of the store (see xdg.configFile below),
+  # so editing them takes effect without a rebuild.
+  themesDir = "/home/raina/System/home/niri/themes";
+  themeFiles =
     name:
     { style, layouts }:
     {
-      "walker/themes/${name}/style.css".text = style;
+      "walker/themes/${name}/style.css".source =
+        config.lib.file.mkOutOfStoreSymlink "${themesDir}/${style}";
     }
     // lib.mapAttrs' (
-      layoutName: content: lib.nameValuePair "walker/themes/${name}/${layoutName}.xml" { text = content; }
+      layoutName: file:
+      lib.nameValuePair "walker/themes/${name}/${layoutName}.xml" {
+        source = config.lib.file.mkOutOfStoreSymlink "${themesDir}/${file}";
+      }
     ) layouts;
 
+  # Default theme: top-right dropdown below waybar.
+  defaultTheme = themeFiles "cyberpunk" {
+    style = "walker.css";
+    layouts.layout = "walker-top-right.xml";
+  };
+
   # Alternate theme for waybar todo button (center-positioned)
-  extraThemes = mkTheme "cyberpunk-center" {
-    style = base;
+  extraThemes = themeFiles "cyberpunk-center" {
+    style = "walker.css";
     layouts = {
-      "layout" = layoutTopCenter;
-      "item_todo" = layoutTopCenter;
+      "layout" = "walker-top-center.xml";
+      "item_todo" = "walker-top-center.xml";
     };
   };
 
@@ -109,17 +117,15 @@ in
     package = pkgs.walker;
     systemd.enable = true;
     enableElephantIntegration = true;
-    settings = walkerSettings;
+    settings = walkerSettings // {
+      theme = "cyberpunk";
+    };
     # Default theme: top-right dropdown below waybar.
     # Layout XML sets valign=start halign=end on box-wrapper for positioning.
-    theme = {
-      name = "cyberpunk";
-      style = base;
-      layout."layout" = layoutTopRight;
-    };
+    # Theme files themselves are symlinked below for live editing.
   };
 
-  xdg.configFile = extraThemes;
+  xdg.configFile = defaultTheme // extraThemes;
 
   # Additional systemd service config not in upstream modules
   systemd.user.services.walker.Unit = {

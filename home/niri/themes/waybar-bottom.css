@@ -1,15 +1,12 @@
 /* Bottom bar: niri workspaces + taskbar */
 
 #workspaces {
-    border: none;
-    background-color: transparent;
     margin: 0 2px;
 }
 #workspaces button {
     color: #5c6776;
     padding: 0 4px;
     margin: 0 0px;
-    background-color: transparent;
     border: 3px solid rgba(255, 126, 219, 0.2);
     border-radius: 6px;
 }
@@ -18,7 +15,6 @@
     color: #7afcff;
 }
 #workspaces button:hover {
-    background-color: transparent;
     background-image: none;
     border-color: rgba(255, 126, 219, 0.5);
 }
@@ -32,7 +28,6 @@
 #custom-gcal,
 #custom-gphotos,
 #custom-thunderbird {
-    background-color: transparent;
     border: 1px solid rgba(255, 126, 219, 0.4);
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
@@ -52,10 +47,8 @@
  * Scroll arrows: siblings (not descendants), styled separately */
 .niri-window-buttons {
     padding: 0 10px;
-    background-color: transparent;
 }
 .niri-window-buttons button {
-    background-color: transparent;
     color: #ff7edb;
     padding-left: 10px;
     padding-right: 10px;

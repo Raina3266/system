@@ -9,25 +9,25 @@
     font-family:
         "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
         "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
 }
 
-window#waybar {
-    background-color: #0E0616;
+window#waybar.top {
+    background-color: #0e0616;
     border-bottom: 2px solid #ff7edb;
+    border-radius: 20px;
 }
 
 /* Bottom bar: pink border on top */
 window#waybar.bottom {
-    border-bottom: none;
+    background-color: #0e0616;
     border-top: 2px solid #ff7edb;
-    box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
+    border-radius: 20px;
 }
 
 /* Module base: geometry here, colors in per-bar files
  * #group-* > widget covers modules nested in groups */
-#workspaces,
 #cpu,
 #temperature,
 #memory,
@@ -35,15 +35,10 @@ window#waybar.bottom {
 #network,
 #clock,
 #custom-ycal,
-#custom-lyrics,
-#custom-media,
-#custom-media-prev,
-#custom-media-next,
 #custom-bt,
 #custom-audio,
 #custom-cliphist,
 #custom-timer,
-#custom-todo,
 #custom-files,
 #custom-obsidian,
 #custom-yazi,
@@ -58,22 +53,50 @@ window#waybar.bottom {
 #custom-battery,
 #custom-powermenu,
 #tray,
+#group-hardware,
+#group-system,
 #group-hardware > widget,
 #group-system > widget {
-    background-color: #190326;
+    color: #7afcff;
+    background-color: transparent;
     margin: 0 3px;
-    padding: 0 10px;
+    padding: 0 15px;
     border-radius: 6px;
-    border: 1px solid rgba(255, 126, 219, 0.2);
+    border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
-/* Group containers: invisible */
-#group-hardware,
-#group-system {
-    background-color: transparent;
+#workspaces,
+#custom-media,
+#custom-media-prev,
+#custom-media-next,
+#custom-lyrics,
+#custom-todo {
+    padding-left: 10px;
+    padding-right: 10px;
     border: none;
-    margin: 0;
-    padding: 0;
+    background-color: transparent;
+}
+
+#custom-media,
+#custom-lyrics,
+#custom-media-prev:hover,
+#custom-media-next:hover {
+    color: #7afcff;
+}
+
+#custom-todo {
+    padding-left: 50px;
+    color: #ff7edb;
+}
+
+#custom-media-prev,
+#custom-media-next {
+    color: rgba(122, 252, 255, 0.6);
+}
+
+#custom-media.paused,
+#custom-lyrics.paused {
+    color: #5c6776;
 }
 
 /* Hover effect */
@@ -103,16 +126,17 @@ window#waybar.bottom {
 #pulseaudio:hover,
 #custom-powermenu:hover,
 #tray:hover {
-    background-color: rgba(255, 126, 219, 0.15);
+    background-color: rgba(255, 126, 219, 0.1);
     border-color: rgba(255, 126, 219, 0.5);
 }
 
 /* Tooltips */
 tooltip {
-    background-color: #0E0616;
-    border: 1px solid #ff7edb;
+    background-color: #3a3345;
+    border: 1px solid rgba(255, 126, 219, 0.6);
     border-radius: 6px;
-    box-shadow: 0 0 15px rgba(255, 126, 219, 0.3);
+    margin-top: 3px;
+    margin-bottom: 3px;
 }
 
 tooltip label {
@@ -121,8 +145,22 @@ tooltip label {
 
 /* Calendar: red accent when events today */
 #custom-ycal.has-events {
-    background-color: rgba(255, 51, 51, 0.12);
-    border-color: rgba(255, 51, 51, 0.55);
+    border-color: darkred;
+}
+
+/* Alert states */
+#temperature.warning,
+#custom-battery.warning:not(.charging),
+#custom-battery.low:not(.charging) {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
+}
+
+#temperature.critical,
+#custom-battery.critical:not(.charging) {
+    color: #ff3333;
+    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
+    animation: blink 1s steps(2) infinite;
 }
 
 /* Blink animation for .critical states */

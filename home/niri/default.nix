@@ -125,7 +125,9 @@ in
   '';
 
   # fcitx5 theme: cyberpunk color palette matching waybar/walker
-  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source = ./themes/fcitx5.conf;
+  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/themes/fcitx5.conf";
 
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False

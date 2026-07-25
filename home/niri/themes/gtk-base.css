@@ -57,6 +57,7 @@ dialog:backdrop label {
 window.csd image,
 dialog image,
 headerbar image {
+    background-color: transparent;
     color: #7afcff;
 }
 
