@@ -3,6 +3,24 @@
  * apps (including nm-applet's Wi-Fi password dialogs and connection
  * editor) pick up the palette.
  *
+ * ── PRECEDENCE RULE ─────────────────────────────────────────
+ * This file lands in ~/.config/gtk-{3,4}.0/gtk.css, which GTK loads at
+ * GTK_STYLE_PROVIDER_PRIORITY_USER (800) — ABOVE the APPLICATION (600)
+ * priority used by waybar's and walker's own stylesheets. GTK compares
+ * provider priority BEFORE specificity, so a bare `button:hover` here
+ * would beat `#cpu:hover` in waybar-cyberpunk.css.
+ *
+ * Therefore every rule that touches a node type also used by
+ * waybar-*.css / walker-cyberpunk.css (window, box, button, label,
+ * image, entry, list, row, popover, scrollbar, tooltip) MUST be scoped
+ * to an app-window root: `window.csd` (GTK4 toplevels + dialogs),
+ * `dialog` (GTK3 dialogs), or `window.popup` (GTK3 menus).
+ * waybar and walker use layer-shell surfaces, which carry neither
+ * `.csd` nor `.popup`, so scoped rules can never reach them.
+ *
+ * Do NOT add bare `window`, `.background`, `tooltip`, `button`,
+ * `image`, `label`, `popover`, or `scrollbar` selectors to this file.
+ *
  * Palette:
  * bg:      #0E0616
  * fg:      #ffffff
@@ -12,24 +30,38 @@
  * dim:     #5c6776
  */
 
+/* ── Titlebars ─────────────────────────────────────────── */
 headerbar,
 .titlebar {
     background-color: #0E0616;
     color: #ffffff;
-    border-bottom: 1px solid #ff7edb;
-    box-shadow:
-        0 2px 8px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(255, 126, 219, 0.3);
+    border-bottom: 1px #ff7edb;
+    box-shadow: none;
     padding: 6px 10px;
 }
 
+/* ── Backdrop (window not focused) ───────────────────
+ * Adwaita only dims the headerbar, which looks like a bug. Dim the
+ * whole toplevel instead and let the titlebar keep the same colour. */
+window.csd:backdrop,
+dialog:backdrop {
+    opacity: 0.5;
+}
 
-headerbar .title,
-headerbar .subtitle,
-.titlebar .title,
-.titlebar .subtitle {
+headerbar:backdrop,
+.titlebar:backdrop {
+    background-color: #0E0616;
+    background-image: none;
     color: #ffffff;
-    padding: 0 4px;
+    box-shadow: none;
+}
+
+window.csd:backdrop label,
+window.csd:backdrop image,
+headerbar:backdrop label,
+headerbar:backdrop image,
+dialog:backdrop label {
+    opacity: 1;
 }
 
 headerbar .subtitle,
@@ -39,92 +71,321 @@ headerbar .subtitle,
     opacity: 0.95;
 }
 
-/* ── Icons: cyan everywhere ────────────────────────────── */
-image,
-image:disabled,
-button image,
+/* ── Dialog / window bodies (kill the white background) ── */
+window.csd,
+dialog,
+dialog.csd,
+messagedialog,
+window.csd scrolledwindow,
+window.csd list,
+window.csd listview,
+window.csd box,
+dialog stack,
+dialog scrolledwindow,
+dialog list,
+filechooser,
+filechooser stack,
+filechooser paned,
+filechooser notebook,
+notebook,
+notebook > stack,
+notebook header,
+paned,
+actionbar,
+toolbar,
+placessidebar,
+placesview,
+.sidebar,
+.sidebar list,
+.view,
+view,
+textview,
+textview text,
+headerbar box,
+treeview.view,
+columnview {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+}
+
+/* Rows and their inner containers stay transparent so the
+ * :hover / :selected highlight below can show through. */
+window.csd list row,
+window.csd listview row,
+window.csd flowbox,
+window.csd flowboxchild,
+window.csd viewport,
+window.csd row box,
+window.csd row grid,
+window.csd row revealer,
+window.csd button box,
+dialog list row,
+dialog row box,
+columnview cell,
+treeview.view cell {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* Tree/column headers inside the file list (Name / Size / Modified) */
+window.csd columnview > header,
+dialog columnview > header,
+window.csd treeview.view header,
+dialog treeview.view header {
+    background-color: #0E0616;
+    background-image: none;
+}
+
+window.csd treeview.view header button,
+window.csd columnview header button,
+window.csd button.column-header,
+dialog treeview.view header button,
+dialog columnview header button,
+dialog button.column-header {
+    background-color: #0E0616;
+    background-image: none;
+    color: #7afcff;
+    /* GTK4 draws these with grey box-shadow "borders" — kill them and
+     * use a real pink 1px bottom/right border so the grid lines up. */
+    border-top: 1px #ff7edb;
+    border-bottom: 1px #ff7edb;
+    border-right: 1px solid rgba(255, 126, 219, 0.35);
+    border-radius: 0;
+}
+
+window.csd columnview header button:last-child,
+window.csd treeview.view header button:last-child,
+dialog columnview header button:last-child,
+dialog treeview.view header button:last-child {
+    border-right: none;
+}
+
+window.csd columnview header button:hover,
+window.csd treeview.view header button:hover,
+dialog columnview header button:hover,
+dialog treeview.view header button:hover {
+    background-color: rgba(255, 126, 219, 0.12);
+    color: #ff7edb;
+}
+
+/* ── Sidebar ↔ content divider ──────────────────────────
+ * GTK4 draws TWO lines here: the .sidebar's own border-right and the
+ * paned handle. That double line is the "misalignment". Drop the
+ * sidebar border and keep a single pink paned separator. */
+paned > separator,
+paned separator,
+paned.horizontal > separator,
+window.csd paned > separator,
+dialog paned > separator,
+filechooser paned > separator {
+    background-color: #ff7edb;
+    background-image: none;
+    background: #ff7edb;
+    border: none;
+    min-width: 1px;
+    min-height: 1px;
+}
+
+placessidebar,
+filechooser placessidebar,
+window.csd .sidebar,
+window.csd .sidebar-pane,
+window.csd .navigation-sidebar,
+dialog .sidebar {
+    border-left: none;
+    border-right: 1px #ff7edb;
+}
+
+placessidebar list,
+placessidebar scrolledwindow,
+placessidebar viewport,
+window.csd .sidebar list,
+window.csd .navigation-sidebar list {
+    border-right: none;
+}
+
+/* The headerbar separator sits above the paned handle; hide it so a
+ * 1px offset between the two can't show up as a broken line. */
+window.csd headerbar > separator,
+dialog headerbar > separator,
+.titlebar > separator {
+    background-color: transparent;
+}
+
+/* ── Icons: cyan (app windows only — waybar tray/walker keep theirs) */
+window.csd image,
+window.csd image:disabled,
+dialog image,
+window.popup image,
 headerbar image,
 .titlebar image {
     color: #7afcff;
-    -gtk-icon-palette: foreground #7afcff, success #7afcff, warning #7afcff, error #ff3333;
 }
 
-/* ── Buttons & generic borders: pink ───────────────────── */
-button:hover {
+/* ── Buttons ───────────────────────────────────────────── */
+window.csd button:hover,
+dialog button:hover,
+window.popup button:hover {
     background-color: rgba(255, 126, 219, 0.15);
-    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+    box-shadow: none;
 }
 
-button:hover > label {
+window.csd button:hover > label,
+dialog button:hover > label,
+window.popup button:hover > label {
     color: #ff7edb;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    text-shadow: none;
 }
 
 /* ── Views, lists, trees, sidebars ─────────────────────── */
 view:hover,
-list row:hover,
 treeview:hover,
+window.csd list row:hover,
+window.csd listview row:hover,
+window.csd columnview row:hover,
+window.csd gridview child:hover,
+dialog list row:hover,
 .sidebar row:hover,
 placessidebar row:hover {
-    background-color: rgba(255, 126, 219, 0.15);
-    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
-}
-
-view:hover label,
-list row:hover label,
-treeview:hover,
-.sidebar row:hover label,
-placessidebar row:hover label {
-    color: #7afcff;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+    background-color: rgba(122, 252, 255, 0.1);
+    background-image: none;
+    box-shadow: none;
 }
 
 view:selected,
 view:selected:focus,
-list row:selected,
 treeview:selected,
+window.csd list row:selected,
+window.csd listview row:selected,
+window.csd columnview row:selected,
+window.csd gridview child:selected,
+window.csd flowboxchild:selected,
+dialog list row:selected,
 .sidebar row:selected,
-placessidebar row:selected,
-flowboxchild:selected,
-iconview:selected {
+placessidebar row:selected {
     background-color: rgba(255, 126, 219, 0.15);
-    box-shadow:
-        inset 0 0 12px rgba(122, 252, 255, 0.2),
-        0 0 10px rgba(255, 126, 219, 0.2);
+    background-image: none;
+}
+
+/* Cells/labels inside a highlighted row must stay transparent, or the
+ * text sits on its own unlit background patch. */
+window.csd columnview row:hover cell,
+window.csd columnview row:selected cell,
+window.csd listview row:hover > *,
+window.csd listview row:selected > *,
+window.csd gridview child:hover > *,
+window.csd gridview child:selected > *,
+window.csd flowboxchild:selected > *,
+window.csd treeview.view:hover cell,
+window.csd treeview.view:selected cell,
+dialog treeview.view:selected cell {
+    background-color: transparent;
+    background-image: none;
 }
 
 view:selected label,
-list row:selected label,
 treeview:selected,
+window.csd listview row:selected label,
+window.csd flowboxchild:selected label,
+dialog list row:selected label,
 .sidebar row:selected label,
-placessidebar row:selected label,
-flowboxchild:selected label,
-iconview:selected label {
+placessidebar row:selected label {
     color: #ff7edb;
-    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+    font: bold;
 }
 
 /* ── Entries / text fields ─────────────────────────────── */
-entry,
-textview,
-textview text,
+window.csd entry,
+window.csd entry text,
+window.csd searchentry,
+window.csd searchentry text,
+window.csd searchbar,
+window.csd searchbar > revealer > box,
+window.csd editablelabel entry,
+dialog entry,
+dialog entry text,
+filechooser entry,
+filechooser searchentry,
+treeview.view entry,
 spinbutton {
-    background-color: rgba(255, 126, 219, 0.08);
-    caret-color: #7afcff;
+    background-color: #0E0616;
+    background-image: none;
     color: #ffffff;
+    border: 1px solid #ff7edb;
 }
 
-entry:focus,
+window.csd entry:focus,
+dialog entry:focus,
 textview:focus {
     border-color: #7afcff;
-    box-shadow: 0 0 8px rgba(122, 252, 255, 0.3);
+    box-shadow: none;
 }
 
-/* ── Popovers & menus (nm-applet dropdown, GTK3 & GTK4) ──*/
-popover,
-popover.background,
-popover > contents,
-popover.background > contents,
+/* ── Radio / check indicators inside menu & list rows ────
+ * These paint an opaque background that punches a hole in the row
+ * highlight; make the node transparent and keep only the pink ring. */
+window.csd modelbutton radio,
+window.csd modelbutton check,
+window.csd row radio,
+window.csd row check,
+window.csd popover radio,
+window.csd popover check,
+dialog radio,
+dialog check,
+menuitem radio,
+menuitem check,
+check,
+radio {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+window.csd modelbutton radio:checked,
+window.csd modelbutton check:checked,
+window.csd row radio:checked,
+window.csd row check:checked,
+dialog radio:checked,
+dialog check:checked,
+check:checked,
+radio:checked {
+    background-color: #ff7edb;
+    background-image: none;
+    border-color: #ff7edb;
+    color: #0E0616;
+}
+
+/* The button/row that wraps the indicator must not draw its own bg */
+window.csd modelbutton,
+window.csd modelbutton > box,
+dialog modelbutton {
+    background-color: transparent;
+    background-image: none;
+}
+
+window.csd modelbutton:hover,
+dialog modelbutton:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    box-shadow: none;
+}
+
+/* ── Popovers & menus (nm-applet dropdown, GTK3 & GTK4) ──
+ * Scoped so walker's own `popover` rule keeps winning. */
+window.csd popover,
+window.csd popover.background,
+dialog popover {
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+}
+
+window.csd popover > contents,
+window.csd popover.background > contents,
+dialog popover > contents,
 menu.menu,
 window.popup,
 window.popup menu {
@@ -136,35 +397,36 @@ window.popup menu {
     padding-bottom: 5px;
 }
 
+window.csd popover > arrow,
+dialog popover > arrow {
+    background-color: transparent;
+    border: 1px solid #ff7edb;
+}
+
 menuitem {
     color: #ffffff;
     padding: 8px 14px;
 }
 
-popover list row:hover,
+window.csd popover list row:hover,
 menuitem:hover {
     background-color: rgba(255, 126, 219, 0.15);
     background-image: none;
-    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+    box-shadow: none;
 }
 
-popover list row:hover > label,
-menuitem:hover > label {
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-}
-
-popover list row:selected,
+window.csd popover list row:selected,
 menuitem:selected {
     background-color: rgba(255, 126, 219, 0.15);
     background-image: none;
     font: bold;
-    box-shadow: inset 0 0 12px rgba(122, 252, 255, 0.2);
+    box-shadow: none;
 }
 
-popover list row:selected > label,
+window.csd popover list row:selected > label,
 menuitem:selected > label {
     color: #ff7edb;
-    text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+    text-shadow: none;
 }
 
 menuitem:disabled > label {
@@ -172,25 +434,33 @@ menuitem:disabled > label {
     opacity: 0.75;
 }
 
-/* ── Scrollbars & misc pink accents ────────────────────── */
-scrollbar slider {
+/* ── Scrollbars & misc pink accents ─────────────────────
+ * scrollbar is styled by walker-cyberpunk.css too, so scope it. */
+window.csd scrollbar slider,
+dialog scrollbar slider {
     background-color: rgba(255, 126, 219, 0.5);
 }
 
-scrollbar slider:hover {
+window.csd scrollbar slider:hover,
+dialog scrollbar slider:hover {
     background-color: #ff7edb;
 }
 
-separator {
+window.csd separator,
+dialog separator,
+window.popup separator,
+headerbar separator {
     background-color: rgba(255, 126, 219, 0.5);
 }
 
-switch:checked {
+window.csd switch:checked,
+dialog switch:checked {
     background-color: #ff7edb;
 }
 
-progressbar progress,
-levelbar block.filled {
+window.csd progressbar progress,
+window.csd levelbar block.filled,
+dialog progressbar progress,
+dialog levelbar block.filled {
     background-color: #7afcff;
 }
-

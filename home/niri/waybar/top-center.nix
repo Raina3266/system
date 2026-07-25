@@ -48,7 +48,7 @@ let
       }
       key = pinned "" urgent "" sprintf("%010d", ts)
       if (!found || key < best) { found=1; best=key; text=$2; st=$3 }
-    } END{print (st=="active" ? "  " : "") text}' "${todoFile}")
+    } END{print (st=="active" ? "" : "") text}' "${todoFile}")
 
     # Truncate to 40 chars
     current_short=$(printf '%s' "$current" | cut -c1-30)
@@ -66,8 +66,8 @@ let
 
     # Tooltip: pending task list, pinned first
     list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
-      if ($3=="active") print "0\t  " $2
-      else print "1\t⬜  " $2
+      if ($3=="active") print "0\t  " $2
+      else print "1\t  " $2
     }' "${todoFile}" | sort -k1,1 | cut -f2- | head -10)
 
     tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"

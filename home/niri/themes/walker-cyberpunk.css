@@ -113,8 +113,7 @@ scrollbar slider {
 /* ── List items ─────────────────────────────────────────── */
 .item-box {
   border-radius: 6px;
-  padding: 6px 10px;
-  border: 1px solid transparent;
+  padding: 5px;
   color: #cbe3e7;
 }
 
@@ -174,8 +173,8 @@ row:selected .item-subtext {
 
 .preview image,
 .preview picture {
-    min-width: 200px;
-    min-height: 200px;
+    min-width: 300px;
+    min-height: 300px;
 }
 
 .preview {
