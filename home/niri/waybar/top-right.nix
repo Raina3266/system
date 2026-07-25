@@ -1,11 +1,10 @@
-# Top-right waybar modules: clipboard, timer, bluetooth, audio sink,
-# tray, power menu.
+# Top-right modules: clipboard, timer, bluetooth, audio, tray, power
 { pkgs }:
 let
   walker = "${pkgs.walker}/bin/walker";
   btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
 
-  # Static launcher icons
+  # Static launcher icons with walker integration
   staticLauncher =
     name: icon: tooltip: walkerArgs:
     {
@@ -21,9 +20,7 @@ let
     };
 in
 {
-  # Audio output launcher — icon + click opens the walker sink picker.
-  # (Live sink name is shown in the walker's menu itself; volume lives
-  # in the pulseaudio module in the system drawer.)
+  # Audio: opens walker device picker (volume in pulseaudio module)
   "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-m menus:audio";
 
   "tray" = {
@@ -52,10 +49,8 @@ in
       fi
     '';
     interval = 5;
-    # Left-click: open the D-Bus bluetooth menu (walker menus:bluetooth).
-    # Right-click: toggle power via D-Bus. Both go through btctl (see
-    # walker/bluetooth.nix) — not bluetoothctl, whose one-shot agent
-    # registration races the persistent bt-agent and breaks pairing.
+    # Left: open walker bluetooth menu | Right: toggle power
+    # Uses btctl (D-Bus) to avoid bluetoothctl agent conflicts
     on-click = pkgs.writeShellScript "waybar-bt" ''
       ${walker} -m menus:bluetooth
     '';

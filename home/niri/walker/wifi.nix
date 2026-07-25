@@ -1,11 +1,5 @@
-# Wi-Fi menu — dynamic Lua menu that scans available networks
-# via nmcli and connects on selection. Invoked via
-# `walker -m menus:wifi`.
-#
-# Per-entry actions:
-#   - disconnect (ctrl d): only on the currently-connected network
-#   - forget     (ctrl f): on any saved network (connected or not)
-# The default action (Return) connects to the network.
+# Wi-Fi menu: scan and connect to networks via nmcli.
+# Actions: Return=connect | Ctrl+D=disconnect (current only) | Ctrl+F=forget (saved networks)
 { pkgs }:
 ''
   Name = "wifi"
@@ -19,7 +13,7 @@
   function GetEntries()
     local entries = {}
 
-    -- Rescan and get current connection
+    -- Rescan networks and get current connection
     os.execute("nmcli device wifi rescan 2>/dev/null")
     local current = ""
     local h = io.popen("nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2")
@@ -28,7 +22,7 @@
       h:close()
     end
 
-    -- Detect the wifi device name (e.g. wlan0) for disconnect.
+    -- Detect Wi-Fi device name (default: wlan0)
     local device = "wlan0"
     local h = io.popen("nmcli -t -f DEVICE,TYPE dev 2>/dev/null | grep ':wifi$' | cut -d: -f1 | head -1")
     if h then
@@ -37,9 +31,7 @@
       h:close()
     end
 
-    -- Build a set of saved SSIDs (connections known to NetworkManager).
-    -- nmcli connection show lists saved profiles; the SSID field may
-    -- be blank for non-wifi connections, so filter by TYPE=wifi.
+    -- Build set of saved SSIDs (filter by TYPE=wifi)
     local saved = {}
     local h = io.popen("nmcli -t -f NAME,TYPE connection show 2>/dev/null | grep ':wifi$' | cut -d: -f1")
     if h then
@@ -49,7 +41,7 @@
       h:close()
     end
 
-    -- List available networks (sorted by signal, deduplicated)
+    -- List networks: sorted by signal, deduplicated, top 20
     local h = io.popen("nmcli -t -f ssid,signal,security dev wifi 2>/dev/null | sort -t: -k2 -nr | awk -F: '!seen[$1]++' | head -20")
     if h then
       for line in h:lines() do
@@ -72,23 +64,17 @@
           if saved[ssid] then
             value = "nmcli connection up \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
           else
-            -- No --ask here: nmcli would try to prompt on its own (nonexistent)
-            -- stdin/tty and hang/fail silently since this runs headless under
-            -- elephant. Omitting --ask makes NetworkManager instead ask any
-            -- registered secret agent for the password -- nm-applet (running
-            -- as a user service, see ../default.nix) is one, and pops up its
-            -- native GTK password dialog.
+            -- No --ask: runs headless, so nmcli delegates to nm-applet secret agent
+            -- for password prompts (see ../default.nix)
             value = "nmcli device wifi connect \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Connected to " .. ssid .. "' || notify-send 'Wi-Fi' 'Failed to connect to " .. ssid .. "'"
           end
 
           local actions = {}
-          -- forget: available on any saved network (connected or not).
-          -- Uses the connection profile name, which for wifi is usually
-          -- the SSID but may differ; look it up to be safe.
+          -- forget: available on saved networks (uses connection profile name)
           if saved[ssid] then
             actions.forget = "nmcli connection delete \"" .. ssid .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Forgot \"" .. ssid .. "\"'"
           end
-          -- disconnect: only on the currently-connected network.
+          -- disconnect: only on current network
           if is_current then
             actions.disconnect = "nmcli device disconnect \"" .. device .. "\" 2>/dev/null && notify-send 'Wi-Fi' 'Disconnected from " .. ssid .. "'"
           end

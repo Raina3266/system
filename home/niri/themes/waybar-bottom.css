@@ -1,4 +1,4 @@
-/* ── Bottom bar: niri workspaces + taskbar ────────────────── */
+/* Bottom bar: niri workspaces + taskbar */
 
 #workspaces {
     border: none;
@@ -23,7 +23,7 @@
     border-color: rgba(255, 126, 219, 0.5);
 }
 
-/* ── Starred apps ───────────────────────────────────────── */
+/* Starred apps */
 #custom-obsidian,
 #custom-yazi,
 #custom-tauon,
@@ -48,13 +48,8 @@
     border-color: rgba(255, 126, 219, 0.5);
 }
 
-/* ── Taskbar buttons (niri_window_buttons) ─────────────────
- * The module's root container carries class .niri-window-buttons
- * (hyphenated, set via style_context().add_class() in widget.rs/lib.rs) —
- * Waybar's CFFI wrapper does NOT set a #cffi.<name> / #cffi-<name> widget
- * id, so ID selectors here never matched anything. Target the class
- * instead. Scroll arrows are siblings of .niri-window-buttons, not
- * descendants, so they're styled with their own top-level selectors. */
+/* Taskbar (niri_window_buttons): class selector (no #cffi id)
+ * Scroll arrows: siblings (not descendants), styled separately */
 .niri-window-buttons {
     padding: 0 10px;
     background-color: transparent;

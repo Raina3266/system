@@ -1,28 +1,7 @@
-/* ═══════════════════════════════════════════════════════════
- * WALKER BASE — the whole Walker theme
- * ═══════════════════════════════════════════════════════════
- * Walker is GTK4 but renders on a layer-shell surface, so it carries no
- * `.csd` class and gtk4.css can never reach it. Everything Walker looks
- * like is in this one file; layout/geometry is in the two
- * walker-*.xml files (GTK4 alignment properties beat CSS).
- *
- * WHERE TO FIND THINGS
- *   outer popup box, border, radius  → .box-wrapper
- *   search field                     → .input
- *   result rows                      → .item-box
- *   hover / selected row             → child:hover / child:selected
- *   right-hand preview pane          → .preview*
- *   bottom keybind hints             → .keybind*
- *
- * Palette:
- * bg:      #0a0a14f2  (rgba 10,10,20,0.95)
- * bg-mod:  #141428b3  (rgba 20,20,40,0.7)
- * fg:      #cbe3e7
- * pink:    #ff7edb
- * cyan:    #7afcff
- * amber:   #f29e74
- * red:     #ff3333
- * dim:     #5c6776
+/* WALKER: GTK4 layer-shell (no .csd class, gtk4.css can't reach)
+ * All styling here, layout in walker-*.xml (GTK4 alignment > CSS)
+ * Classes: .box-wrapper=outer | .input=search | .item-box=rows | .preview*=preview
+ * Palette: bg=#0a0a14f2 bg-mod=#141428b3 fg=#cbe3e7 pink=#ff7edb cyan=#7afcff amber=#f29e74 red=#ff3333 dim=#5c6776
  */
 
 @define-color window_bg_color #0a0a14f2;
@@ -66,16 +45,9 @@ scrollbar slider {
   box-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
-/* ── Main window box ──────────────────────────────────────
- * Positioning (valign/halign) is controlled by the layout XML, not CSS —
- * GTK4 alignment properties in XML override any CSS margins. The
- * layout XML sets the box-wrapper alignment:
- *   cyberpunk → valign=start, halign=end   (top-right)
- *
- * Sizing is also content-driven via the layout XML: BoxWrapper has no
- * fixed width/height-request, and Scroll caps growth with max-content-*
- * only, so the popup shrinks to fit small menus and grows up to the cap.
- */
+/* Main window box: positioning/sizing by layout XML (GTK4 alignment > CSS)
+ * cyberpunk theme: valign=start halign=end (top-right)
+ * BoxWrapper: no fixed size, Scroll caps with max-content-* */
 .box-wrapper {
   background: #0E0616;
   padding: 12px;
@@ -93,7 +65,7 @@ scrollbar slider {
   padding-bottom: 5px;
 }
 
-/* ── Search input ───────────────────────────────────────── */
+/* Search input */
 .input placeholder {
   opacity: 0.5;
   color: #5c6776;
@@ -125,7 +97,7 @@ scrollbar slider {
   color: #cbe3e7;
 }
 
-/* ── List items ─────────────────────────────────────────── */
+/* List items */
 .item-box {
   border-radius: 6px;
   padding: 8px;
@@ -198,8 +170,7 @@ row:selected .item-subtext {
   color: #cbe3e7;
 }
 
-/* Scrolled window wrapping the preview. Caps the preview area so large
-   PDF/image previews can't expand the whole popup. */
+/* Preview scroll: caps size for large PDF/image previews */
 .preview-scroll {
   border-radius: 10px;
 }
@@ -228,7 +199,7 @@ row:selected .item-subtext {
   -gtk-icon-size: 64px;
 }
 
-/* ── Keybinds / action hints ────────────────────────────── */
+/* Keybinds / action hints */
 .keybinds {
   padding-top: 10px;
   border-top: 1px solid rgba(255, 126, 219, 0.2);
@@ -246,9 +217,7 @@ row:selected .item-subtext {
 }
 
 .keybind-bind {
-  /* Hide the "ctrl+f" part: three buttons (scan/power/forget) with
-     bind text overflow narrow popups and push earlier buttons off the
-     left edge (the box is right-aligned). Labels alone stay visible. */
+  /* Hide bind text (e.g., ctrl+f) to avoid overflow on narrow popups */
   opacity: 0;
   font-size: 0;
   margin: 0;

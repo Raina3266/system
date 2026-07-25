@@ -1,39 +1,27 @@
-# Walker launcher with cyberpunk theme.
+# Walker: GTK4 Wayland launcher with cyberpunk theme.
+# Replaces rofi, supports click-outside-to-close and elephant providers
+# (clipboard/todo/files).
 #
-# Replaces rofi — Walker is a GTK4 Wayland launcher that supports
-# click-outside-to-close (unlike rofi on Wayland). Uses elephant's
-# built-in clipboard/todo/files providers instead of custom
-# shell scripts.
-#
-# Configured through home-manager's upstream `services.walker` /
-# `services.elephant` modules and nixpkgs' walker/elephant packages,
-# so no flake inputs are needed for either project. Two things the
-# upstream modules don't cover are re-implemented below:
-#
-#   1. elephant's per-provider config fan-out — see ./elephant.nix.
-#   2. `services.walker.theme` holds a single theme, so the two alternate
-#      layouts are written out directly.
-#   3. walker's own `providers` option (default/empty/prefixes/actions)
-#      — see ./providers.nix, kept separate for readability.
+# Extensions beyond upstream home-manager modules:
+#   1. elephant per-provider config (see ./elephant.nix)
+#   2. alternate theme layouts written directly (services.walker.theme
+#      only supports one theme)
+#   3. providers config (default/empty/prefixes/actions in ./providers.nix)
 {
   pkgs,
   lib,
   ...
 }:
 let
-  # ── walker ────────────────────────────────────────────────
-  # `theme` below sets settings.theme to the theme name, so it is
-  # deliberately not repeated here.
+  # Walker settings (theme name set via `theme` attribute below)
   walkerSettings = {
     click_to_close = true;
     close_when_open = true;
     single_click_activation = true;
-    # Hide the F1–F4 quick-activation buttons in the popup.
+    # Hide F1-F4 quick-activation buttons
     hide_quick_activation = true;
-    # Layer-shell anchoring: keep the default fullscreen overlay (all
-    # four anchors) so click-to-close works — clicks on the empty area
-    # around the box-wrapper dismiss walker. The box-wrapper itself is
-    # nudged to the top-right corner via CSS margins in the theme.
+    # Layer-shell: fullscreen overlay (all anchors) for click-to-close.
+    # Box-wrapper positioned via CSS margins in theme.
     shell = {
       exclusive_zone = -1;
       layer = "overlay";
@@ -66,10 +54,9 @@ let
       nirisessions.input = "Search sessions…";
       nirisessions.list = "No sessions defined";
     };
-    # See ./providers.nix: which providers are queried by default/on
-    # empty query, prefix-triggered providers, and per-provider actions.
+    # Provider config in ./providers.nix
     providers = import ./providers.nix;
-    # Global keybinds — also lost when `settings` replaces the default.
+    # Global keybinds
     keybinds = {
       close = [ "Escape" ];
       next = [ "Down" ];
@@ -86,13 +73,12 @@ let
     };
   };
 
-  # ── themes ────────────────────────────────────────────────
+  # Theme files
   base = builtins.readFile ../themes/walker.css;
   layoutTopRight = builtins.readFile ../themes/walker-top-right.xml;
   layoutTopCenter = builtins.readFile ../themes/walker-top-center.xml;
 
-  # `services.walker.theme` only models one theme, so the alternate is
-  # written out with the same file layout the module would produce.
+  # services.walker.theme supports one theme; alternate written manually
   mkTheme =
     name:
     { style, layouts }:
@@ -103,7 +89,7 @@ let
       layoutName: content: lib.nameValuePair "walker/themes/${name}/${layoutName}.xml" { text = content; }
     ) layouts;
 
-  # Used by the waybar todo button (`walker -t cyberpunk-center -m todo`).
+  # Alternate theme for waybar todo button (center-positioned)
   extraThemes = mkTheme "cyberpunk-center" {
     style = base;
     layouts = {
@@ -112,7 +98,7 @@ let
     };
   };
 
-  # Restart walker when its config changes — it only re-reads on start.
+  # Restart walker on config changes (only reads config at startup)
   restartTrigger = value: [ (builtins.hashString "sha256" (builtins.toJSON value)) ];
 in
 {
@@ -124,10 +110,8 @@ in
     systemd.enable = true;
     enableElephantIntegration = true;
     settings = walkerSettings;
-    # Default theme: top-right dropdown, sitting just under the top waybar.
-    # The layout XML sets valign=start halign=end on the box-wrapper so it
-    # actually anchors to the top-right (CSS margins alone can't override
-    # GTK4 alignment properties set in the default layout).
+    # Default theme: top-right dropdown below waybar.
+    # Layout XML sets valign=start halign=end on box-wrapper for positioning.
     theme = {
       name = "cyberpunk";
       style = base;
@@ -137,8 +121,7 @@ in
 
   xdg.configFile = extraThemes;
 
-  # Details the upstream home-manager modules leave out but the
-  # previous setup relied on.
+  # Additional systemd service config not in upstream modules
   systemd.user.services.walker.Unit = {
     ConditionEnvironment = "WAYLAND_DISPLAY";
     PartOf = [ "graphical-session.target" ];
@@ -146,6 +129,6 @@ in
   };
 
   home.packages = with pkgs; [
-    wtype # Wayland typing
+    wtype # Wayland text input simulation
   ];
 }

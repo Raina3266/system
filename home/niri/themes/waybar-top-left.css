@@ -1,6 +1,5 @@
-/* ── Top-left: clock, system group, hardware group ─────────
- * Boxes/margins come from waybar.css; this file only sets
- * colour, glow and the 2px border on the outer containers. */
+/* Top-left: clock, system/hardware groups
+ * Boxes/margins: waybar.css | Colors/glow/borders: here */
 
 #group-hardware,
 #group-system {
@@ -10,7 +9,7 @@
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
-/* ── Hardware + system modules ──────────────────────────── */
+/* Hardware + system modules */
 #cpu,
 #memory,
 #disk,
@@ -34,7 +33,7 @@
     text-shadow: 0 0 8px rgba(122, 252, 255, 0.8);
 }
 
-/* ── Alert states ───────────────────────────────────────── */
+/* Alert states */
 #temperature.warning,
 #custom-battery.warning:not(.charging),
 #custom-battery.low:not(.charging) {
@@ -59,7 +58,7 @@
     text-shadow: none;
 }
 
-/* ── Clock + calendar (ycal) ────────────────────────────── */
+/* Clock + calendar */
 #clock,
 #custom-ycal {
     color: #7afcff;

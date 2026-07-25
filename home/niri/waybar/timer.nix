@@ -1,11 +1,7 @@
-# Timer module for waybar, with wob overlay visualization.
-#
-# State file: "$XDG_RUNTIME_DIR/waybar-timer.state" containing
-#   "<end_epoch> <total_seconds> <label> <paused>"
-# When paused, the end_epoch field stores the remaining seconds instead.
-#
-# Click: set duration (walker dmenu)  |  Middle-click: cancel
-# Right-click: pause/resume           |  Scroll: +/- 1 minute
+# Waybar timer module with wob progress overlay.
+# State: $XDG_RUNTIME_DIR/waybar-timer.state (end_epoch total_seconds label paused)
+# When paused, end_epoch stores remaining seconds instead of end time.
+# Controls: Click=set duration | Middle=cancel | Right=pause/resume | Scroll=±1min
 { pkgs }:
 let
   walker = "${pkgs.walker}/bin/walker";
@@ -13,10 +9,10 @@ let
 
   timerState = "\${XDG_RUNTIME_DIR:-/tmp}/waybar-timer.state";
 
-  # wob progress bar FIFO
+  # wob FIFO for progress bar updates
   wobFifo = "\${XDG_RUNTIME_DIR:-/tmp}/wob.sock";
 
-  # Update wob progress bar (expects $remaining and $total vars)
+  # Update wob progress (requires $remaining and $total variables)
   wobTick = ''
     if [ -p "${wobFifo}" ] && [ "$total" -gt 0 ] 2>/dev/null; then
       pct=$(( ("$remaining" * 100) / "$total" ))
@@ -46,7 +42,7 @@ let
     if [ "$remaining" -le 0 ]; then
       rm -f "$state"
       ${notify} -u critical "Timer" "⏰ ${label:-Done}"
-      # Play completion beep
+      # Beep on completion
       (
         ${pkgs.ffmpeg}/bin/ffplay -nodisp -autoexit -f lavfi -i "sine=frequency=880:duration=1" >/dev/null 2>&1
       ) &
@@ -77,7 +73,7 @@ let
       *Custom*)
         input=$(${walker} -d -p "Minutes (or e.g. 90s, 2h)" 2>/dev/null)
         [ -z "$input" ] && exit 0
-        # Bare number = minutes
+        # Default unit: minutes
         if printf '%s' "$input" | grep -qE '^[0-9]+$'; then
           input="''${input}m"
         fi
@@ -87,7 +83,7 @@ let
       *) exit 0 ;;
     esac
 
-    # Parse duration (90s, 10m, 2h, 1h30m)
+    # Parse duration: supports s/m/h (e.g., 90s, 10m, 2h, 1h30m)
     total=0
     rest="$input"
     while [ -n "$rest" ]; do
@@ -117,7 +113,7 @@ let
     state="${timerState}"
     if [ -f "$state" ]; then
       rm -f "$state"
-      # Clear wob
+      # Clear wob bar
       [ -p "${wobFifo}" ] && printf '0\n' > "${wobFifo}" 2>/dev/null &
       ${notify} "Timer" "Cancelled"
     fi
@@ -128,13 +124,13 @@ let
     if [ ! -f "$state" ]; then exit 0; fi
     read -r end total label paused < "$state"
     if [ "$paused" = "1" ]; then
-      # Resume: convert remaining to new epoch
+      # Resume: calculate new end epoch
       now=$(date +%s)
       newend=$((now + end))
       printf '%s %s %s 0\n' "$newend" "$total" "$label" > "$state"
       ${notify} "Timer" "Resumed"
     else
-      # Pause: store remaining in end field
+      # Pause: save remaining time
       now=$(date +%s)
       remaining=$((end - now))
       if [ "$remaining" -le 0 ]; then
@@ -154,7 +150,7 @@ let
       printf '%s %s %s %s\n' "$end" "$total" "$label" "$paused" > "$state"
       ${wobTick}
     else
-      # No timer - start 1m
+      # Start 1min timer if none active
       end=$(( $(date +%s) + 60 ))
       printf '%s 60 1m 0\n' "$end" > "$state"
       ${notify} "Timer" "Started: 1m"

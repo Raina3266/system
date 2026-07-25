@@ -1,22 +1,11 @@
-/* ═══════════════════════════════════════════════════════════
- * GTK3 — lands in ~/.config/gtk-3.0/gtk.css
- * ═══════════════════════════════════════════════════════════
- * Apps: nemo, pavucontrol, nm-applet / nm-connection-editor,
- *       meld, gimp, inkscape, czkawka, kid3, thunderbird dialogs
- *
- * GTK3-only node names live here: `menu` / `menuitem` (GTK4 uses
- * popover + modelbutton), `treeview.view`, `.view`, `iconview`,
- * `window.popup`, `placessidebar`.
- *
- * WHERE TO FIND THINGS
- *   colours, buttons, entries, scrollbars → gtk-base.css
- *   file list / sidebar / menus           → below
- *   nemo-specific                         → §5
+/* GTK3: nemo, pavucontrol, nm-applet, meld, gimp, thunderbird
+ * GTK3-only nodes: menu/menuitem, treeview.view, iconview, window.popup, placessidebar
+ * Colors/buttons/entries: see gtk-base.css
  */
 
 @import url("gtk-base.css");
 
-/* ── 1. Views (file lists, trees, text areas) ──────────── */
+/* 1. Views (file lists, trees, text areas) */
 window.csd .view,
 window.csd treeview.view,
 window.csd iconview,
@@ -36,7 +25,7 @@ dialog treeview.view cell {
     background-image: none;
 }
 
-/* ── 2. Rows: hover & selected ─────────────────────────── */
+/* 2. Rows: hover & selected */
 window.csd treeview.view:hover,
 window.csd iconview:hover,
 window.csd list row:hover,
@@ -61,8 +50,7 @@ window.csd placessidebar row:selected {
     box-shadow: none;
 }
 
-/* Cells inside a highlighted row must not paint their own background,
- * or the text sits on an unlit patch inside the highlight. */
+/* Cells in highlighted rows: transparent to show row highlight */
 window.csd treeview.view:hover cell,
 window.csd treeview.view:selected cell,
 window.csd iconview:selected *,
@@ -80,13 +68,13 @@ window.csd placessidebar row:selected label {
     color: #ff7edb;
 }
 
-/* ── 3. Column headers (nemo list view) ────────────────── */
+/* 3. Column headers (nemo list view) */
 window.csd treeview.view header button,
 dialog treeview.view header button {
     background-color: #0E0616;
     background-image: none;
     color: #7afcff;
-    /* Adwaita fakes these borders with grey box-shadow; use a real one. */
+    /* Real borders (Adwaita uses grey box-shadow) */
     box-shadow: none;
     border: none;
     border-right: 1px solid rgba(255, 126, 219, 0.35);
@@ -105,8 +93,7 @@ dialog treeview.view header button:hover {
     color: #ff7edb;
 }
 
-/* ── 4. Menus (right-click, menubar dropdowns) ─────────────
- * GTK3 menus are their own toplevel: window.popup > menu. */
+/* 4. Menus (right-click, menubar dropdowns; GTK3: window.popup > menu) */
 window.popup,
 window.popup menu,
 menu.menu {
@@ -155,7 +142,7 @@ menuitem radio {
     border: 1px solid rgba(255, 126, 219, 0.6);
 }
 
-/* Nemo's menubar sits in the window, not a popup. */
+/* Nemo menubar: inside window (not popup) */
 window.csd menubar,
 window.csd menubar > menuitem {
     background-color: #0E0616;
@@ -164,10 +151,7 @@ window.csd menubar > menuitem {
     box-shadow: none;
 }
 
-/* ── 5. Nemo ───────────────────────────────────────────────
- * Nemo's sidebar IS inside a GtkPaned, so the paned separator from
- * gtk-base.css already draws the divider — the sidebar must NOT add
- * its own border or you get a 2px double line. */
+/* 5. Nemo: sidebar in GtkPaned, no extra border (gtk-base.css draws divider) */
 .nemo-window .sidebar,
 .nemo-window .nemo-places-sidebar,
 .nemo-window placessidebar {
@@ -184,7 +168,7 @@ window.csd menubar > menuitem {
     color: #ffffff;
 }
 
-/* Current segment of the breadcrumb path bar */
+/* Current breadcrumb path segment */
 .nemo-window .path-bar button:checked,
 .nemo-window .nemo-pathbar-button:checked {
     background-color: rgba(255, 126, 219, 0.15);
@@ -193,7 +177,7 @@ window.csd menubar > menuitem {
     box-shadow: none;
 }
 
-/* Overlay strip showing "n items" / drag hints */
+/* Overlay strip ("n items" / drag hints) */
 .nemo-window .floating-bar {
     background-color: #0E0616;
     color: #7afcff;
@@ -205,7 +189,7 @@ window.csd menubar > menuitem {
     color: #7afcff;
 }
 
-/* ── 6. Notebook tabs (nemo tabs, meld panes) ──────────── */
+/* 6. Notebook tabs (nemo, meld) */
 window.csd notebook > header {
     background-color: #0E0616;
     border-color: rgba(255, 126, 219, 0.35);

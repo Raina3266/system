@@ -1,7 +1,4 @@
-/* ── Top-right: tray, utilities ──────────────────────────── */
-
-/* All top-right modules share a 2px pink border (overrides the 1px
-   base border from waybar.css). */
+/* Top-right: tray, utilities (2px pink border overrides waybar.css 1px) */
 #custom-audio,
 #tray,
 #custom-bt,
@@ -14,7 +11,7 @@
     border: 2px solid rgba(255, 126, 219, 0.2);
 }
 
-/* Cyan text + cyan glow */
+/* Cyan text/glow */
 #custom-audio,
 #custom-bt,
 #custom-cliphist,

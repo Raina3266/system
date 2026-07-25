@@ -6,7 +6,7 @@ let
 
   todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
 
-  # Todo module: shows current task + count, tooltip lists pending tasks
+  # Todo: shows current task + count, tooltip lists pending
   todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
     icon="<span size='x-large'>󰄲 </span>"
     if [ ! -f "${todoFile}" ]; then
@@ -14,9 +14,7 @@ let
       exit 0
     fi
 
-    # "active" is used as a pin: elephant's todo provider has no pin
-    # action, but `active` is a Return-toggled state that it already
-    # sorts to the top of the list, so it serves the same purpose.
+    # Use "active" as pin: sorts to top and shows first (no native pin action)
     pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {c++} END{print c+0}' "${todoFile}")
     total=$(awk -F';' 'NR>1 {c++} END{print c+0}' "${todoFile}")
 
@@ -35,8 +33,7 @@ let
       if (ts!="" && ts+0 <= eod+0) c++
     } END{print c+0}' "${todoFile}")
 
-    # Get the task to display: pinned (active) first, then urgent, then
-    # by deadline ($6 = scheduled), then file order.
+    # Display priority: pinned > urgent > deadline > file order
     current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
       pinned = ($3=="active") ? 0 : 1
       urgent = ($3=="urgent") ? 0 : 1
@@ -50,7 +47,7 @@ let
       if (!found || key < best) { found=1; best=key; text=$2; st=$3 }
     } END{print (st=="active" ? "" : "") text}' "${todoFile}")
 
-    # Truncate to 40 chars
+    # Truncate to 40 characters
     current_short=$(printf '%s' "$current" | cut -c1-30)
     if [ "''${#current}" -gt 40 ]; then
       current_short="$current_short…"
@@ -64,7 +61,7 @@ let
 
     text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>"
 
-    # Tooltip: pending task list, pinned first
+    # Tooltip: pending tasks with pinned first
     list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
       if ($3=="active") print "0\t  " $2
       else print "1\t  " $2
@@ -76,7 +73,7 @@ let
       '{text:$text, tooltip:$tooltip, class:$class}'
   '';
 
-  # Media control buttons
+  # Media control buttons (prev/play/next)
   mediaButton = glyph: cmd: {
     format = "<span size='x-large'>${glyph}</span>";
     return-type = "json";
@@ -104,7 +101,7 @@ in
           printf '{"text":"","class":"stopped"}'
           exit 0
       fi
-      # Pick the first active player that isn't tauon or kid3
+      # First active player (exclude tauon/kid3)
       player_name=$(echo "$all_players" | grep -ivE 'tauon|kid3' | head -1)
       if [ -z "$player_name" ]; then
           printf '{"text":"","class":"stopped"}'
@@ -115,7 +112,7 @@ in
       artist=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{artist}}' 2>/dev/null)
       title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{title}}' 2>/dev/null)
       player=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{playerName}}' 2>/dev/null)
-      # Some players (e.g. VLC) leave title empty for video files — fall back to filename
+      # Extract filename if title empty (e.g., VLC video files)
       [ -z "$title" ] && title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata xesam:url 2>/dev/null)
       case "$title" in
         file://*|/*)
@@ -165,7 +162,7 @@ in
     return-type = "json";
     interval = 2;
     exec = todoPoll;
-    # left=search, right=create
+    # Left-click: search | Right-click: create
     on-click = pkgs.writeShellScript "waybar-todo-search" ''
       ${elephant} activate "todo;;search;;" || true
       exec ${walker} -t cyberpunk-center -m todo

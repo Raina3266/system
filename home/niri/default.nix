@@ -4,11 +4,8 @@
   ...
 }:
 let
-  # Wrapper around playerctl that targets the right player when multiple
-  # MPRIS players are running (e.g. VLC + Chromium). Prefers a player
-  # that is currently Playing; falls back to the most recently active
-  # player. Usage: mediactl <play-pause|next|previous|stop>
-  # Invoked by niri media-key binds in config.kdl.
+  # Smart playerctl wrapper: targets the currently playing MPRIS player,
+  # or falls back to the most recently active. Used by media key binds.
   mediactl = pkgs.writeShellScriptBin "mediactl" ''
     cmd="$1"
     players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
@@ -21,8 +18,7 @@ let
         break
       fi
     done
-    # Fall back to the first listed player (playerctl -l orders by
-    # most recent activity).
+    # Fall back to first listed player (most recently active)
     [ -z "$target" ] && target=$(echo "$players" | head -n1)
     exec ${pkgs.playerctl}/bin/playerctl -p "$target" "$cmd"
   '';
@@ -37,26 +33,21 @@ in
 
   programs'.waybar.enable = true;
 
-  # Tools invoked by niri binds in config.kdl.
-  # Includes mediactl (defined above) and xwayland-satellite (spawned at
-  # startup by config.kdl) for rootless XWayland so legacy X11 apps work
-  # under niri.
+  # Tools for niri binds and X11 app support
   home.packages = with pkgs; [
     swaybg
     bluez-tools
-    brightnessctl # F5/F6 brightness keys
-    wob # Wayland overlay progress bar — used by the timer
-    xwayland-satellite # rootless XWayland for X11 apps
-    xrandr # for X11 apps that query display layout
-    snixembed # SNI→XEmbed bridge so Qt5-xcb apps (birdtray) see a tray
-    networkmanagerapplet # graphical NetworkManager secret agent / Wi-Fi password dialogs
+    brightnessctl # Screen brightness control
+    wob # Wayland overlay progress bar for timer
+    xwayland-satellite # Rootless XWayland for X11 apps
+    xrandr # Display layout info for X11 apps
+    snixembed # System tray bridge for Qt5-xcb apps
+    networkmanagerapplet # NetworkManager GUI and Wi-Fi password dialogs
     mediactl
   ];
 
-  # Bluetooth auto-confirm agent — registers a DisplayYesNo BlueZ agent
-  # that auto-accepts pairing/confirmation requests. Without this, Walker's
-  # bluetooth provider hangs at "Pairing..." because bluetoothctl pair
-  # (one-shot) has no agent to confirm the request.
+  # Bluetooth pairing agent: auto-confirms pairing requests so Walker's
+  # bluetooth provider doesn't hang.
   systemd.user.services.bt-agent = {
     Unit = {
       Description = "Persistent Bluetooth pairing agent";
@@ -64,9 +55,8 @@ in
       After = [ "graphical-session.target" ];
     };
     Service = {
-      # DisplayYesNo (not NoInputNoOutput) so SSP passkey-confirmation
-      # devices (keyboards, many earbuds, phones) can pair too; bt-agent
-      # auto-answers "yes". NoInputNoOutput hangs them at "Pairing...".
+      # DisplayYesNo capability required for SSP passkey devices (keyboards,
+      # earbuds, phones). Auto-answers "yes" to pairing requests.
       ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=DisplayYesNo";
       Restart = "on-failure";
     };
@@ -75,9 +65,8 @@ in
     };
   };
 
-  # NetworkManager applet — runs as a secret agent so graphical password
-  # prompts appear when connecting to new Wi-Fi networks. The --indicator
-  # flag keeps it out of the system tray while still handling requests.
+  # NetworkManager applet: provides graphical Wi-Fi password prompts.
+  # Uses --indicator flag to avoid system tray icon.
   systemd.user.services.nm-applet = {
     Unit = {
       Description = "NetworkManager applet / secret agent";
@@ -95,18 +84,15 @@ in
     };
   };
 
-  # wob daemon — reads integer percentages from $XDG_RUNTIME_DIR/wob.sock
-  # and renders an overlay progress bar. The timer scripts write to this
-  # FIFO to visualize the countdown. See waybar/timer.nix.
+  # wob: overlay progress bar daemon for timer countdown visualization.
+  # Reads percentages from $XDG_RUNTIME_DIR/wob.sock.
   systemd.user.services.wob = {
     Unit = {
       Description = "wob — Wayland overlay bar";
       ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
       PartOf = [ "graphical-session.target" ];
-      # PartOf alone doesn't order startup after the target — it only
-      # propagates stop/restart. Without this, wob can start before niri
-      # (which sets WAYLAND_DISPLAY) finishes and reaches the target,
-      # so ConditionEnvironment intermittently fails right after boot.
+      # After ensures wob starts after niri sets WAYLAND_DISPLAY.
+      # Without this, ConditionEnvironment can fail at boot.
       After = [ "graphical-session.target" ];
     };
     Service = {
@@ -119,7 +105,7 @@ in
     };
   };
 
-  # Configure fcitx5 input methods: English (keyboard-gb) + Chinese (pinyin).
+  # fcitx5 input methods: English (GB keyboard) and Chinese (Pinyin)
   xdg.configFile."fcitx5/profile".text = ''
     [Groups/0]
     Name="Default"
@@ -138,7 +124,7 @@ in
     0="Default"
   '';
 
-  # Cyberpunk fcitx5 theme (matches waybar/walker palette).
+  # fcitx5 theme: cyberpunk color palette matching waybar/walker
   xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source = ./themes/fcitx5.conf;
 
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
@@ -150,9 +136,8 @@ in
     MenuFont="Sans 14"
   '';
 
-  # Global GTK theme — applies the cyberpunk palette to all GTK apps,
-  # including nm-applet's Wi-Fi password dialogs and connection editor.
-  # Palette matches waybar/walker/fcitx5 themes (see ./themes/).
+  # GTK theme: cyberpunk palette for all GTK apps (nm-applet, file dialogs, etc.)
+  # Matches waybar/walker/fcitx5 themes in ./themes/
   gtk = {
     enable = true;
 
@@ -164,12 +149,11 @@ in
     };
   };
 
-  # Split across three files so each rule has one obvious home:
-  #   gtk-base.css  shared colours/widgets (imported by both)
-  #   gtk3.css      nemo, pavucontrol, nm-*, meld, gimp — menu/treeview
-  #   gtk4.css      portal file chooser, loupe — popover/columnview
-  # gtk-base.css is symlinked into both config dirs because GTK resolves
-  # @import relative to the stylesheet's own directory.
+  # GTK stylesheets:
+  #   gtk-base.css - shared colors/widgets (imported by both versions)
+  #   gtk3.css     - GTK3 apps (file managers, pavucontrol, nm-applet)
+  #   gtk4.css     - GTK4 apps (portal file chooser, image viewer)
+  # gtk-base.css symlinked to both dirs for @import resolution.
   xdg.configFile."gtk-3.0/gtk.css".source =
     config.lib.file.mkOutOfStoreSymlink
       "/home/raina/System/home/niri/themes/gtk3.css";

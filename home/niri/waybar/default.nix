@@ -1,9 +1,7 @@
-# Waybar configuration: top + bottom bars with the cyberpunk theme.
-#
-# The top bar (clock, hardware, media, utilities) and bottom bar
-# (niri workspace taskbar + launcher buttons) live in separate files
-# for readability. Polling scripts (todo, timer) live in top-right.nix,
-# next to the modules that use them.
+# Waybar: top and bottom status bars with cyberpunk theme.
+# Top bar: clock, hardware, media, utilities (see top.nix)
+# Bottom bar: niri workspace taskbar + launcher buttons (see bottom.nix)
+# Polling scripts: todo/timer in top-right.nix
 {
   pkgs,
   lib,
@@ -15,8 +13,7 @@ let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
 
-  # Outputs to attach the bars to: every non-auxiliary display declared
-  # in osConfig.services'.desktop.displays (if any).
+  # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
   barOutputs = lib.optionalAttrs ((osConfig.services'.desktop.displays or [ ]) != [ ]) {
     output = map (d: d.name) (lib.filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
   };
@@ -42,8 +39,7 @@ in
 
         systemd.user.services.waybar = {
           Unit = {
-            # Only run under niri — GNOME/Mutter lacks layer-shell support
-            # and waybar would crash-loop there.
+            # Only run under niri (GNOME/Mutter lacks layer-shell support)
             ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
           };
           Service = {
@@ -54,7 +50,7 @@ in
 
         systemd.user.services.waybar-ycal = {
           Unit = {
-            Description = "waybar-ycal — Google Calendar + Tasks popup";
+            Description = "waybar-ycal: Google Calendar and Tasks popup";
             ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
             PartOf = [ "graphical-session.target" ];
             After = [ "graphical-session.target" ];

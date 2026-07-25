@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  # Shared drawer config for the system/hardware groups.
+  # Drawer config for system/hardware groups
   drawer = {
     transition-duration = 300;
     transition-left-to-right = true;

@@ -1,24 +1,8 @@
-/* ═══════════════════════════════════════════════════════════
- * WAYBAR BASE — shared by all four bars
- * ═══════════════════════════════════════════════════════════
- * Loaded first; each bar then loads its own file on top:
- *   waybar-top-left.css     clock, hardware + system groups
- *   waybar-top-center.css   media, lyrics, todo
- *   waybar-top-right.css    tray, utilities, power
- *   waybar-bottom.css       workspaces, taskbar, starred apps
- *
- * This file owns geometry (margin/padding/radius) and the default box
- * background + border. The per-bar files own colour, glow and state
- * classes (.warning/.critical/.muted/...).
- *
- * Palette:
- * bg:      #190326
- * fg:      #cbe3e7
- * pink:    #ff7edb
- * cyan:    #7afcff
- * amber:   #f29e74
- * red:     #ff3333
- * dim:     #5c6776
+/* WAYBAR BASE: shared by all bars
+ * Loaded first, then per-bar files (top-left/center/right, bottom)
+ * Owns: geometry (margin/padding/radius), default background/border
+ * Per-bar files: colors, glow, state classes (.warning/.critical/.muted)
+ * Palette: bg=#190326 fg=#cbe3e7 pink=#ff7edb cyan=#7afcff amber=#f29e74 red=#ff3333 dim=#5c6776
  */
 
 * {
@@ -34,18 +18,15 @@ window#waybar {
     border-bottom: 2px solid #ff7edb;
 }
 
-/* Bottom bar: pink line on top instead of bottom */
+/* Bottom bar: pink border on top */
 window#waybar.bottom {
     border-bottom: none;
     border-top: 2px solid #ff7edb;
     box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
 }
 
-/* ── Module base ───────────────────────────────────────────
- * Modules are listed by id; `#group-* > widget` covers the same
- * styling for modules nested inside a group container, whose ids
- * Waybar doesn't always expose. Per-bar files override colour and
- * border on top of this; margin/padding/radius come from here. */
+/* Module base: geometry here, colors in per-bar files
+ * #group-* > widget covers modules nested in groups */
 #workspaces,
 #cpu,
 #temperature,
@@ -86,7 +67,7 @@ window#waybar.bottom {
     border: 1px solid rgba(255, 126, 219, 0.2);
 }
 
-/* Group containers themselves stay invisible */
+/* Group containers: invisible */
 #group-hardware,
 #group-system {
     background-color: transparent;
@@ -95,7 +76,7 @@ window#waybar.bottom {
     padding: 0;
 }
 
-/* ── Hover effect ───────────────────────────────────────── */
+/* Hover effect */
 #workspaces button:hover,
 #cpu:hover,
 #temperature:hover,
@@ -126,7 +107,7 @@ window#waybar.bottom {
     border-color: rgba(255, 126, 219, 0.5);
 }
 
-/* ── Tooltips ───────────────────────────────────────────── */
+/* Tooltips */
 tooltip {
     background-color: #0E0616;
     border: 1px solid #ff7edb;
@@ -138,13 +119,13 @@ tooltip label {
     color: #cbe3e7;
 }
 
-/* Calendar with events today: red accent */
+/* Calendar: red accent when events today */
 #custom-ycal.has-events {
     background-color: rgba(255, 51, 51, 0.12);
     border-color: rgba(255, 51, 51, 0.55);
 }
 
-/* Used by the .critical states in waybar-top-left.css */
+/* Blink animation for .critical states */
 @keyframes blink {
     to {
         color: #1a1a2e;

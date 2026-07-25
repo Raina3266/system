@@ -1,59 +1,29 @@
-# Bluetooth menu for walker/elephant, driven over the BlueZ D-Bus API
-# (gdbus) instead of bluetoothctl.
+# Bluetooth menu via BlueZ D-Bus API (gdbus).
+# Uses D-Bus instead of bluetoothctl to avoid pairing agent conflicts that cause
+# "Pairing..." hangs with elephant's built-in provider. Works with persistent
+# bt-agent (../default.nix) for auto-confirmation.
 #
-# Why not bluetoothctl: elephant's built-in bluetooth provider feeds
-# "pair <mac>\nquit" into a one-shot bluetoothctl, which exits before
-# the pairing exchange finishes. Worse, every one-shot bluetoothctl
-# registers itself as the default pairing agent and unregisters on
-# exit, racing the persistent bt-agent service (../default.nix) and
-# leaving windows with NO default agent -> pair hangs at "Pairing...".
-#
-# Talking to bluetoothd directly via D-Bus needs no agent inside this
-# process at all: bluetoothd forwards confirmation requests to the
-# persistent bt-agent, which auto-accepts (DisplayYesNo).
-#
-# The menu has two modes, held in elephant's per-menu Lua state:
-#
-#   list (default) - paired devices only. Actions: connect/disconnect
-#                    (default), forget, scan, power off.
-#   scan           - everything bluetoothd currently knows, so freshly
-#                    discovered devices can be paired. Already-paired
-#                    devices stay visible, marked with their state.
-#
-# The mode sticks until changed, so typing to filter the list doesn't
-# knock you out of scan mode. Pairing returns to the paired list (the
-# point of scanning is done), as does the explicit "paired" action.
-# Every action uses after = "AsyncClearReload" (see providers.nix), which
-# re-queries once elephant reports the activation finished.
+# Modes (persisted in elephant state):
+#   list (default) - paired devices: connect/disconnect/forget/scan/power
+#   scan           - all devices: pair new devices, see existing ones with state
+# Mode persists during filtering. Pairing returns to list mode.
 { pkgs }:
 let
   gdbus = "${pkgs.glib}/bin/gdbus";
   notify = "${pkgs.libnotify}/bin/notify-send";
   adapter = "/org/bluez/hci0";
 
-  # btscan - run one scan session for N seconds. bluetoothd ties a
-  # discovery session to the requesting D-Bus client and stops scanning
-  # the moment that client disconnects, so one-shot gdbus StartDiscovery
-  # calls (each client exits immediately) leave Discovering=false and
-  # find nothing. bluetoothctl --timeout stays alive for the whole
-  # window, which keeps the session alive. It temporarily registers its
-  # pairing agent while running but unregisters on exit; we never pair
-  # during a scan, so the persistent bt-agent is unaffected.
-  #
-  # writeShellScriptBin (not writeShellScript) so the store path is a
-  # directory with bin/btscan - the menu Lua below calls
-  # "${btscan}/bin/btscan", and writeShellScript would put the script
-  # directly at ...-btscan (a file), making /bin/btscan "Not a
-  # directory" and silently no-op'ing the action.
+  # btscan: run discovery for N seconds. bluetoothctl --timeout keeps session alive
+  # (one-shot gdbus disconnects immediately and finds nothing). Temporary pairing
+  # agent doesn't interfere since we never pair during scan.
+  # writeShellScriptBin creates bin/ directory structure needed by menu Lua.
   btscan = pkgs.writeShellScriptBin "btscan" ''
     secs="''${1:-6}"
     ${pkgs.bluez}/bin/bluetoothctl --timeout "$secs" scan on >/dev/null 2>&1
   '';
 
-  # btctl <verb> [args...] - small D-Bus helper used as the command for
-  # every menu action (runs headless under elephant). Also handy from a
-  # terminal, and used by waybar's right-click power toggle.
-  # writeShellScriptBin for the same reason as btscan above.
+  # btctl: D-Bus command wrapper for menu actions (also used by waybar).
+  # writeShellScriptBin for bin/ directory structure.
   btctl = pkgs.writeShellScriptBin "btctl" ''
     set -u
     dev_path() { printf '${adapter}/dev_%s' "$(printf '%s' "$1" | tr ':' '_')"; }
@@ -65,7 +35,7 @@ let
         err=$(${gdbus} call --system --dest org.bluez --object-path "$path" \
               --method org.bluez.Device1.Pair 2>&1)
         rc=$?
-        # "Already Exists" means already paired - treat as success.
+        # "Already Exists" = already paired (treat as success)
         if [ $rc -ne 0 ] && ! printf '%s' "$err" | grep -qi 'Already Exists'; then
           ${notify} -u critical "Bluetooth" "Failed to pair $name"
           exit 1
@@ -117,7 +87,7 @@ in
 {
   inherit btctl btscan;
 
-  # Lua source for provider.menus.lua."bluetooth" (see elephant.nix).
+  # Lua menu provider (see elephant.nix)
   menuLua = ''
     Name = "bluetooth"
     NamePretty = "Bluetooth"
@@ -126,15 +96,14 @@ in
     HideFromProviderlist = false
     SearchName = true
     FixedOrder = true
-    -- Unused: every entry supplies its command through its Actions
-    -- table. Kept so an entry without actions would still do something.
+    -- Fallback action (entries provide their own via Actions table)
     Action = "sh -c '%VALUE%'"
 
     local GDBUS = "${gdbus}"
     local BTCTL = "${btctl}/bin/btctl"
     local ADAPTER = "${adapter}"
 
-    -- Query one property of one object; returns the value as a string.
+    -- Query D-Bus property, return as string
     local function prop(path, iface, name)
       local h = io.popen(GDBUS .. " call --system --dest org.bluez --object-path "
         .. path .. " --method org.freedesktop.DBus.Properties.Get "
@@ -142,18 +111,14 @@ in
       if not h then return "" end
       local out = h:read("*a") or ""
       h:close()
-      -- gdbus prints "(<value>,)" - strip the wrapping punctuation and
-      -- either quote style (gdbus uses '...' normally but "..." when
-      -- the string itself contains a single quote, e.g. "Raina's").
+      -- Strip gdbus output wrapping: "(<value>,)" and quotes
       local v = out:match("%(<(.-)>,?%)") or ""
       v = v:gsub("^'(.*)'$", "%1")
       v = v:gsub('^"(.*)"$', "%1")
       return v
     end
 
-    -- Device object paths known to the adapter. Uses GetManagedObjects
-    -- (the ObjectManager at the root) rather than Introspect, whose XML
-    -- gdbus returns with escaped quotes that are painful to match.
+    -- List device paths via GetManagedObjects (avoids Introspect's escaped XML)
     local function list_devices()
       local paths, seen = {}, {}
       local h = io.popen(GDBUS .. " call --system --dest org.bluez --object-path /"
@@ -172,34 +137,29 @@ in
       return paths
     end
 
-    -- Render "<mac> \"<name>\"" for use as btctl's arguments. Characters
-    -- that would break out of the double quotes are dropped rather than
-    -- escaped -- names are cosmetic here, the mac does the work.
+    -- Format btctl arguments: <mac> "<name>" (drops quote-breaking chars)
     local function target(mac, name)
       return mac .. ' "' .. name:gsub('["$`\\\\]', "") .. '"'
     end
 
-    -- Mode lives in elephant's per-menu state, which persists across
-    -- the throwaway Lua states used for each query.
+    -- Mode persisted in elephant's per-menu state
     local function in_scan_mode()
       local s = state()
       return s ~= nil and s[1] == "scan"
     end
 
-    -- Bound to the "scan" action. Enters scan mode, then holds a
-    -- discovery session open so nearby devices get a chance to show up.
-    -- Walker's AsyncClearReload re-queries when this returns.
+    -- Enter scan mode and run discovery (AsyncClearReload re-queries after)
     function StartScan()
       setState({ "scan" })
       os.execute("${btscan}/bin/btscan 6")
     end
 
-    -- Bound to the "paired" action: leave scan mode.
+    -- Return to list mode
     function ShowPaired()
       setState({ "list" })
     end
 
-    -- Bound to "pair": pair, then drop back to the paired list.
+    -- Pair device and return to list mode
     function Pair(value)
       os.execute(BTCTL .. " pair " .. value)
       setState({ "list" })
@@ -208,9 +168,7 @@ in
     function GetEntries()
       local entries = {}
 
-      -- Powered off: exactly one entry, one action. Nothing else is
-      -- actionable until the adapter is up. Also reset the mode so the
-      -- menu comes back up as the paired list next time.
+      -- Adapter off: single "power on" entry, reset to list mode
       if prop(ADAPTER, "org.bluez.Adapter1", "Powered") ~= "true" then
         setState({ "list" })
         table.insert(entries, {
@@ -233,14 +191,13 @@ in
         local paired = prop(path, "org.bluez.Device1", "Paired") == "true"
         local connected = prop(path, "org.bluez.Device1", "Connected") == "true"
 
-        -- List mode shows paired devices only; scan mode shows
-        -- everything, with paired devices marked as such.
+        -- List: paired only | Scan: all devices with state markers
         if paired or scanning then
           local arg = target(mac, name)
           local actions = { scan = "lua:StartScan" }
           local subtext
 
-          -- State is conveyed by the subtext alone; no glyph markers.
+          -- State shown in subtext only
           if connected then
             subtext = "connected"
             actions.disconnect = BTCTL .. " disconnect " .. arg
@@ -249,8 +206,7 @@ in
             actions.connect = BTCTL .. " connect " .. arg
           else
             subtext = "not paired"
-            -- Via Lua so it can drop back to the paired list on success;
-            -- takes its arguments from Value below.
+            -- Lua action to return to list mode after pairing
             actions.pair = "lua:Pair"
           end
 
@@ -264,24 +220,21 @@ in
           if scanning then
             actions.list = "lua:ShowPaired"
           else
-            -- Kept out of scan mode so nothing can power the adapter
-            -- down midway through pairing.
+            -- Hidden in scan mode to prevent power-off during pairing
             actions.power_off = BTCTL .. " power off"
           end
 
           table.insert(entries, {
             Text = name,
             Subtext = subtext,
-            -- Passed to lua:Pair as its first argument.
+            -- Argument for lua:Pair
             Value = arg,
             Actions = actions,
           })
         end
       end
 
-      -- Nothing to show. Offer a single action so walker has an
-      -- unambiguous default, and drop back to list mode so an empty
-      -- scan can't leave the menu stuck in a state with no way out.
+      -- No devices: single scan action, reset to list mode
       if #entries == 0 then
         if scanning then setState({ "list" }) end
         table.insert(entries, {

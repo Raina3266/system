@@ -1,4 +1,4 @@
-/* ── Media player ──────────────────────────────────────── */
+/* Media player */
 #custom-media {
     color: #7afcff;
     border: none;
@@ -19,7 +19,7 @@
     padding: 0;
 }
 
-/* prev/next buttons */
+/* Media prev/next buttons */
 #custom-media-prev,
 #custom-media-next {
     color: #7afcff;
@@ -31,7 +31,7 @@
     color: #ff7edb;
 }
 
-/* ── Lyrics ────────────────────────────────────── */
+/* Lyrics */
 #custom-lyrics {
     color: #7afcff;
     border: none;
@@ -45,7 +45,7 @@
     text-shadow: none;
 }
 
-/* ── Todo list ────────────────────────────────── */
+/* Todo list */
 #custom-todo {
     border-color: transparent;
     background-color: transparent;

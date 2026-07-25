@@ -1,28 +1,12 @@
-/* ═══════════════════════════════════════════════════════════
- * GTK4 — lands in ~/.config/gtk-4.0/gtk.css
- * ═══════════════════════════════════════════════════════════
- * Apps: the xdg-desktop-portal-gnome file chooser (used by Chrome,
- *       Zed, Slack, Discord, Obsidian…), loupe, sushi,
- *       gnome-control-center
- *
- * GTK4-only node names live here: `listview`, `columnview`, `gridview`,
- * `popover` + `modelbutton` (GTK4 has no `menu`/`menuitem`),
- * `.navigation-sidebar`.
- *
- * NOT reached by this file: walker and the waybar-ycal popup. Both are
- * GTK4 but use layer-shell surfaces, which carry no `.csd` class, and
- they load their own stylesheets — see walker.css.
- *
- * WHERE TO FIND THINGS
- *   colours, buttons, entries, scrollbars → gtk-base.css
- *   file chooser list / sidebar           → §1–§3
- *   right-click & menu-button popovers    → §4
- *   file chooser only (borders, dividers) → §5
+/* GTK4: portal file chooser (Chrome/Zed/Discord/Obsidian), loupe, gnome-control-center
+ * GTK4-only nodes: listview, columnview, gridview, popover/modelbutton, .navigation-sidebar
+ * walker/waybar-ycal: layer-shell, not reached here (see walker.css)
+ * Colors/buttons/entries: see gtk-base.css
  */
 
 @import url("gtk-base.css");
 
-/* ── 1. Views & rows ───────────────────────────────────── */
+/* 1. Views & rows */
 window.csd list,
 window.csd listview,
 window.csd columnview,
@@ -34,8 +18,7 @@ window.csd .navigation-sidebar {
     color: #ffffff;
 }
 
-/* Rows and their wrappers stay transparent so the highlight below
- * shows through the whole row. */
+/* Rows transparent to show highlights */
 window.csd list row,
 window.csd listview row,
 window.csd columnview cell,
@@ -47,7 +30,7 @@ window.csd button box {
     background-image: none;
 }
 
-/* ── 2. Rows: hover & selected ─────────────────────────── */
+/* 2. Rows: hover & selected */
 window.csd list row:hover,
 window.csd listview row:hover,
 window.csd columnview row:hover,
@@ -69,9 +52,7 @@ window.csd .navigation-sidebar row:selected {
     box-shadow: none;
 }
 
-/* Everything inside a highlighted row must be transparent — labels are
- * often nested two deep (row > box > label), so match all descendants
- * rather than direct children. */
+/* Row contents transparent (labels nested, match all descendants) */
 window.csd row:hover *,
 window.csd row:selected *,
 window.csd gridview child:hover *,
@@ -82,7 +63,7 @@ window.csd flowboxchild:selected * {
     box-shadow: none;
 }
 
-/* Entries nested in a row keep their own background */
+/* Entries in rows keep own background */
 window.csd row:hover entry,
 window.csd row:hover entry text,
 window.csd row:selected entry,
@@ -99,12 +80,12 @@ window.csd .navigation-sidebar row:selected label {
     color: #ff7edb;
 }
 
-/* ── 3. Column headers (Name / Size / Type / Modified) ─── */
+/* 3. Column headers (Name/Size/Type/Modified) */
 window.csd columnview > header button {
     background-color: #0E0616;
     background-image: none;
     color: #7afcff;
-    /* Adwaita fakes these borders with grey box-shadow; use a real one. */
+    /* Real borders (Adwaita uses grey box-shadow) */
     box-shadow: none;
     border: none;
     border-right: 1px solid rgba(255, 126, 219, 0.35);
@@ -121,9 +102,7 @@ window.csd columnview > header button:hover {
     color: #ff7edb;
 }
 
-/* ── 4. Popovers & popover menus ───────────────────────────
- * The visible box is `> contents`; the popover node itself is just a
- * positioning shell and must stay transparent. */
+/* 4. Popovers (visible box: > contents; popover node: transparent shell) */
 window.csd popover,
 window.csd popover.background {
     background-color: transparent;
@@ -146,7 +125,7 @@ window.csd popover > arrow {
     border: 1px solid #ff7edb;
 }
 
-/* Menu rows inside a popover */
+/* Menu rows in popover */
 window.csd modelbutton,
 window.csd modelbutton > box {
     background-color: transparent;
@@ -163,17 +142,13 @@ window.csd modelbutton:hover label {
     color: #ff7edb;
 }
 
-/* GTK4 marks disabled menu rows on the modelbutton, not the label. */
+/* Disabled: on modelbutton (not label) */
 window.csd modelbutton:disabled,
 window.csd modelbutton:disabled label {
     color: #5c6776;
 }
 
-/* ── 5. File chooser only ──────────────────────────────────
- * The portal file chooser's sidebar is NOT inside a GtkPaned, so the
- * `paned > separator` rule in gtk-base.css never reaches it and the
- * sidebar has to draw the divider itself. Scoped to `filechooser` so
- * nemo (GTK3) and other GTK4 apps don't get a double line. */
+/* 5. File chooser: sidebar not in GtkPaned, draws own divider (scoped to avoid double line) */
 filechooser .sidebar,
 filechooser .navigation-sidebar,
 filechooser placessidebar {
@@ -181,7 +156,7 @@ filechooser placessidebar {
     border-right: 1px solid #ff7edb;
 }
 
-/* Inner nodes never draw a border, so the divider stays exactly 1px. */
+/* Inner nodes: no border for 1px divider */
 filechooser .sidebar list,
 filechooser .navigation-sidebar list,
 filechooser placessidebar list,
@@ -191,7 +166,7 @@ filechooser placessidebar viewport {
     border-right: none;
 }
 
-/* Framing between the file chooser's regions */
+/* File chooser region borders */
 filechooser headerbar {
     border-bottom: 1px solid #ff7edb;
 }

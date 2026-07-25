@@ -1,14 +1,8 @@
-# Bottom waybar: niri workspace switcher + niri_window_buttons taskbar
-# (per-window icon/title buttons via the niri_window_buttons CFFI module)
-# + starred-app launcher buttons.
-# Returns the bottomBar attrset (without bar outputs — merged by default.nix).
+# Bottom bar: niri workspaces + taskbar (niri_window_buttons CFFI) + app launchers
 { pkgs }:
 let
-  # Standalone Waybar CFFI module providing rich per-window taskbar buttons
-  # for the niri compositor: https://github.com/adelmonte/niri_window_buttons
-  #
-  # Produces $out/lib/libniri_window_buttons.so, referenced by module_path in
-  # the cffi/niri_window_buttons config below.
+  # niri_window_buttons: Waybar CFFI taskbar module for niri compositor
+  # https://github.com/adelmonte/niri_window_buttons
   niri-window-buttons = pkgs.rustPlatform.buildRustPackage rec {
     pname = "niri_window_buttons";
     version = "0.4.3";
@@ -43,7 +37,7 @@ let
     };
   };
 
-  # Starred-app launcher button: emoji icon + tooltip + background launch.
+  # App launcher button: emoji icon + tooltip
   starredApp = name: icon: cmd: {
     format = icon;
     tooltip = true;
@@ -51,7 +45,7 @@ let
     on-click = "${cmd} &";
   };
 
-  # Google Chrome PWA launcher by app id.
+  # Chrome PWA launcher
   chromeApp = name: icon: appId: starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
 in
 {
@@ -82,10 +76,7 @@ in
   "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
   "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
 
-  # Workspace switcher — shows index + name for each workspace.
-  # Middle-click moves the clicked workspace up; right-click moves it down.
-  # (niri has no close-workspace action, so middle-click reorders instead.)
-  # The workspace is focused first so niri's move acts on the right one.
+  # Workspace switcher: click to focus, middle-click to move up, right-click to move down
   "niri/workspaces" = {
     format = " {index} ";
     tooltip-format = "Middle-click: move up  |  Right-click: move down";
@@ -93,10 +84,8 @@ in
     on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";
   };
 
-  # Per-window taskbar — shows app icon + title for windows on the current
-  # workspace only. Click to focus, middle-click to close, right-click for
-  # a context menu. Drag to reorder, shift-click to multi-select. Buttons
-  # shrink down to min_button_width before the taskbar starts scrolling.
+  # Taskbar (current workspace only): click=focus, middle=close, right=menu
+  # Drag to reorder, shift-click for multi-select
   "cffi/niri_window_buttons" = {
     module_path = "${niri-window-buttons}/lib/libniri_window_buttons.so";
 
@@ -109,28 +98,23 @@ in
     icon_spacing = 10;
     min_button_width = 120;
     max_button_width = 200;
-    # Fall back to the eDP-1 logical width; overridden per-output below to
-    # match each display's actual logical resolution (see niri/config.kdl).
+    # Default to eDP-1 width (overridden per-output below)
     max_taskbar_width = 1350;
     scroll_arrow_left = " ◀ ";
     scroll_arrow_right = " ▶ ";
 
-    # Let the taskbar grow to fill each monitor's full logical width instead
-    # of a fixed pixel count. Logical width = mode width / scale (see
-    # niri/config.kdl for each output's mode + scale).
+    # Per-monitor logical widths (mode width / scale, see niri/config.kdl)
     max_taskbar_width_per_output = {
-      "eDP-1" = 1350; # 1920x1200 @ scale 1
-      "DP-8" = 2000; # 2560x1440 @ scale 1
-      "DP-7" = 1700; # 2560x2880 @ scale 1.25 -> 2048 logical
+      "eDP-1" = 1350; # 1920x1200 @ 1x
+      "DP-8" = 2000; # 2560x1440 @ 1x
+      "DP-7" = 1700; # 2560x2880 @ 1.25x = 2048 logical
     };
 
-    # Size each button to mirror its window's on-screen width in the niri
-    # layout, clamped between min_button_width and max_button_width.
+    # Button size mirrors window width (clamped to min/max)
     proportional_button_width = true;
     proportional_icon_size = true;
 
-    # Drag reorder — browser-style: grabbed button follows the cursor while
-    # neighbors slide around it.
+    # Drag reorder: browser-style (button follows cursor)
     drag_style = "browser";
     drag_hover_focus = true;
     drag_hover_focus_delay = 500;
@@ -154,8 +138,7 @@ in
       { label = "  Close Window"; action = "close-window"; }
     ];
 
-    # Multi-select: hold Shift + left-click to select several windows,
-    # then right-click for batch actions.
+    # Multi-select: Shift+click windows, right-click for batch actions
     multi_select_modifier = "shift";
     multi_select_menu = [
       { label = "  Move All Up"; action = "move-to-workspace-up"; }
@@ -164,9 +147,7 @@ in
       { label = "  Close All"; action = "close-windows"; }
     ];
 
-    # Speaker icon on windows currently playing audio; click to mute.
-    # Disabled: libpulse's glib-mainloop integration has a known
-    # double-free bug in its timer teardown that crashes waybar.
+    # Audio indicator disabled: libpulse glib-mainloop double-free crashes waybar
     # audio_indicator = {
     #   enabled = true;
     #   playing_icon = "󰕾 ";
@@ -174,7 +155,7 @@ in
     #   clickable = true;
     # };
 
-    # Urgency-hint highlighting when an app requests attention.
+    # Urgency hints when app requests attention
     notifications = {
       enabled = true;
       use_desktop_entry = true;

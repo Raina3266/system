@@ -1,15 +1,8 @@
-# Walker's `providers` option: which providers are queried by default
-# and on an empty query, prefix-triggered providers, and per-provider
-# action keybinds.
-#
-# The action keybinds are REQUIRED for the todo provider (and others)
-# to function — without them, Enter/Ctrl+D etc. do nothing. Walker's
-# `settings` (./default.nix) replaces its default config (imported
-# from resources/config.toml) entirely, so we must re-declare the
-# actions we want here.
+# Walker providers config: default/empty query providers, prefixes, and keybinds.
+# Action keybinds are required (walker's settings replaces default config entirely).
+# Without these, providers like todo won't respond to Enter/Ctrl+D.
 {
-  # Providers queried by default (empty query) and on launch.
-  # Without these, walker shows nothing when opened plain.
+  # Default providers (shown on launch and empty query)
   default = [
     "desktopapplications"
     "files"
@@ -89,10 +82,8 @@
         bind = "ctrl d";
         after = "AsyncClearReload";
       }
-      # Used as pin/unpin: the todo provider has no pin action, but
-      # "active" is a state it already sorts to the top of the list, and
-      # the waybar todo module shows the active task first (top-center.nix).
-      # AsyncReload so the pin marker updates without closing the menu.
+      # Pin/unpin via "active"/"inactive" (sorted to top, shown first in waybar)
+      # AsyncReload keeps menu open while updating
       {
         action = "active";
         label = "pin";
@@ -404,11 +395,8 @@
         bind = "ctrl Return";
       }
     ];
-    # Applied to any reported action a provider's own section doesn't
-    # declare. `menus:default` is what elephant synthesizes for menu
-    # entries that carry no Actions table of their own (e.g. the power and
-    # audio menus, which drive everything off their top-level
-    # `action`) -- it means "run this entry's command", hence the label.
+    # Fallback for actions not in provider-specific sections.
+    # menus:default = run entry's command (for menus without Actions table)
     fallback = [
       {
         action = "menus:open";
@@ -435,11 +423,8 @@
         after = "AsyncReload";
       }
     ];
-    # Per-entry actions for menus. Elephant >= 2.x registers each menu as
-    # its own provider (menus:wifi, menus:bluetooth, ...) — walker looks
-    # up provider actions by that full name, so each menu needs its own
-    # section. Actions not present on an entry are simply not shown, so
-    # per-menu sections stay precise.
+    # Menu-specific actions: each menu is a provider (menus:wifi, menus:bluetooth).
+    # Only actions present on an entry are shown.
     "menus:wifi" = [
       {
         action = "menus:default";
@@ -461,11 +446,8 @@
         after = "AsyncClearReload";
       }
     ];
-    # Which buttons actually appear is decided per entry by the Actions
-    # table in bluetooth.nix (e.g. power_on only on the "Bluetooth is off"
-    # entry, pair only on unpaired ones); this section only supplies their
-    # labels, keybinds and after-behaviour. Walker drops any action listed
-    # here that the selected entry doesn't report.
+    # Actions defined here; visibility controlled by bluetooth.nix Actions table
+    # per entry (e.g., power_on only when off, pair only on unpaired).
 
     "menus:bluetooth" = [
       {
@@ -521,8 +503,7 @@
         after = "AsyncClearReload";
       }
     ];
-    # Volume/mute keep the menu open and re-query so the bars update in
-    # place; picking a default device closes it.
+    # Volume/mute: keep open and re-query | Select default: close menu
     "menus:audio" = [
       {
         action = "set_default";
