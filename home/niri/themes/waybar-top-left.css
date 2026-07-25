@@ -1,5 +1,5 @@
 /* ── Top-left: clock, system group, hardware group ─────────
- * Boxes/margins come from waybar-cyberpunk.css; this file only sets
+ * Boxes/margins come from waybar.css; this file only sets
  * colour, glow and the 2px border on the outer containers. */
 
 #group-hardware,

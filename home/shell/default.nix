@@ -2,7 +2,6 @@
 {
   imports = [
     ./nvim
-    ./yazi
     ./git.nix
     ./terminal.nix
     ./tmux.nix

@@ -139,7 +139,7 @@ in
   '';
 
   # Cyberpunk fcitx5 theme (matches waybar/walker palette).
-  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source = ./themes/fcitx5-cyberpunk.conf;
+  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source = ./themes/fcitx5.conf;
 
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False

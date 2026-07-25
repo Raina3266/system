@@ -11,7 +11,7 @@
  *
  * NOT reached by this file: walker and the waybar-ycal popup. Both are
  * GTK4 but use layer-shell surfaces, which carry no `.csd` class, and
- * they load their own stylesheets — see walker-cyberpunk.css.
+ they load their own stylesheets — see walker.css.
  *
  * WHERE TO FIND THINGS
  *   colours, buttons, entries, scrollbars → gtk-base.css

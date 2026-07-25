@@ -73,9 +73,9 @@ in
           enable = true;
           systemd.enable = true;
           style = pkgs.concatTextFile {
-            name = "waybar-cyberpunk";
+            name = "waybar";
             files = [
-              ../themes/waybar-cyberpunk.css
+              ../themes/waybar.css
               ../themes/waybar-top-left.css
               ../themes/waybar-top-center.css
               ../themes/waybar-top-right.css

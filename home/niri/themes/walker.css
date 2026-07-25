@@ -4,7 +4,7 @@
  * Walker is GTK4 but renders on a layer-shell surface, so it carries no
  * `.csd` class and gtk4.css can never reach it. Everything Walker looks
  * like is in this one file; layout/geometry is in the two
- * walker-layout-*.xml files (GTK4 alignment properties beat CSS).
+ * walker-*.xml files (GTK4 alignment properties beat CSS).
  *
  * WHERE TO FIND THINGS
  *   outer popup box, border, radius  → .box-wrapper

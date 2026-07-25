@@ -10,20 +10,17 @@
 # so no flake inputs are needed for either project. Two things the
 # upstream modules don't cover are re-implemented below:
 #
-#   1. elephant's per-provider config fan-out. `services.elephant.settings`
-#      only writes a single elephant/config.toml; the per-provider files
-#      (elephant/clipboard.toml, elephant/menus/*.lua, ...) are generated
-#      here from ./elephant.nix, which keeps its original shape.
+#   1. elephant's per-provider config fan-out — see ./elephant.nix.
 #   2. `services.walker.theme` holds a single theme, so the two alternate
 #      layouts are written out directly.
+#   3. walker's own `providers` option (default/empty/prefixes/actions)
+#      — see ./providers.nix, kept separate for readability.
 {
   pkgs,
   lib,
   ...
 }:
 let
-  tomlFormat = pkgs.formats.toml { };
-
   # ── walker ────────────────────────────────────────────────
   # `theme` below sets settings.theme to the theme name, so it is
   # deliberately not repeated here.
@@ -69,75 +66,9 @@ let
       nirisessions.input = "Search sessions…";
       nirisessions.list = "No sessions defined";
     };
-    providers = {
-      # Providers queried by default (empty query) and on launch.
-      # Without these, walker shows nothing when opened plain.
-      default = [
-        "desktopapplications"
-        "files"
-        "calc"
-      ];
-      empty = [ "desktopapplications" ];
-      prefixes = [
-        {
-          provider = "clipboard";
-          prefix = ":";
-        }
-        {
-          provider = "todo";
-          prefix = "!";
-        }
-        {
-          provider = "providerlist";
-          prefix = ";";
-        }
-        {
-          provider = "websearch";
-          prefix = "@";
-        }
-        {
-          provider = "calc";
-          prefix = "=";
-        }
-        {
-          provider = "symbols";
-          prefix = ".";
-        }
-        {
-          provider = "unicode";
-          prefix = "u:";
-        }
-        {
-          provider = "files";
-          prefix = "/";
-        }
-        {
-          provider = "windows";
-          prefix = "$";
-        }
-        {
-          provider = "runner";
-          prefix = ">";
-        }
-        {
-          provider = "playerctl";
-          prefix = "mp:";
-        }
-        {
-          provider = "wireplumber";
-          prefix = "au:";
-        }
-        {
-          provider = "nirisessions";
-          prefix = "ses:";
-        }
-      ];
-      # Per-provider action keybinds. These are REQUIRED for the todo
-      # provider (and others) to function — without them, Enter/Ctrl+D
-      # etc. do nothing. `settings` replaces walker's built-in default
-      # config entirely, so we must re-declare the actions we want here.
-      actions = import ./actions.nix;
-    };
+    # See ./providers.nix: which providers are queried by default/on
+    # empty query, prefix-triggered providers, and per-provider actions.
+    providers = import ./providers.nix;
     # Global keybinds — also lost when `settings` replaces the default.
     keybinds = {
       close = [ "Escape" ];
@@ -156,9 +87,9 @@ let
   };
 
   # ── themes ────────────────────────────────────────────────
-  base = builtins.readFile ../themes/walker-cyberpunk.css;
-  layoutTopRight = builtins.readFile ../themes/walker-layout-top-right.xml;
-  layoutTopCenter = builtins.readFile ../themes/walker-layout-top-center.xml;
+  base = builtins.readFile ../themes/walker.css;
+  layoutTopRight = builtins.readFile ../themes/walker-top-right.xml;
+  layoutTopCenter = builtins.readFile ../themes/walker-top-center.xml;
 
   # `services.walker.theme` only models one theme, so the alternate is
   # written out with the same file layout the module would produce.
@@ -181,74 +112,11 @@ let
     };
   };
 
-  # ── elephant ──────────────────────────────────────────────
-  # ./elephant.nix keeps the shape the upstream flake module expected
-  # (provider.<name>.settings, provider.menus.lua/.toml); the fan-out
-  # into individual config files is reproduced here.
-  elephantCfg = import ./elephant.nix { inherit pkgs; };
-
-  providerConfigs = lib.mapAttrs' (
-    name: provider:
-    lib.nameValuePair "elephant/${name}.toml" {
-      source = tomlFormat.generate "${name}.toml" provider.settings;
-    }
-  ) (lib.filterAttrs (_: provider: provider ? settings) elephantCfg.provider);
-
-  menuTomlFiles = lib.mapAttrs' (
-    name: menu:
-    lib.nameValuePair "elephant/menus/${name}.toml" {
-      source = tomlFormat.generate "${name}.toml" menu;
-    }
-  ) (elephantCfg.provider.menus.toml or { });
-
-  menuLuaFiles = lib.mapAttrs' (
-    name: menu: lib.nameValuePair "elephant/menus/${name}.lua" { text = menu; }
-  ) (elephantCfg.provider.menus.lua or { });
-
-  # Restart the units when any of the generated config changes — the
-  # upstream flake modules did this and walker/elephant only re-read
-  # their config on start.
+  # Restart walker when its config changes — it only re-reads on start.
   restartTrigger = value: [ (builtins.hashString "sha256" (builtins.toJSON value)) ];
 in
 {
-  services.elephant = {
-    enable = true;
-    # nixpkgs' elephant wraps its binary with ELEPHANT_PROVIDER_DIR
-    # pointing at its own store path, so the provider .so files no
-    # longer need to be linked into ~/.config/elephant/providers.
-    #
-    # The provider list is pinned: building all of them would pull in
-    # aptpackages/archlinuxpkgs/dnfpackages (useless here, but they
-    # would still show up in the providerlist) plus protonpass.
-    #
-    # wireplumber needs `pw-dump` and `wpctl` on elephant's PATH or it
-    # disables itself at load; both come from pkgs.wireplumber, added
-    # to home.packages below.
-    package = pkgs.elephant.override {
-      enabledProviders = [
-        "bitwarden"
-        "bluetooth"
-        "bookmarks"
-        "calc"
-        "clipboard"
-        "desktopapplications"
-        "files"
-        "menus"
-        "niriactions"
-        "nirisessions"
-        "playerctl"
-        "providerlist"
-        "runner"
-        "snippets"
-        "symbols"
-        "todo"
-        "unicode"
-        "websearch"
-        "windows"
-        "wireplumber"
-      ];
-    };
-  };
+  imports = [ ./elephant.nix ];
 
   services.walker = {
     enable = true;
@@ -267,35 +135,17 @@ in
     };
   };
 
-  xdg.configFile = lib.mkMerge [
-    extraThemes
-    providerConfigs
-    menuTomlFiles
-    menuLuaFiles
-  ];
+  xdg.configFile = extraThemes;
 
   # Details the upstream home-manager modules leave out but the
   # previous setup relied on.
-  systemd.user.services = {
-    walker.Unit = {
-      ConditionEnvironment = "WAYLAND_DISPLAY";
-      PartOf = [ "graphical-session.target" ];
-      X-Restart-Triggers = restartTrigger walkerSettings;
-    };
-    elephant = {
-      Unit.ConditionEnvironment = "WAYLAND_DISPLAY";
-      Service = {
-        RestartSec = 1;
-        # Clean up the socket on stop.
-        ExecStopPost = "${pkgs.coreutils}/bin/rm -f /tmp/elephant.sock";
-        X-Restart-Triggers = restartTrigger elephantCfg;
-      };
-    };
+  systemd.user.services.walker.Unit = {
+    ConditionEnvironment = "WAYLAND_DISPLAY";
+    PartOf = [ "graphical-session.target" ];
+    X-Restart-Triggers = restartTrigger walkerSettings;
   };
 
   home.packages = with pkgs; [
     wtype # Wayland typing
-    fd # files provider (elephant/walker)
-    wireplumber # wpctl/pw-dump — wireplumber provider + audio menu
   ];
 }

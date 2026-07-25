@@ -9,7 +9,7 @@
  * This loads at PRIORITY_USER (800), above the APPLICATION (600)
  * priority of waybar's and walker's stylesheets, and GTK compares
  * priority BEFORE specificity. A bare `button:hover` here would beat
- * `#cpu:hover` in waybar-cyberpunk.css.
+ `#cpu:hover` in waybar.css.
  *
  * So every selector must be rooted at an app window:
  *   window.csd    GTK4 toplevels/dialogs, GTK3 CSD windows (nemo)

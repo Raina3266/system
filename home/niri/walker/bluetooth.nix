@@ -23,7 +23,7 @@
 # The mode sticks until changed, so typing to filter the list doesn't
 # knock you out of scan mode. Pairing returns to the paired list (the
 # point of scanning is done), as does the explicit "paired" action.
-# Every action uses after = "AsyncClearReload" (see actions.nix), which
+# Every action uses after = "AsyncClearReload" (see providers.nix), which
 # re-queries once elephant reports the activation finished.
 { pkgs }:
 let

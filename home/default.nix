@@ -6,6 +6,7 @@
   imports = [
     ./niri
     ./shell
+    ./yazi
     ./thunderbird.nix
     ./cloud.nix
     ./ocr.nix
@@ -81,7 +82,7 @@
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
   ];
-  
+
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
@@ -97,7 +98,7 @@
       "x-scheme-handler/https" = "google-chrome.desktop";
       "x-scheme-handler/about" = "google-chrome.desktop";
       "x-scheme-handler/unknown" = "google-chrome.desktop";
-      
+
       # PDF
       "application/pdf" = [ "google-chrome.desktop" ];
 

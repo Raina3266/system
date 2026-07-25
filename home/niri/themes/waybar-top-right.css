@@ -1,7 +1,7 @@
 /* ── Top-right: tray, utilities ──────────────────────────── */
 
 /* All top-right modules share a 2px pink border (overrides the 1px
-   base border from waybar-cyberpunk.css). */
+   base border from waybar.css). */
 #custom-audio,
 #tray,
 #custom-bt,
