@@ -20,6 +20,7 @@
 
   programs.home-manager.enable = true;
   programs.zed-editor.enable = true;
+  programs.vscode.enable = true;
 
   home.packages = with pkgs; [
     # browsers

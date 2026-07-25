@@ -117,7 +117,7 @@ in
 
   "temperature" = {
     thermal-zone = 7;
-    warning-threshold = 50;
+    warning-threshold = 55;
     critical-threshold = 80;
     interval = 5;
     format = "󰄏 {temperatureC}°C";

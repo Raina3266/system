@@ -45,7 +45,7 @@ headerbar,
  * whole toplevel instead and let the titlebar keep the same colour. */
 window.csd:backdrop,
 dialog:backdrop {
-    opacity: 0.5;
+    opacity: 1;
 }
 
 headerbar:backdrop,
@@ -62,13 +62,6 @@ headerbar:backdrop label,
 headerbar:backdrop image,
 dialog:backdrop label {
     opacity: 1;
-}
-
-headerbar .subtitle,
-.titlebar .subtitle {
-    color: #7afcff;
-    font-size: 0.9em;
-    opacity: 0.95;
 }
 
 /* ── Dialog / window bodies (kill the white background) ── */

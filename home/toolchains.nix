@@ -10,6 +10,7 @@
     cargo-machete
     diesel-cli
     cargo-audit
+    elan
     cargo-autoinherit
   ];
 

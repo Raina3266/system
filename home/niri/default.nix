@@ -1,5 +1,6 @@
 {
   pkgs,
+  config,
   ...
 }:
 let
@@ -161,9 +162,14 @@ in
     gtk4.extraConfig = {
       gtk-application-prefer-dark-theme = 1;
     };
-    gtk3.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
-    gtk4.extraCss = builtins.readFile ./themes/gtk-cyberpunk.css;
   };
+
+  xdg.configFile."gtk-3.0/gtk.css".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/themes/gtk-cyberpunk.css";
+  xdg.configFile."gtk-4.0/gtk.css".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/themes/gtk-cyberpunk.css";
 
   home.pointerCursor = {
     enable = true;

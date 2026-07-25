@@ -61,7 +61,7 @@
 }
 .niri-window-buttons button {
     background-color: transparent;
-    color: #7afcff;
+    color: #ff7edb;
     padding-left: 10px;
     padding-right: 10px;
     border-radius: 6px;
@@ -72,7 +72,7 @@
 }
 .niri-window-buttons button.focused {
     background-color: rgba(255, 126, 219, 0.15);
-    color: #ff7edb;
+    color: #7afcff;
     border-color: rgba(255, 126, 219, 0.5);
 }
 .niri-window-buttons button:hover {
@@ -102,7 +102,10 @@
 .scroll-arrow-left,
 .scroll-arrow-right {
     color: #5c6776;
-    padding: 0 3px;
+    margin-top: 2px;
+    margin-left: 5px;
+    margin-right: 5px;
+    padding: 3px;
 }
 .scroll-arrow-left:hover,
 .scroll-arrow-right:hover {
