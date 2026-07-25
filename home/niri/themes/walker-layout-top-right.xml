@@ -18,7 +18,7 @@
         <property name="valign">start</property>
         <property name="halign">end</property>
         <property name="margin-top">44</property>
-        <property name="margin-end">8</property>
+        <property name="margin-end">5</property>
         <!-- No fixed width/height-request: the popup shrinks to fit its
              contents (a 4-item power menu stays small; a long wifi list
              grows). Growth is capped by max-content-* on the Scroll below. -->
@@ -141,7 +141,6 @@
                     <style>
                       <class name="preview-box"></class>
                     </style>
-                    <property name="overflow">hidden</property>
                     <property name="hexpand">false</property>
                     <property name="vexpand">false</property>
                     <child>

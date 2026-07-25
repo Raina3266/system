@@ -226,7 +226,6 @@ in
     # to home.packages below.
     package = pkgs.elephant.override {
       enabledProviders = [
-        "1password"
         "bitwarden"
         "bluetooth"
         "bookmarks"

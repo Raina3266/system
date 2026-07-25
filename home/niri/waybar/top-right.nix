@@ -24,7 +24,7 @@ in
   # Audio output launcher — icon + click opens the walker sink picker.
   # (Live sink name is shown in the walker's menu itself; volume lives
   # in the pulseaudio module in the system drawer.)
-  "custom/audio-sink" = staticLauncher "audio-sink" "󰅾" "Audio devices & volume" "-m menus:audio-sink";
+  "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-m menus:audio";
 
   "tray" = {
     icon-size = 18;

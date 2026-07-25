@@ -194,10 +194,6 @@ row:selected .item-subtext {
   font-size: 24px;
 }
 
-.todo.done .item-text-box {
-  opacity: 0.25;
-}
-
 .todo.urgent {
   font-size: 24px;
   color: #ff3333;

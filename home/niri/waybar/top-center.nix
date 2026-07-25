@@ -14,7 +14,10 @@ let
       exit 0
     fi
 
-    pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {c++} END{print c+0}' "${todoFile}")
+    # "active" is used as a pin: elephant's todo provider has no pin
+    # action, but `active` is a Return-toggled state that it already
+    # sorts to the top of the list, so it serves the same purpose.
+    pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {c++} END{print c+0}' "${todoFile}")
     total=$(awk -F';' 'NR>1 {c++} END{print c+0}' "${todoFile}")
 
     if [ "$pending" -eq 0 ] 2>/dev/null; then
@@ -24,7 +27,7 @@ let
       exit 0
     fi
 
-    actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") && $6!="" {
+    actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") && $6!="" {
       cmd="date -d \"" $6 "\" +%s 2>/dev/null"
       cmd | getline ts; close(cmd)
       cmd="date -d \"today 23:59:59\" +%s"
@@ -32,8 +35,10 @@ let
       if (ts!="" && ts+0 <= eod+0) c++
     } END{print c+0}' "${todoFile}")
 
-    # Get top-priority task (urgent first, then by schedule, then file order)
-    current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
+    # Get the task to display: pinned (active) first, then urgent, then
+    # by deadline ($6 = scheduled), then file order.
+    current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
+      pinned = ($3=="active") ? 0 : 1
       urgent = ($3=="urgent") ? 0 : 1
       ts = 9999999999
       if ($6!="") {
@@ -41,9 +46,9 @@ let
         cmd | getline t; close(cmd)
         if (t!="") ts = t+0
       }
-      key = urgent * 10000000000 + ts
-      if (!found || key < best) { found=1; best=key; text=$2 }
-    } END{print text}' "${todoFile}")
+      key = pinned "" urgent "" sprintf("%010d", ts)
+      if (!found || key < best) { found=1; best=key; text=$2; st=$3 }
+    } END{print (st=="active" ? "  " : "") text}' "${todoFile}")
 
     # Truncate to 40 chars
     current_short=$(printf '%s' "$current" | cut -c1-30)
@@ -59,10 +64,11 @@ let
 
     text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>"
 
-    # Tooltip: pending task list
-    list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent") {
-      print "⬜  " $2
-    }' "${todoFile}" | head -10)
+    # Tooltip: pending task list, pinned first
+    list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
+      if ($3=="active") print "0\t  " $2
+      else print "1\t⬜  " $2
+    }' "${todoFile}" | sort -k1,1 | cut -f2- | head -10)
 
     tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"
 
@@ -159,7 +165,7 @@ in
     return-type = "json";
     interval = 2;
     exec = todoPoll;
-    # left=search, right=create, middle=mark done
+    # left=search, right=create
     on-click = pkgs.writeShellScript "waybar-todo-search" ''
       ${elephant} activate "todo;;search;;" || true
       exec ${walker} -t cyberpunk-center -m todo
@@ -167,9 +173,6 @@ in
     on-click-right = pkgs.writeShellScript "waybar-todo-create" ''
       ${elephant} activate "todo;;create;;" || true
       exec ${walker} -t cyberpunk-center -m todo
-    '';
-    on-click-middle = pkgs.writeShellScript "waybar-todo-done" ''
-      ${elephant} activate "todo;;done;;" || true
     '';
   };
 }

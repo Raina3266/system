@@ -28,7 +28,7 @@ in
     "tray"
     "custom/cliphist"
     "custom/timer"
-    "custom/audio-sink"
+    "custom/audio"
     "custom/bt"
     "custom/powermenu"
   ];

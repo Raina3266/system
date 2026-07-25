@@ -2,7 +2,7 @@
 
 /* All top-right modules share a 2px pink border (overrides the 1px
    base border from waybar-cyberpunk.css). */
-#custom-audio-sink,
+#custom-audio,
 #tray,
 #custom-bt,
 #custom-cliphist,
@@ -15,7 +15,7 @@
 }
 
 /* Pink text + cyan glow */
-#custom-audio-sink,
+#custom-audio,
 #custom-bt {
     color: #7afcff;
     text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);

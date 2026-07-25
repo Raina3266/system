@@ -86,10 +86,10 @@ layout {
 }
 
 spawn-at-startup "xwayland-satellite"
-spawn-at-startup "snixembed"
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
-spawn-at-startup "birdtray"
+spawn-at-startup "sh" "-c" "sleep 3 && snixembed"
+spawn-at-startup "sh" "-c" "sleep 5 && birdtray"
 
 hotkey-overlay {
     // skip-at-startup
