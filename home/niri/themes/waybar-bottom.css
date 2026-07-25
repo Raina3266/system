@@ -72,6 +72,7 @@
 }
 .niri-window-buttons button.focused {
     background-color: rgba(255, 126, 219, 0.15);
+    font-weight: bold;
     color: #7afcff;
     border-color: rgba(255, 126, 219, 0.5);
 }

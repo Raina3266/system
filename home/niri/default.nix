@@ -164,12 +164,24 @@ in
     };
   };
 
+  # Split across three files so each rule has one obvious home:
+  #   gtk-base.css  shared colours/widgets (imported by both)
+  #   gtk3.css      nemo, pavucontrol, nm-*, meld, gimp — menu/treeview
+  #   gtk4.css      portal file chooser, loupe — popover/columnview
+  # gtk-base.css is symlinked into both config dirs because GTK resolves
+  # @import relative to the stylesheet's own directory.
   xdg.configFile."gtk-3.0/gtk.css".source =
     config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/home/niri/themes/gtk-cyberpunk.css";
+      "/home/raina/System/home/niri/themes/gtk3.css";
+  xdg.configFile."gtk-3.0/gtk-base.css".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/themes/gtk-base.css";
   xdg.configFile."gtk-4.0/gtk.css".source =
     config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/home/niri/themes/gtk-cyberpunk.css";
+      "/home/raina/System/home/niri/themes/gtk4.css";
+  xdg.configFile."gtk-4.0/gtk-base.css".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/themes/gtk-base.css";
 
   home.pointerCursor = {
     enable = true;

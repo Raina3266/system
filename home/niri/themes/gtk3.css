@@ -1,0 +1,225 @@
+/* ═══════════════════════════════════════════════════════════
+ * GTK3 — lands in ~/.config/gtk-3.0/gtk.css
+ * ═══════════════════════════════════════════════════════════
+ * Apps: nemo, pavucontrol, nm-applet / nm-connection-editor,
+ *       meld, gimp, inkscape, czkawka, kid3, thunderbird dialogs
+ *
+ * GTK3-only node names live here: `menu` / `menuitem` (GTK4 uses
+ * popover + modelbutton), `treeview.view`, `.view`, `iconview`,
+ * `window.popup`, `placessidebar`.
+ *
+ * WHERE TO FIND THINGS
+ *   colours, buttons, entries, scrollbars → gtk-base.css
+ *   file list / sidebar / menus           → below
+ *   nemo-specific                         → §5
+ */
+
+@import url("gtk-base.css");
+
+/* ── 1. Views (file lists, trees, text areas) ──────────── */
+window.csd .view,
+window.csd treeview.view,
+window.csd iconview,
+dialog .view,
+dialog treeview.view,
+window.csd placessidebar,
+window.csd .sidebar,
+dialog .sidebar {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+}
+
+window.csd treeview.view cell,
+dialog treeview.view cell {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* ── 2. Rows: hover & selected ─────────────────────────── */
+window.csd treeview.view:hover,
+window.csd iconview:hover,
+window.csd list row:hover,
+dialog treeview.view:hover,
+dialog list row:hover,
+window.csd .sidebar row:hover,
+window.csd placessidebar row:hover {
+    background-color: rgba(122, 252, 255, 0.1);
+    background-image: none;
+    box-shadow: none;
+}
+
+window.csd treeview.view:selected,
+window.csd iconview:selected,
+window.csd list row:selected,
+dialog treeview.view:selected,
+dialog list row:selected,
+window.csd .sidebar row:selected,
+window.csd placessidebar row:selected {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    box-shadow: none;
+}
+
+/* Cells inside a highlighted row must not paint their own background,
+ * or the text sits on an unlit patch inside the highlight. */
+window.csd treeview.view:hover cell,
+window.csd treeview.view:selected cell,
+window.csd iconview:selected *,
+dialog treeview.view:selected cell {
+    background-color: transparent;
+    background-image: none;
+}
+
+window.csd treeview.view:selected,
+window.csd iconview:selected label,
+window.csd list row:selected label,
+dialog list row:selected label,
+window.csd .sidebar row:selected label,
+window.csd placessidebar row:selected label {
+    color: #ff7edb;
+}
+
+/* ── 3. Column headers (nemo list view) ────────────────── */
+window.csd treeview.view header button,
+dialog treeview.view header button {
+    background-color: #0E0616;
+    background-image: none;
+    color: #7afcff;
+    /* Adwaita fakes these borders with grey box-shadow; use a real one. */
+    box-shadow: none;
+    border: none;
+    border-right: 1px solid rgba(255, 126, 219, 0.35);
+    border-bottom: 1px solid #ff7edb;
+    border-radius: 0;
+}
+
+window.csd treeview.view header button:last-child,
+dialog treeview.view header button:last-child {
+    border-right: none;
+}
+
+window.csd treeview.view header button:hover,
+dialog treeview.view header button:hover {
+    background-color: rgba(255, 126, 219, 0.12);
+    color: #ff7edb;
+}
+
+/* ── 4. Menus (right-click, menubar dropdowns) ─────────────
+ * GTK3 menus are their own toplevel: window.popup > menu. */
+window.popup,
+window.popup menu,
+menu.menu {
+    background-color: #0E0616;
+    color: #ffffff;
+    border: 1px solid #ff7edb;
+    border-radius: 10px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+menuitem {
+    color: #ffffff;
+    padding: 8px 14px;
+}
+
+menuitem:hover,
+menuitem:selected {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    box-shadow: none;
+}
+
+menuitem:hover > label,
+menuitem:selected > label {
+    color: #ff7edb;
+}
+
+menuitem:disabled,
+menuitem:disabled > label {
+    color: #5c6776;
+}
+
+window.popup separator,
+menu separator {
+    background-color: rgba(255, 126, 219, 0.5);
+}
+
+window.popup check,
+window.popup radio,
+menuitem check,
+menuitem radio {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+/* Nemo's menubar sits in the window, not a popup. */
+window.csd menubar,
+window.csd menubar > menuitem {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+    box-shadow: none;
+}
+
+/* ── 5. Nemo ───────────────────────────────────────────────
+ * Nemo's sidebar IS inside a GtkPaned, so the paned separator from
+ * gtk-base.css already draws the divider — the sidebar must NOT add
+ * its own border or you get a 2px double line. */
+.nemo-window .sidebar,
+.nemo-window .nemo-places-sidebar,
+.nemo-window placessidebar {
+    border-left: none;
+    border-right: none;
+}
+
+.nemo-window,
+.nemo-window .primary-toolbar,
+.nemo-window statusbar,
+.nemo-window notebook > stack {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+}
+
+/* Current segment of the breadcrumb path bar */
+.nemo-window .path-bar button:checked,
+.nemo-window .nemo-pathbar-button:checked {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    color: #ff7edb;
+    box-shadow: none;
+}
+
+/* Overlay strip showing "n items" / drag hints */
+.nemo-window .floating-bar {
+    background-color: #0E0616;
+    color: #7afcff;
+    border: 1px solid #ff7edb;
+    border-radius: 8px;
+}
+
+.nemo-window .floating-bar label {
+    color: #7afcff;
+}
+
+/* ── 6. Notebook tabs (nemo tabs, meld panes) ──────────── */
+window.csd notebook > header {
+    background-color: #0E0616;
+    border-color: rgba(255, 126, 219, 0.35);
+}
+
+window.csd notebook > header > tabs > tab {
+    background-color: transparent;
+    background-image: none;
+    color: #5c6776;
+    border-bottom: 2px solid transparent;
+    box-shadow: none;
+}
+
+window.csd notebook > header > tabs > tab:checked {
+    color: #ff7edb;
+    border-bottom-color: #ff7edb;
+}

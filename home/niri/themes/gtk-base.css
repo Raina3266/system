@@ -1,0 +1,205 @@
+/* ═══════════════════════════════════════════════════════════
+ * GTK BASE — shared by GTK3 and GTK4
+ * ═══════════════════════════════════════════════════════════
+ * Imported by gtk3.css and gtk4.css. Only rules that look correct in
+ * EVERY GTK app belong here. Anything app- or version-specific goes in
+ * the importing file.
+ *
+ * ── SCOPING RULE (why every selector has a prefix) ──────────
+ * This loads at PRIORITY_USER (800), above the APPLICATION (600)
+ * priority of waybar's and walker's stylesheets, and GTK compares
+ * priority BEFORE specificity. A bare `button:hover` here would beat
+ * `#cpu:hover` in waybar-cyberpunk.css.
+ *
+ * So every selector must be rooted at an app window:
+ *   window.csd    GTK4 toplevels/dialogs, GTK3 CSD windows (nemo)
+ *   dialog        GTK3 dialogs (pavucontrol, nm-connection-editor)
+ *   window.popup  GTK3 menus
+ * waybar, walker and the ycal popup are layer-shell surfaces and carry
+ * none of those classes, so they can never be reached from here.
+ *
+ * Never add a bare `window`, `.background`, `tooltip`, `button`,
+ * `label`, `image`, `entry`, `row`, `popover` or `scrollbar` selector.
+ * Same reason there are no @define-color overrides: redefining
+ * Adwaita's names would leak into waybar/walker.
+ *
+ * Palette
+ *   bg    #0E0616      fg    #ffffff
+ *   pink  #ff7edb      rgba(255, 126, 219, a)
+ *   cyan  #7afcff      rgba(122, 252, 255, a)
+ *   red   #ff3333      dim   #5c6776
+ */
+
+/* ── 1. Window & container backgrounds ─────────────────────
+ * Adwaita paints these light; flatten them to the palette bg. */
+window.csd,
+dialog,
+window.csd box,
+window.csd scrolledwindow,
+window.csd viewport,
+dialog box,
+dialog stack,
+dialog scrolledwindow,
+window.csd notebook,
+window.csd notebook > stack,
+dialog notebook,
+dialog notebook > stack,
+window.csd paned,
+window.csd toolbar,
+dialog toolbar,
+window.csd textview,
+window.csd textview text,
+dialog textview,
+dialog textview text {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+}
+
+/* ── 2. Titlebar ───────────────────────────────────────────
+ * :backdrop shares the colour so an unfocused window doesn't look
+ * broken (Adwaita greys only the headerbar, which reads as a bug). */
+headerbar,
+.titlebar,
+headerbar:backdrop,
+.titlebar:backdrop,
+headerbar box {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+    box-shadow: none;
+    padding: 6px 10px;
+}
+
+headerbar:backdrop label,
+window.csd:backdrop label,
+dialog:backdrop label {
+    color: #ffffff;
+    opacity: 1;
+}
+
+/* ── 3. Symbolic icons ─────────────────────────────────── */
+window.csd image,
+dialog image,
+headerbar image {
+    color: #7afcff;
+}
+
+/* ── 4. Buttons ─────────────────────────────────────────── */
+window.csd button:hover,
+dialog button:hover {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    box-shadow: none;
+}
+
+window.csd button:hover > label,
+dialog button:hover > label {
+    color: #ff7edb;
+    text-shadow: none;
+}
+
+/* Pressed, or holding a popover open — without this Adwaita's grey
+ * :checked background shows through on menu buttons. */
+window.csd button:active,
+window.csd button:checked,
+dialog button:active,
+dialog button:checked {
+    background-color: rgba(255, 126, 219, 0.25);
+    background-image: none;
+    color: #ff7edb;
+    box-shadow: none;
+}
+
+/* ── 5. Entries & text fields ──────────────────────────── */
+window.csd entry,
+window.csd entry text,
+window.csd searchentry,
+window.csd searchentry text,
+window.csd spinbutton,
+dialog entry,
+dialog entry text,
+dialog spinbutton {
+    background-color: #0E0616;
+    background-image: none;
+    color: #ffffff;
+    border: 1px solid #ff7edb;
+}
+
+window.csd entry:focus,
+dialog entry:focus,
+window.csd textview:focus,
+dialog textview:focus {
+    border-color: #7afcff;
+    box-shadow: none;
+}
+
+/* ── 6. Check & radio indicators ───────────────────────────
+ * Adwaita paints an opaque background that punches a hole in a
+ * highlighted row; keep only the pink ring. */
+window.csd check,
+window.csd radio,
+dialog check,
+dialog radio {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+window.csd check:checked,
+window.csd radio:checked,
+dialog check:checked,
+dialog radio:checked {
+    background-color: #ff7edb;
+    background-image: none;
+    border-color: #ff7edb;
+    color: #0E0616;
+}
+
+/* ── 7. Scrollbars ─────────────────────────────────────── */
+window.csd scrollbar slider,
+dialog scrollbar slider {
+    background-color: rgba(255, 126, 219, 0.5);
+}
+
+window.csd scrollbar slider:hover,
+dialog scrollbar slider:hover {
+    background-color: #ff7edb;
+}
+
+/* ── 8. Separators ─────────────────────────────────────── */
+window.csd separator,
+dialog separator,
+headerbar separator {
+    background-color: rgba(255, 126, 219, 0.5);
+}
+
+/* Paned handles are the sidebar↔content divider: solid pink, 1px. */
+window.csd paned > separator,
+dialog paned > separator {
+    background-color: #ff7edb;
+    background-image: none;
+    border: none;
+    min-width: 1px;
+    min-height: 1px;
+}
+
+/* ── 9. Switch, progress, level ────────────────────────── */
+window.csd switch:checked,
+dialog switch:checked {
+    background-color: #ff7edb;
+}
+
+window.csd progressbar progress,
+dialog progressbar progress,
+dialog levelbar block.filled {
+    background-color: #7afcff;
+}
+
+/* ── 10. Selection highlight (text, not rows) ──────────── */
+window.csd selection,
+dialog selection {
+    background-color: rgba(255, 126, 219, 0.25);
+    color: #ff7edb;
+}

@@ -1,4 +1,16 @@
-/* 
+/* ═══════════════════════════════════════════════════════════
+ * WAYBAR BASE — shared by all four bars
+ * ═══════════════════════════════════════════════════════════
+ * Loaded first; each bar then loads its own file on top:
+ *   waybar-top-left.css     clock, hardware + system groups
+ *   waybar-top-center.css   media, lyrics, todo
+ *   waybar-top-right.css    tray, utilities, power
+ *   waybar-bottom.css       workspaces, taskbar, starred apps
+ *
+ * This file owns geometry (margin/padding/radius) and the default box
+ * background + border. The per-bar files own colour, glow and state
+ * classes (.warning/.critical/.muted/...).
+ *
  * Palette:
  * bg:      #190326
  * fg:      #cbe3e7
