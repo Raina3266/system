@@ -76,9 +76,6 @@ let
     # Bluetooth menu via D-Bus (replaces built-in provider to avoid pairing
     # hangs with bluetoothctl). See ./bluetooth.nix.
     provider.menus.lua."bluetooth" = (import ./bluetooth.nix { inherit pkgs; }).menuLua;
-
-    # Wi-Fi menu (see ./wifi.nix)
-    provider.menus.lua."wifi" = import ./wifi.nix { inherit pkgs; };
   };
 
   # Config generation: services.elephant.settings writes elephant/config.toml;

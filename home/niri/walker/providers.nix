@@ -423,29 +423,8 @@
         after = "AsyncReload";
       }
     ];
-    # Menu-specific actions: each menu is a provider (menus:wifi, menus:bluetooth).
+    # Menu-specific actions: each menu is a provider (menus:bluetooth, etc.)
     # Only actions present on an entry are shown.
-    "menus:wifi" = [
-      {
-        action = "menus:default";
-        label = "connect";
-        default = true;
-        bind = "Return";
-        after = "Close";
-      }
-      {
-        action = "disconnect";
-        label = "disconnect";
-        bind = "ctrl d";
-        after = "AsyncClearReload";
-      }
-      {
-        action = "forget";
-        label = "forget";
-        bind = "ctrl f";
-        after = "AsyncClearReload";
-      }
-    ];
     # Actions defined here; visibility controlled by bluetooth.nix Actions table
     # per entry (e.g., power_on only when off, pair only on unpaired).
 
