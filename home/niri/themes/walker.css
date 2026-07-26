@@ -3,7 +3,9 @@
  * Classes: .box-wrapper=outer | .input=search | .item-box=rows | .preview*=preview
  * Palette: bg=#0a0a14f2 bg-mod=#141428b3 fg=#cbe3e7 pink=#ff7edb cyan=#7afcff amber=#f29e74 red=#ff3333 dim=#5c6776
  */
- 
+
+/* ── Fonts / reset ── */
+
 * {
   all: unset;
   font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
@@ -11,43 +13,38 @@
   font-weight: 600;
 }
 
-popover {
-  background: #190326;
-  border: 1px solid #ff7edb;
-  border-radius: 18px;
-  padding: 10px;
-  box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
-}
+/* ── Icon sizes ── */
 
 .normal-icons {
   -gtk-icon-size: 16px;
 }
 
 .large-icons {
-  -gtk-icon-size: 32px;
+  -gtk-icon-size: 25px;
 }
 
-scrollbar {
-  opacity: 0.5;
-  background-color: rgba(20, 20, 40, 0.5);
+.preview .large-icons {
+  -gtk-icon-size: 50px;
 }
 
-scrollbar slider {
-  background-color: #ff7edb;
-  border-radius: 2px;
-  min-width: 4px;
-  box-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+.item-image-text {
+  font-size: 28px;
 }
 
-/* Main window box: positioning/sizing by layout XML (GTK4 alignment > CSS)
+/* ── Main window box ── */
+/* positioning/sizing by layout XML (GTK4 alignment > CSS)
  * cyberpunk theme: valign=start halign=end (top-right)
  * BoxWrapper: no fixed size, Scroll caps with max-content-* */
+
 .box-wrapper {
   background: #0E0616;
   padding: 12px;
   border-radius: 15px;
   border: 1px solid rgba(255, 126, 219, 0.5);
+  min-width: 150px;
 }
+
+/* ── Search input ── */
 
 .elephant-hint,
 .placeholder {
@@ -59,7 +56,6 @@ scrollbar slider {
   padding-bottom: 5px;
 }
 
-/* Search input */
 .input placeholder {
   opacity: 0.5;
   color: #5c6776;
@@ -67,7 +63,6 @@ scrollbar slider {
 
 .input selection {
   background: rgba(255, 126, 219, 0.25);
-  color: #ff7edb;
 }
 
 .input {
@@ -78,7 +73,6 @@ scrollbar slider {
   border: 1px solid rgba(255, 126, 219, 0.2);
   border-radius: 6px;
   font-size: 14px;
-  text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 
 .input:focus,
@@ -87,25 +81,30 @@ scrollbar slider {
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
+/* ── List items ── */
+
 .list {
   color: #cbe3e7;
 }
 
-/* List items */
 .item-box {
   border-radius: 6px;
-  padding: 8px;
+  padding: 10px;
   color: #cbe3e7;
 }
 
-.item-quick-activation {
-  background: rgba(255, 126, 219, 0.15);
-  border: 1px solid rgba(255, 126, 219, 0.5);
-  border-radius: 5px;
-  padding: 10px;
-  color: #ff7edb;
-  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+
+
+.item-subtext {
+  font-size: 12px;
+  color: #5c6776;
 }
+
+.providerlist .item-subtext {
+  opacity: 0.75;
+}
+
+/* ── Hover / selected states ── */
 
 child:hover .item-box {
   background: rgba(255, 126, 219, 0.15);
@@ -114,8 +113,7 @@ child:hover .item-box {
   text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
-child:selected .item-box,
-row:selected .item-box {
+child:selected .item-box {
   background: rgba(255, 126, 219, 0.15);
   border: 1px solid rgba(255, 126, 219, 0.5);
   color: #ff7edb;
@@ -123,25 +121,12 @@ row:selected .item-box {
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
-.item-subtext {
-  font-size: 12px;
-  color: #5c6776;
-}
-
-child:selected .item-subtext,
-row:selected .item-subtext {
+child:selected .item-subtext {
   color: #7afcff;
   text-shadow: 0 0 6px rgba(122, 252, 255, 0.5);
 }
 
-.providerlist .item-subtext {
-  font-size: unset;
-  opacity: 0.75;
-}
-
-.item-image-text {
-  font-size: 28px;
-}
+/* ── Preview pane ── */
 
 .preview-box {
     min-width: 300px;
@@ -164,36 +149,10 @@ row:selected .item-subtext {
   color: #cbe3e7;
 }
 
-/* Preview scroll: caps size for large PDF/image previews */
-.preview-scroll {
-  border-radius: 10px;
-}
 
-.symbols .item-image {
-  font-size: 24px;
-}
 
-.todo.urgent {
-  font-size: 24px;
-  color: #ff3333;
-  text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
-}
+/* ── Keybinds / action hints ── */
 
-.todo.active {
-  font-weight: bold;
-  color: #ff7edb;
-  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-}
-
-.bluetooth.disconnected {
-  opacity: 0.5;
-}
-
-.preview .large-icons {
-  -gtk-icon-size: 64px;
-}
-
-/* Keybinds / action hints */
 .keybinds {
   padding-top: 10px;
   border-top: 1px solid rgba(255, 126, 219, 0.2);
@@ -224,6 +183,26 @@ row:selected .item-subtext {
   border: 1px solid #cbe3e7;
 }
 
+/* ── Provider-specific items (todo / bluetooth) ── */
+
+.todo.urgent {
+  font-size: 24px;
+  color: #ff3333;
+  text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
+}
+
+.todo.active {
+  font-weight: bold;
+  color: #ff7edb;
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+.bluetooth.disconnected {
+  opacity: 0.5;
+}
+
+/* ── Error / misc states ── */
+
 .error {
   padding: 10px;
   background: #ff3333;
@@ -234,7 +213,27 @@ row:selected .item-subtext {
   font-style: italic;
 }
 
-.preview-content.archlinuxpkgs,
-.preview-content.dnfpackages {
-  font-family: monospace;
+/* ── Popover ── */
+
+popover {
+  background: #190326;
+  border: 1px solid #ff7edb;
+  border-radius: 18px;
+  padding: 10px;
+  box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
+  min-width: 200px;
+}
+
+/* ── Scrollbar ── */
+
+scrollbar {
+  opacity: 0.5;
+  background-color: rgba(20, 20, 40, 0.5);
+}
+
+scrollbar slider {
+  background-color: #ff7edb;
+  border-radius: 2px;
+  min-width: 4px;
+  box-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }

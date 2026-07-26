@@ -14,6 +14,8 @@
         </style>
         <property name="overflow">hidden</property>
         <property name="orientation">horizontal</property>
+        <property name="width-request">150</property>
+
         <!-- top-right: aligned to top-end so it drops down from the top-right corner -->
         <property name="valign">start</property>
         <property name="halign">end</property>

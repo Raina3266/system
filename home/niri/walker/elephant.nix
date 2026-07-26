@@ -52,7 +52,6 @@ let
     provider.menus.toml."power" = {
       name = "power";
       name_pretty = "Power";
-      action = "sh -c '%VALUE%'";
       entries = [
         {
           text = "Shutdown";
