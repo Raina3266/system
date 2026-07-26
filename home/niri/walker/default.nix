@@ -97,12 +97,13 @@ let
     layouts.layout = "walker-top-right.xml";
   };
 
-  # Alternate theme for waybar todo button (center-positioned)
+  # Alternate theme for waybar todo button: same top-right layout, but
+  # includes the item_todo template override (upstream hardcodes 48px icon).
   extraThemes = themeFiles "cyberpunk-center" {
     style = "walker.css";
     layouts = {
-      "layout" = "walker-top-center.xml";
-      "item_todo" = "walker-top-center.xml";
+      "layout" = "walker-top-right.xml";
+      "item_todo" = "walker-top-right.xml";
     };
   };
 
