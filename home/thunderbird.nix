@@ -18,6 +18,27 @@
 
   programs.thunderbird = {
     enable = true;
+
+    # Birdtray (forced to xcb above) decides whether Thunderbird is running
+    # solely by looking up its X11 window -- its log prints "Window ID found:
+    # 0" when the lookup fails, which is what draws the red cross. A
+    # native-Wayland Thunderbird owns no X11 window, so the lookup always
+    # failed; combined with common/launchthunderbird=true, birdtray also read
+    # every close as a crash and immediately relaunched it. Running
+    # Thunderbird on XWayland makes the window visible to birdtray and fixes
+    # both symptoms. Trade-off: blurrier rendering under fractional scaling.
+    package = pkgs.symlinkJoin {
+      name = "thunderbird-xwayland-${pkgs.thunderbird.version}";
+      paths = [ pkgs.thunderbird ];
+      nativeBuildInputs = [ pkgs.makeWrapper ];
+      # Home Manager reads .version off this package to derive
+      # programs.thunderbird.release, and symlinkJoin would otherwise drop it.
+      inherit (pkgs.thunderbird) version meta;
+      postBuild = ''
+        wrapProgram $out/bin/thunderbird --set MOZ_ENABLE_WAYLAND 0
+      '';
+    };
+
     profiles.default = {
       isDefault = true;
       settings = {

@@ -107,7 +107,6 @@ menu.menu {
 
 menuitem {
     color: #ffffff;
-    padding: 8px 14px;
 }
 
 menuitem:hover,
@@ -145,7 +144,7 @@ menuitem radio {
 /* Nemo menubar: inside window (not popup) */
 window.csd menubar,
 window.csd menubar > menuitem {
-    background-color: #0E0616;
+    background-color: transparent;
     background-image: none;
     color: #ffffff;
     box-shadow: none;

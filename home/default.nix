@@ -41,7 +41,7 @@
     qq
     wemeet
     whatsie
-    thunderbird
+    # thunderbird: installed via programs.thunderbird (xwayland wrapper) in thunderbird.nix
 
     # productivity / office
     onlyoffice-desktopeditors

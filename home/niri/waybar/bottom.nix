@@ -99,7 +99,7 @@ in
     min_button_width = 120;
     max_button_width = 200;
     # Default to eDP-1 width (overridden per-output below)
-    max_taskbar_width = 1350;
+    max_taskbar_width = 1300;
     scroll_arrow_left = " ◀ ";
     scroll_arrow_right = " ▶ ";
 
