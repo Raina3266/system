@@ -1,9 +1,6 @@
-/* WAYBAR BASE: shared by all bars
- * Loaded first, then per-bar files (top-left/center/right, bottom)
- * Owns: geometry (margin/padding/radius), default background/border
- * Per-bar files: colors, glow, state classes (.warning/.critical/.muted)
- * Palette: bg=#190326 fg=#cbe3e7 pink=#ff7edb cyan=#7afcff amber=#f29e74 red=#ff3333 dim=#5c6776
- */
+/* WAYBAR BASE: shared by all bars */
+
+/* ── Fonts ── */
 
 * {
     font-family:
@@ -17,21 +14,22 @@
     font-size: 16px;
 }
 
+/* ── Waybar ── */
+
 window#waybar.top {
     background-color: #0e0616;
     border-bottom: 2px solid #ff7edb;
     border-radius: 20px;
 }
 
-/* Bottom bar: pink border on top */
 window#waybar.bottom {
     background-color: #0e0616;
     border-top: 2px solid #ff7edb;
     border-radius: 20px;
 }
 
-/* Module base: geometry here, colors in per-bar files
- * #group-* > widget covers modules nested in groups */
+/* ── Standard modules ── */
+
 #cpu,
 #temperature,
 #memory,
@@ -64,10 +62,12 @@ window#waybar.bottom {
     color: #7afcff;
     background-color: transparent;
     margin: 0 3px;
-    padding: 0 15px;
+    padding: 0 11px;
     border-radius: 6px;
-    border: 2px solid rgba(255, 126, 219, 0.2);
+    border: 2px solid rgba(255, 126, 219, 0.3);
 }
+
+/* ── Borderless modules (media / todo / workspaces) ── */
 
 #workspaces,
 #custom-media,
@@ -93,6 +93,12 @@ window#waybar.bottom {
     color: #ff7edb;
 }
 
+#custom-media.paused,
+#custom-lyrics.paused {
+    color: #5c6776;
+    margin-top: 2px;
+}
+
 #custom-media-prev,
 #custom-media-next,
 .scroll-arrow-left,
@@ -104,12 +110,47 @@ window#waybar.bottom {
     padding: 3px;
 }
 
-#custom-media.paused,
-#custom-lyrics.paused {
+/* ── Bottom buttons ── */
+
+#workspaces button {
     color: #5c6776;
+    margin-top: 2px;
+    padding: 0 6px;
 }
 
-/* Hover effect */
+#workspaces button.focused {
+    background-image: none;
+    border: 2px solid rgba(255, 126, 219, 0.5);
+    background-color: rgba(255, 126, 219, 0.2);
+    color: #7afcff;
+}
+
+.niri-window-buttons button {
+    color: ghostwhite;
+    padding-left: 10px;
+    padding-right: 5px;
+    border-radius: 6px;
+    border: 2px solid rgba(255, 126, 219, 0.2);
+}
+
+.niri-window-buttons button.focused {
+    background-image: none;
+    border: 2px solid rgba(255, 126, 219, 0.5);
+    background-color: rgba(255, 126, 219, 0.15);
+    color: #7afcff;
+}
+
+.niri-window-buttons button.dragging {
+    opacity: 0.5;
+}
+
+.niri-window-buttons button.drag-over {
+    border-color: #7afcff;
+    background-color: rgba(122, 252, 255, 0.15);
+}
+
+/* ── Hover states ── */
+
 #workspaces button:hover,
 #cpu:hover,
 #temperature:hover,
@@ -140,10 +181,10 @@ window#waybar.bottom {
 .scroll-arrow-right:hover {
     background-image: none;
     background-color: rgba(255, 126, 219, 0.1);
-    border-color: rgba(255, 126, 219, 0.5);
 }
 
-/* Tooltips */
+/* ── Tooltips ── */
+
 tooltip {
     background-color: #3a3345;
     border: 1px solid rgba(255, 126, 219, 0.6);
@@ -156,12 +197,12 @@ tooltip label {
     color: #cbe3e7;
 }
 
-/* Calendar: red accent when events today */
+/* ── Alert states (warning / critical) ── */
+
 #custom-ycal.has-events {
     border-color: darkred;
 }
 
-/* Alert states */
 #temperature.warning,
 #custom-battery.warning:not(.charging),
 #custom-battery.low:not(.charging) {
@@ -176,7 +217,6 @@ tooltip label {
     animation: blink 1s steps(2) infinite;
 }
 
-/* Blink animation for .critical states */
 @keyframes blink {
     to {
         color: #1a1a2e;

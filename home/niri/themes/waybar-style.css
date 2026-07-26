@@ -1,5 +1,0 @@
-/* Waybar entrypoint: concatenates the per-bar stylesheets via @import.
-   Relative paths resolve against this file's location, so this works
-   through the out-of-store symlink for live theme editing. */
-@import url("waybar.css");
-@import url("waybar-bottom.css");

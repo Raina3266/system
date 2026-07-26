@@ -74,27 +74,10 @@ in
           };
         };
 
-        # Style is a symlink to the repo (see ../themes/waybar-style.css),
-        # so edits apply without a rebuild. Each imported stylesheet is also
-        # symlinked next to it, since GTK resolves @import relative to the
-        # loaded file's directory (~/.config/waybar/), not the link target.
-        xdg.configFile =
-          let
-            waybarCss =
-              name:
-              lib.nameValuePair "waybar/${name}" {
-                source = config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/${name}";
-              };
-          in
-          lib.listToAttrs (map waybarCss [
-            "waybar.css"
-            "waybar-bottom.css"
-          ])
-          // {
-            "waybar/style.css".source =
-              config.lib.file.mkOutOfStoreSymlink
-                "/home/raina/System/home/niri/themes/waybar-style.css";
-          };
+        # Style is symlinked directly to the repo's waybar.css for live editing
+        xdg.configFile."waybar/style.css".source =
+          config.lib.file.mkOutOfStoreSymlink
+            "/home/raina/System/home/niri/themes/waybar.css";
       })
     ]
   );
