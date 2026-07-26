@@ -59,7 +59,7 @@ let
       class="pending"
     fi
 
-    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>"
+    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>          "
 
     # Tooltip: pending tasks with pinned first
     list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {

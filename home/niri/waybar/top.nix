@@ -17,18 +17,18 @@ in
     "group/hardware"
   ];
   modules-center = [
+    "custom/todo"
     "custom/media-prev"
     "custom/media"
     "custom/lyrics"
     "custom/media-next"
-    "custom/todo"
   ];
   modules-right = [
     "tray"
     "custom/cliphist"
     "custom/audio"
-    "custom/timer"
     "custom/bt"
+    "custom/timer"
     "custom/powermenu"
   ];
 }

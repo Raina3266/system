@@ -3,17 +3,11 @@
  * Classes: .box-wrapper=outer | .input=search | .item-box=rows | .preview*=preview
  * Palette: bg=#0a0a14f2 bg-mod=#141428b3 fg=#cbe3e7 pink=#ff7edb cyan=#7afcff amber=#f29e74 red=#ff3333 dim=#5c6776
  */
-
-@define-color window_bg_color #0a0a14f2;
-@define-color accent_bg_color #ff7edb;
-@define-color theme_fg_color #cbe3e7;
-@define-color error_bg_color #ff3333;
-@define-color error_fg_color #cbe3e7;
-
+ 
 * {
   all: unset;
   font-family: "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono", "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
 }
 
