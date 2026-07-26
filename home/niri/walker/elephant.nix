@@ -52,23 +52,22 @@ let
     provider.menus.toml."power" = {
       name = "power";
       name_pretty = "Power";
-      icon = "system-shutdown";
       action = "sh -c '%VALUE%'";
       entries = [
         {
-          text = "   Shutdown";
+          text = "Shutdown";
           value = "systemctl poweroff";
         }
         {
-          text = "   Reboot";
+          text = "Reboot";
           value = "systemctl reboot";
         }
         {
-          text = "   Suspend";
+          text = "Suspend";
           value = "systemctl suspend";
         }
         {
-          text = "   Logout";
+          text = "Logout";
           value = "niri msg action quit";
         }
       ];

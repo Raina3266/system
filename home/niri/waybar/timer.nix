@@ -66,7 +66,7 @@ let
     choice=$(printf '%s\n' \
       "15 min" "20 min" "25 min" "30 min" "45 min" "1 hour" \
       "Custom…" \
-      | ${walker} -d -p "Timer" 2>/dev/null)
+      | ${walker} -n -d -p "Timer" 2>/dev/null)
     [ -z "$choice" ] && exit 0
 
     case "$choice" in

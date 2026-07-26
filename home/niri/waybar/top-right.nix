@@ -21,7 +21,7 @@ let
 in
 {
   # Audio: opens walker device picker (volume in pulseaudio module)
-  "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-m menus:audio";
+  "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-n -m menus:audio";
 
   "tray" = {
     icon-size = 18;
@@ -52,7 +52,7 @@ in
     # Left: open walker bluetooth menu | Right: toggle power
     # Uses btctl (D-Bus) to avoid bluetoothctl agent conflicts
     on-click = pkgs.writeShellScript "waybar-bt" ''
-      ${walker} -m menus:bluetooth
+      ${walker} -n -m menus:bluetooth
     '';
     on-click-right = pkgs.writeShellScript "waybar-bt-toggle-power" ''
       powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
@@ -64,6 +64,6 @@ in
     '';
   };
 
-  "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-m menus:power";
+  "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-n -m menus:power";
 }
 // (import ./timer.nix { inherit pkgs; })

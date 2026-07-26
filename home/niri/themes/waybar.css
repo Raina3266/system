@@ -83,14 +83,10 @@ window#waybar.bottom {
 
 #custom-media,
 #custom-lyrics,
+#custom-todo,
 #custom-media-prev:hover,
 #custom-media-next:hover {
     color: #7afcff;
-}
-
-#custom-todo {
-    margin-left: 50px;
-    color: #ff7edb;
 }
 
 #custom-media.paused,

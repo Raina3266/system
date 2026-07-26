@@ -26,8 +26,8 @@ in
   modules-right = [
     "tray"
     "custom/cliphist"
-    "custom/timer"
     "custom/audio"
+    "custom/timer"
     "custom/bt"
     "custom/powermenu"
   ];
