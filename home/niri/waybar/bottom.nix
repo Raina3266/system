@@ -56,7 +56,6 @@ in
 
   modules-left = [
     "niri/workspaces"
-    "custom/thunderbird"
     "custom/gcal"
     "custom/gkeep"
     "custom/gphotos"
@@ -68,7 +67,6 @@ in
   ];
 
   "custom/yazi" = starredApp "Yazi" "🐤" "ghostty -e yazi";
-  "custom/thunderbird" = starredApp "Thunderbird" "📧" "thunderbird";
   "custom/obsidian" = starredApp "Obsidian" "💎" "obsidian";
   "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
   "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
