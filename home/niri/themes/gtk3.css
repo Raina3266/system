@@ -14,7 +14,7 @@ dialog treeview.view,
 window.csd placessidebar,
 window.csd .sidebar,
 dialog .sidebar {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #ffffff;
 }
@@ -71,7 +71,7 @@ window.csd placessidebar row:selected label {
 /* 3. Column headers (nemo list view) */
 window.csd treeview.view header button,
 dialog treeview.view header button {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #7afcff;
     /* Real borders (Adwaita uses grey box-shadow) */
@@ -97,16 +97,16 @@ dialog treeview.view header button:hover {
 window.popup,
 window.popup menu,
 menu.menu {
-    background-color: #0E0616;
+    background-color: #0e0616;
     color: #ffffff;
     border: 1px solid #ff7edb;
+    padding-right: 10px;
     border-radius: 10px;
-    padding-top: 10px;
-    padding-bottom: 10px;
 }
 
 menuitem {
     color: #ffffff;
+    padding: 8px;
 }
 
 menuitem:hover,
@@ -118,6 +118,7 @@ menuitem:selected {
 
 menuitem:hover > label,
 menuitem:selected > label {
+    background-image: none;
     color: #ff7edb;
 }
 
@@ -155,14 +156,14 @@ window.csd menubar > menuitem {
 .nemo-window .nemo-places-sidebar,
 .nemo-window placessidebar {
     border-left: none;
-    border-right: none;
+    border-right: rgba(255, 126, 219, 0.1);
 }
 
 .nemo-window,
 .nemo-window .primary-toolbar,
 .nemo-window statusbar,
 .nemo-window notebook > stack {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #ffffff;
 }
@@ -178,7 +179,7 @@ window.csd menubar > menuitem {
 
 /* Overlay strip ("n items" / drag hints) */
 .nemo-window .floating-bar {
-    background-color: #0E0616;
+    background-color: #0e0616;
     color: #7afcff;
     border: 1px solid #ff7edb;
     border-radius: 8px;
@@ -190,7 +191,7 @@ window.csd menubar > menuitem {
 
 /* 6. Notebook tabs (nemo, meld) */
 window.csd notebook > header {
-    background-color: #0E0616;
+    background-color: #0e0616;
     border-color: rgba(255, 126, 219, 0.35);
 }
 

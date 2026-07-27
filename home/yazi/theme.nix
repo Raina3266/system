@@ -1,76 +1,56 @@
 # Yazi theme — Cyberpunk palette.
 # Aligned with System/home/niri/themes/{fcitx5,walker,waybar}-cyberpunk.
 # Schema: https://yazi-rs.github.io/docs/configuration/theme (v26.5.6)
-#
-# Palette (shared across the desktop):
-#   bg:     #0a0a14  dark blue-black
-#   bg-mod: #141428  secondary surface
-#   fg:     #cbe3e7  light cyan-white
-#   pink:   #ff7edb  primary accent (selection, borders)
-#   cyan:   #7afcff  secondary accent (input, highlights)
-#   amber:  #f29e74  media / warnings
-#   red:    #ff3333  errors / archives
-#   dim:    #5c6776  muted text
 let
-  bg = "#0a0a14";
-  bgmod = "#0E0616";
+  bg = "#0a0a14"; # dark blue-black
+  bgmod = "#0E0616"; # secondary surface
+  fg = "#cbe3e7"; # light cyan-white
   white = "#ffffff";
-  fg = "#cbe3e7";
-  pink = "#ff7edb";
-  cyan = "#7afcff";
-  red = "#ff3333";
-  dim = "#5c6776";
-  green = "#6af6a8";   
-  yellow = "#ffe66d";     
-  purple = "#c200fb";  
-  amber = "#f29e74";   
+  pink = "#ff7edb"; # primary accent (selection, borders)
+  cyan = "#7afcff"; # secondary accent (input, highlights)
+  green = "#6af6a8";
+  yellow = "#ffe66d";
+  purple = "#c200fb";
+  amber = "#f29e74"; # media / warnings
+  red = "#ff3333"; # errors
+  dim = "#5c6776"; # muted text
 in
 {
   # ── Filetype rules ──────────────────────────────────────────────────────
   filetype.rules = [
-    # ── Directories ──
     { url = "*/"; fg = cyan; bold = true; }
 
     # ── Images ──
     { mime = "image/*"; fg = green; }
     { url = "*.{bmp,webp,svg,ico,tif,tiff,heic,heif,avif,jxl,cr2,cr3,nef,arw,dng,raw,orf,rw2}"; fg = green; }
 
-    # ── Video ──
+    # ── Media ──
     { mime = "video/*"; fg = yellow; }
-
-    # ── Audio ──
     { mime = "audio/*"; fg = amber; }
 
-    # ── PDF ──
+    # ── Documents ──
     { mime = "application/pdf"; fg = purple; }
-
-    # ── Office documents & spreadsheets ──
     { mime = "application/vnd.openxmlformats-*"; fg = purple; }
     { mime = "application/vnd.ms-*"; fg = purple; }
     { mime = "application/msword"; fg = purple; }
     { mime = "application/vnd.oasis.opendocument.*"; fg = purple; }
     { url = "*.{doc,docx,ppt,pptx,xls,xlsx,csv,odt,ods,odp}"; fg = purple; }
 
-    # ── Archives (cyan — caution) ──
+    # ── Archives ──
     { mime = "application/{,g}zip"; fg = cyan; }
     { mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}"; fg = cyan; }
     { mime = "application/java-archive"; fg = cyan; }
 
-    # ── Code & scripts ──
-    { mime = "text/*"; fg = white; }
+    # ── Code, data & markup ──
+    { mime = "text/*"; fg = white; } # covers markdown, html, css
     { mime = "application/javascript"; fg = white; }
     { mime = "application/x-shellscript"; fg = white; }
     { mime = "application/x-python"; fg = white; }
     { mime = "application/x-rust"; fg = white; }
-
-    # ── Data & markup formats ──
     { mime = "application/json"; fg = white; }
     { mime = "application/toml"; fg = white; }
     { mime = "application/yaml"; fg = white; }
     { mime = "application/xml"; fg = white; }
-    { mime = "text/markdown"; fg = white; }
-    { mime = "text/html"; fg = white; }
-    { mime = "text/css"; fg = white; }
 
     # ── Executables & binaries ──
     { mime = "application/x-executable"; fg = dim; }

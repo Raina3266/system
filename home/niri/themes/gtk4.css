@@ -1,19 +1,19 @@
 /* GTK4: portal file chooser (Chrome/Zed/Discord/Obsidian), loupe, gnome-control-center
- * GTK4-only nodes: listview, columnview, gridview, popover/modelbutton, .navigation-sidebar
+ * GTK4-only nodes: listview, columnview, gridview, popover/modelbutton, placessidebar
  * walker/waybar-ycal: layer-shell, not reached here (see walker.css)
  * Colors/buttons/entries: see gtk-base.css
  */
 
 @import url("gtk-base.css");
 
-/* 1. Views & rows */
+/* 1. Views: base background */
 window.csd list,
 window.csd listview,
 window.csd columnview,
 window.csd gridview,
 window.csd .view,
 window.csd .navigation-sidebar {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #ffffff;
 }
@@ -68,7 +68,7 @@ window.csd row:hover entry,
 window.csd row:hover entry text,
 window.csd row:selected entry,
 window.csd row:selected entry text {
-    background-color: #0E0616;
+    background-color: #0e0616;
 }
 
 window.csd row:selected label,
@@ -82,21 +82,12 @@ window.csd .navigation-sidebar row:selected label {
 
 /* 3. Column headers (Name/Size/Type/Modified) */
 window.csd columnview > header button {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #7afcff;
     /* Real borders (Adwaita uses grey box-shadow) */
     box-shadow: none;
-    border: 1px solid rgba(255, 126, 219, 0.35);
-}
-
-window.csd columnview > header button:last-child {
-    border-right: none;
-}
-
-window.csd columnview > header button:hover {
-    background-color: rgba(255, 126, 219, 0.12);
-    color: #ff7edb;
+    border-bottom: 1px solid rgba(255, 126, 219, 0.35);
 }
 
 /* 4. Popovers (visible box: > contents; popover node: transparent shell) */
@@ -109,7 +100,7 @@ window.csd popover.background {
 }
 
 window.csd popover > contents {
-    background-color: #0E0616;
+    background-color: #0e0616;
     color: #ffffff;
     border: 1px solid #ff7edb;
     border-radius: 12px;
@@ -145,34 +136,46 @@ window.csd modelbutton:disabled label {
     color: #5c6776;
 }
 
-/* 5. File chooser: sidebar not in GtkPaned, draws own divider (scoped to avoid double line) */
-filechooser .sidebar,
-filechooser .navigation-sidebar,
-filechooser placessidebar {
-    border-left: none;
-    border-right: 1px solid #ff7edb;
+/* 5. Headerbar backdrop: portal file dialog paints it grey when unfocused.
+ * windowhandle wraps the headerbar; .flat wins over plain headerbar:backdrop. */
+window.csd:backdrop headerbar,
+window.csd:backdrop headerbar.flat,
+window.csd headerbar:backdrop,
+window.csd windowhandle:backdrop,
+window.csd:backdrop windowhandle,
+window.csd:backdrop windowhandle headerbar {
+    background-color: #0e0616;
+    background-image: none;
+    box-shadow: none;
 }
 
-/* Inner nodes: no border for 1px divider */
-filechooser .sidebar list,
-filechooser .navigation-sidebar list,
-filechooser placessidebar list,
-filechooser placessidebar scrolledwindow,
-filechooser placessidebar viewport {
-    border-left: none;
-    border-right: none;
+/* Whole-window backdrop tint (libadwaita/Adwaita greys everything unfocused) */
+window.csd:backdrop box,
+window.csd:backdrop .background {
+    background-color: #0e0616;
+    background-image: none;
 }
 
-/* File chooser region borders */
-filechooser headerbar {
-    border-bottom: 1px solid #ff7edb;
+/* 6. File chooser: sidebar not in GtkPaned, draws own divider (scoped to avoid double line) */
+
+window.csd placessidebar {
+    border-right: 1px solid #ff7edb; /* row height / inner spacing */
+}
+/* Each sidebar row: Home, Downloads, ... */
+window.csd placessidebar row,
+window.csd .navigation-sidebar row {
+    padding: 1px; /* row height / inner spacing */
 }
 
-filechooser actionbar,
-filechooser actionbar > revealer > box {
-    border-top: 1px solid #ff7edb;
+/* Eject buttons (e.g. GoogleDrive) */
+window.csd placessidebar row button.image-button {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: #7afcff;
 }
 
-filechooser searchbar > revealer > box {
-    border-bottom: 1px solid rgba(255, 126, 219, 0.35);
+window.csd placessidebar row button.image-button:hover {
+    color: #ff7edb;
+    background-color: rgba(255, 126, 219, 0.15);
 }

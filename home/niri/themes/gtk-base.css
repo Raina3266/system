@@ -14,6 +14,7 @@ dialog,
 window.csd box,
 window.csd scrolledwindow,
 window.csd viewport,
+window.csd headerbar,
 dialog box,
 dialog stack,
 dialog scrolledwindow,
@@ -27,28 +28,26 @@ dialog toolbar,
 window.csd textview,
 window.csd textview text,
 dialog textview,
-dialog textview text {
-    background-color: #0E0616;
+dialog textview text,
+.titlebar,
+headerbar box {
+    background-color: #0e0616;
     background-image: none;
     color: #ffffff;
 }
 
-/* 2. Titlebar (:backdrop keeps color for unfocused windows) */
-headerbar,
-.titlebar,
-headerbar:backdrop,
-.titlebar:backdrop,
-headerbar box {
-    background-color: #0E0616;
-    background-image: none;
-    color: #ffffff;
-    box-shadow: none;
+window.csd headerbar {
+    border-bottom: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+window.csd {
+    border: 1px solid #ff7edb;
 }
 
 headerbar:backdrop label,
 window.csd:backdrop label,
 dialog:backdrop label {
-    color: rgba(255, 126, 219, 0.15);
+    color: #ffffff;
     opacity: 1;
 }
 
@@ -63,15 +62,9 @@ headerbar image {
 /* 4. Buttons */
 window.csd button:hover,
 dialog button:hover {
-    background-color: rgba(255, 126, 219, 0.15);
+    background-color: rgba(255, 126, 219, 0.1);
     background-image: none;
     box-shadow: none;
-}
-
-window.csd button:hover > label,
-dialog button:hover > label {
-    color: #ff7edb;
-    text-shadow: none;
 }
 
 /* Pressed/checked state (prevents Adwaita grey background) */
@@ -94,7 +87,7 @@ window.csd spinbutton,
 dialog entry,
 dialog entry text,
 dialog spinbutton {
-    background-color: #0E0616;
+    background-color: #0e0616;
     background-image: none;
     color: #ffffff;
     border: 1px solid #ff7edb;
@@ -126,7 +119,7 @@ dialog radio:checked {
     background-color: #ff7edb;
     background-image: none;
     border-color: #ff7edb;
-    color: #0E0616;
+    color: #0e0616;
 }
 
 /* 7. Scrollbars */

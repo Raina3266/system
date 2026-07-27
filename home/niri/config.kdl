@@ -123,6 +123,7 @@ binds {
     Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
+    Mod+Y hotkey-overlay-title="Open Yazi" { spawn "ghostty" "-e" "yazi"; }
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)

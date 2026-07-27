@@ -46,7 +46,9 @@ let
   };
 
   # Chrome PWA launcher
-  chromeApp = name: icon: appId: starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
+  chromeApp =
+    name: icon: appId:
+    starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
 in
 {
   layer = "top";
@@ -56,17 +58,15 @@ in
 
   modules-left = [
     "niri/workspaces"
+    "custom/obsidian"
     "custom/gcal"
     "custom/gkeep"
     "custom/gphotos"
-    "custom/obsidian"
-    "custom/tauon"
     "custom/whatsapp"
-    "custom/yazi"
+    "custom/tauon"
     "cffi/niri_window_buttons"
   ];
 
-  "custom/yazi" = starredApp "Yazi" "🐤" "ghostty -e yazi";
   "custom/obsidian" = starredApp "Obsidian" "💎" "obsidian";
   "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
   "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
@@ -103,7 +103,7 @@ in
 
     # Per-monitor logical widths (mode width / scale, see niri/config.kdl)
     max_taskbar_width_per_output = {
-      "eDP-1" = 1350; # 1920x1200 @ 1x
+      "eDP-1" = 1400; # 1920x1200 @ 1x
       "DP-8" = 2000; # 2560x1440 @ 1x
       "DP-7" = 1700; # 2560x2880 @ 1.25x = 2048 logical
     };
@@ -127,22 +127,55 @@ in
     };
 
     context_menu = [
-      { label = "  Maximize Column"; action = "maximize-column"; }
-      { label = "  Maximize to Edges"; action = "maximize-window-to-edges"; }
-      { label = "  Center Column"; action = "center-column"; }
-      { label = "󰉩  Toggle Floating"; action = "toggle-window-floating"; }
-      { label = "  Move WS Up"; action = "move-window-to-workspace-up"; }
-      { label = "  Move WS Down"; action = "move-window-to-workspace-down"; }
-      { label = "  Close Window"; action = "close-window"; }
+      {
+        label = "  Maximize Column";
+        action = "maximize-column";
+      }
+      {
+        label = "  Maximize to Edges";
+        action = "maximize-window-to-edges";
+      }
+      {
+        label = "  Center Column";
+        action = "center-column";
+      }
+      {
+        label = "󰉩  Toggle Floating";
+        action = "toggle-window-floating";
+      }
+      {
+        label = "  Move WS Up";
+        action = "move-window-to-workspace-up";
+      }
+      {
+        label = "  Move WS Down";
+        action = "move-window-to-workspace-down";
+      }
+      {
+        label = "  Close Window";
+        action = "close-window";
+      }
     ];
 
     # Multi-select: Shift+click windows, right-click for batch actions
     multi_select_modifier = "shift";
     multi_select_menu = [
-      { label = "  Move All Up"; action = "move-to-workspace-up"; }
-      { label = "  Move All Down"; action = "move-to-workspace-down"; }
-      { label = "  Maximize All"; action = "maximize-columns"; }
-      { label = "  Close All"; action = "close-windows"; }
+      {
+        label = "  Move All Up";
+        action = "move-to-workspace-up";
+      }
+      {
+        label = "  Move All Down";
+        action = "move-to-workspace-down";
+      }
+      {
+        label = "  Maximize All";
+        action = "maximize-columns";
+      }
+      {
+        label = "  Close All";
+        action = "close-windows";
+      }
     ];
 
     # Audio indicator disabled: libpulse glib-mainloop double-free crashes waybar
