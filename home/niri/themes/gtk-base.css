@@ -48,7 +48,7 @@ headerbar box {
 headerbar:backdrop label,
 window.csd:backdrop label,
 dialog:backdrop label {
-    color: #ffffff;
+    color: rgba(255, 126, 219, 0.15);
     opacity: 1;
 }
 

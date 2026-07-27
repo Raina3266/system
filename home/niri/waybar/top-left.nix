@@ -115,14 +115,17 @@ in
     on-click = "pactl set-sink-mute 0 toggle";
   };
 
+  # thermal-zone 8 is x86_pkg_temp, the CPU package sensor. Only
+  # {temperatureC}/{temperatureF}/{temperatureK} are valid placeholders
+  # here; anything else makes the module throw on every poll.
   "temperature" = {
-    thermal-zone = 7;
+    thermal-zone = 8;
     warning-threshold = 55;
     critical-threshold = 80;
     interval = 5;
     format = "󰄏 {temperatureC}°C";
     format-critical = "󰄅 {temperatureC}°C";
-    tooltip-format = "Sensor: {chip}\n{temperatureC}°C";
+    tooltip-format = "CPU package: {temperatureC}°C";
   };
 
   "memory" = {

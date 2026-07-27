@@ -4,6 +4,7 @@
 # media services, database, and odds-and-ends. Core system identity
 # (boot, networking, locale, hardware) lives in ./configuration.nix.
 {
+  lib,
   pkgs,
   ...
 }:
@@ -16,6 +17,18 @@
     ffmpegthumbnailer
     gdk-pixbuf
     nemo-with-extensions
+
+    # Start/stop the on-demand media services (see "Media services").
+    (writeShellScriptBin "media-stack" ''
+      set -euo pipefail
+      units="redis-immich immich-server immich-machine-learning jellyfin"
+      case "''${1:-status}" in
+        up)     exec sudo systemctl start $units ;;
+        down)   exec sudo systemctl stop $units ;;
+        status) exec systemctl --no-pager status $units ;;
+        *) echo "usage: media-stack {up|down|status}" >&2; exit 1 ;;
+      esac
+    '')
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────
@@ -59,6 +72,12 @@
 
   # Power management for waybar's power-profiles-daemon module.
   services.power-profiles-daemon.enable = true;
+
+  # Intel thermal daemon: uses this CPU's DPTF/RAPL sensors to manage
+  # thermal limits actively, rather than leaving the firmware to clamp
+  # hard to the efficiency floor. Complements (does not replace)
+  # power-profiles-daemon, which sets the EPP/platform profile.
+  services.thermald.enable = true;
   services.tumbler.enable = true; # Thumbnail support for images
 
   xdg.portal = {
@@ -95,6 +114,7 @@
   };
 
   # ── Media services ────────────────────────────────────────────────────
+  # Installed and configured but NOT started at boot
   services.jellyfin = {
     enable = true;
     openFirewall = true;
@@ -106,6 +126,14 @@
     enable = true;
     openFirewall = true;
   };
+
+  # immich-server keeps Requires=postgresql.target, so Postgres is
+  # pulled in automatically when Immich starts.
+  systemd.services.jellyfin.wantedBy = lib.mkForce [ ];
+  systemd.services.immich-server.wantedBy = lib.mkForce [ ];
+  systemd.services.immich-machine-learning.wantedBy = lib.mkForce [ ];
+  systemd.services.redis-immich.wantedBy = lib.mkForce [ ];
+
 
   services.sunshine = {
     enable = true;

@@ -68,9 +68,8 @@ in
       rclone
     ];
 
-    # FUSE mount of Google Drive, started on first access via the automount
-    # unit (no idle daemon). 1G write cache kept for 24h. The unit name
-    # must match the mount path (systemd requirement for automount pairs).
+    # FUSE mount of Google Drive, started at login and kept running.
+    # 1G write cache kept for 24h.
     #
     # status: systemctl --user status home-raina-GoogleDrive.service
     # errors: journalctl --user-unit home-raina-GoogleDrive.service
@@ -120,16 +119,7 @@ in
       };
     };
 
-    # Stop the mount after 10 minutes idle; the automount restarts it on
-    # the next access to ~/GoogleDrive.
-    systemd.user.automounts."home-raina-GoogleDrive" = {
-      Unit.Description = "Automount Google Drive";
-      Automount = {
-        Where = mountDir;
-        TimeoutIdleSec = "10min";
-      };
-      Install.WantedBy = [ "default.target" ];
-    };
+
 
     # Two-way sync ~/Music <-> GoogleDrive:Music. Newer wins on conflicts;
     # the loser is kept with a -conflict suffix.

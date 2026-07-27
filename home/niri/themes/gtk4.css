@@ -87,10 +87,7 @@ window.csd columnview > header button {
     color: #7afcff;
     /* Real borders (Adwaita uses grey box-shadow) */
     box-shadow: none;
-    border: none;
-    border-right: 1px solid rgba(255, 126, 219, 0.35);
-    border-bottom: 1px solid #ff7edb;
-    border-radius: 0;
+    border: 1px solid rgba(255, 126, 219, 0.35);
 }
 
 window.csd columnview > header button:last-child {
