@@ -1,26 +1,9 @@
 {
   pkgs,
-  lib,
-  nixosConfig ? null,
   ...
 }:
-let
-  isNixOS = nixosConfig != null;
-in
 {
-  programs.kitty = {
-    enable = true;
-  };
-  programs.kitty.themeFile = "Dracula";
-  programs.kitty.package = lib.mkIf (!isNixOS) (
-    pkgs.writeShellScriptBin "kitty" ''
-      ${pkgs.nixgl.nixGLIntel}/bin/nixGLIntel ${pkgs.kitty}/bin/kitty "$@"
-    ''
-  );
-  programs.kitty.settings = {
-    shell = "fish";
-  };
-
+  # ── Terminal emulators ───────────────────────────────────────────────────
   programs.ghostty = {
     enable = true;
     enableFishIntegration = true;
@@ -30,5 +13,36 @@ in
       adjust-cell-height = "20%";
       background = "#0E0616";
     };
+  };
+
+  # ── tmux ──────────────────────────────────────────────────────────────────
+  programs.tmux = {
+    enable = true;
+    prefix = "C-a";
+    plugins = with pkgs.tmuxPlugins; [
+      {
+        plugin = gruvbox;
+        extraConfig = ''
+          run ${gruvbox}/tmux-gruvbox.nix
+          set -g @tmux-gruvbox 'dark'
+        '';
+      }
+    ];
+
+    extraConfig = ''
+      set -g default-terminal "xterm-256color"
+      set -ag terminal-overrides ",xterm-256color:RGB:Sxl"
+
+      set -s extended-keys always
+      set -as terminal-features 'xterm-kitty*:extkeys'
+
+      set -gq allow-passthrough on
+
+      bind -n M-x split-window -v -c "#{pane_current_path}"
+      bind -n M-v split-window -h -c "#{pane_current_path}"
+      bind c new-window -c "#{pane_current_path}"
+
+      set-option -g automatic-rename-format '#{b:pane_current_path}'
+    '';
   };
 }

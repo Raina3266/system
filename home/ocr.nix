@@ -37,8 +37,6 @@ let
 in
 {
   home.packages = with pkgs; [
-    # Screenshot tools — both sets are installed so the script can pick
-    # the right one at runtime depending on the active session.
     gnome-screenshot # GNOME
     grim # niri / wlroots
     slurp # niri / wlroots (region selector)

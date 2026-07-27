@@ -100,8 +100,6 @@ window#waybar.bottom {
 .scroll-arrow-right {
     color: rgba(122, 252, 255, 0.6);
     margin-top: 2px;
-    margin-left: 5px;
-    margin-right: 5px;
     padding: 3px;
 }
 
@@ -118,6 +116,10 @@ window#waybar.bottom {
     border: 2px solid rgba(255, 126, 219, 0.5);
     background-color: rgba(255, 126, 219, 0.2);
     color: #7afcff;
+}
+
+.niri-window-buttons {
+    margin-left: 10px;
 }
 
 .niri-window-buttons button {

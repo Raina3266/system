@@ -4,31 +4,24 @@
   ...
 }:
 let
-  mountDir_gdrive = "${config.home.homeDirectory}/GoogleDrive";
-  musicDir_local = "${config.home.homeDirectory}/Music";
+  mountDir = "${config.home.homeDirectory}/GoogleDrive";
+  musicDir = "${config.home.homeDirectory}/Music";
   musicRemote = "GoogleDrive:Music";
-
-  # bisync state directory. Holds the lock file and per-side listings
-  # that bisync uses to detect changes since the last successful run.
   bisyncStateDir = "${config.xdg.stateHome}/rclone-bisync-music";
 
-  # Wrapper script for the bisync run. Using a real script (instead of
-  # an inline `bash -c '...'` in ExecStart) sidesteps systemd's
-  # notoriously finicky ExecStart quoting rules — the script path is a
-  # single argument with no embedded quotes to parse.
+  # Soft delete: files that lose a sync (deleted or overwritten on the other
+  # side) are moved here instead of being removed. Both dirs are local, so
+  # recovery needs no download and cleanup works offline. Purged after 30
+  # days by the rclone-bisync-music-cleanup service.
+  trashDir = "${config.xdg.dataHome}/rclone-bisync-music/trash";
+  backupDir_local = "${trashDir}/local";
+  backupDir_remote = "${trashDir}/remote";
+
   bisyncScript = pkgs.writeShellScript "rclone-bisync-music.sh" ''
     set -euo pipefail
 
-    # First-run detection: if no lock file exists yet, do a --resync
-    # to establish the baseline. Otherwise run a normal two-way sync.
-    #
-    # --check-access is a steady-state safety feature: it aborts unless
-    # matching RCLONE_TEST files exist on both sides. It is *enforced
-    # during --resync too* (per the rclone docs), so it would block the
-    # very first resync from ever completing — a deadlock, since the
-    # lock file that marks "first run done" is only written by a
-    # successful run. We therefore disable --check-access on the first
-    # (resync) run, and enable it for every subsequent normal sync.
+    # No --check-access on the first run: RCLONE_TEST files only exist after
+    # a successful sync.
     if [ ! -f "${bisyncStateDir}/bisync.lck" ]; then
       resync_flag="--resync"
       check_access_flag=""
@@ -37,10 +30,18 @@ let
       check_access_flag="--check-access"
     fi
 
+    # Timestamped suffix so repeated backups of a same-named file don't
+    # overwrite each other in the trash.
+    backup_suffix="-$(${pkgs.coreutils}/bin/date +%Y-%m-%dT%H%M%S)"
+
     exec ${pkgs.rclone}/bin/rclone bisync \
-      "${musicDir_local}" "${musicRemote}" \
+      "${musicDir}" "${musicRemote}" \
       --workdir "${bisyncStateDir}" \
       $check_access_flag \
+      --backup-dir1 "${backupDir_local}" \
+      --backup-dir2 "${backupDir_remote}" \
+      --suffix "$backup_suffix" \
+      --suffix-keep-extension \
       --conflict-resolve newer \
       --conflict-suffix conflict \
       --resilient \
@@ -52,6 +53,13 @@ let
       --tpslimit-burst 20 \
       $resync_flag
   '';
+
+  cleanupScript = pkgs.writeShellScript "rclone-bisync-music-cleanup.sh" ''
+    set -euo pipefail
+
+    ${pkgs.findutils}/bin/find "${trashDir}" -mindepth 1 \( -type f -o -type l \) -mtime +30 -delete
+    ${pkgs.findutils}/bin/find "${trashDir}" -mindepth 1 -type d -empty -delete
+  '';
 in
 {
   config = {
@@ -60,14 +68,13 @@ in
       rclone
     ];
 
-    # ── FUSE mount for browsing the rest of Google Drive ──────────────
-    # Kept for ad-hoc access to non-Music files. The Music subtree is
-    # handled separately by rclone-bisync-music below, which keeps a real
-    # local copy in ~/Music that survives reboots.
+    # FUSE mount of Google Drive, started on first access via the automount
+    # unit (no idle daemon). 1G write cache kept for 24h. The unit name
+    # must match the mount path (systemd requirement for automount pairs).
     #
-    # to view status, `systemctl --user status rclone-mount-gdrive.service`
-    # to view errors, `journalctl --user-unit rclone-mount-gdrive.service`
-    systemd.user.services.rclone-mount-gdrive = {
+    # status: systemctl --user status home-raina-GoogleDrive.service
+    # errors: journalctl --user-unit home-raina-GoogleDrive.service
+    systemd.user.services."home-raina-GoogleDrive" = {
       Unit = {
         Description = "Mount Google Drive";
         After = [ "network-online.target" ];
@@ -76,30 +83,23 @@ in
 
       Service = with pkgs; {
         Type = "simple";
-        # Run at low priority so rclone never starves interactive work.
         Nice = 10;
         IOSchedulingClass = "best-effort";
         IOSchedulingPriority = 7;
-        # Ensure rclone can find ~/.config/rclone/rclone.conf.
         Environment = "HOME=%h";
-        # Give the mount enough time to come up on slow networks.
         TimeoutStartSec = "60s";
 
-        # Ensure the mountpoint exists. Connectivity is handled by
-        # After=network-online.target + rclone's own --retries + Restart=on-failure,
-        # so no ping loop is needed.
-        ExecStartPre = "${coreutils}/bin/mkdir -p '${mountDir_gdrive}'";
+        ExecStartPre = "${coreutils}/bin/mkdir -p '${mountDir}'";
 
         ExecStart = ''
-          ${rclone}/bin/rclone mount GoogleDrive: '${mountDir_gdrive}' \
-            --vfs-cache-mode full \
-            --vfs-cache-max-size 5G \
-            --vfs-cache-max-age 168h \
-            --vfs-cache-poll-interval 5m \
+          ${rclone}/bin/rclone mount GoogleDrive: '${mountDir}' \
+            --vfs-cache-mode writes \
+            --vfs-cache-max-size 1G \
+            --vfs-cache-max-age 24h \
             --vfs-read-chunk-size 8M \
             --vfs-read-chunk-size-limit 256M \
-            --dir-cache-time 24h \
-            --poll-interval 1m \
+            --dir-cache-time 1h \
+            --poll-interval 10m \
             --buffer-size 16M \
             --low-level-retries 10 \
             --retries 3 \
@@ -109,15 +109,10 @@ in
             --tpslimit-burst 20
         '';
 
-        # Use the setuid wrapper at /run/wrappers/bin/fusermount3, not the
-        # non-setuid copy in the nix store — only the wrapper can unmount
-        # FUSE filesystems as an unprivileged user. Ignore failure if the
-        # mount is already gone (e.g. bisync stopped it via Conflicts=).
+        # Setuid wrapper: the store fusermount3 lacks permissions.
         ExecStop = ''
-          /run/wrappers/bin/fusermount3 -u '${mountDir_gdrive}' || true
+          /run/wrappers/bin/fusermount3 -u '${mountDir}' || true
         '';
-        Restart = "on-failure";
-        RestartSec = 10;
       };
 
       Install = {
@@ -125,28 +120,23 @@ in
       };
     };
 
-    # ── Two-way sync for ~/Music ↔ GoogleDrive:Music ──────────────────
+    # Stop the mount after 10 minutes idle; the automount restarts it on
+    # the next access to ~/GoogleDrive.
+    systemd.user.automounts."home-raina-GoogleDrive" = {
+      Unit.Description = "Automount Google Drive";
+      Automount = {
+        Where = mountDir;
+        TimeoutIdleSec = "10min";
+      };
+      Install.WantedBy = [ "default.target" ];
+    };
+
+    # Two-way sync ~/Music <-> GoogleDrive:Music. Newer wins on conflicts;
+    # the loser is kept with a -conflict suffix.
     #
-    # Keeps a real local copy of the Music folder on disk (survives
-    # reboots, no eviction, no FUSE dependency) and propagates changes
-    # both ways: local edits upload, remote changes download.
-    #
-    # Conflict policy: the newer version wins; the older version is
-    # kept with a `-conflict` suffix so nothing is silently lost.
-    #
-    # IMPORTANT: the very first run must be a --resync to establish the
-    # baseline. The ExecStartPre below detects a missing lock file (i.e.
-    # bisync has never completed successfully) and runs `--resync` once
-    # *without* --check-access (which would otherwise deadlock the first
-    # run, since --check-access is enforced during --resync and there are
-    # no RCLONE_TEST files yet). Subsequent runs are normal two-way syncs
-    # with --check-access enabled for safety.
-    #
-    # to view status:  systemctl --user status rclone-bisync-music.service
-    # to view errors:  journalctl --user-unit rclone-bisync-music.service
-    # to force a full re-sync: systemctl --user stop rclone-bisync-music.timer
-    #   then: rm -rf ~/.local/state/rclone-bisync-music
-    #   then: systemctl --user start rclone-bisync-music.service
+    # status:       systemctl --user status rclone-bisync-music.service
+    # force resync: rm -rf ~/.local/state/rclone-bisync-music
+    #               && systemctl --user start rclone-bisync-music.service
     systemd.user.services.rclone-bisync-music = {
       Unit = {
         Description = "Two-way sync ~/Music with GoogleDrive:Music";
@@ -160,27 +150,19 @@ in
         Nice = 10;
         IOSchedulingClass = "best-effort";
         IOSchedulingPriority = 7;
-        # A large library over a slow link can take a while.
         TimeoutStartSec = "2h";
 
-        # Ensure both the local directory and the bisync state directory
-        # exist. The state dir holds the lock file; if it's absent on
-        # startup, bisync treats this as a first run and the wrapper
-        # script adds --resync automatically.
         ExecStartPre = [
-          "${coreutils}/bin/mkdir -p '${musicDir_local}'"
+          "${coreutils}/bin/mkdir -p '${musicDir}'"
           "${coreutils}/bin/mkdir -p '${bisyncStateDir}'"
+          "${coreutils}/bin/mkdir -p '${backupDir_local}'"
+          "${coreutils}/bin/mkdir -p '${backupDir_remote}'"
         ];
 
-        # The wrapper script handles first-run detection (--resync when
-        # no lock file exists yet) and conflict resolution (newer wins,
-        # loser kept with a `-conflict` suffix).
         ExecStart = "${bisyncScript}";
       };
     };
 
-    # Run the sync shortly after boot (give the network time to come up)
-    # and then every hour to pick up changes from either side.
     systemd.user.timers.rclone-bisync-music = {
       Install = {
         WantedBy = [ "timers.target" ];
@@ -188,6 +170,36 @@ in
       Timer = {
         OnBootSec = "1min";
         OnUnitActiveSec = "1h";
+        Persistent = true;
+      };
+    };
+
+    # Purge files older than 30 days from the bisync trash.
+    #
+    # status: systemctl --user status rclone-bisync-music-cleanup.service
+    systemd.user.services.rclone-bisync-music-cleanup = {
+      Unit.Description = "Purge bisync trash files older than 30 days";
+
+      Service = {
+        Type = "oneshot";
+        Environment = "HOME=%h";
+        Nice = 10;
+        IOSchedulingClass = "best-effort";
+        IOSchedulingPriority = 7;
+        TimeoutStartSec = "30m";
+
+        ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p '${backupDir_local}' '${backupDir_remote}'";
+        ExecStart = "${cleanupScript}";
+      };
+    };
+
+    systemd.user.timers.rclone-bisync-music-cleanup = {
+      Install = {
+        WantedBy = [ "timers.target" ];
+      };
+      Timer = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = "1d";
         Persistent = true;
       };
     };

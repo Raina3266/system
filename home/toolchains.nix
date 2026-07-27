@@ -5,7 +5,6 @@
     gcc
     nil
     nixd
-    neovim
     rustup
     cargo-machete
     diesel-cli

@@ -134,8 +134,4 @@ in
     PartOf = [ "graphical-session.target" ];
     X-Restart-Triggers = restartTrigger walkerSettings;
   };
-
-  home.packages = with pkgs; [
-    wtype # Wayland text input simulation
-  ];
 }

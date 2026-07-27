@@ -52,6 +52,9 @@ let
     provider.menus.toml."power" = {
       name = "power";
       name_pretty = "Power";
+      # TOML menus don't run `value` implicitly — a menu action is required.
+      # %VALUE% is substituted with the activated entry's value.
+      action = "%VALUE%";
       entries = [
         {
           text = "Shutdown";

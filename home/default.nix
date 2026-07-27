@@ -34,7 +34,6 @@
     wl-clipboard
 
     # communication
-    slack
     discord
     zoom-us
     wechat
@@ -62,15 +61,9 @@
     inkscape
     gimp
     shotcut
-    sunshine
     kid3
     spotdl
     yt-dlp
-
-    # media servers / sync
-    jellyfin
-    jellyfin-web
-    immich
 
     # downloads / torrent
     qbittorrent

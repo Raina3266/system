@@ -102,13 +102,31 @@
     group = "jellyfin";
   };
 
+  services.immich = {
+    enable = true;
+    openFirewall = true;
+  };
+
+  services.sunshine = {
+    enable = true;
+    autoStart = false;
+    openFirewall = true;
+    capSysAdmin = true;
+  };
+
   # ── Database ──────────────────────────────────────────────────────────
+  # Local Unix-socket access for the owner, loopback TCP for apps that
+  # connect via 127.0.0.1. No access from other hosts.
   services.postgresql.enable = true;
   services.postgresql.authentication = pkgs.lib.mkForce ''
-    local all all           trust
-    host  all all 0.0.0.0/0 trust
-    host  all all ::0/0     trust
+    local all all                      peer
+    host  all all 127.0.0.1/32         scram-sha-256
+    host  all all ::1/128              scram-sha-256
   '';
+  services.postgresql.ensureDatabases = [ "raina" ];
+  services.postgresql.ensureUsers = [
+    { name = "raina"; ensureDBOwnership = true; }
+  ];
 
   # ── Misc ──────────────────────────────────────────────────────────────
   programs.nix-ld.enable = true;

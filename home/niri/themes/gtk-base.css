@@ -43,7 +43,6 @@ headerbar box {
     background-image: none;
     color: #ffffff;
     box-shadow: none;
-    padding: 6px 10px;
 }
 
 headerbar:backdrop label,

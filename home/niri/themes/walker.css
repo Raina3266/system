@@ -23,14 +23,6 @@
   -gtk-icon-size: 25px;
 }
 
-.preview .large-icons {
-  -gtk-icon-size: 50px;
-}
-
-.item-image-text {
-  font-size: 28px;
-}
-
 /* ── Main window box ── */
 /* positioning/sizing by layout XML (GTK4 alignment > CSS)
  * cyberpunk theme: valign=start halign=end (top-right)
@@ -92,8 +84,6 @@
   padding: 10px;
   color: #cbe3e7;
 }
-
-
 
 .item-subtext {
   font-size: 12px;
@@ -207,21 +197,6 @@ child:selected .item-subtext {
   padding: 10px;
   background: #ff3333;
   color: #cbe3e7;
-}
-
-:not(.calc).current {
-  font-style: italic;
-}
-
-/* ── Popover ── */
-
-popover {
-  background: #190326;
-  border: 1px solid #ff7edb;
-  border-radius: 18px;
-  padding: 10px;
-  box-shadow: 0 0 20px rgba(255, 126, 219, 0.3);
-  min-width: 200px;
 }
 
 /* ── Scrollbar ── */

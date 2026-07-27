@@ -109,9 +109,10 @@
   # "open"); the rest only show up in the "Open with..." (<Enter>) menu.
   opener.text_editor = [
     {
-      run = "zeditor --new-window \"$@\"";
+      run = "zeditor \"$@\"";
       desc = "Edit in Zed";
       for = "linux";
+      orphan = true;
     }
     {
       run = "nvim \"$@\"";
@@ -186,6 +187,7 @@
       run = "google-chrome \"$@\"";
       desc = "Open in Chrome";
       for = "linux";
+      orphan = true;
     }
     {
       run = "gimp \"$@\"";

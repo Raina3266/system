@@ -1,12 +1,18 @@
-{ pkgs, ... }:
+{ inputs, pkgs, ... }:
 {
   imports = [
-    ./nvim
+    inputs.nixvim.homeModules.nixvim
     ./git.nix
     ./terminal.nix
-    ./tmux.nix
   ];
   config = {
+    # ── Neovim (nixvim) ───────────────────────────────────────────────────
+    programs.nixvim = {
+      enable = true;
+      nixpkgs.source = pkgs.path;
+    };
+
+    # ── Shell (fish/bash, prompt, history, direnv) ────────────────────────
     programs.starship.enable = true;
     programs.bash.enable = true;
 
