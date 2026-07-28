@@ -49,9 +49,7 @@ layer-rule {
 
 layout {
     gaps 16
-
     background-color "transparent"
-
     center-focused-column "never"
 
     preset-column-widths {

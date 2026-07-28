@@ -98,7 +98,7 @@
 
 child:hover .item-box {
   background: rgba(255, 126, 219, 0.15);
-  border-color: rgba(255, 126, 219, 0.5);
+  border: 1px solid rgba(255, 126, 219, 0.5);
   color: #ff7edb;
   text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
@@ -107,7 +107,7 @@ child:selected .item-box {
   background: rgba(255, 126, 219, 0.15);
   border: 1px solid rgba(255, 126, 219, 0.5);
   color: #ff7edb;
-  text-shadow: 0 0 8px rgba(255, 126, 219, 0.6);
+  text-shadow: 0 0 6px rgba(255, 126, 219, 0.6);
   box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 

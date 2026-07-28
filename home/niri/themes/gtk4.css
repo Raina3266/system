@@ -1,69 +1,54 @@
-/* GTK4: portal file chooser (Chrome/Zed/Discord/Obsidian), loupe, gnome-control-center
- * GTK4-only nodes: listview, columnview, gridview, popover/modelbutton, placessidebar
- * walker/waybar-ycal: layer-shell, not reached here (see walker.css)
- * Colors/buttons/entries: see gtk-base.css
+/* GTK4 — portal file chooser (Chrome/Zed/Discord/Obsidian "Open File"),
+ *        loupe, gnome-control-center
+ *
+ * Colours, hover, selected, buttons, entries: all in gtk-base.css.
+ * This file only holds things that exist in GTK4 but not GTK3:
+ *   1. FILE LISTS ....... listview / columnview / gridview innards
+ *   2. COLUMN HEADERS ... "Name / Size / Modified" bar
+ *   3. POPOVER MENUS .... GTK4 draws menus as popovers, not separate windows
+ *   4. FILE CHOOSER ..... sidebar (Home, Downloads, ...) spacing and divider
+ *
+ * walker and waybar are layer-shell surfaces with no .csd class, so nothing
+ * here reaches them — they have their own walker.css / waybar.css.
  */
 
 @import url("gtk-base.css");
 
-/* 1. Views: base background */
+/* ── 1. FILE LISTS ────────────────────────────────────────────────────────
+ * listview   = the file chooser's list
+ * columnview = list with sortable columns
+ * gridview   = icon grid
+ * Base backgrounds, then everything inside a row is forced transparent so
+ * the hover/selected fill from gtk-base.css sections 4 and 5 shows through. */
+
 window.csd list,
 window.csd listview,
 window.csd columnview,
 window.csd gridview,
-window.csd .view,
 window.csd .navigation-sidebar {
     background-color: #0e0616;
     background-image: none;
     color: #ffffff;
 }
 
-/* Rows transparent to show highlights */
 window.csd list row,
 window.csd listview row,
 window.csd columnview cell,
 window.csd flowbox,
 window.csd flowboxchild,
-window.csd row box,
-window.csd button box {
+window.csd row box {
     background-color: transparent;
     background-image: none;
 }
 
-/* 2. Rows: hover & selected */
-window.csd list row:hover,
-window.csd listview row:hover,
-window.csd columnview row:hover,
-window.csd gridview child:hover,
-window.csd .navigation-sidebar row:hover {
-    background-color: rgba(122, 252, 255, 0.1);
-    background-image: none;
-    box-shadow: none;
-}
-
-window.csd list row:selected,
-window.csd listview row:selected,
-window.csd columnview row:selected,
-window.csd gridview child:selected,
-window.csd flowboxchild:selected,
-window.csd .navigation-sidebar row:selected {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    box-shadow: none;
-}
-
-/* Row contents transparent (labels nested, match all descendants) */
 window.csd row:hover *,
-window.csd row:selected *,
-window.csd gridview child:hover *,
-window.csd gridview child:selected *,
-window.csd flowboxchild:selected * {
+window.csd row:selected * {
     background-color: transparent;
     background-image: none;
-    box-shadow: none;
 }
 
-/* Entries in rows keep own background */
+/* Exception: a text field inside a row keeps its own dark background
+ * (inline rename in the file chooser) */
 window.csd row:hover entry,
 window.csd row:hover entry text,
 window.csd row:selected entry,
@@ -71,26 +56,26 @@ window.csd row:selected entry text {
     background-color: #0e0616;
 }
 
-window.csd row:selected label,
-window.csd listview row:selected label,
-window.csd columnview row:selected label,
-window.csd gridview child:selected label,
-window.csd flowboxchild:selected label,
-window.csd .navigation-sidebar row:selected label {
-    color: #ff7edb;
-}
+/* ── 2. COLUMN HEADERS ────────────────────────────────────────────────────
+ * Adwaita fakes the bottom border with a grey box-shadow; cleared and
+ * redrawn as a real 1px pink line. */
 
-/* 3. Column headers (Name/Size/Type/Modified) */
 window.csd columnview > header button {
     background-color: #0e0616;
     background-image: none;
     color: #7afcff;
-    /* Real borders (Adwaita uses grey box-shadow) */
     box-shadow: none;
+    border: none;
     border-bottom: 1px solid rgba(255, 126, 219, 0.35);
+    border-radius: 0;
 }
 
-/* 4. Popovers (visible box: > contents; popover node: transparent shell) */
+/* ── 3. POPOVER MENUS ─────────────────────────────────────────────────────
+ * GTK4's right-click and dropdown menus. The `popover` node is just an
+ * invisible shell; the visible panel is `popover > contents`, so the border
+ * and radius go there or you get a double outline.
+ * Menu rows are `modelbutton`; their hover is in gtk-base.css section 4. */
+
 window.csd popover,
 window.csd popover.background {
     background-color: transparent;
@@ -113,69 +98,31 @@ window.csd popover > arrow {
     border: 1px solid #ff7edb;
 }
 
-/* Menu rows in popover */
 window.csd modelbutton,
 window.csd modelbutton > box {
     background-color: transparent;
     background-image: none;
 }
 
-window.csd modelbutton:hover {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    box-shadow: none;
-}
-
-window.csd modelbutton:hover label {
-    color: #ff7edb;
-}
-
-/* Disabled: on modelbutton (not label) */
-window.csd modelbutton:disabled,
-window.csd modelbutton:disabled label {
-    color: #5c6776;
-}
-
-/* 5. Headerbar backdrop: portal file dialog paints it grey when unfocused.
- * windowhandle wraps the headerbar; .flat wins over plain headerbar:backdrop. */
-window.csd:backdrop headerbar,
-window.csd:backdrop headerbar.flat,
-window.csd headerbar:backdrop,
-window.csd windowhandle:backdrop,
-window.csd:backdrop windowhandle,
-window.csd:backdrop windowhandle headerbar {
-    background-color: #0e0616;
-    background-image: none;
-    box-shadow: none;
-}
-
-/* Whole-window backdrop tint (libadwaita/Adwaita greys everything unfocused) */
-window.csd:backdrop box,
-window.csd:backdrop .background {
-    background-color: #0e0616;
-    background-image: none;
-}
-
-/* 6. File chooser: sidebar not in GtkPaned, draws own divider (scoped to avoid double line) */
+/* ── 4. FILE CHOOSER SIDEBAR ──────────────────────────────────────────────
+ * The Home / Downloads / Documents column. Unlike nemo it is not in a
+ * GtkPaned, so it draws its own right-hand divider. */
 
 window.csd placessidebar {
-    border-right: 1px solid #ff7edb; /* row height / inner spacing */
-}
-/* Each sidebar row: Home, Downloads, ... */
-window.csd placessidebar row,
-window.csd .navigation-sidebar row {
-    padding: 1px; /* row height / inner spacing */
+    border-right: 1px solid #ff7edb;
 }
 
-/* Eject buttons (e.g. GoogleDrive) */
+/* Row height: raise this padding for taller, roomier sidebar entries */
+window.csd placessidebar row,
+window.csd .navigation-sidebar row {
+    padding: 1px;
+}
+
+/* Small eject / unmount buttons on removable entries (e.g. GoogleDrive) */
 window.csd placessidebar row button.image-button {
     background-color: transparent;
     background-image: none;
     box-shadow: none;
+    border: none;
     color: #7afcff;
-}
-
-window.csd placessidebar row button.image-button:hover {
-    color: #ff7edb;
-    background-color: rgba(255, 126, 219, 0.15);
 }

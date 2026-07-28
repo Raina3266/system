@@ -97,7 +97,7 @@ window#waybar.bottom {
 #custom-media-next,
 .scroll-arrow-left,
 .scroll-arrow-right {
-    color: rgba(122, 252, 255, 0.6);
+    color: rgba(122, 252, 255, 0.5);
     margin-top: 2px;
     padding: 3px;
 }

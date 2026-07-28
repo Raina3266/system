@@ -1,111 +1,211 @@
-/* GTK BASE: shared styles for GTK3 and GTK4
- * Imported by gtk3.css and gtk4.css. Only universal rules here.
+/* GTK BASE — shared by GTK3 and GTK4 (imported by gtk3.css and gtk4.css)
  *
- * SCOPING: All selectors must start with window.csd/dialog/window.popup to avoid
- * conflicting with waybar/walker (PRIORITY_USER=800 > APPLICATION=600).
- * Layer-shell surfaces (waybar/walker/ycal) have no .csd class and are safe.
+ * WHERE TO CHANGE WHAT
+ *   1. PALETTE ......... the 5 colours, listed once below
+ *   2. SURFACES ........ window / dialog / headerbar backgrounds + window border
+ *   3. TEXT & ICONS .... label colour, icon colour, disabled (dim) text
+ *   4. HOVER ........... one block, every hoverable widget in every app
+ *   5. SELECTED ........ one block, pressed buttons + selected rows/files
+ *   6. BUTTONS ......... resting look of buttons
+ *   7. TEXT FIELDS ..... entry / search box / spinbutton
+ *   8. TOGGLES ......... check, radio, switch, progress bar
+ *   9. CHROME .......... scrollbar, separator, pane divider, text selection
  *
- * Palette: bg=#0E0616 fg=#ffffff pink=#ff7edb cyan=#7afcff red=#ff3333 dim=#5c6776
+ * Widget-specific bits live in the version files:
+ *   gtk3.css - nemo, pavucontrol, nm-applet, meld, gimp  (right-click menus,
+ *              file lists, nemo chrome)
+ *   gtk4.css - portal file chooser (Chrome/Zed/Discord/Obsidian), loupe,
+ *              gnome-control-center  (popover menus, file chooser sidebar)
+ *
+ * SCOPING RULE: every selector here starts with `window.csd` (or
+ * `window.popup` in gtk3.css). App windows and dialogs both carry the .csd
+ * class; waybar/walker/ycal are layer-shell surfaces without it, so this
+ * scoping keeps their own stylesheets from being overridden.
  */
 
-/* 1. Window & container backgrounds (override Adwaita light defaults) */
+/* ── 1. PALETTE ───────────────────────────────────────────────────────────
+ * bg      #0e0616  window background
+ * fg      #ffffff  normal text
+ * pink    #ff7edb  accent: borders, selection, active state
+ * cyan    #7afcff  secondary accent: icons, column headers, progress
+ * dim     #5c6776  disabled text
+ * Glow recipe used throughout:
+ *   hover fill      rgba(122, 252, 255, 0.10)   (cyan 10%)
+ *   selected fill   rgba(255, 126, 219, 0.15)   (pink 15%)
+ *   faint border    rgba(255, 126, 219, 0.20)
+ *   strong border   rgba(255, 126, 219, 0.50)
+ *   text glow       0 0 6px rgba(255, 126, 219, 0.5)
+ *   box glow        0 0 10px rgba(255, 126, 219, 0.2)
+ */
+
+/* ── 2. SURFACES ──────────────────────────────────────────────────────────
+ * Everything that paints a large flat area. Adwaita would paint these light
+ * grey, so they are forced to the dark background here. */
+
 window.csd,
-dialog,
 window.csd box,
+window.csd stack,
 window.csd scrolledwindow,
 window.csd viewport,
-window.csd headerbar,
-dialog box,
-dialog stack,
-dialog scrolledwindow,
-window.csd notebook,
-window.csd notebook > stack,
-dialog notebook,
-dialog notebook > stack,
 window.csd paned,
 window.csd toolbar,
-dialog toolbar,
-window.csd textview,
-window.csd textview text,
-dialog textview,
-dialog textview text,
-.titlebar,
-headerbar box {
+window.csd headerbar,
+window.csd .titlebar,
+window.csd .background,
+window.csd .view {
     background-color: #0e0616;
     background-image: none;
     color: #ffffff;
+}
+
+/* Window outline + the line under the title bar */
+window.csd {
+    border: 1px solid #ff7edb;
 }
 
 window.csd headerbar {
     border-bottom: 1px solid rgba(255, 126, 219, 0.6);
 }
 
-window.csd {
-    border: 1px solid #ff7edb;
+/* Unfocused windows: keep our colours instead of Adwaita's grey wash.
+ * GTK4 wraps the headerbar in `windowhandle`, hence the extra selectors. */
+window.csd:backdrop,
+window.csd:backdrop box,
+window.csd:backdrop .background,
+window.csd:backdrop headerbar,
+window.csd:backdrop headerbar.flat,
+window.csd headerbar:backdrop,
+window.csd:backdrop windowhandle,
+window.csd:backdrop windowhandle headerbar {
+    background-color: #0e0616;
+    background-image: none;
+    box-shadow: none;
 }
 
-headerbar:backdrop label,
-window.csd:backdrop label,
-dialog:backdrop label {
+/* ── 3. TEXT & ICONS ──────────────────────────────────────────────────── */
+
+window.csd label,
+window.csd:backdrop label {
     color: #ffffff;
     opacity: 1;
 }
 
-/* 3. Symbolic icons */
-window.csd image,
-dialog image,
-headerbar image {
+window.csd image {
     background-color: transparent;
     color: #7afcff;
 }
 
-/* 4. Buttons */
-window.csd button:hover,
-dialog button:hover {
-    background-color: rgba(255, 126, 219, 0.1);
-    background-image: none;
-    box-shadow: none;
+window.csd *:disabled,
+window.csd *:disabled label {
+    color: #5c6776;
 }
 
-/* Pressed/checked state (prevents Adwaita grey background) */
+/* ── 4. HOVER ─────────────────────────────────────────────────────────────
+ * THE hover look, for every app. Change these three lines and every button,
+ * file row, sidebar entry and menu item follows.
+ *
+ * The selector list is long only because GTK3 and GTK4 name their lists
+ * differently; a name that doesn't exist in one toolkit simply never matches.
+ *   GTK3: treeview.view (list view) | iconview (grid view) | menuitem
+ *   GTK4: listview | columnview | gridview | list row | modelbutton
+ * GTK3 quirk: `menuitem:selected` means "hovered", not "chosen". */
+
+window.csd button:hover,
+window.csd treeview.view:hover,
+window.csd iconview:hover,
+window.csd list row:hover,
+window.csd listview row:hover,
+window.csd columnview row:hover,
+window.csd gridview child:hover,
+window.csd flowboxchild:hover,
+window.csd .sidebar row:hover,
+window.csd .navigation-sidebar row:hover,
+window.csd placessidebar row:hover,
+window.csd placessidebar row button.image-button:hover,
+window.csd modelbutton:hover,
+menuitem:hover,
+menuitem:selected {
+    background-color: rgba(122, 252, 255, 0.1);
+    background-image: none;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+/* ── 5. SELECTED / PRESSED ───────────────────────────────────────────────
+ * THE selected look: clicked buttons, selected files, current sidebar item.
+ * Row *contents* are made transparent in gtk3.css / gtk4.css so this fill
+ * shows through. */
+
 window.csd button:active,
 window.csd button:checked,
-dialog button:active,
-dialog button:checked {
-    background-color: rgba(255, 126, 219, 0.25);
+window.csd treeview.view:selected,
+window.csd iconview:selected,
+window.csd list row:selected,
+window.csd listview row:selected,
+window.csd columnview row:selected,
+window.csd gridview child:selected,
+window.csd flowboxchild:selected,
+window.csd .sidebar row:selected,
+window.csd .navigation-sidebar row:selected,
+window.csd placessidebar row:selected {
+    background-color: rgba(255, 126, 219, 0.15);
     background-image: none;
+    border: 1px solid rgba(255, 126, 219, 0.5);
     color: #ff7edb;
+    box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
+}
+
+/* Labels inside a selected row inherit the pink instead of staying white */
+window.csd treeview.view:selected label,
+window.csd iconview:selected label,
+window.csd row:selected label,
+window.csd gridview child:selected label,
+window.csd flowboxchild:selected label {
+    background-color: transparent;
+    color: #ff7edb;
+}
+
+/* ── 6. BUTTONS (resting) ────────────────────────────────────────────────
+ * Hover/pressed looks are in sections 4 and 5. */
+
+window.csd button {
+    background-color: transparent;
+    background-image: none;
+    color: #ffffff;
+    border: 1px solid rgba(255, 126, 219, 0.2);
     box-shadow: none;
 }
 
-/* 5. Entries & text fields */
+window.csd button.flat,
+window.csd button box {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* ── 7. TEXT FIELDS ─────────────────────────────────────────────────────── */
+
 window.csd entry,
 window.csd entry text,
 window.csd searchentry,
 window.csd searchentry text,
 window.csd spinbutton,
-dialog entry,
-dialog entry text,
-dialog spinbutton {
+window.csd textview,
+window.csd textview text {
     background-color: #0e0616;
     background-image: none;
     color: #ffffff;
-    border: 1px solid #ff7edb;
 }
 
 window.csd entry:focus,
-dialog entry:focus,
-window.csd textview:focus,
-dialog textview:focus {
-    border-color: #7afcff;
+window.csd searchentry:focus,
+window.csd textview:focus {
+    border: 1px solid rgba(255, 126, 219, 0.6);
     box-shadow: none;
 }
 
-/* 6. Check & radio (transparent background, pink ring only) */
+/* ── 8. TOGGLES ─────────────────────────────────────────────────────────── */
+
 window.csd check,
-window.csd radio,
-dialog check,
-dialog radio {
+window.csd radio {
     background-color: transparent;
     background-image: none;
     box-shadow: none;
@@ -114,35 +214,34 @@ dialog radio {
 
 window.csd check:checked,
 window.csd radio:checked,
-dialog check:checked,
-dialog radio:checked {
+window.csd switch:checked {
     background-color: #ff7edb;
     background-image: none;
     border-color: #ff7edb;
     color: #0e0616;
 }
 
-/* 7. Scrollbars */
-window.csd scrollbar slider,
-dialog scrollbar slider {
+window.csd progressbar progress,
+window.csd levelbar block.filled {
+    background-color: #7afcff;
+}
+
+/* ── 9. CHROME ──────────────────────────────────────────────────────────── */
+
+window.csd scrollbar slider {
     background-color: rgba(255, 126, 219, 0.5);
 }
 
-window.csd scrollbar slider:hover,
-dialog scrollbar slider:hover {
+window.csd scrollbar slider:hover {
     background-color: #ff7edb;
 }
 
-/* 8. Separators */
-window.csd separator,
-dialog separator,
-headerbar separator {
+window.csd separator {
     background-color: rgba(255, 126, 219, 0.5);
 }
 
-/* Paned handles: sidebar↔content divider, solid pink 1px */
-window.csd paned > separator,
-dialog paned > separator {
+/* Draggable divider between sidebar and content (nemo, meld) */
+window.csd paned > separator {
     background-color: #ff7edb;
     background-image: none;
     border: none;
@@ -150,21 +249,8 @@ dialog paned > separator {
     min-height: 1px;
 }
 
-/* 9. Switch, progress, level */
-window.csd switch:checked,
-dialog switch:checked {
-    background-color: #ff7edb;
-}
-
-window.csd progressbar progress,
-dialog progressbar progress,
-dialog levelbar block.filled {
-    background-color: #7afcff;
-}
-
-/* 10. Selection highlight (text only) */
-window.csd selection,
-dialog selection {
-    background-color: rgba(255, 126, 219, 0.25);
+/* Highlight behind selected text */
+window.csd selection {
+    background-color: rgba(255, 126, 219, 0.15);
     color: #ff7edb;
 }
