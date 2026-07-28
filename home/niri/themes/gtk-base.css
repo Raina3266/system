@@ -110,9 +110,11 @@ window.csd *:disabled label {
  *   GTK4: listview | columnview | gridview | list row | modelbutton
  * GTK3 quirk: `menuitem:selected` means "hovered", not "chosen". */
 
+window.csd row:hover,
 window.csd button:hover,
 window.csd treeview.view:hover,
 window.csd iconview:hover,
+window.csd iconview:hover label,
 window.csd list row:hover,
 window.csd listview row:hover,
 window.csd columnview row:hover,
@@ -139,6 +141,7 @@ window.csd button:active,
 window.csd button:checked,
 window.csd treeview.view:selected,
 window.csd iconview:selected,
+window.csd iconview:selected label,
 window.csd list row:selected,
 window.csd listview row:selected,
 window.csd columnview row:selected,
@@ -154,16 +157,6 @@ window.csd placessidebar row:selected {
     box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
-/* Labels inside a selected row inherit the pink instead of staying white */
-window.csd treeview.view:selected label,
-window.csd iconview:selected label,
-window.csd row:selected label,
-window.csd gridview child:selected label,
-window.csd flowboxchild:selected label {
-    background-color: transparent;
-    color: #ff7edb;
-}
-
 /* ── 6. BUTTONS (resting) ────────────────────────────────────────────────
  * Hover/pressed looks are in sections 4 and 5. */
 
@@ -175,6 +168,8 @@ window.csd button {
     box-shadow: none;
 }
 
+window.csd gridview child:hover *,
+window.csd gridview child:selected *,
 window.csd button.flat,
 window.csd button box {
     background-color: transparent;

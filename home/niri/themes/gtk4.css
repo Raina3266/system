@@ -24,15 +24,17 @@
 window.csd list,
 window.csd listview,
 window.csd columnview,
+window.csd iconview,
 window.csd gridview,
 window.csd .navigation-sidebar {
-    background-color: #0e0616;
+    background-color: transparent;
     background-image: none;
     color: #ffffff;
 }
 
 window.csd list row,
 window.csd listview row,
+window.csd iconview,
 window.csd columnview cell,
 window.csd flowbox,
 window.csd flowboxchild,
@@ -45,15 +47,6 @@ window.csd row:hover *,
 window.csd row:selected * {
     background-color: transparent;
     background-image: none;
-}
-
-/* Exception: a text field inside a row keeps its own dark background
- * (inline rename in the file chooser) */
-window.csd row:hover entry,
-window.csd row:hover entry text,
-window.csd row:selected entry,
-window.csd row:selected entry text {
-    background-color: #0e0616;
 }
 
 /* ── 2. COLUMN HEADERS ────────────────────────────────────────────────────

@@ -82,7 +82,7 @@
 
   xdg.portal = {
     enable = true;
-    extraPortals = with pkgs; [ xdg-desktop-portal-gnome ];
+    extraPortals = with pkgs; [ xdg-desktop-portal-gtk ];
   };
 
   # ── Sound (PipeWire) ──────────────────────────────────────────────────
