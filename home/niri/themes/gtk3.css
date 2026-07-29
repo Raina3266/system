@@ -7,6 +7,7 @@
  *   3. RIGHT-CLICK MENUS  (GTK3 draws menus in a separate window.popup)
  *   4. TABS ............. the tab strip above nemo / meld content
  *   5. NEMO CHROME ...... path bar, sidebar edge, status overlay
+ *   6. SIDEBAR ROWS ..... padding + rounded pill highlight (Nemo only)
  */
 
 @import url("gtk-base.css");
@@ -45,7 +46,6 @@ window.csd treeview.view header button {
     color: #7afcff;
     box-shadow: none;
     border: none;
-    border-right: 1px solid rgba(255, 126, 219, 0.35);
     border-bottom: 1px solid #ff7edb;
     border-radius: 0;
 }
@@ -189,4 +189,48 @@ window.csd notebook > header > tabs > tab:checked {
 
 .nemo-window .floating-bar {
     border: 1px solid #ff7edb;
+}
+
+/* ── 6. SIDEBAR ROWS ──────────────────────────────────────────────────────
+ * Roomier, pill-shaped rows instead of the sharp edge-to-edge box that
+ * gtk-base.css sections 4–5 use for every other app's sidebar/list rows.
+ * `window.csd.nemo-window` (both classes on the same window) is more
+ * specific than the shared `window.csd ...` rules, so these win. */
+
+/* Breathing room around each row + gap between sections (Bookmarks/Devices) */
+window.csd.nemo-window .sidebar row,
+window.csd.nemo-window placessidebar row,
+window.csd.nemo-window .nemo-places-sidebar row {
+    padding: 6px 10px;
+    margin: 1px 6px;
+    border-radius: 8px;
+}
+
+/* Pill-shaped hover/selected fill instead of the sharp full-width box */
+window.csd.nemo-window .sidebar row:hover,
+window.csd.nemo-window placessidebar row:hover,
+window.csd.nemo-window .nemo-places-sidebar row:hover {
+    background-color: rgba(122, 252, 255, 0.1);
+    background-image: none;
+    border: none;
+    border-radius: 8px;
+}
+
+window.csd.nemo-window .sidebar row:selected,
+window.csd.nemo-window placessidebar row:selected,
+window.csd.nemo-window .nemo-places-sidebar row:selected {
+    background-color: rgba(255, 126, 219, 0.15);
+    background-image: none;
+    border: none;
+    border-radius: 8px;
+    box-shadow: none;
+    color: #ff7edb;
+}
+
+/* Section headers: Bookmarks / Devices / Network */
+window.csd.nemo-window placessidebar .sidebar-section-title,
+window.csd.nemo-window .nemo-places-sidebar .sidebar-section-title {
+    padding: 8px 10px 4px;
+    color: #5c6776;
+    font-weight: bold;
 }

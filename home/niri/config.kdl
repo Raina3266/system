@@ -13,12 +13,11 @@ input {
     }
 }
 
-// Display outputs (get names with `niri msg outputs`)
+// Laptop screen: centered below external monitors
 output "eDP-1" {
     mode "1920x1200@60.026"
     scale 1
     transform "normal"
-    // Laptop screen: centered below external monitors
     position x=1344 y=2304
 }
 
