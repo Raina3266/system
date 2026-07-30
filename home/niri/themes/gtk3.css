@@ -152,9 +152,41 @@ window.csd notebook > header > tabs > tab:checked {
 /* ── 5. NEMO CHROME ───────────────────────────────────────────────────────
  * Nemo-only parts that no other app has. */
 
-/* Breadcrumb path buttons: current folder gets the selected look */
-.nemo-window .path-bar button:checked,
-.nemo-window .nemo-pathbar-button:checked {
+/* ---------- window / base ---------- */
+.neno-window .view {
+    border: 1px solid rgba(255, 126, 219, 0.6);
+}
+.nemo-window .sidebar,
+.nemo-window .menubar {
+    padding: 2px;
+    border: none;
+    outline: none;
+}
+
+.nemo-window .sidebar .view,
+.nemo-window .view {
+    padding: 5px;
+    border: none;
+    font-size: 12pt;
+}
+
+.nemo-window .view:selected,
+.nemo-window .view:hover,
+.nemo-window .view:focus,
+.nemo-window .view:selected:focus,
+.nemo-window .view:selected:not(:focus) {
+    border: none;
+    outline: none;
+    box-shadow: none;
+}
+
+.nemo-window .view:hover {
+    background-color: rgba(122, 252, 255, 0.2);
+    background-image: none;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+.nemo-window .view:selected {
     background-color: rgba(255, 126, 219, 0.15);
     background-image: none;
     border: 1px solid rgba(255, 126, 219, 0.5);
@@ -162,75 +194,6 @@ window.csd notebook > header > tabs > tab:checked {
     box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
 }
 
-/* Sidebar sits in a GtkPaned, so the divider is already drawn by
- * gtk-base.css section 9 — no extra border here or it doubles up. */
-.nemo-window .sidebar,
-.nemo-window .nemo-places-sidebar,
-.nemo-window placessidebar {
-    border-left: none;
-    border-right: none;
-}
-
-.nemo-window,
-.nemo-window .primary-toolbar,
-.nemo-window statusbar {
-    background-color: #0e0616;
-    background-image: none;
-    color: #ffffff;
-}
-
-/* Small overlay strip: "12 items", drag hints */
-.nemo-window .floating-bar,
-.nemo-window .floating-bar label {
-    background-color: #0e0616;
-    color: #7afcff;
-    border-radius: 8px;
-}
-
-.nemo-window .floating-bar {
-    border: 1px solid #ff7edb;
-}
-
-/* ── 6. SIDEBAR ROWS ──────────────────────────────────────────────────────
- * Roomier, pill-shaped rows instead of the sharp edge-to-edge box that
- * gtk-base.css sections 4–5 use for every other app's sidebar/list rows.
- * `window.csd.nemo-window` (both classes on the same window) is more
- * specific than the shared `window.csd ...` rules, so these win. */
-
-/* Breathing room around each row + gap between sections (Bookmarks/Devices) */
-window.csd.nemo-window .sidebar row,
-window.csd.nemo-window placessidebar row,
-window.csd.nemo-window .nemo-places-sidebar row {
-    padding: 6px 10px;
-    margin: 1px 6px;
-    border-radius: 8px;
-}
-
-/* Pill-shaped hover/selected fill instead of the sharp full-width box */
-window.csd.nemo-window .sidebar row:hover,
-window.csd.nemo-window placessidebar row:hover,
-window.csd.nemo-window .nemo-places-sidebar row:hover {
-    background-color: rgba(122, 252, 255, 0.1);
-    background-image: none;
-    border: none;
-    border-radius: 8px;
-}
-
-window.csd.nemo-window .sidebar row:selected,
-window.csd.nemo-window placessidebar row:selected,
-window.csd.nemo-window .nemo-places-sidebar row:selected {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    border: none;
-    border-radius: 8px;
-    box-shadow: none;
-    color: #ff7edb;
-}
-
-/* Section headers: Bookmarks / Devices / Network */
-window.csd.nemo-window placessidebar .sidebar-section-title,
-window.csd.nemo-window .nemo-places-sidebar .sidebar-section-title {
-    padding: 8px 10px 4px;
-    color: #5c6776;
-    font-weight: bold;
+.nemo-window toolbar {
+    padding: 4px;
 }

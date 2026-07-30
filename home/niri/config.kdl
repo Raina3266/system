@@ -47,7 +47,7 @@ layer-rule {
 }
 
 layout {
-    gaps 16
+    gaps 10
     background-color "transparent"
     center-focused-column "never"
 
@@ -94,9 +94,9 @@ hotkey-overlay {
 
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
-animations {
-    // off
-    // slowdown 3.0
+window-rule {
+    geometry-corner-radius 12
+    clip-to-geometry true
 }
 
 // WezTerm: empty default width to avoid initial configure bug

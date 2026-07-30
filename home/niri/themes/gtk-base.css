@@ -58,11 +58,6 @@ window.csd .view {
     color: #ffffff;
 }
 
-/* Window outline + the line under the title bar */
-window.csd {
-    border: 1px solid #ff7edb;
-}
-
 window.csd headerbar {
     border-bottom: 1px solid rgba(255, 126, 219, 0.6);
 }
