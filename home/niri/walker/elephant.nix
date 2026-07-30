@@ -14,6 +14,16 @@ let
   tomlFormat = pkgs.formats.toml { };
 
   cfg = {
+    # Files: search all non-hidden files/dirs under ~ 
+    # NOTE: ~/GoogleDrive is an rclone FUSE mount, so fd will still stall on
+    # network readdir when the mount refreshes — that's the tradeoff of
+    # including it. Acceptable per user request.
+    provider.files.settings = {
+      fd_flags = [ "--type" "file" "--type" "directory" ];
+      search_dirs = [ ];
+      watch = false;
+      min_score = 20;
+    };
     # Clipboard: auto-cleanup after 3 days (4320 min)
     provider.clipboard.settings = {
       auto_cleanup = 4320;

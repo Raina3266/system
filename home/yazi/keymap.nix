@@ -8,6 +8,9 @@
     { on = [ "b" "b" ]; run = "plugin bookmarks save"; desc = "Save bookmark"; }
     { on = [ "b" "d" ]; run = "plugin bookmarks delete"; desc = "Delete bookmark"; }
 
+    # Bulk rename in GUI editor (Zed)
+    { on = [ "r" "g" ]; run = "plugin batch-rename-gui"; desc = "Bulk rename in Zed"; }
+
     # Search
     { on = "M"; run = "plugin mount"; desc = "Mount manager"; }
     { on = [ "F" "G" ]; run = "plugin yafg"; desc = "Grep file contents (rg+fzf)"; }
@@ -24,6 +27,9 @@
     # Paste
     { on = "p"; run = "plugin smart-paste"; desc = "Paste into hovered dir or CWD"; }
     { on = "P"; run = "plugin smart-paste --force"; desc = "Paste (overwrite)"; }
+
+    # Selection
+    { on = "<C-a>"; run = "select --all"; desc = "Select all files in cwd"; }
 
     # Navigation
     { on = "i"; run = "plugin easyjump"; desc = "Easyjump to visible file"; }

@@ -61,6 +61,7 @@ require("yatline"):setup {
 -- ── File manipulation ──────────────────────────────────────────────────────
 require("smart-enter"):setup { open_multi = true }
 require("bookmarks"):setup()
+require("batch-rename-gui"):setup { editor = "zeditor" }
 require("recycle-bin"):setup()
 require("yafg"):setup { editor = "nvim" }
 
