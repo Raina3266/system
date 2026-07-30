@@ -43,7 +43,6 @@
  * grey, so they are forced to the dark background here. */
 
 window.csd,
-window.csd box,
 window.csd stack,
 window.csd scrolledwindow,
 window.csd viewport,
@@ -60,6 +59,14 @@ window.csd .view {
 
 window.csd headerbar {
     border-bottom: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+window.csd eventbox {
+    border-top: 1px solid rgba(255, 126, 219, 0.6);
+}
+
+window.csd toolbar {
+    border: 1px solid rgba(255, 126, 219, 0.6);
 }
 
 /* Unfocused windows: keep our colours instead of Adwaita's grey wash.

@@ -156,11 +156,10 @@ window.csd notebook > header > tabs > tab:checked {
 .neno-window .view {
     border: 1px solid rgba(255, 126, 219, 0.6);
 }
-.nemo-window .sidebar,
-.nemo-window .menubar {
+.neno-window .toolbar .view {
     padding: 2px;
-    border: none;
-    outline: none;
+    border-top: 1px solid rgba(255, 126, 219, 0.5);
+    border-bottom: 1px solid rgba(255, 126, 219, 0.5);
 }
 
 .nemo-window .sidebar .view,
