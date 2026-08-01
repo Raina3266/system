@@ -61,7 +61,8 @@ require("yatline"):setup {
 -- ── File manipulation ──────────────────────────────────────────────────────
 require("smart-enter"):setup { open_multi = true }
 require("bookmarks"):setup()
-require("batch-rename-gui"):setup { editor = "zeditor" }
+-- Bulk rename uses yazi's built-in `rename --force` (see keymap.nix `r g`),
+-- which opens $EDITOR with the selected file list. No plugin required.
 require("recycle-bin"):setup()
 require("yafg"):setup { editor = "nvim" }
 

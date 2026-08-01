@@ -8,8 +8,11 @@
     { on = [ "b" "b" ]; run = "plugin bookmarks save"; desc = "Save bookmark"; }
     { on = [ "b" "d" ]; run = "plugin bookmarks delete"; desc = "Delete bookmark"; }
 
-    # Bulk rename in GUI editor (Zed)
-    { on = [ "r" "g" ]; run = "plugin batch-rename-gui"; desc = "Bulk rename in Zed"; }
+    # Bulk rename in GUI editor (Zed): yazi's built-in `rename` opens
+    # $EDITOR with the selected file list when multiple files are selected.
+    # No plugin needed — the old batch-rename-gui plugin no longer exists
+    # upstream and was producing an empty/broken plugin dir.
+    { on = "R"; run = "rename --force"; desc = "Bulk rename in Zed"; }
 
     # Search
     { on = "M"; run = "plugin mount"; desc = "Mount manager"; }
@@ -29,7 +32,7 @@
     { on = "P"; run = "plugin smart-paste --force"; desc = "Paste (overwrite)"; }
 
     # Selection
-    { on = "<C-a>"; run = "select --all"; desc = "Select all files in cwd"; }
+    { on = "<C-a>"; run = "toggle_all --state=on"; desc = "Select all files in cwd"; }
 
     # Navigation
     { on = "i"; run = "plugin easyjump"; desc = "Easyjump to visible file"; }

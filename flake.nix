@@ -44,26 +44,6 @@
         inherit system;
         overlays = [
           nixGL.overlay
-          # niri's vendored `libdisplay-info-sys` crate requires
-          # libdisplay-info < 0.4.0, but nixpkgs bumped the system package
-          # to 0.4.0 (fixed upstream in nixpkgs PR #546004, not yet on
-          # nixos-unstable as of this pin). Give niri its own 0.3.0 copy
-          # without touching the system-wide libdisplay-info used
-          # elsewhere. Safe to drop once nixpkgs is updated past that fix.
-          (final: prev: {
-            niri = prev.niri.override {
-              libdisplay-info = prev.libdisplay-info.overrideAttrs (old: {
-                version = "0.3.0";
-                src = prev.fetchFromGitLab {
-                  domain = "gitlab.freedesktop.org";
-                  owner = "emersion";
-                  repo = "libdisplay-info";
-                  rev = "0.3.0";
-                  hash = "sha256-nXf2KGovNKvcchlHlzKBkAOeySMJXgxMpbi5z9gLrdc=";
-                };
-              });
-            };
-          })
         ];
         config = {
           allowUnfree = true;

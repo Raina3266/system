@@ -1,16 +1,5 @@
 # Yazi file manager.
 { lib, pkgs, ... }:
-let
-  # Pinned to a concrete commit (not the moving "main" branch) so the
-  # hash stays stable. Bump rev + hash together when updating.
-  yazi-plugins-repo = pkgs.fetchFromGitHub {
-    owner = "yazi-rs";
-    repo = "plugins";
-    rev = "9014ed21f3a62c71907751e8dd5b9f4882124b74";
-    sha256 = "sha256-HUbc5JJwBznvyOoZnQVq18K991LQ+ksCGXN0Gj7GQjE=";
-  };
-  batch-rename-gui = "${yazi-plugins-repo}/batch-rename-gui.yazi";
-in
 {
   programs.yazi = {
     enable = true;
@@ -62,10 +51,7 @@ in
       "jump-to-char"
       "easyjump"
       "yafg" # ripgrep+fzf content search
-    ] pkgs.yaziPlugins) // {
-      # Custom plugins not in nixpkgs
-      batch-rename-gui = batch-rename-gui;
-    };
+    ] pkgs.yaziPlugins);
 
     # Tools yazi shells out to for previews and file ops.
     extraPackages = with pkgs; [
