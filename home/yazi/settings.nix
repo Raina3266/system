@@ -8,7 +8,6 @@ in
     show_hidden = true;
     sort_by = "alphabetical";
     sort_dir_first = true;
-    sort_reverse = false;
     linemode = "size";
     show_symlink = true;
     ratio = [ 3 3 3 ]; # parent / current / preview pane widths
@@ -51,6 +50,10 @@ in
 
       { mime = "application/{,g}zip"; run = "lsar"; }
       { mime = "application/x-{tar,bzip2,7z-compressed,xz,rar}"; run = "lsar"; }
+
+      # pdf: built-in previewer, bridges to pdftoppm (poppler-utils)
+      { mime = "application/pdf"; run = "pdf"; }
+      { url = "*.pdf"; run = "pdf"; }
 
       { mime = "application/vnd.ms-excel"; run = "duckdb"; }
       { url = "*.parquet"; run = "duckdb"; }

@@ -4,7 +4,6 @@
   programs.yazi = {
     enable = true;
     enableFishIntegration = true;
-    enableBashIntegration = true;
 
     initLua = ./main.lua;
     settings = import ./settings.nix;

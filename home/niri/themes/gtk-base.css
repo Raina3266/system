@@ -65,9 +65,9 @@ window.csd eventbox {
     border-top: 1px solid rgba(255, 126, 219, 0.6);
 }
 
-window.csd toolbar {
+window.dialog {
     border: 1px solid rgba(255, 126, 219, 0.6);
-}
+    padding: 3px;}
 
 /* Unfocused windows: keep our colours instead of Adwaita's grey wash.
  * GTK4 wraps the headerbar in `windowhandle`, hence the extra selectors. */
