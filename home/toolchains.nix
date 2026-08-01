@@ -5,6 +5,7 @@
     gcc
     nil
     nixd
+    uv
     rustup
     cargo-machete
     diesel-cli

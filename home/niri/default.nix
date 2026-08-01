@@ -31,6 +31,19 @@ in
 
   xdg.configFile."niri/config.kdl".source = ./config.kdl;
 
+  # rofi is pinned in flake.nix to the commit that adds Wayland
+  # click-to-exit (a fullscreen transparent capture surface catches
+  # pointer events outside the menu and cancels the view).
+  programs.rofi = {
+    enable = true;
+    extraConfig = {
+      click-to-exit = true;
+      location = 0;
+      xoffset = 0;
+      yoffset = 0;
+    };
+  };
+
   programs'.waybar.enable = true;
 
   # Tools for niri binds and X11 app support

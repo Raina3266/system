@@ -43,7 +43,6 @@
  * grey, so they are forced to the dark background here. */
 
 window.csd,
-window.csd stack,
 window.csd scrolledwindow,
 window.csd viewport,
 window.csd paned,
@@ -65,9 +64,17 @@ window.csd eventbox {
     border-top: 1px solid rgba(255, 126, 219, 0.6);
 }
 
-window.dialog {
+window.dialog,
+dialog {
+    outline: 1px solid rgba(255, 126, 219, 0.6);
+    outline-offset: -3px;
+}
+
+window.csd rubberband,
+window.csd .rubberband {
+    background-color: transparent;
     border: 1px solid rgba(255, 126, 219, 0.6);
-    padding: 3px;}
+}
 
 /* Unfocused windows: keep our colours instead of Adwaita's grey wash.
  * GTK4 wraps the headerbar in `windowhandle`, hence the extra selectors. */
