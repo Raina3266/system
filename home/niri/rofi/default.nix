@@ -1,22 +1,19 @@
 # Rofi: application launcher / dmenu (replacing walker incrementally)
-{ pkgs, ... }:
+#
+{ pkgs, config, ... }:
 {
   home.packages = with pkgs; [
+    rofi
+    rofi-rbw
     rofi-vpn
     rofi-network-manager
     rofi-bluetooth
   ];
 
-  programs.rofi = {
-    enable = true;
-    package = pkgs.rofi;
-    theme = ./cyberpunk.rasi;
-
-    location = "top-right";
-    xoffset = 5;
-    yoffset = 44;
-    cycle = false;
-
-    modes = [ "combi" "filebrowser" "recursivebrowser" ];
-  };
+  xdg.configFile."rofi/config.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/rofi/config.rasi";
+  xdg.configFile."rofi/cyberpunk.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/rofi/cyberpunk.rasi";
 }

@@ -1,7 +1,14 @@
 /* ROFI: base configuration */
 
 configuration {
-    scroll-method: 1;
+    /* ── Top-right corner ── */ 
+    location: 3; 
+    x-offset: 5px; 
+    y-offset: 44px; 
+    scroll-method: 1; 
+    cycle: false;
+
+    modes: "combi,drun,filebrowser,recursivebrowser"; 
     combi-modes: "drun,recursivebrowser";
     combi-display-format: "{text}";
     sidebar-mode: true;
