@@ -20,8 +20,16 @@ window {
     border:           1px;
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
-    padding:          12px;
+    padding:          10px;
     width:            800px;
+    height:           510px;
+}
+
+/* ── Content / Preview ── */
+
+mainbox {
+    orientation: vertical;
+    children:   [ inputbar, message, listview, mode-switcher ];
 }
 
 /* ── Search input ── */
@@ -58,7 +66,6 @@ listview {
     lines:       8;
     dynamic:     true;
     scrollbar:   true;
-    fixed-height: true;
     spacing:     3px;
 }
 
@@ -98,7 +105,6 @@ element-text {
 mode-switcher {
     border:       1px 0 0 0;
     border-color: rgba(255, 126, 219, 0.2);
-    margin:       10px 0 0 0;
     padding:      10px 0 5px 0;
     spacing:      6px;
 }
@@ -125,29 +131,4 @@ error-message {
     padding:          10px;
     background-color: @bg;
     text-color:       @fg;
-}
-
-/* ── Content / Preview ── */
-
-mainbox {
-    orientation: horizontal;
-    children:   [ preview-pane, content-pane ];
-    spacing:    10px;
-}
-
-content-pane {
-    orientation: vertical;
-    expand:     true;
-    children:   [ inputbar, message, listview, mode-switcher ];
-}
-
-preview-pane {
-    orientation:      vertical;
-    expand:           true;
-    width:            400px;
-    background-color: @bg-mod;
-    border:           1px;
-    border-color:     rgba(255, 126, 219, 0.2);
-    border-radius:    6px;
-    padding:          10px;
 }

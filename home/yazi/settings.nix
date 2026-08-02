@@ -125,5 +125,8 @@ in
     { mime = "application/vnd.ms-powerpoint"; use = "office_suite"; } # .ppt
     { mime = "application/vnd.ms-excel"; use = "office_suite"; } # .xls
     { url = "*.{doc,docx,ppt,pptx,csv,xls,xlsx,odt,ods,odp}"; use = "office_suite"; }
+
+    # Everything else -> Zed (unless it's a directory or another rule matched)
+    { url = "*"; use = "text_editor"; }
   ];
 }

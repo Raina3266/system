@@ -1,6 +1,5 @@
 # Waybar: top and bottom status bars with cyberpunk theme.
-# Top bar: clock, hardware, media, utilities (see top.nix)
-# Bottom bar: niri workspace taskbar + launcher buttons (see bottom.nix)
+# Bar layouts: layout.nix (top: clock/hardware/media/utilities; bottom: taskbar)
 # Polling scripts: todo/timer in top-right.nix
 {
   pkgs,
@@ -13,13 +12,15 @@ let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
 
+  layout = import ./layout.nix { inherit pkgs; };
+
   # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
   barOutputs = lib.optionalAttrs ((osConfig.services'.desktop.displays or [ ]) != [ ]) {
     output = map (d: d.name) (lib.filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
   };
 
-  topBar = (import ./top.nix { inherit pkgs; }) // barOutputs;
-  bottomBar = (import ./bottom.nix { inherit pkgs; }) // barOutputs;
+  topBar = layout.topBar // barOutputs;
+  bottomBar = layout.bottomBar // barOutputs;
 in
 {
   options.programs'.waybar = {
@@ -33,6 +34,7 @@ in
           waybar-lyric
           ycal.waybarYcal
           wl-clipboard
+          cliphist
           jq
           playerctl
         ];
@@ -46,6 +48,21 @@ in
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
           };
+        };
+
+        systemd.user.services.cliphist = {
+          Unit = {
+            Description = "cliphist: clipboard history watcher";
+            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.cliphist}/bin/cliphist store";
+            Restart = lib.mkForce "on-failure";
+            RestartSec = 3;
+          };
+          Install = { WantedBy = [ "graphical-session.target" ]; };
         };
 
         systemd.user.services.waybar-ycal = {

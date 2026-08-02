@@ -1,0 +1,133 @@
+/**
+ * filepreview.rasi
+ *
+ * Dedicated rofi theme for browsing/previewing FILES ONLY.
+ * Left half = file list, right half = large live preview of the
+ * currently highlighted file (`icon-current-entry`).
+ *
+ * Preview images come from rofi's own thumbnail system:
+ *   - images: handled natively
+ *   - PDFs / video / audio / office docs: handled automatically if a
+ *     matching XDG thumbnailer is installed on your system
+ *   - plain text / code: needs the small custom thumbnailer included
+ *     alongside this file (rofi-text-thumbnailer) — see README notes
+ *
+ * This is deliberately a SEPARATE theme from your normal app-launcher
+ * config.rasi. Do not @theme/@import it into that file — load it only
+ * when you explicitly launch filebrowser mode (see launch-filepreview.sh),
+ * so drun/run/window modes stay unaffected.
+ *
+ * Usage:
+ *   rofi -show filebrowser -theme ~/.config/rofi/filepreview.rasi \
+ *        -filebrowser-directory "$HOME" \
+ *        -filebrowser-command "xdg-open"
+ */
+
+configuration {
+    show-icons: true;
+}
+
+* {
+    bg0:      #1e1e2e;
+    bg1:      #313244;
+    bg-sel:   #45475a;
+    fg0:      #cdd6f4;
+    fg-dim:   #a6adc8;
+    accent:   #89b4fa;
+
+    background-color: transparent;
+    text-color:       @fg0;
+    font:             "JetBrainsMono Nerd Font 11";
+}
+
+window {
+    fullscreen:        true;
+    background-color:  @bg0;
+    padding:            2em;
+    spacing:            1em;
+    children:           [ inputbar, listview-split ];
+}
+
+/* ---- search bar ---- */
+
+inputbar {
+    background-color:  @bg1;
+    border-radius:      0.5em;
+    padding:            0.7em 1em;
+    spacing:            0.6em;
+    children:           [ icon-search, entry ];
+}
+icon-search {
+    expand:              false;
+    filename:            "system-search";
+    size:                1em;
+    vertical-align:      0.5;
+}
+entry {
+    placeholder:         "Search files…";
+    placeholder-color:   @fg-dim;
+}
+
+/* ---- the actual split: list on the left, preview on the right ---- */
+
+listview-split {
+    orientation:  horizontal;
+    spacing:      1em;
+    children:     [ listview, previewbox ];
+}
+
+listview {
+    width:          50%;
+    columns:        1;
+    lines:          16;
+    fixed-height:   true;
+    scrollbar:      true;
+    spacing:        0.2em;
+    padding:        0.3em;
+    background-color: @bg1;
+    border-radius:  0.5em;
+}
+scrollbar {
+    handle-color: @bg-sel;
+    handle-width: 0.4em;
+    padding:      0em 0.2em;
+}
+
+element {
+    orientation:    horizontal;
+    padding:        0.5em 0.7em;
+    spacing:        0.6em;
+    border-radius:  0.4em;
+    children:       [ element-icon, element-text ];
+}
+element-icon {
+    size:             1.4em;
+    vertical-align:   0.5;
+}
+element-text {
+    vertical-align:   0.5;
+    text-color:       inherit;
+}
+element normal.normal {
+    text-color: @fg0;
+}
+element selected.normal {
+    background-color: @bg-sel;
+    text-color:       @accent;
+}
+
+/* right pane: big live preview of the highlighted entry */
+previewbox {
+    expand:            true;
+    orientation:       vertical;
+    background-color:  @bg1;
+    border-radius:     0.5em;
+    padding:           1em;
+    children:          [ icon-current-entry ];
+}
+icon-current-entry {
+    expand:            true;
+    size:              100%;
+    horizontal-align:  0.5;
+    vertical-align:    0.5;
+}

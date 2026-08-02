@@ -37,6 +37,7 @@ in
   # Tools for niri binds and X11 app support
   home.packages = with pkgs; [
     swaybg
+    nwg-displays
     bluez-tools
     brightnessctl # Screen brightness control
     wob # Wayland overlay progress bar for timer

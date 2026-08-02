@@ -2,7 +2,6 @@
 { pkgs }:
 let
   walker = "${pkgs.walker}/bin/walker";
-  rofi = "${pkgs.rofi}/bin/rofi";
   btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
 
   # Static launcher icons with walker integration
@@ -27,23 +26,6 @@ in
   "tray" = {
     icon-size = 18;
     spacing = 10;
-  };
-
-  # Clipboard: rofi dmenu picker over cliphist history (replaces walker's
-  # clipboard provider). Selected entry is decoded and copied via wl-copy.
-  "custom/cliphist" = {
-    format = "<span size='large'>󰕛</span>";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-cliphist-poll" ''
-      printf '{"text":"<span size='"'"'large'"'"'>󰕛</span>","tooltip":"Clipboard history"}'
-    '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-cliphist" ''
-      ${pkgs.cliphist}/bin/cliphist list \
-        | ${rofi} -dmenu -i -p "Clipboard" -theme-str 'window {width: 420px;}' \
-        | ${pkgs.cliphist}/bin/cliphist decode \
-        | ${pkgs.wl-clipboard}/bin/wl-copy
-    '';
   };
 
   "custom/bt" = {
@@ -83,3 +65,4 @@ in
   "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-n -m menus:power";
 }
 // (import ./timer.nix { inherit pkgs; })
+// (import ./cliphist.nix { inherit pkgs; })
