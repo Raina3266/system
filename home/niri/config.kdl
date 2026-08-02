@@ -113,7 +113,7 @@ binds {
 
     // Application launchers and session controls
     Mod+T hotkey-overlay-title="Open a Terminal: ghostty" { spawn "ghostty"; }
-    Mod+F hotkey-overlay-title="Run an Application: walker" { spawn "walker"; }
+    Mod+F hotkey-overlay-title="App & File Finder: rofi" { spawn "rofi" "-show" "combi"; }
     Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }

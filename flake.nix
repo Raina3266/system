@@ -38,41 +38,10 @@
     }@inputs:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs {
-        inherit system;
-        overlays = [
-          nixGL.overlay
-          (final: prev: {
-            # rofi = the bash wrapper, rofi-unwrapped = the compiled C program.
-            # Pinned to the merge commit of PR #2272, which implements
-            # click-to-exit on Wayland (fullscreen capture surface).
-            rofi-unwrapped = prev.rofi-unwrapped.overrideAttrs (old: {
-              version = "2.0.0-dev";
-              src = final.fetchFromGitHub {
-                owner = "davatorium";
-                repo = "rofi";
-                rev = "6d2a5281e45dee92dfbdaf6f9ba6081c4c608682";
-                fetchSubmodules = true;
-                hash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
-              };
-            });
-          })
-        ];
-        config = {
-          allowUnfree = true;
-          packageOverrides = pkgs: {
-            intel-vaapi-driver = pkgs.intel-vaapi-driver.override {
-              enableHybridCodec = true;
-            };
-          };
-        };
-      };
     in
     {
-      # sudo nixos-rebuild switch --flake .#raina
       nixosConfigurations.raina = nixpkgs.lib.nixosSystem {
         inherit system;
-        inherit pkgs;
         specialArgs = {
           inputs = inputs;
         };

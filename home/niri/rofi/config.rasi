@@ -1,0 +1,41 @@
+/* ROFI: base configuration */
+
+configuration {
+    scroll-method: 1;
+    combi-modes: "drun,recursivebrowser";
+    combi-display-format: "{text}";
+    sidebar-mode: true;
+
+    /* ── Behaviour ── */
+    show-icons: true;
+    icon-theme: "Papirus-Dark";
+    display-combi: "󰍉 ";
+    display-drun: "󰀻 ";
+    display-filebrowser: "󰈔 ";
+    display-recursivebrowser: "󰈞 ";
+    drun-display-format: "{icon} {name}";
+
+    /* ── File contents preview ──
+       Called as: rofi-preview <input> <output> <size>; must write a PNG to
+       <output>. Results are cached by rofi under ~/.cache/thumbnails.
+    preview-cmd: "rofi-preview {input} {output} {size}";*/
+
+    filebrowser {
+        command: "xdg-open";
+        directory: "/home/raina";
+        show-hidden: false;
+    }
+
+    recursivebrowser {
+        command: "xdg-open";
+        directory: "/home/raina";
+        display-format: "{name}";
+        depth: 0;
+        filter-regex: "^(\\..*|node_modules|build|dist|target|out|result|bin|__pycache__|venv|\\.venv|\\.cache|\\.mypy_cache|\\.pytest_cache|\\.gradle|\\.cargo|\\.git|\\.svn|\\.hg|\\.idea|\\.vscode|tmp|\\.tmp)$";
+    }
+
+    /* ── Wayland ── */
+    click-to-exit: true;
+}
+
+@theme "~/.config/rofi/cyberpunk.rasi"
