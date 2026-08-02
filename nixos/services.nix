@@ -17,18 +17,9 @@
     ffmpegthumbnailer
     gdk-pixbuf
     nemo-with-extensions
-
-    # Start/stop the on-demand media services (see "Media services").
-    (writeShellScriptBin "media-stack" ''
-      set -euo pipefail
-      units="redis-immich immich-server immich-machine-learning jellyfin"
-      case "''${1:-status}" in
-        up)     exec sudo systemctl start $units ;;
-        down)   exec sudo systemctl stop $units ;;
-        status) exec systemctl --no-pager status $units ;;
-        *) echo "usage: media-stack {up|down|status}" >&2; exit 1 ;;
-      esac
-    '')
+    gnomeExtensions.simple-timer
+    gnomeExtensions.clipboard-history
+    gnomeExtensions.astra-monitor
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────
@@ -129,10 +120,32 @@
 
   # immich-server keeps Requires=postgresql.target, so Postgres is
   # pulled in automatically when Immich starts.
-  systemd.services.jellyfin.wantedBy = lib.mkForce [ ];
-  systemd.services.immich-server.wantedBy = lib.mkForce [ ];
-  systemd.services.immich-machine-learning.wantedBy = lib.mkForce [ ];
-  systemd.services.redis-immich.wantedBy = lib.mkForce [ ];
+  #
+  # Grouped under a custom target so they can be started/stopped together:
+  #   sudo systemctl start media-stack.target
+  #   sudo systemctl stop media-stack.target
+  #   systemctl list-dependencies media-stack.target
+  systemd.targets.media-stack = {
+    description = "On-demand media services (Immich + Jellyfin)";
+    unitConfig.StopWhenUnneeded = true;
+  };
+
+  systemd.services.jellyfin = {
+    wantedBy = lib.mkForce [ ];
+    partOf = [ "media-stack.target" ];
+  };
+  systemd.services.immich-server = {
+    wantedBy = lib.mkForce [ ];
+    partOf = [ "media-stack.target" ];
+  };
+  systemd.services.immich-machine-learning = {
+    wantedBy = lib.mkForce [ ];
+    partOf = [ "media-stack.target" ];
+  };
+  systemd.services.redis-immich = {
+    wantedBy = lib.mkForce [ ];
+    partOf = [ "media-stack.target" ];
+  };
 
 
   services.sunshine = {

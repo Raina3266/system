@@ -69,10 +69,5 @@
     # downloads / torrent
     qbittorrent
     clash-verge-rev
-
-    # gnome extensions
-    gnomeExtensions.simple-timer
-    gnomeExtensions.clipboard-history
-    gnomeExtensions.astra-monitor
   ];
 }
