@@ -21,8 +21,7 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            800px;
-    height:           510px;
+    width:            400px;
 }
 
 /* ── Content / Preview ── */
@@ -64,7 +63,7 @@ entry {
 
 listview {
     lines:       8;
-    dynamic:     true;
+    fixed-height: true;
     scrollbar:   true;
     spacing:     3px;
 }
@@ -106,7 +105,6 @@ mode-switcher {
     border:       1px 0 0 0;
     border-color: rgba(255, 126, 219, 0.2);
     padding:      10px 0 5px 0;
-    spacing:      6px;
 }
 
 button {

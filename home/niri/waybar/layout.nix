@@ -41,7 +41,6 @@ let
 
 # ------------ BottomBar -------------
 
-  # App launcher button: emoji icon + tooltip
   starredApp = name: icon: cmd: {
     format = icon;
     tooltip = true;

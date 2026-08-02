@@ -8,7 +8,7 @@ configuration {
     scroll-method: 1; 
     cycle: false;
 
-    modes: "combi,drun,filebrowser"; 
+    modes: "combi,filebrowser"; 
     combi-modes: "drun,filebrowser";
     combi-display-format: "{text}";
     sidebar-mode: true;
