@@ -83,27 +83,23 @@ in
 
     context_menu = [
       {
-        label = "  Maximize Column";
-        action = "maximize-column";
-      }
-      {
-        label = "  Maximize to Edges";
+        label = "  Maximize to Edges  ";
         action = "maximize-window-to-edges";
       }
       {
-        label = "  Center Column";
+        label = "  Center Column  ";
         action = "center-column";
       }
       {
-        label = "  Toggle Floating";
+        label = "  Toggle Floating  ";
         action = "toggle-window-floating";
       }
       {
-        label = "  Move WS Up";
+        label = "  Move Up  ";
         action = "move-window-to-workspace-up";
       }
       {
-        label = "  Move WS Down";
+        label = "  Move Down  ";
         action = "move-window-to-workspace-down";
       }
       {
@@ -116,30 +112,29 @@ in
     multi_select_modifier = "shift";
     multi_select_menu = [
       {
-        label = "  Move All Up";
+        label = "  Move All Up  ";
         action = "move-to-workspace-up";
       }
       {
-        label = "  Move All Down";
+        label = "  Move All Down  ";
         action = "move-to-workspace-down";
       }
       {
-        label = "  Maximize All";
+        label = "  Maximize All  ";
         action = "maximize-columns";
       }
       {
-        label = "  Close All";
+        label = "  Close All  ";
         action = "close-windows";
       }
     ];
 
-    # Audio indicator disabled: libpulse glib-mainloop double-free crashes waybar
-    # audio_indicator = {
-    #   enabled = true;
-    #   playing_icon = "󰕾 ";
-    #   muted_icon = "󰖁 ";
-    #   clickable = true;
-    # };
+    audio_indicator = {
+      enabled = true;
+      playing_icon = "󰕾";
+      muted_icon = "󰖁";
+      clickable = true;
+    };
 
     # Urgency hints when app requests attention
     notifications = {
