@@ -10,6 +10,12 @@
 # Text files are the interesting case: there is no way to put real text in the
 # preview pane, so we render syntax-highlighted text to an image via
 # bat -> Pango markup -> ImageMagick.
+#
+# For anything with no meaningful preview (binaries, archives, empty files) we
+# write a 1x1 transparent PNG rather than failing. Rofi cannot hide the preview
+# widget at runtime, but with `squared: false` in the theme the widget's desired
+# width is derived from the image aspect ratio, so a 1px-wide image makes the
+# pane collapse and the listview reclaims the space.
 
 set -uo pipefail
 
@@ -20,13 +26,21 @@ size=$3
 bg="#12101A"
 fg="#CBE3E7"
 
-# Characters that fit across `size` pixels at 10pt monospace (~8px advance).
-cols=$((size / 8))
+# Characters that fit across `size` pixels at 9pt monospace (~7px advance).
+cols=$((size / 7))
 ((cols < 40)) && cols=40
 
-# Lines that fit down `size * 1.3` pixels at ~17px line height.
-rows=$((size * 13 / 10 / 17))
+# Lines that fit down `size` pixels at ~15px line height. Kept within `size`
+# (rather than taller) so the rendered image never exceeds the pane's box and
+# gets scaled down -- downscaling makes the text blurry and small.
+rows=$((size / 15))
 ((rows < 10)) && rows=10
+
+# Collapse the preview pane: a 1x1 transparent PNG.
+no_preview() {
+    magick -size 1x1 xc:none "PNG:$output"
+    exit 0
+}
 
 mime=$(file --mime-type -b -- "$input" 2>/dev/null) || mime="application/octet-stream"
 
@@ -36,16 +50,17 @@ render_text() {
     # shellcheck disable=SC2064
     trap "rm -f '$markup'" RETURN
 
-    bat --color=always --style=plain --paging=never \
+    bat --color=always --style=plain --paging=never --wrap=character \
         --terminal-width="$cols" --line-range=":$rows" -- "$input" 2>/dev/null |
-        ansifilter --pango --font "JetBrains Mono" --font-size 10 >"$markup" || return 1
+        ansifilter --pango --font "JetBrains Mono" --font-size 9 >"$markup" || return 1
 
     [[ -s $markup ]] || return 1
 
     magick -background "$bg" -fill "$fg" -density 96 -size "${size}x" \
         "pango:@$markup" \
         -bordercolor "$bg" -border 8 \
-        -resize "${size}x$((size * 3 / 2))>" \
+        -resize "${size}x${size}>" \
+        -background "$bg" -gravity northwest -extent "${size}x${size}" \
         "PNG:$output"
 }
 
@@ -60,8 +75,8 @@ case $mime in
     video/*)
         ffmpegthumbnailer -i "$input" -o "$output" -s "$size" -c png
         ;;
-    inode/x-empty)
-        exit 1
+    inode/x-empty | inode/directory)
+        no_preview
         ;;
     text/* | application/json | application/xml | application/javascript | \
     application/x-shellscript | application/toml | application/x-yaml)
@@ -72,10 +87,11 @@ case $mime in
         if grep -Iq . -- "$input" 2>/dev/null; then
             render_text
         else
-            exit 1
+            no_preview
         fi
         ;;
 esac
 
-# Exit non-zero if nothing was produced, so rofi falls back to the mime icon.
-[[ -s $output ]]
+# If a renderer failed part-way, still collapse the pane rather than leaving
+# rofi to fall back to a giant mime icon.
+[[ -s $output ]] || no_preview

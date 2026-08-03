@@ -21,14 +21,32 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            400px;
+    width:            500px;
 }
 
 /* ── Content / Preview ── */
 
 mainbox {
     orientation: vertical;
-    children:   [ inputbar, message, listview, mode-switcher ];
+    children:   [ inputbar, current-entry, message, listview, mode-switcher ];
+}
+
+/* ── Hovered/selected row readout (sits between input and list) ── */
+
+current-entry {
+    orientation:   horizontal;
+    height:        12px; 
+    margin:        0 0 4px 0;
+    border:        0 0 1px 0;
+    border-color:  rgba(122, 252, 255, 0.15);
+    children:      [ textbox-current-entry ];
+}
+
+textbox-current-entry {
+    height:        12px;
+    text-color:  @cyan;
+    markup:      true;
+    vertical-align: 0.1;
 }
 
 /* ── Search input ── */
@@ -63,7 +81,7 @@ entry {
 
 listview {
     lines:       8;
-    fixed-height: true;
+    dynamic:     true;
     scrollbar:   true;
     spacing:     3px;
 }

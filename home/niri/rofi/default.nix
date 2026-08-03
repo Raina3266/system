@@ -19,6 +19,16 @@
     
     (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))
     fd
+
+    # Dedicated file finder with the preview pane. Kept separate from the combi
+    # launcher because drun entries feed their own app icon to the preview
+    # widget, which looks bad blown up to pane size.
+    (writeShellScriptBin "rofi-files" ''
+      exec rofi -show filesearch \
+        -modes "filesearch:rofi-filesearch" \
+        -theme "$HOME/.config/rofi/filepreview.rasi" \
+        -display-filesearch "󰈞 Files "
+    '')
   ];
 
   xdg.configFile."rofi/config.rasi".source =

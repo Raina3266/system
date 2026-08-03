@@ -46,7 +46,6 @@
     # productivity / office
     onlyoffice-desktopeditors
     obsidian
-    anki
     meld
     czkawka
     exercism

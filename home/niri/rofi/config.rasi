@@ -5,10 +5,11 @@ configuration {
     location: 3; 
     x-offset: 5px; 
     y-offset: 44px; 
-    scroll-method: 1; 
+    scroll-method: 0; 
+    hover-select: true;
     cycle: false;
 
-    modes: "combi,filesearch:rofi-filesearch";
+    modes: "combi,filesearch:rofi-filesearch,filebrowser";
     combi-modes: "drun,filesearch:rofi-filesearch";
     combi-display-format: "{text}";
     sidebar-mode: true;
@@ -16,9 +17,9 @@ configuration {
     /* ── Behaviour ── */
     show-icons: true;
     icon-theme: "Papirus-Dark";
-    display-combi: "󰍉 ";
-    display-drun: "󰀻 ";
-    display-filesearch: "󰈞 ";
+    display-combi: "󰍉 All ";
+    display-filebrowser: " Folders ";
+    display-filesearch: "󰈞 Files ";
     drun-display-format: "{icon} {name}";
 
     /* ── File contents preview ──

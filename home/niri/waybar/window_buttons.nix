@@ -48,7 +48,7 @@ in
     show_tooltip = true;
 
     icon_size = 22;
-    icon_spacing = 10;
+    icon_spacing = 5;
     min_button_width = 120;
     max_button_width = 200;
     # Default to eDP-1 width (overridden per-output below)
@@ -131,8 +131,8 @@ in
 
     audio_indicator = {
       enabled = true;
-      playing_icon = "󰕾";
-      muted_icon = "󰖁";
+      playing_icon = "󰕾 ";
+      muted_icon = "󰖁 ";
       clickable = true;
     };
 
