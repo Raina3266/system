@@ -16,6 +16,9 @@
     poppler-utils
     ffmpegthumbnailer
     file
+    
+    (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))
+    fd
   ];
 
   xdg.configFile."rofi/config.rasi".source =

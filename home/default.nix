@@ -9,7 +9,7 @@
     ./yazi
     ./copyq.nix
     ./thunderbird.nix
-    ./cloud.nix
+    ./cloud
     ./ocr.nix
     ./toolchains.nix
     ./desktop.nix
