@@ -26,7 +26,7 @@ window {
 
 mainbox {
     orientation: vertical;
-    children:   [ inputbar, textbox-current-entry, listview, mode-switcher ];
+    children:   [ inputbar, message, textbox-current-entry, listview, mode-switcher ];
 }
 
 /* ── Current Entry ── */

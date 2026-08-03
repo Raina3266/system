@@ -9,18 +9,25 @@ configuration {
     hover-select: true;
     cycle: false;
 
+    /* `filesearch` is declared with its script ONCE, here. combi-modes then
+     * refers to it by bare name so it resolves to that same mode instance --
+     * writing "filesearch:rofi-filesearch" in both places makes combi build a
+     * second, separate instance and run the generator script twice on every
+     * launch (see combi_mode_parse_switchers: it only reuses an existing mode
+     * when the token has no ':' in it). */
     modes: "combi,filesearch:rofi-filesearch,filebrowser";
-    combi-modes: "drun,filesearch:rofi-filesearch";
+    combi-modes: "drun,filesearch";
     combi-display-format: "{text}";
     sidebar-mode: true;
 
     /* ── Behaviour ── */
-    show-icons: true;
+    show-icons: false;
     icon-theme: "Papirus-Dark";
     display-combi: "󰍉 All ";
     display-filebrowser: " Folders ";
     display-filesearch: "󰈞 Files ";
-    drun-display-format: "{icon} {name}";
+    drun-display-format: "⌘ {name}";
+    filebrowser-display-format: " {name}";
 
     /* ── File contents preview ──
        Called as: rofi-preview <input> <output> <size>; must write a PNG to
@@ -31,7 +38,6 @@ configuration {
         command: "xdg-open";
         directory: "/home/raina";
         show-hidden: false;
-        display-format: "{name}";
     }
 
     /* ── Wayland ── */
