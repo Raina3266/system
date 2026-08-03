@@ -24,29 +24,19 @@ window {
     width:            500px;
 }
 
-/* ── Content / Preview ── */
-
 mainbox {
     orientation: vertical;
-    children:   [ inputbar, current-entry, message, listview, mode-switcher ];
+    children:   [ inputbar, textbox-current-entry, listview, mode-switcher ];
 }
 
-/* ── Hovered/selected row readout (sits between input and list) ── */
-
-current-entry {
-    orientation:   horizontal;
-    height:        12px; 
-    margin:        0 0 4px 0;
-    border:        0 0 1px 0;
-    border-color:  rgba(122, 252, 255, 0.15);
-    children:      [ textbox-current-entry ];
-}
+/* ── Current Entry ── */
 
 textbox-current-entry {
-    height:        12px;
-    text-color:  @cyan;
-    markup:      true;
-    vertical-align: 0.1;
+    margin:        0 0 5px 0;
+    fixed-height:  true;
+    font:          "JetBrains Mono Nerd Font 11";
+    text-color:    @cyan;
+    markup:        true;
 }
 
 /* ── Search input ── */
@@ -135,7 +125,7 @@ button {
 
 button selected {
     border-color: @pink;
-    text-color:   @pink;
+    text-color:   @cyan;
 }
 
 /* ── Error ── */

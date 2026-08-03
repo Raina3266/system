@@ -21,17 +21,27 @@ window {
 }
 
 mainbox {
-    children: [ inputbar, message, listview-split, mode-switcher ];
+    children: [ inputbar, textbox-current-entry, listview-split, mode-switcher ];
 }
 
 listview-split {
     orientation: horizontal;
     spacing:     10px;
-    children:    [ listview, icon-current-entry ];
+    children:    [ icon-current-entry, listview ];
 }
 
 listview {
     lines: 12;
+}
+
+/* ── Current Entry ── */
+
+textbox-current-entry {
+    margin:        0 0 5px 5px;
+    fixed-height:  true;
+    font:          "JetBrains Mono Nerd Font 11";
+    text-color:    @cyan;
+    markup:        true;
 }
 
 /* The preview pane itself. `squared: false` lets the widget take its natural

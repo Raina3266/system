@@ -15,7 +15,6 @@ set -euo pipefail
 home=$HOME
 
 if (( $# > 0 )); then
-    # Selection: rofi passes the raw entry, which is the full path.
     setsid -f xdg-open "$1" >/dev/null 2>&1
     exit 0
 fi
@@ -27,7 +26,8 @@ while IFS= read -r path; do
     name=${path##*/}
     parent=${path%/*}
     dir=${parent#"$home"}
-    dir="~${dir}"
-    printf '%s\0display\x1f<span size="small" alpha="55%%">%s/</span>%s\x1fmeta\x1f%s/%s\n' \
-        "$path" "$dir" "$name" "$dir" "$name"
+    dir=${dir#/}
+    dir="~${dir:+/$dir}"
+    printf '%s\0display\x1f%s<span size="66%%" alpha="50%%">  %s/</span>\n' \
+        "$path" "$name" "$dir"
 done
