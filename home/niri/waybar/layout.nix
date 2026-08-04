@@ -7,7 +7,7 @@ let
     smooth-scrolling-threshold = 5;
   };
 
-# ------------ TopBar -------------
+  # ------------ TopBar -------------
 
   topBar =
     common
@@ -32,13 +32,15 @@ let
         "custom/audio"
         "custom/bt"
         "custom/timer"
+        "custom/wifi"
       ];
     }
     // (import ./top-left.nix { inherit pkgs; })
     // (import ./top-center.nix { inherit pkgs; })
-    // (import ./top-right.nix { inherit pkgs; });
+    // (import ./top-right.nix { inherit pkgs; })
+    // (import ./wifi.nix { inherit pkgs; });
 
-# ------------ BottomBar -------------
+  # ------------ BottomBar -------------
 
   starredApp = name: icon: cmd: {
     format = icon;
