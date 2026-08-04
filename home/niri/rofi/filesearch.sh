@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # Rofi script mode: fuzzy file search over $HOME backed by fd.
 #
-# Rows show only the file NAME with the parent dir dimmed behind it (Pango
-# markup). The full path travels out-of-band:
+# Rows are two lines: the file NAME, then the parent dir below it, smaller and
+# dimmed (Pango markup). The line break is U+2029 PARAGRAPH SEPARATOR rather
+# than \n, because the script-mode protocol is line-delimited -- a real newline
+# would be read as the start of a new entry. U+2028 LINE SEPARATOR also breaks
+# the line, but it gets swallowed when Pango ellipsizes, collapsing the row back
+# to one line; U+2029 survives.
+#
+# `listview { lines: N }` counts rows, not text lines, so the window grows to fit
+# automatically. Row height is measured once at startup from a single-line
+# sample, so `eh: 2` (below) is required to reserve space for the second line.
+#
+# The full path travels out-of-band:
 #   - the raw entry is the absolute path, so rofi matches against it and
 #     passes it back verbatim when the row is accepted;
 #   - the `display` row option carries the markup that is actually drawn;
@@ -25,8 +35,6 @@ fi
 
 printf '\0markup-rows\x1ftrue\n'
 
-# --base-directory keeps fd's output relative so awk can split the basename
-# without rescanning the $HOME prefix; the absolute path is rebuilt below.
 fd --one-file-system --type f --base-directory "$home" . |
     awk -v home="$home" '
     {
@@ -39,7 +47,11 @@ fd --one-file-system --type f --base-directory "$home" . |
         path = home "/" $0
 
         printf "%s", path
-        printf "%cdisplay%c%s<span size=\"80%%\" alpha=\"50%%\">  %s/</span>", \
+        # \342\200\251 == U+2029 PARAGRAPH SEPARATOR (see header).
+        printf "%cdisplay%c%s\342\200\251<span size=\"80%%\" alpha=\"50%%\">%s/</span>", \
             0, 31, name, dir
+        # thumbnail:// makes rofi render an XDG thumbnail in the icon slot
+        # (falls back to the mimetype icon when no thumbnailer exists).
+        printf "%cicon%cthumbnail://%s", 0, 31, path
         printf "%cmeta%c%s/%s\n", 0, 31, dir, name
     }'

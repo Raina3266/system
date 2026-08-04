@@ -76,8 +76,8 @@ in
     format = "{}";
     return-type = "json";
     exec = pkgs.writeShellScript "waybar-wifi-poll" ''
-      on_icon="<span size='large'>󰤨</span>"
-      off_icon="<span size='large'>󰤮</span>"
+      on_icon="<span size='large'>󰤨 </span>"
+      off_icon="<span size='large'>󰤮 </span>"
       state=$(nmcli -t -f WIFI g 2>/dev/null)
       if [ "$state" = "enabled" ]; then
         ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')

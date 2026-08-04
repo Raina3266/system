@@ -18,12 +18,15 @@ configuration {
     sidebar-mode: true;
 
     /* ── Behaviour ── */
-    show-icons: false;
+    /* Two-line rows (filesearch shows name + dir). Row height is measured once
+       at startup, so this must be set globally rather than per-mode. */
+    show-icons: true;
     icon-theme: "Papirus-Dark";
     display-combi: "󰍉 All ";
     display-filebrowser: " Folders ";
     display-filesearch: "󰈞 Files ";
-    drun-display-format: "⌘ {name}";
+    drun-display-format: "{icon} {name}";
+    filesearch-display-format: "{icon} {name}";
     filebrowser-display-format: "  {name}";
 
     filebrowser {
@@ -33,4 +36,4 @@ configuration {
     }
 }
 
-@theme "~/.config/rofi/cyberpunk.rasi"
+@theme "~/.config/rofi/rofi-double.rasi"

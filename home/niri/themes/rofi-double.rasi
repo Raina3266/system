@@ -1,0 +1,139 @@
+/* ROFI: cyberpunk double-line theme
+   Two-line rows: main text on line one, a smaller + dimmed tooltip (e.g. the
+   parent dir from filesearch) on line two. The tooltip styling itself comes
+   from Pango markup in the caller (filesearch.sh); this theme just reserves
+   the extra row height via `eh: 2`. */
+
+* {
+    font: "JetBrains Mono Nerd Font 13";
+    bg:        #0E0616F2;
+    bg-mod:    #141428B3;
+    fg:        #CBE3E7;
+    pink:      #FF7EDB;
+    cyan:      #7AFCFF;
+    amber:     #F29E74;
+    red:       #FF3333;
+    dim:       #5C6776;
+
+    background-color: transparent;
+    text-color:       @fg;
+}
+
+window {
+    background-color: @bg;
+    border:           1px;
+    border-color:     rgba(255, 126, 219, 0.5);
+    border-radius:    15px;
+    padding:          10px;
+    width:            500px;
+}
+
+mainbox {
+    orientation: vertical;
+    children:   [ inputbar, listview, mode-switcher ];
+}
+
+/* ── Search input ── */
+
+inputbar {
+    background-color: @bg-mod;
+    border:           1px;
+    border-color:     rgba(255, 126, 219, 0.2);
+    border-radius:    6px;
+    padding:          10px 14px;
+    margin:           0 0 10px 0;
+    children:         [ prompt, entry ];
+}
+
+inputbar focus,
+inputbar active {
+    border-color: rgba(255, 126, 219, 0.5);
+}
+
+prompt {
+    text-color: @pink;
+}
+
+entry {
+    text-color: @fg;
+    cursor:     text;
+    placeholder: "";
+    placeholder-color: @dim;
+}
+
+/* ── List ── */
+
+listview {
+    margin:      10px 0 0 0;
+    lines:       5;
+    dynamic:     true;
+    scrollbar:   true;
+    spacing:     3px;
+    eh:          2;
+}
+
+scrollbar {
+    width:         4px;
+    border-radius: 2px;
+    handle-color:  @pink;
+    handle-width:  4px;
+    border:        0;
+    margin:        0 0 0 4px;
+}
+
+element {
+    padding:       10px;
+    border:        1px;
+    border-color:  rgba(122, 252, 255, 0.1);
+}
+
+element selected.normal {
+    border-color:     rgba(255, 126, 219, 0.5);
+}
+
+element-text {
+    cursor:          inherit;
+    vertical-align:  0.5;
+}
+
+element-text selected.normal {
+    text-color:       @pink;
+}
+
+element-icon {
+    size:         2em;
+    vertical-align: 0.5;
+    margin:       0 10px 0 0;
+}
+
+/* ── Mode switcher (bottom bar) ── */
+
+mode-switcher {
+    border:       1px 0 0 0;
+    border-color: rgba(255, 126, 219, 0.2);
+    padding:      10px 0 5px 0;
+}
+
+button {
+    border-radius:  4px;
+    border:         1px;
+    border-color:   @fg;
+    padding:        2px 6px;
+    text-color:     @cyan;
+}
+
+button selected {
+    border-color: @pink;
+    text-color:   @pink;
+}
+
+/* ── Error ── */
+
+error-message {
+    border:           1px;
+    border-color:     @red;
+    border-radius:    6px;
+    padding:          10px;
+    background-color: @bg;
+    text-color:       @fg;
+}

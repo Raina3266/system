@@ -13,14 +13,17 @@ let
   # Picker: list history → rofi dmenu → decode → copy
   cliphistPick = pkgs.writeShellScript "waybar-cliphist" ''
     ${cliphist} list \
-      | ${rofi} -dmenu -i -p "Clipboard" -theme-str 'window {width: 420px;}' \
+      | ${rofi} -dmenu -i -p "clipboard" \
+          -display-column-separator '\t' -display-columns 2 \
+          -theme "~/.config/rofi/rofi-single.rasi" \
+          -theme-str 'window {width: 500px;}' \
       | ${cliphist} decode \
       | ${wlCopy}
   '';
 in
 {
   "custom/cliphist" = {
-    format = "<span size='large'>󰕛</span>";
+    format = "<span size='large'>󰕛 </span>";
     return-type = "json";
     exec = cliphistPoll;
     interval = 86400;
