@@ -21,10 +21,10 @@ configuration {
     show-icons: false;
     icon-theme: "Papirus-Dark";
     display-combi: "󰍉 All ";
-    display-filebrowser: " Folders ";
+    display-filebrowser: " Folders ";
     display-filesearch: "󰈞 Files ";
     drun-display-format: "⌘ {name}";
-    filebrowser-display-format: " {name}";
+    filebrowser-display-format: "  {name}";
 
     filebrowser {
         command: "xdg-open";

@@ -32,7 +32,6 @@ let
         "custom/audio"
         "custom/bt"
         "custom/timer"
-        "custom/powermenu"
       ];
     }
     // (import ./top-left.nix { inherit pkgs; })

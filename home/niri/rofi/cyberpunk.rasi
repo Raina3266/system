@@ -32,9 +32,13 @@ mainbox {
 /* ── Current Entry ── */
 
 textbox-current-entry {
-    margin:        0 0 5px 10px;
-    fixed-height:  true;
-    font:          "JetBrains Mono Nerd Font 11";
+    vertical-align: 0.5;
+    width:         580px;
+    padding:        10px;
+    border:           1px;
+    border-radius:    6px;
+    border-color:     rgba(255, 126, 219, 0.2);
+    font:          "JetBrains Mono Nerd Font 12";
     text-color:    @cyan;
     markup:        true;
 }
@@ -47,7 +51,7 @@ inputbar {
     border-color:     rgba(255, 126, 219, 0.2);
     border-radius:    6px;
     padding:          10px 14px;
-    margin:           0 0 5px 0;
+    margin:           0 0 10px 0;
     children:         [ prompt, entry ];
 }
 
@@ -70,6 +74,7 @@ entry {
 /* ── List ── */
 
 listview {
+    margin:      10px 0 0 0;
     lines:       8;
     dynamic:     true;
     scrollbar:   true;
@@ -97,11 +102,6 @@ element selected.normal {
     text-color:       @pink;
 }
 
-element-icon {
-    size:    22px;
-    cursor:  inherit;
-}
-
 element-text {
     cursor:          inherit;
     vertical-align:  0.5;
@@ -125,7 +125,7 @@ button {
 
 button selected {
     border-color: @pink;
-    text-color:   @cyan;
+    text-color:   @pink;
 }
 
 /* ── Error ── */

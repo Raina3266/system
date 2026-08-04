@@ -39,7 +39,7 @@ fd --one-file-system --type f --base-directory "$home" . |
         path = home "/" $0
 
         printf "%s", path
-        printf "%cdisplay%c%s<span size=\"66%%\" alpha=\"50%%\">  %s/</span>", \
+        printf "%cdisplay%c%s<span size=\"80%%\" alpha=\"50%%\">  %s/</span>", \
             0, 31, name, dir
         printf "%cmeta%c%s/%s\n", 0, 31, dir, name
     }'

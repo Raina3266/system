@@ -10,5 +10,10 @@ final: prev: {
       fetchSubmodules = true;
       hash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
     };
+    
+    postPatch = ''
+      # Make textbox-current-entry wrap instead of truncating/ellipsizing.
+      sed -i 's/TB_MARKUP | TB_AUTOHEIGHT, NORMAL, "", 0, 0)/TB_MARKUP | TB_AUTOHEIGHT | TB_WRAP, NORMAL, "", 0, 0)/' source/view.c
+    '';
   });
 }

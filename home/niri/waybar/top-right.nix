@@ -61,8 +61,6 @@ in
       fi
     '';
   };
-
-  "custom/powermenu" = staticLauncher "powermenu" "󰐥" "Power menu" "-n -m menus:power";
 }
 // (import ./timer.nix { inherit pkgs; })
 // (import ./cliphist.nix { inherit pkgs; })
