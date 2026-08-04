@@ -21,7 +21,7 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            600px;
+    width:            500px;
 }
 
 mainbox {
@@ -34,7 +34,7 @@ mainbox {
 textbox-current-entry {
     vertical-align: 0.5;
     width:         580px;
-    padding:        10px;
+    padding:        5px 10px;
     border:           1px;
     border-radius:    6px;
     border-color:     rgba(255, 126, 219, 0.2);
@@ -61,11 +61,11 @@ inputbar active {
 }
 
 prompt {
-    text-color: @cyan;
+    text-color: @pink;
 }
 
 entry {
-    text-color: @cyan;
+    text-color: @fg;
     cursor:     text;
     placeholder: "";
     placeholder-color: @dim;
@@ -97,14 +97,16 @@ element {
 }
 
 element selected.normal {
-    background-color: rgba(255, 126, 219, 0.2);
     border-color:     rgba(255, 126, 219, 0.5);
-    text-color:       @pink;
 }
 
 element-text {
     cursor:          inherit;
     vertical-align:  0.5;
+}
+
+element-text selected.normal {
+    text-color:       @pink;
 }
 
 /* ── Mode switcher (bottom bar) ── */

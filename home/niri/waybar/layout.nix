@@ -38,7 +38,7 @@ let
     // (import ./top-left.nix { inherit pkgs; })
     // (import ./top-center.nix { inherit pkgs; })
     // (import ./top-right.nix { inherit pkgs; })
-    // (import ./wifi.nix { inherit pkgs; });
+    // (import ./network.nix { inherit pkgs; });
 
   # ------------ BottomBar -------------
 
