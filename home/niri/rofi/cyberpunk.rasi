@@ -21,7 +21,7 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            500px;
+    width:            600px;
 }
 
 mainbox {
@@ -32,7 +32,7 @@ mainbox {
 /* ── Current Entry ── */
 
 textbox-current-entry {
-    margin:        0 0 5px 0;
+    margin:        0 0 5px 10px;
     fixed-height:  true;
     font:          "JetBrains Mono Nerd Font 11";
     text-color:    @cyan;

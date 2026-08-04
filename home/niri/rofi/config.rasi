@@ -1,20 +1,17 @@
 /* ROFI: base configuration */
 
 configuration {
-    /* ── Top-right corner ── */ 
-    location: 3; 
-    x-offset: 5px; 
-    y-offset: 44px; 
-    scroll-method: 0; 
+    /* ── Top-right corner ── */
+    location: 3;
+    x-offset: 5px;
+    y-offset: 44px;
+    scroll-method: 0;
     hover-select: true;
     cycle: false;
+    
+    /* ── Wayland ── */
+    click-to-exit: true;
 
-    /* `filesearch` is declared with its script ONCE, here. combi-modes then
-     * refers to it by bare name so it resolves to that same mode instance --
-     * writing "filesearch:rofi-filesearch" in both places makes combi build a
-     * second, separate instance and run the generator script twice on every
-     * launch (see combi_mode_parse_switchers: it only reuses an existing mode
-     * when the token has no ':' in it). */
     modes: "combi,filesearch:rofi-filesearch,filebrowser";
     combi-modes: "drun,filesearch";
     combi-display-format: "{text}";
@@ -24,24 +21,16 @@ configuration {
     show-icons: false;
     icon-theme: "Papirus-Dark";
     display-combi: "󰍉 All ";
-    display-filebrowser: " Folders ";
+    display-filebrowser: " Folders ";
     display-filesearch: "󰈞 Files ";
     drun-display-format: "⌘ {name}";
-    filebrowser-display-format: " {name}";
-
-    /* ── File contents preview ──
-       Called as: rofi-preview <input> <output> <size>; must write a PNG to
-       <output>. Results are cached by rofi under ~/.cache/thumbnails. */
-    preview-cmd: "rofi-preview {input} {output} {size}";
+    filebrowser-display-format: " {name}";
 
     filebrowser {
         command: "xdg-open";
         directory: "/home/raina";
         show-hidden: false;
     }
-
-    /* ── Wayland ── */
-    click-to-exit: true;
 }
 
 @theme "~/.config/rofi/cyberpunk.rasi"
