@@ -7,7 +7,6 @@
     ./niri
     ./shell
     ./yazi
-    ./copyq.nix
     ./thunderbird.nix
     ./cloud
     ./ocr.nix

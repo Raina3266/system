@@ -17,19 +17,24 @@ let
   };
 in
 {
+  imports = [
+    #./copyq.nix
+  ];
+
   home.packages = with pkgs; [
-    whitesur-icon-theme
     rofi
     rofi-rbw
+    rofi-file-browser
     rofi-network-manager
     rofi-bluetooth
+    whitesur-icon-theme
 
     (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))
     fd
 
     # Thumbnailers rofi's icon fetcher shells out to. ffmpegthumbnailer and
     # gdk-pixbuf ship their own .thumbnailer files; PDFs get one below.
-    pdfThumbnailer
+    thumbnailer
     ffmpegthumbnailer
     gdk-pixbuf
   ];
@@ -45,12 +50,9 @@ in
   '';
 
   xdg.configFile."rofi/config.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/home/niri/rofi/config.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/config.rasi";
   xdg.configFile."rofi/rofi-single.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/home/niri/themes/rofi-single.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-single.rasi";
   xdg.configFile."rofi/rofi-double.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/home/niri/themes/rofi-double.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-double.rasi";
 }

@@ -5,11 +5,10 @@ configuration {
     location: 3;
     x-offset: 5px;
     y-offset: 44px;
+    
     scroll-method: 0;
     hover-select: true;
     cycle: false;
-    
-    /* ── Wayland ── */
     click-to-exit: true;
 
     modes: "combi,filesearch:rofi-filesearch,filebrowser";
