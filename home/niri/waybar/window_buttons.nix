@@ -63,7 +63,6 @@ in
       "DP-7" = 1700; # 2560x2880 @ 1.25x = 2048 logical
     };
 
-    # Button size mirrors window width (clamped to min/max)
     proportional_button_width = true;
     proportional_icon_size = true;
 
@@ -129,12 +128,12 @@ in
       }
     ];
 
-    audio_indicator = {
-      enabled = true;
-      playing_icon = "󰕾 ";
-      muted_icon = "󰖁 ";
-      clickable = true;
-    };
+    # audio_indicator = {
+    #   enabled = true;
+    #   playing_icon = "󰕾 ";
+    #   muted_icon = "󰖁 ";
+    #   clickable = true;
+    # };
 
     # Urgency hints when app requests attention
     notifications = {

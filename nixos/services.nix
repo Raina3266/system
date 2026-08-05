@@ -69,8 +69,7 @@
   # hard to the efficiency floor. Complements (does not replace)
   # power-profiles-daemon, which sets the EPP/platform profile.
   services.thermald.enable = true;
-  services.tumbler.enable = true; # Thumbnail support for images
-
+ 
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [ xdg-desktop-portal-gtk ];

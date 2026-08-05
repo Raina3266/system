@@ -13,7 +13,7 @@ let
   # Picker: list history → rofi dmenu → decode → copy
   cliphistPick = pkgs.writeShellScript "waybar-cliphist" ''
     ${cliphist} list \
-      | ${rofi} -dmenu -i -p "clipboard" \
+      | ${rofi} -dmenu -i -p "󰕛  " \
           -display-column-separator '\t' -display-columns 2 \
           -theme "~/.config/rofi/rofi-single.rasi" \
           -theme-str 'window {width: 500px;}' \

@@ -40,8 +40,7 @@ inputbar {
     border:           1px;
     border-color:     rgba(255, 126, 219, 0.2);
     border-radius:    6px;
-    padding:          10px 14px;
-    margin:           0 0 10px 0;
+    padding:          10px 10px;
     children:         [ prompt, entry ];
 }
 
@@ -82,9 +81,10 @@ scrollbar {
 }
 
 element {
-    padding:       10px;
+    padding:       2px;
     border:        1px;
     border-color:  rgba(122, 252, 255, 0.1);
+    children: [ element-icon, element-text ];
 }
 
 element selected.normal {
@@ -101,11 +101,9 @@ element-text selected.normal {
 }
 
 element-icon {
-    size:         2em;
+    size:         3em;
     vertical-align: 0.5;
-    margin:       0 10px 0 0;
 }
-
 /* ── Mode switcher (bottom bar) ── */
 
 mode-switcher {

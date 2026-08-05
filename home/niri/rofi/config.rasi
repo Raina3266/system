@@ -14,20 +14,15 @@ configuration {
 
     modes: "combi,filesearch:rofi-filesearch,filebrowser";
     combi-modes: "drun,filesearch";
-    combi-display-format: "{text}";
+    combi-display-format: "{icon} {text}";
     sidebar-mode: true;
 
-    /* ── Behaviour ── */
-    /* Two-line rows (filesearch shows name + dir). Row height is measured once
-       at startup, so this must be set globally rather than per-mode. */
     show-icons: true;
-    icon-theme: "Papirus-Dark";
+    icon-theme: "WhiteSur-dark";
     display-combi: "󰍉 All ";
     display-filebrowser: " Folders ";
     display-filesearch: "󰈞 Files ";
-    drun-display-format: "{icon} {name}";
-    filesearch-display-format: "{icon} {name}";
-    filebrowser-display-format: "  {name}";
+    filebrowser-display-format: "  {name}";
 
     filebrowser {
         command: "xdg-open";
