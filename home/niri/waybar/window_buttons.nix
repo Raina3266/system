@@ -47,7 +47,7 @@ in
     truncate_titles = true;
     show_tooltip = true;
 
-    icon_size = 22;
+    icon_size = 25;
     icon_spacing = 5;
     min_button_width = 120;
     max_button_width = 200;
@@ -102,7 +102,7 @@ in
         action = "move-window-to-workspace-down";
       }
       {
-        label = "  Close Window";
+        label = "  Close Window  ";
         action = "close-window";
       }
     ];

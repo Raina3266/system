@@ -191,7 +191,15 @@ tooltip label {
     color: #cbe3e7;
 }
 
-/* ── Alert states (warning / critical) ── */
+/* ── States ── */
+
+#custom-timer.running {
+  color: #ff7edb;
+}
+
+#custom-timer.paused {
+  color: #7afcff;
+}
 
 #custom-ycal.has-events {
     border-color: darkred;

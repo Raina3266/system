@@ -40,11 +40,9 @@ in
     nwg-displays
     bluez-tools
     brightnessctl # Screen brightness control
-    wob # Wayland overlay progress bar for timer
     xwayland-satellite # Rootless XWayland for X11 apps
     xrandr # Display layout info for X11 apps
     snixembed # System tray bridge for Qt5-xcb apps
-    networkmanagerapplet # NetworkManager GUI and Wi-Fi password dialogs
     mediactl
   ];
 
@@ -78,27 +76,6 @@ in
     };
     Service = {
       ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet --indicator";
-      Restart = "on-failure";
-      RestartSec = 3;
-    };
-    Install = {
-      WantedBy = [ "graphical-session.target" ];
-    };
-  };
-
-  # wob: overlay progress bar daemon for timer countdown visualization.
-  # Reads percentages from $XDG_RUNTIME_DIR/wob.sock.
-  systemd.user.services.wob = {
-    Unit = {
-      Description = "wob — Wayland overlay bar";
-      ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
-      PartOf = [ "graphical-session.target" ];
-      # After ensures wob starts after niri sets WAYLAND_DISPLAY.
-      # Without this, ConditionEnvironment can fail at boot.
-      After = [ "graphical-session.target" ];
-    };
-    Service = {
-      ExecStart = "${pkgs.wob}/bin/wob";
       Restart = "on-failure";
       RestartSec = 3;
     };

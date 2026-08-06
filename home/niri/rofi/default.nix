@@ -32,6 +32,7 @@ in
     (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))
     fd
 
+    iwmenu
     # Thumbnailers rofi's icon fetcher shells out to. ffmpegthumbnailer and
     # gdk-pixbuf ship their own .thumbnailer files; PDFs get one below.
     thumbnailer

@@ -1,25 +1,57 @@
 # Top-right modules: clipboard, timer, bluetooth, audio, tray, power
 { pkgs }:
 let
+  waybar-timer = pkgs.rustPlatform.buildRustPackage {
+    pname = "waybar-timer";
+    version = "0.1.0";
+    src = ../../../scripts/waybar-timer;
+    cargoLock = {
+      lockFile = ../../../scripts/waybar-timer/Cargo.lock;
+    };
+
+    # Beep 3 times when the countdown ends.
+    nativeBuildInputs = [
+      pkgs.makeWrapper
+    ];
+    postInstall = ''
+      wrapProgram "$out/bin/waybar-timer" \
+        --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg}/bin/ffplay"
+    '';
+  };
+  
   walker = "${pkgs.walker}/bin/walker";
   btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
 
   # Static launcher icons with walker integration
-  staticLauncher =
-    name: icon: tooltip: walkerArgs:
-    {
-      format = "<span size='large'>${icon}</span>";
-      return-type = "json";
-      exec = pkgs.writeShellScript "waybar-${name}-poll" ''
-        printf '{"text":"<span size='"'"'large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
-      '';
-      interval = 86400;
-      on-click = pkgs.writeShellScript "waybar-${name}" ''
-        ${walker} ${walkerArgs}
-      '';
-    };
+  staticLauncher = name: icon: tooltip: walkerArgs: {
+    format = "<span size='large'>${icon}</span>";
+    return-type = "json";
+    exec = pkgs.writeShellScript "waybar-${name}-poll" ''
+      printf '{"text":"<span size='"'"'large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
+    '';
+    interval = 86400;
+    on-click = pkgs.writeShellScript "waybar-${name}" ''
+      ${walker} ${walkerArgs}
+    '';
+  };
 in
 {
+  "custom/timer" = {
+    exec = "${waybar-timer}/bin/waybar-timer";
+
+    format = "{}";
+    "return-type" = "json";
+
+    tooltip = true;
+    escape = false;
+    "restart-interval" = 1;
+    "exec-on-event" = false;
+
+    on-click = "${waybar-timer}/bin/waybar-timer add";
+    on-click-middle = "${waybar-timer}/bin/waybar-timer toggle";
+    on-click-right = "${waybar-timer}/bin/waybar-timer clear";
+  };
+
   # Audio: opens walker device picker (volume in pulseaudio module)
   "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-n -m menus:audio";
 
@@ -62,5 +94,4 @@ in
     '';
   };
 }
-// (import ./timer.nix { inherit pkgs; })
 // (import ./cliphist.nix { inherit pkgs; })
