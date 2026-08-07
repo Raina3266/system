@@ -18,6 +18,7 @@ let
 in
 {
   imports = [
+    ./clipboard.nix
     #./copyq.nix
   ];
 

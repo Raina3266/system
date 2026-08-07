@@ -27,7 +27,7 @@ window {
 mainbox {
     orientation: vertical;
     spacing: 10px;
-    children: [ mode-switcher, inputbar, clipboard-body, action-bar, message ];
+    children: [ mode-switcher, inputbar, clipboard-body, action-bar ];
 }
 
 /* Pinned / Text / Images are native mode buttons and are mouse-clickable. */
@@ -152,10 +152,6 @@ element-text {
     vertical-align: 0.5;
 }
 
-element-text active {
-    text-color: @cyan;
-}
-
 element-text selected {
     text-color: @pink;
 }
@@ -206,14 +202,6 @@ button-preview {
     action: "kb-custom-4";
     border-color: rgba(242, 158, 116, 0.40);
     text-color: @amber;
-}
-
-message {
-    padding: 8px 10px;
-    border: 1px;
-    border-radius: 7px;
-    border-color: rgba(242, 158, 116, 0.28);
-    background-color: rgba(242, 158, 116, 0.06);
 }
 
 textbox {

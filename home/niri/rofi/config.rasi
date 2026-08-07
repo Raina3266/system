@@ -7,7 +7,6 @@ configuration {
     y-offset: 44px;
     
     scroll-method: 0;
-    hover-select: true;
     cycle: false;
     click-to-exit: true;
 

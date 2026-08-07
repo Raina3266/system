@@ -17,22 +17,6 @@ let
     '';
   };
 
-  rofi-clipboard = pkgs.rustPlatform.buildRustPackage {
-    pname = "rofi-clipboard";
-    version = "0.1.0";
-    src = ../../../scripts/rofi-clipboard;
-    cargoLock.lockFile = ../../../scripts/rofi-clipboard/Cargo.lock;
-
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-
-    postInstall = ''
-      wrapProgram "$out/bin/rofi-clipboard" \
-        --set ROFI_CLIPBOARD_ROFI "${pkgs.rofi}/bin/rofi" \
-        --set ROFI_CLIPBOARD_WL_COPY "${pkgs.wl-clipboard}/bin/wl-copy" \
-        --set ROFI_CLIPBOARD_WL_PASTE "${pkgs.wl-clipboard}/bin/wl-paste"
-    '';
-  };
-
   walker = "${pkgs.walker}/bin/walker";
   btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
 
@@ -67,8 +51,7 @@ in
   "custom/clipboard" = {
     format = "<span size='large'>󰕛 </span>";
     tooltip-format = "Clipboard + Todo";
-    on-click = "${rofi-clipboard}/bin/rofi-clipboard";
-
+    on-click = "rofi-clipboard";
   };
 
   # Audio: opens walker device picker (volume in pulseaudio module)

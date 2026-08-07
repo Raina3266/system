@@ -7,9 +7,10 @@ input {
         }
         numlock
     }
-
     touchpad {
         tap
+        dwt  
+        scroll-factor 0.2
     }
 }
 
