@@ -22,7 +22,7 @@ let
 
   # Shared dmenu invocation; callers append `-p "Prompt"` and any extra flags.
   # Later -theme-str flags win, so callers can override the window geometry.
-  menu = ''${rofi} -dmenu -i -theme "$HOME/.config/rofi/rofi-single.rasi" '';
+  menu = ''${rofi} -dmenu -i -theme "$HOME/.config/rofi/rofi-network.rasi" '';
 
   # icon_for <signal 0-100> <secured yes|no> -- Wi-Fi strength glyph.
   iconFor = ''
@@ -142,7 +142,7 @@ let
       fi
       # Only structure is injected here -- which navrow holds which buttons, and
       # each button's content/action. All appearance (navbar orientation and
-      # padding, navrow layout, the button pills) lives in rofi-single.rasi,
+      # padding, navrow layout, the button pills) lives in rofi-network.rasi,
       # which pre-declares button1..8 and navrow1..3 by name. That is necessary
       # because rofi resolves properties from a widget's *own* name/path rather
       # than by walking ancestors: it looks up `#button1`, `#button2`, ... and

@@ -30,4 +30,4 @@ configuration {
     }
 }
 
-@theme "~/.config/rofi/rofi-double.rasi"
+@theme "~/.config/rofi/rofi-finder.rasi"

@@ -11,7 +11,6 @@
 let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
-
   layout = import ./layout.nix { inherit pkgs; };
 
   # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
@@ -34,7 +33,6 @@ in
           waybar-lyric
           ycal.waybarYcal
           wl-clipboard
-          cliphist
           jq
           playerctl
         ];
@@ -48,21 +46,6 @@ in
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
           };
-        };
-
-        systemd.user.services.cliphist = {
-          Unit = {
-            Description = "cliphist: clipboard history watcher";
-            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
-            PartOf = [ "graphical-session.target" ];
-            After = [ "graphical-session.target" ];
-          };
-          Service = {
-            ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.cliphist}/bin/cliphist store";
-            Restart = lib.mkForce "on-failure";
-            RestartSec = 3;
-          };
-          Install = { WantedBy = [ "graphical-session.target" ]; };
         };
 
         systemd.user.services.waybar-ycal = {

@@ -1,0 +1,231 @@
+/* Clipboard menu: pinned/text/image tabs, live preview, and action buttons. */
+
+* {
+    font: "JetBrains Mono Nerd Font 13";
+    bg:       #0E0616F2;
+    bg-mod:   #141428F2;
+    fg:       #CBE3E7;
+    pink:     #FF7EDB;
+    cyan:     #7AFCFF;
+    amber:    #F29E74;
+    red:      #FF5C57;
+    dim:      #5C6776;
+
+    background-color: transparent;
+    text-color: @fg;
+}
+
+window {
+    width: 500px;
+    background-color: @bg;
+    border: 1px;
+    border-color: rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    padding: 10px;
+}
+
+mainbox {
+    orientation: vertical;
+    spacing: 10px;
+    children: [ mode-switcher, inputbar, clipboard-body, action-bar, message ];
+}
+
+/* Pinned / Text / Images are native mode buttons and are mouse-clickable. */
+mode-switcher {
+    orientation: horizontal;
+    spacing: 10px;
+    padding: 0 0 2px 0;
+}
+
+button {
+    expand: true;
+    cursor: pointer;
+    padding: 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+    horizontal-align: 0.5;
+}
+
+button selected {
+    border-color: @pink;
+    background-color: rgba(255, 126, 219, 0.16);
+    text-color: @pink;
+}
+
+inputbar {
+    spacing: 10px;
+    padding: 10px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(255, 126, 219, 0.25);
+    background-color: @bg-mod;
+    children: [ entry ];
+}
+
+entry {
+    cursor: text;
+    placeholder: "Search clipboard";
+    placeholder-color: @dim;
+}
+
+clipboard-body {
+    orientation: horizontal;
+    spacing: 10px;
+    children: [ preview-pane, listview ];
+}
+
+preview-pane {
+    enabled: false;
+    orientation: vertical;
+    spacing: 10px;
+    width: 420px;
+    padding: 12px;
+    border: 1px;
+    border-radius: 9px;
+    border-color: rgba(122, 252, 255, 0.32);
+    background-color: rgba(20, 20, 40, 0.96);
+    children: [ textbox-current-entry, icon-current-entry ];
+}
+
+@media ( enabled: env(ROFI_CLIPBOARD_PREVIEW, false)) {
+    window {
+        width: 1000px;
+    }
+
+    preview-pane {
+        enabled: true;
+    }
+}
+
+textbox-current-entry {
+    width: 396px;
+    text-color: @fg;
+    font: "JetBrains Mono Nerd Font 11";
+    markup: false;
+    vertical-align: 0.0;
+}
+
+icon-current-entry {
+    size: 396px;
+    expand: true;
+    horizontal-align: 0.5;
+    vertical-align: 0.5;
+}
+
+listview {
+    width: 536px;
+    lines: 8;
+    eh: 1;
+    fixed-height: true;
+    dynamic: true;
+    scrollbar: true;
+    spacing: 4px;
+}
+
+scrollbar {
+    width: 4px;
+    handle-width: 4px;
+    handle-color: @pink;
+    border: 0;
+    margin: 0 0 0 5px;
+}
+
+/* Rows contain text only. The image path and database ID are rofi metadata. */
+element {
+    children: [ element-text ];
+    padding: 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.10);
+}
+
+element selected.normal,
+element selected.active {
+    border-color: rgba(255, 126, 219, 0.65);
+    background-color: rgba(255, 126, 219, 0.10);
+}
+
+element-text {
+    vertical-align: 0.5;
+}
+
+element-text active {
+    text-color: @cyan;
+}
+
+element-text selected {
+    text-color: @pink;
+}
+
+/* Custom widget names beginning with "button" are real rofi buttons. Their
+   action invokes the same script-mode event as the documented Alt shortcut. */
+action-bar {
+    expand: false;
+    orientation: horizontal;
+    padding: 0 0 2px 0;
+    spacing: 10px;
+    children: [ button-pin, button-preview, button-edit, button-delete ];
+}
+
+button-pin,
+button-delete,
+button-edit,
+button-preview {
+    cursor: pointer;
+    horizontal-align: 0.5;
+    padding: 8px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+}
+
+button-pin {
+    content: "󰐃 Pin";
+    action: "kb-custom-1";
+}
+
+button-delete {
+    content: "󰆴 Delete";
+    action: "kb-custom-2";
+    border-color: rgba(255, 92, 87, 0.35);
+    text-color: @red;
+}
+
+button-edit {
+    content: "󰏫 Edit";
+    action: "kb-custom-3";
+}
+
+button-preview {
+    content: "󰈈 Preview";
+    action: "kb-custom-4";
+    border-color: rgba(242, 158, 116, 0.40);
+    text-color: @amber;
+}
+
+message {
+    padding: 8px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(242, 158, 116, 0.28);
+    background-color: rgba(242, 158, 116, 0.06);
+}
+
+textbox {
+    markup: false;
+    text-color: @amber;
+}
+
+error-message {
+    padding: 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: @red;
+    background-color: @bg;
+    text-color: @fg;
+}

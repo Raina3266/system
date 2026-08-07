@@ -5,9 +5,7 @@ let
     pname = "waybar-timer";
     version = "0.1.0";
     src = ../../../scripts/waybar-timer;
-    cargoLock = {
-      lockFile = ../../../scripts/waybar-timer/Cargo.lock;
-    };
+    cargoLock.lockFile = ../../../scripts/waybar-timer/Cargo.lock;
 
     # Beep 3 times when the countdown ends.
     nativeBuildInputs = [
@@ -18,7 +16,23 @@ let
         --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg}/bin/ffplay"
     '';
   };
-  
+
+  rofi-clipboard = pkgs.rustPlatform.buildRustPackage {
+    pname = "rofi-clipboard";
+    version = "0.1.0";
+    src = ../../../scripts/rofi-clipboard;
+    cargoLock.lockFile = ../../../scripts/rofi-clipboard/Cargo.lock;
+
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+
+    postInstall = ''
+      wrapProgram "$out/bin/rofi-clipboard" \
+        --set ROFI_CLIPBOARD_ROFI "${pkgs.rofi}/bin/rofi" \
+        --set ROFI_CLIPBOARD_WL_COPY "${pkgs.wl-clipboard}/bin/wl-copy" \
+        --set ROFI_CLIPBOARD_WL_PASTE "${pkgs.wl-clipboard}/bin/wl-paste"
+    '';
+  };
+
   walker = "${pkgs.walker}/bin/walker";
   btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
 
@@ -38,18 +52,23 @@ in
 {
   "custom/timer" = {
     exec = "${waybar-timer}/bin/waybar-timer";
-
     format = "{}";
-    "return-type" = "json";
-
+    return-type = "json";
     tooltip = true;
     escape = false;
     "restart-interval" = 1;
     "exec-on-event" = false;
 
-    on-click = "${waybar-timer}/bin/waybar-timer add";
-    on-click-middle = "${waybar-timer}/bin/waybar-timer toggle";
+    on-click = "${waybar-timer}/bin/waybar-timer toggle";
+    on-click-middle = "${waybar-timer}/bin/waybar-timer add";
     on-click-right = "${waybar-timer}/bin/waybar-timer clear";
+  };
+
+  "custom/clipboard" = {
+    format = "<span size='large'>󰕛 </span>";
+    tooltip-format = "Clipboard + Todo";
+    on-click = "${rofi-clipboard}/bin/rofi-clipboard";
+
   };
 
   # Audio: opens walker device picker (volume in pulseaudio module)
@@ -94,4 +113,3 @@ in
     '';
   };
 }
-// (import ./cliphist.nix { inherit pkgs; })

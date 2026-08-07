@@ -28,10 +28,11 @@ let
       ];
       modules-right = [
         "tray"
-        "custom/cliphist"
+        "custom/timer"
+        "custom/clipboard"
         "custom/audio"
         "custom/bt"
-        "custom/timer"
+
         "custom/wifi"
       ];
     }

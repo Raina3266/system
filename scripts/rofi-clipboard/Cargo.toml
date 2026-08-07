@@ -2,5 +2,12 @@
 name = "rofi-clipboard"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
+anyhow = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
