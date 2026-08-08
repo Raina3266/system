@@ -82,6 +82,8 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
 | `ROFI_CLIPBOARD_PREVIEW` | Start Rofi with the preview layout enabled |
 
+---
+
 ## waybar-timer
 
 `scripts/waybar-timer` is a small countdown timer that outputs Waybar-compatible JSON. The main process owns the timer state, while command invocations communicate with it over a Unix datagram socket.
