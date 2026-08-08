@@ -1,150 +1,212 @@
-# Raina's NixOS system
+# Scripts
 
-A personal, reproducible NixOS configuration for an `x86_64-linux` workstation. The flake combines the system configuration and Home Manager setup for the `raina` host, with both GNOME and the [niri](https://github.com/YaLTeR/niri) scrollable-tiling Wayland compositor.
+This repository contains two Rust utilities used by the desktop configuration:
 
-> [!WARNING]
-> This repository is tailored to one user and one machine. It contains hardware UUIDs, a fixed username and home path, hardware-specific services, and personal defaults. Do not deploy it unchanged on another computer.
+- [`rofi-clipboard`](#rofi-clipboard) — a Wayland clipboard history manager with a Rofi interface
+- [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 
-## Highlights
+Both projects use Rust 2024 edition and can be built independently with Cargo.
 
-- Nix flakes with `nixos-unstable`, Home Manager, nixvim, nixGL, and Zed nightly
-- GNOME and niri sessions with GDM
-- A custom niri desktop built around Waybar, Walker, Rofi, and themed GTK applications
-- Fish, Starship, Atuin, direnv, Neovim, Ghostty, Yazi, Git, and development toolchains
-- PipeWire audio, NetworkManager with iwd, printing, fingerprint support, SSH, and GSConnect
-- On-demand Immich and Jellyfin services grouped under `media-stack.target`
-- Automated Google Drive synchronization using rclone bisync, systemd timers, and file watchers
-- Region-select screenshot OCR for GNOME and niri
-- A cropped virtual webcam backed by v4l2loopback and FFmpeg
-- Small Rust utilities for Waybar timers and Rofi clipboard history
+## rofi-clipboard
 
-## Repository layout
+`scripts/rofi-clipboard` is a clipboard history manager for Wayland. It watches the clipboard with `wl-paste`, stores text and images locally, and presents the history through custom Rofi modes.
 
-| Path | Purpose |
+### Features
+
+- Separate views for pinned items, text, and images
+- Text and image clipboard history
+- Image previews inside Rofi
+- Pin, delete, and edit actions
+- Full-text preview toggle
+- Restores the selected item with its original MIME type
+- Detects local image files copied from a file manager
+- Deduplicates repeated clipboard entries
+- Ignores empty and sensitive clipboard values
+- Keeps up to 2,000 history entries
+- Uses file locking and atomic writes to protect the history file
+
+### Requirements
+
+- Rust and Cargo
+- [Rofi](https://github.com/davatorium/rofi)
+- [wl-clipboard](https://github.com/bugaevc/wl-clipboard)
+- A Wayland session
+
+### Build
+
+```bash
+cd scripts/rofi-clipboard
+cargo build --release
+```
+
+The executable is created at:
+
+```text
+target/release/rofi-clipboard
+```
+
+### Run
+
+Start the clipboard watcher:
+
+```bash
+wl-paste --watch ./target/release/rofi-clipboard capture
+```
+
+Open the clipboard interface:
+
+```bash
+./target/release/rofi-clipboard
+```
+
+The repository's Home Manager configuration builds the program, wraps its Rofi and wl-clipboard paths, and runs the watcher as a user service.
+
+### Controls
+
+| Action | Result |
 | --- | --- |
-| `flake.nix` | Flake inputs and the `raina` NixOS configuration |
-| `nixos/configuration.nix` | Core host, user, boot, networking, locale, and Home Manager settings |
-| `nixos/hardware.nix` | Machine-specific disks, filesystems, LUKS, and CPU configuration |
-| `nixos/services.nix` | Desktop, audio, network, media, database, and system services |
-| `nixos/webcam-crop.nix` | Cropped virtual webcam NixOS module |
-| `home/default.nix` | Home Manager entry point and desktop applications |
-| `home/niri/` | niri, Waybar, Walker, Rofi, themes, and key bindings |
-| `home/shell/` | Shell, terminal, Git, and nixvim configuration |
-| `home/yazi/` | Yazi configuration, plugins, theme, and keymap |
-| `home/cloud/` | rclone bisync services, watchers, timers, and video sync |
-| `scripts/` | Rust utilities used by the desktop configuration |
+| `Enter` | Copy the selected item |
+| `Alt+P` | Pin or unpin the selected item |
+| `Alt+D` | Delete the selected item |
+| `Alt+E` | Edit a text item |
+| `Alt+V` | Toggle the preview layout |
+| `Ctrl+Enter` | Save edited text |
 
-## Prerequisites
+The interface contains three modes:
 
-- A NixOS installation on `x86_64-linux`
-- Git
-- Internet access for the flake inputs and packages
-- A UEFI system if you keep the included systemd-boot configuration
-- An rclone remote if you keep the cloud synchronization modules
+- **Pinned** — items marked for quick access
+- **Text** — captured text entries
+- **Images** — captured images with previews
 
-Flakes are enabled by this configuration. If the current system does not already support them, enable `nix-command` and `flakes` temporarily before the first rebuild.
+### Commands
 
-## Adapting the configuration
-
-Clone the repository to the path expected by its out-of-store theme links:
-
-```bash
-git clone https://github.com/Raina3266/system.git ~/System
-cd ~/System
+```text
+rofi-clipboard [run]
+rofi-clipboard capture
+rofi-clipboard store --mime MIME
+rofi-clipboard script <pinned|text|images>
 ```
 
-Before building, review and replace the machine-specific settings:
+`capture` is designed to receive clipboard data from `wl-paste --watch`. The `store` command reads an item from standard input and stores it with the supplied MIME type.
 
-1. Generate hardware configuration for the target machine:
+### Data storage
 
-   ```bash
-   nixos-generate-config --show-hardware-config > nixos/hardware.nix
-   ```
+By default, history is stored in:
 
-2. Search for values tied to the original installation:
-
-   ```bash
-   rg -n 'raina|/home/raina|System|Europe/London|keyboard-gb'
-   ```
-
-   Update the flake output name, username, home directory, host name, repository path, timezone, locale, and keyboard layout as needed.
-
-3. Review hardware-dependent configuration:
-
-   - Intel graphics and microcode
-   - the latest kernel selection
-   - systemd-boot and EFI settings
-   - the swap file and Btrfs layout
-   - fingerprint and thermal services
-   - `nixos/webcam-crop.nix`, including its camera udev rules
-
-4. Review network-facing services and firewall settings. SSH, Jellyfin, Immich, Sunshine, and GSConnect/KDE Connect are configured in this repository.
-
-5. Review `home/cloud/bisync.nix` and the rest of `home/cloud/`. Configure the referenced rclone remote with:
-
-   ```bash
-   rclone config
-   ```
-
-6. Remove any modules or packages that are not needed on the target system.
-
-If the flake output remains named `raina`, evaluate and test the system with:
-
-```bash
-nix flake check
-sudo nixos-rebuild test --flake .#raina
+```text
+$XDG_DATA_HOME/rofi-clipboard/
+├── history.json
+├── history.lock
+└── images/
 ```
 
-Once the test configuration works:
+If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `ROFI_CLIPBOARD_DATA_DIR` | Override the history and image data directory |
+| `ROFI_CLIPBOARD_THEME` | Override the Rofi theme path |
+| `ROFI_CLIPBOARD_ROFI` | Override the `rofi` executable |
+| `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
+| `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
+| `ROFI_CLIPBOARD_PREVIEW` | Start Rofi with the preview layout enabled |
+
+## waybar-timer
+
+`scripts/waybar-timer` is a small countdown timer that outputs Waybar-compatible JSON. The main process owns the timer state, while command invocations communicate with it over a Unix datagram socket.
+
+### Features
+
+- Adds time in five-minute steps
+- Supports countdowns up to two hours
+- Start, pause, resume, and clear actions
+- Emits JSON only when the displayed state changes
+- Uses a per-user Unix socket for commands
+- Plays a three-beep alarm when the countdown finishes
+- Cleans up stale socket files when it starts
+
+### Requirements
+
+- Rust and Cargo
+- Waybar
+- `ffplay` from FFmpeg for the alarm sound
+
+### Build
 
 ```bash
-sudo nixos-rebuild switch --flake .#raina
+cd scripts/waybar-timer
+cargo build --release
 ```
 
-If you rename `nixosConfigurations.raina` in `flake.nix`, use the new name after `#`.
+The executable is created at:
 
-## Common commands
+```text
+target/release/waybar-timer
+```
 
-Rebuild the current configuration:
+### Commands
+
+Run the continuous Waybar module:
 
 ```bash
-sudo nixos-rebuild switch --flake ~/System#raina
+./target/release/waybar-timer
 ```
 
-Update all flake inputs, inspect the changes, and rebuild:
+Control the running timer from another process:
 
 ```bash
-cd ~/System
-nix flake update
-git diff -- flake.lock
-sudo nixos-rebuild switch --flake .#raina
+./target/release/waybar-timer add
+./target/release/waybar-timer toggle
+./target/release/waybar-timer clear
 ```
 
-Start or stop the on-demand media stack:
+| Command | Result |
+| --- | --- |
+| `add` | Add five minutes |
+| `toggle` | Start, pause, or resume the countdown |
+| `clear` / `stop` | Stop and reset the countdown |
+
+### Waybar configuration
+
+A minimal custom module configuration looks like this:
+
+```jsonc
+{
+  "custom/timer": {
+    "exec": "/path/to/waybar-timer",
+    "return-type": "json",
+    "escape": false,
+    "restart-interval": 1,
+    "exec-on-event": false,
+    "on-click": "/path/to/waybar-timer toggle",
+    "on-click-middle": "/path/to/waybar-timer add",
+    "on-click-right": "/path/to/waybar-timer clear"
+  }
+}
+```
+
+With this configuration:
+
+- left click starts or pauses the timer
+- middle click adds five minutes
+- right click clears the timer
+
+### Socket and alarm configuration
+
+The command socket is normally created at:
+
+```text
+$XDG_RUNTIME_DIR/waybar-countdown.sock
+```
+
+If `XDG_RUNTIME_DIR` is unavailable, the program creates a user-specific socket in the system temporary directory.
+
+Set `WAYBAR_TIMER_FFPLAY` to use a specific `ffplay` executable:
 
 ```bash
-sudo systemctl start media-stack.target
-sudo systemctl stop media-stack.target
+WAYBAR_TIMER_FFPLAY=/path/to/ffplay ./target/release/waybar-timer
 ```
 
-Inspect the services grouped into it:
-
-```bash
-systemctl list-dependencies media-stack.target
-```
-
-Check the cloud synchronization timers:
-
-```bash
-systemctl --user list-timers 'rclone-bisync-*'
-```
-
-## Secrets and local state
-
-Secrets are intentionally kept outside the repository. Fish optionally loads `~/.secrets.fish`, and rclone stores its credentials in its normal user configuration. Keep generated credentials, tokens, and machine-local secrets untracked.
-
-The cloud synchronization setup also writes operational state and retained local backups beneath the user's XDG state/data directories.
-
-## License
-
-No license has been added. Unless a license is provided, the repository's contents remain under the copyright holder's default rights.
+The repository's Nix configuration sets this automatically when packaging the utility.
