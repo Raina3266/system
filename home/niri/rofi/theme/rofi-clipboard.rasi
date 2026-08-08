@@ -16,12 +16,14 @@
 }
 
 window {
-    width: 500px;
+    width: 400px;
+    height: 615px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
     border-radius: 15px;
-    padding: 10px;
+    margin: 5px;
+    padding: 12px;
 }
 
 mainbox {
@@ -34,13 +36,12 @@ mainbox {
 mode-switcher {
     orientation: horizontal;
     spacing: 10px;
-    padding: 0 0 2px 0;
+    padding: 2px 0 2px 0;
 }
 
 button {
     expand: true;
     cursor: pointer;
-    padding: 10px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);
@@ -57,7 +58,7 @@ button selected {
 
 inputbar {
     spacing: 10px;
-    padding: 10px 10px;
+    padding: 6px 10px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(255, 126, 219, 0.25);
@@ -81,7 +82,7 @@ preview-pane {
     enabled: false;
     orientation: vertical;
     spacing: 10px;
-    width: 420px;
+    width: 300px;
     padding: 12px;
     border: 1px;
     border-radius: 9px;
@@ -92,7 +93,7 @@ preview-pane {
 
 @media ( enabled: env(ROFI_CLIPBOARD_PREVIEW, false)) {
     window {
-        width: 1000px;
+        width: 700px;
     }
 
     preview-pane {
@@ -101,7 +102,6 @@ preview-pane {
 }
 
 textbox-current-entry {
-    width: 396px;
     text-color: @fg;
     font: "JetBrains Mono Nerd Font 11";
     markup: false;
@@ -109,17 +109,17 @@ textbox-current-entry {
 }
 
 icon-current-entry {
-    size: 396px;
+    size: 400px;
     expand: true;
     horizontal-align: 0.5;
     vertical-align: 0.5;
 }
 
 listview {
-    width: 536px;
-    lines: 8;
+    width: 400px;
+    lines: 9;
     eh: 1;
-    fixed-height: true;
+    padding: 4px 0;
     dynamic: true;
     scrollbar: true;
     spacing: 4px;
@@ -142,6 +142,12 @@ element {
     border-color: rgba(122, 252, 255, 0.10);
 }
 
+element normal.active,
+element alternate.active {
+    border-color: rgba(122, 252, 255, 0.45);
+    background-color: rgba(122, 252, 255, 0.07);
+}
+
 element selected.normal,
 element selected.active {
     border-color: rgba(255, 126, 219, 0.65);
@@ -150,6 +156,11 @@ element selected.active {
 
 element-text {
     vertical-align: 0.5;
+}
+
+element-text normal.active,
+element-text alternate.active {
+    text-color: @cyan;
 }
 
 element-text selected {
@@ -161,7 +172,6 @@ element-text selected {
 action-bar {
     expand: false;
     orientation: horizontal;
-    padding: 0 0 2px 0;
     spacing: 10px;
     children: [ button-pin, button-preview, button-edit, button-delete ];
 }
@@ -172,7 +182,7 @@ button-edit,
 button-preview {
     cursor: pointer;
     horizontal-align: 0.5;
-    padding: 8px 10px;
+    margin: 5px 0px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);
@@ -198,7 +208,7 @@ button-edit {
 }
 
 button-preview {
-    content: "󰈈 Preview";
+    content: "󰈈 View";
     action: "kb-custom-4";
     border-color: rgba(242, 158, 116, 0.40);
     text-color: @amber;

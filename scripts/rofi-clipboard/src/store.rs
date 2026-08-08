@@ -154,9 +154,8 @@ impl ClipboardStore {
             let Some(item) = history.items.iter_mut().find(|item| item.id == id) else {
                 return Ok(false);
             };
-            let changed = !item.pinned;
-            item.pinned = true;
-            Ok(changed)
+            item.pinned = !item.pinned;
+            Ok(true)
         })
     }
 
@@ -388,3 +387,4 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     write_result
 }
+

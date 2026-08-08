@@ -4,6 +4,8 @@ mod rofi;
 mod store;
 
 use std::env;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 
@@ -21,10 +23,17 @@ fn main() {
 pub fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
-        None | Some("run") => launch_rofi(Mode::Pinned),
+        None | Some("run") => launch_rofi(Mode::Pinned, false, None),
+        Some("relaunch") => {
+            let mode = Mode::parse(args.next().as_deref().unwrap_or("pinned"))?;
+            let preview = args.next().as_deref() == Some("preview");
+            let selected_id = args.next().and_then(|value| value.parse().ok());
+            thread::sleep(Duration::from_millis(120));
+            launch_rofi(mode, preview, selected_id)
+        }
         Some("script") => {
             let mode = Mode::parse(args.next().as_deref().unwrap_or("pinned"))?;
-            run_script(mode)
+            run_script(mode, args.next())
         }
         Some("capture") => capture_clipboard(),
         Some("store") => {
@@ -42,3 +51,4 @@ fn parse_mime_argument(mut args: impl Iterator<Item = String>) -> Result<String>
         _ => bail!("store requires --mime MIME"),
     }
 }
+

@@ -1,7 +1,7 @@
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
@@ -65,7 +65,7 @@ impl UiState {
     fn parse(value: Option<String>) -> Self {
         let Some(value) = value else {
             return Self {
-                preview: false,
+                preview: env::var_os("ROFI_CLIPBOARD_PREVIEW").is_some(),
                 editing: None,
                 initialized: false,
             };
@@ -93,7 +93,7 @@ impl UiState {
     }
 }
 
-pub fn launch_rofi(mode: Mode) -> Result<()> {
+pub fn launch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
     let executable = executable.to_string_lossy();
     let modes = format!(
@@ -102,6 +102,7 @@ pub fn launch_rofi(mode: Mode) -> Result<()> {
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
     command
+        .env_remove("ROFI_CLIPBOARD_PREVIEW")
         .args([
             "-show",
             mode.name(),
@@ -114,20 +115,72 @@ pub fn launch_rofi(mode: Mode) -> Result<()> {
             "-display-images",
             "󰋩 Images",
             "-kb-custom-1",
-            "",
+            "Alt+p",
             "-kb-custom-2",
-            "",
+            "Alt+d",
             "-kb-custom-3",
-            "",
+            "Alt+e",
             "-kb-custom-4",
-            "",
+            "Alt+v",
             "-theme",
         ])
         .arg(theme);
+
+    if preview {
+        command.env("ROFI_CLIPBOARD_PREVIEW", "true");
+    }
+    if let Some(row) = selected_row(mode, selected_id)? {
+        command.arg("-selected-row").arg(row.to_string());
+    }
+
     let status = command.status().context("launch rofi")?;
     if !status.success() && status.code() != Some(1) {
         bail!("rofi exited with {status}");
     }
+    Ok(())
+}
+
+fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
+    let Some(selected_id) = selected_id else {
+        return Ok(None);
+    };
+    let history = ClipboardStore::discover()?.load()?;
+    Ok(history
+        .items
+        .iter()
+        .filter(|item| mode.includes(item))
+        .position(|item| item.id == selected_id))
+}
+
+fn relaunch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<()> {
+    let executable = env::current_exe().context("locate rofi-clipboard executable")?;
+    let mut command = Command::new(executable);
+
+    for variable in [
+        "ROFI_RETV",
+        "ROFI_INFO",
+        "ROFI_DATA",
+        "ROFI_INPUT",
+        "ROFI_OUTSIDE",
+    ] {
+        command.env_remove(variable);
+    }
+
+    command
+        .args([
+            "relaunch",
+            mode.name(),
+            if preview { "preview" } else { "compact" },
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    if let Some(id) = selected_id {
+        command.arg(id.to_string());
+    }
+
+    command.spawn().context("schedule rofi preview relaunch")?;
     Ok(())
 }
 
@@ -147,7 +200,7 @@ fn theme_path() -> Result<PathBuf> {
         .join("rofi-clipboard.rasi"))
 }
 
-pub fn run_script(mode: Mode) -> Result<()> {
+pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
     let store = ClipboardStore::discover()?;
     let retv = env::var("ROFI_RETV")
         .ok()
@@ -159,54 +212,64 @@ pub fn run_script(mode: Mode) -> Result<()> {
     let mut state = UiState::parse(env::var("ROFI_DATA").ok());
 
     match retv {
-        // Initially opens and renders the clipboard history
-        0 => render_history(&store, mode, state, false),
-        // Copies the selected item to the clipboard, then closes Rofi
+        // Pre-arm keep-selection on the initial response so the first button
+        // action preserves the highlighted row.
+        0 => render_history(&store, mode, state, None),
+        // Copies the selected item to the clipboard, then closes Rofi.
         1 => {
             if let Some(id) = selected_id {
                 copy_item(&store, id)?;
             }
             Ok(())
         }
-        // Saves the edited text from ROFI_INPUT
+        // Rofi 2.0 passes custom input as the script's final argument. Newer
+        // versions also expose ROFI_INPUT, so support both forms.
         2 if state.editing.is_some() => {
-            let id = state.editing.take().expect("editing ID checked above");
-            let replacement = decode_edit_input(&env::var("ROFI_INPUT").unwrap_or_default());
+            let id = state.editing.expect("editing ID checked above");
+            let replacement_source = env::var("ROFI_INPUT")
+                .ok()
+                .or(script_argument)
+                .unwrap_or_default();
+            let replacement = decode_edit_input(&replacement_source);
+            if replacement.is_empty() {
+                return render_editor(&store, mode, state, id);
+            }
+            state.editing = None;
             if !store.edit_text(id, replacement)? {
                 bail!("clipboard item no longer exists");
             }
-            render_history(&store, mode, state, true)
+            render_history(&store, mode, state, Some(id))
         }
-        // Deletes the selected item
+        // Deletes the selected item. Rofi's native delete action reports 3;
+        // the Delete button uses custom action 2 and reports 11.
         3 | 11 => {
             if let Some(id) = selected_id {
                 store.delete(id)?;
             }
-            render_history(&store, mode, state, true)
+            render_history(&store, mode, state, selected_id)
         }
-        // Pins or unpins the selected item
+        // Pins or unpins the selected item.
         10 => {
             if let Some(id) = selected_id {
                 store.pin(id)?;
             }
-            render_history(&store, mode, state, true)
+            render_history(&store, mode, state, selected_id)
         }
-        // Opens the editor for the selected item
+        // Opens the editor for a text item.
         12 => match selected_id {
-            Some(id) => render_editor(&store, state, id),
-            None => render_history(&store, mode, state, true),
+            Some(id) => render_editor(&store, mode, state, id),
+            None => render_history(&store, mode, state, None),
         },
-        // Opens or closes the preview pane
-        13 => {
-            state.preview = !state.preview;
-            render_history(&store, mode, state, true)
-        }
+        // Layout cannot be changed by a script-mode theme update. Relaunch
+        // Rofi with the preview media-query environment set instead.
+        13 => relaunch_rofi(mode, !state.preview, selected_id),
         _ if state.editing.is_some() => render_editor(
             &store,
+            mode,
             state,
             state.editing.expect("editing ID checked above"),
         ),
-        _ => render_history(&store, mode, state, true),
+        _ => render_history(&store, mode, state, selected_id),
     }
 }
 
@@ -214,7 +277,7 @@ fn render_history(
     store: &ClipboardStore,
     mode: Mode,
     state: UiState,
-    keep_selection: bool,
+    selected_id: Option<u64>,
 ) -> Result<()> {
     let history = store.load()?;
     let items: Vec<_> = history
@@ -222,8 +285,18 @@ fn render_history(
         .iter()
         .filter(|item| mode.includes(item))
         .collect();
+    let new_selection =
+        selected_id.and_then(|id| items.iter().position(|item| item.id == id));
+
     let mut output = Vec::new();
-    write_common_headers(&mut output, mode.prompt(), state, true, keep_selection);
+    write_common_headers(
+        &mut output,
+        mode.prompt(),
+        state,
+        true,
+        true,
+        new_selection,
+    );
 
     if items.is_empty() {
         write!(&mut output, "Nothing here yet")?;
@@ -235,9 +308,9 @@ fn render_history(
     for item in items {
         let raw = row_value(item);
         write!(&mut output, "{}", sanitize_record_value(&raw))?;
-        // Rofi's textbox-current-entry uses the row's display value. While the
-        // preview is open we therefore expose the complete row value; the
-        // fixed one-line list height still keeps the menu rows compact.
+        // textbox-current-entry and the list use the same display value. In
+        // preview mode the full value is supplied; listview's one-line element
+        // height clips/ellipsizes it while the preview pane shows the value.
         if !state.preview {
             write_row_option(&mut output, "display", &row_preview(item));
         }
@@ -253,19 +326,24 @@ fn render_history(
     io::stdout().write_all(&output).context("write rofi rows")
 }
 
-fn render_editor(store: &ClipboardStore, mut state: UiState, id: u64) -> Result<()> {
+fn render_editor(
+    store: &ClipboardStore,
+    mode: Mode,
+    mut state: UiState,
+    id: u64,
+) -> Result<()> {
     let history = store.load()?;
     let Some(item) = history.items.iter().find(|item| item.id == id) else {
-        bail!("selected clipboard item no longer exists");
+        return render_history(store, mode, state, None);
     };
     if item.kind != ItemKind::Text {
-        bail!("images cannot be edited as text");
+        return render_history(store, mode, state, Some(id));
     }
     state.editing = Some(id);
 
     let mut output = Vec::new();
-    write_common_headers(&mut output, "Edit", state, false, false);
-    write!(&mut output, "Type replacement text and press Enter")?;
+    write_common_headers(&mut output, "Edit", state, false, true, Some(0));
+    write!(&mut output, "Type replacement text and press Ctrl+Enter")?;
     write_row_option(&mut output, "nonselectable", "true");
     write_row_option(&mut output, "permanent", "true");
     output.push(RECORD_SEPARATOR);
@@ -278,10 +356,11 @@ fn write_common_headers(
     mut state: UiState,
     no_custom: bool,
     keep_selection: bool,
+    new_selection: Option<usize>,
 ) {
     if !state.initialized {
-        // The first delimiter header must itself end with rofi's initial '\n'
-        // delimiter. Every later record (and later script invocation) uses RS.
+        // The first delimiter header must itself end with Rofi's initial '\n'
+        // delimiter. Every later record and invocation uses RS.
         output.push(0);
         output.extend_from_slice(b"delim");
         output.push(UNIT_SEPARATOR);
@@ -297,18 +376,12 @@ fn write_common_headers(
     );
     write_header(output, "use-hot-keys", "true");
     write_header(output, "data", &state.encode());
-    write_header(output, "theme", preview_theme(state.preview));
+
     if keep_selection {
         write_header(output, "keep-selection", "true");
-        write_header(output, "keep-filter", "true");
-    }
-}
-
-fn preview_theme(preview: bool) -> &'static str {
-    if preview {
-        "preview-pane { enabled: true; }"
-    } else {
-        "preview-pane { enabled: false; }"
+        if let Some(index) = new_selection {
+            write_header(output, "new-selection", &index.to_string());
+        }
     }
 }
 
@@ -405,3 +478,4 @@ fn rofi_binary() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
+
