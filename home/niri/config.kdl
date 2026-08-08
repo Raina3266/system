@@ -10,7 +10,7 @@ input {
     touchpad {
         tap
         dwt  
-        scroll-factor 0.2
+        scroll-factor 0.5
     }
 }
 

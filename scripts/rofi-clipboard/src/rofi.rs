@@ -154,6 +154,9 @@ fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
 
 fn relaunch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
+    let previous_rofi_pid = env::var("ROFI_OUTSIDE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
     let mut command = Command::new(executable);
 
     for variable in [
@@ -173,11 +176,16 @@ fn relaunch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<
             if preview { "preview" } else { "compact" },
         ])
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::null());
 
-    if let Some(id) = selected_id {
-        command.arg(id.to_string());
+    // Keep the positional arguments unambiguous when no row is selected.
+    command.arg(
+        selected_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_owned()),
+    );
+    if let Some(pid) = previous_rofi_pid {
+        command.arg(pid.to_string());
     }
 
     command.spawn().context("schedule rofi preview relaunch")?;
@@ -300,26 +308,43 @@ fn render_history(
 
     if items.is_empty() {
         write!(&mut output, "Nothing here yet")?;
-        write_row_option(&mut output, "nonselectable", "true");
-        write_row_option(&mut output, "permanent", "true");
+        let mut first_option = true;
+        write_row_option(&mut output, &mut first_option, "nonselectable", "true");
+        write_row_option(&mut output, &mut first_option, "permanent", "true");
         output.push(RECORD_SEPARATOR);
     }
 
     for item in items {
         let raw = row_value(item);
         write!(&mut output, "{}", sanitize_record_value(&raw))?;
+        let mut first_option = true;
         // textbox-current-entry and the list use the same display value. In
         // preview mode the full value is supplied; listview's one-line element
         // height clips/ellipsizes it while the preview pane shows the value.
         if !state.preview {
-            write_row_option(&mut output, "display", &row_preview(item));
+            write_row_option(
+                &mut output,
+                &mut first_option,
+                "display",
+                &row_preview(item),
+            );
         }
-        write_row_option(&mut output, "info", &item.id.to_string());
+        write_row_option(
+            &mut output,
+            &mut first_option,
+            "info",
+            &item.id.to_string(),
+        );
         if let Some(path) = store.image_path(item) {
-            write_row_option(&mut output, "icon", &path.to_string_lossy());
+            write_row_option(
+                &mut output,
+                &mut first_option,
+                "icon",
+                &path.to_string_lossy(),
+            );
         }
         if item.pinned {
-            write_row_option(&mut output, "active", "true");
+            write_row_option(&mut output, &mut first_option, "active", "true");
         }
         output.push(RECORD_SEPARATOR);
     }
@@ -344,8 +369,9 @@ fn render_editor(
     let mut output = Vec::new();
     write_common_headers(&mut output, "Edit", state, false, true, Some(0));
     write!(&mut output, "Type replacement text and press Ctrl+Enter")?;
-    write_row_option(&mut output, "nonselectable", "true");
-    write_row_option(&mut output, "permanent", "true");
+    let mut first_option = true;
+    write_row_option(&mut output, &mut first_option, "nonselectable", "true");
+    write_row_option(&mut output, &mut first_option, "permanent", "true");
     output.push(RECORD_SEPARATOR);
     io::stdout().write_all(&output).context("write rofi editor")
 }
@@ -393,8 +419,11 @@ fn write_header(output: &mut Vec<u8>, key: &str, value: &str) {
     output.push(RECORD_SEPARATOR);
 }
 
-fn write_row_option(output: &mut Vec<u8>, key: &str, value: &str) {
-    output.push(0);
+fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &str) {
+    // A row has one NUL before all metadata. Individual key/value pairs are
+    // separated by US. A second NUL would make Rofi ignore every later option.
+    output.push(if *first { 0 } else { UNIT_SEPARATOR });
+    *first = false;
     output.extend_from_slice(key.as_bytes());
     output.push(UNIT_SEPARATOR);
     output.extend_from_slice(sanitize_option_value(value).as_bytes());
@@ -478,4 +507,3 @@ fn rofi_binary() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
-

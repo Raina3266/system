@@ -1,5 +1,8 @@
 use std::env;
+use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Read, Write};
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -66,7 +69,12 @@ pub fn capture_clipboard() -> Result<()> {
             }
             output.stdout
         };
-        ClipboardStore::discover()?.add_image(&bytes, mime.to_owned())?;
+        let source = clipboard_image_source(&types)?;
+        ClipboardStore::discover()?.add_image_named(&bytes, mime.to_owned(), source)?;
+        return Ok(());
+    }
+
+    if store_local_image_files(&types, &watched_bytes)? {
         return Ok(());
     }
 
@@ -78,6 +86,227 @@ pub fn capture_clipboard() -> Result<()> {
         ClipboardStore::discover()?.add_text(text, mime.to_owned())?;
     }
     Ok(())
+}
+
+fn store_local_image_files(types: &str, watched_bytes: &[u8]) -> Result<bool> {
+    let Some(uri_mime) = preferred_uri_mime(types.lines()) else {
+        return Ok(false);
+    };
+    let output = Command::new(wl_paste_binary())
+        .args(["--type", uri_mime])
+        .output()
+        .with_context(|| format!("read clipboard as {uri_mime}"))?;
+    let uri_bytes = if output.status.success() && !output.stdout.is_empty() {
+        output.stdout
+    } else {
+        watched_bytes.to_vec()
+    };
+    let uri_list = String::from_utf8_lossy(&uri_bytes);
+    let paths: Vec<_> = uri_list.lines().filter_map(local_file_path).collect();
+    if paths.is_empty() {
+        return Ok(false);
+    }
+
+    let store = ClipboardStore::discover()?;
+    let mut stored = false;
+    for path in paths {
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+        let Some(mime) = detected_image_mime(&bytes) else {
+            continue;
+        };
+        let name = Some(path.to_string_lossy().into_owned());
+        stored |= store
+            .add_image_named(&bytes, mime.to_owned(), name)?
+            .is_some();
+    }
+    Ok(stored)
+}
+
+fn clipboard_image_source(types: &str) -> Result<Option<String>> {
+    for mime in types.lines().filter(|mime| {
+        mime.split(';').next() == Some("text/uri-list")
+            || *mime == "x-special/gnome-copied-files"
+    }) {
+        if let Some(text) = read_clipboard_text(mime)? {
+            for line in text.lines() {
+                if let Some(source) = source_from_value(line) {
+                    return Ok(Some(source));
+                }
+            }
+        }
+    }
+
+    if let Some(mime) = types
+        .lines()
+        .find(|mime| mime.split(';').next() == Some("text/html"))
+        && let Some(html) = read_clipboard_text(mime)?
+        && let Some(source) = image_source_from_html(&html)
+    {
+        return Ok(Some(source));
+    }
+
+    if let Some(mime) = types
+        .lines()
+        .find(|mime| mime.split(';').next() == Some("text/plain"))
+        && let Some(text) = read_clipboard_text(mime)?
+        && let Some(source) = source_from_value(text.trim())
+    {
+        return Ok(Some(source));
+    }
+
+    Ok(None)
+}
+
+fn read_clipboard_text(mime: &str) -> Result<Option<String>> {
+    let output = Command::new(wl_paste_binary())
+        .args(["--type", mime])
+        .output()
+        .with_context(|| format!("read clipboard source as {mime}"))?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+}
+
+fn source_from_value(value: &str) -> Option<String> {
+    let value = value.trim().replace("&amp;", "&");
+    if value.starts_with("https://") || value.starts_with("http://") {
+        return Some(value);
+    }
+    local_file_path(&value).map(|path| path.to_string_lossy().into_owned())
+}
+
+fn image_source_from_html(html: &str) -> Option<String> {
+    let lowercase = html.to_ascii_lowercase();
+    let mut offset = 0;
+    while let Some(relative_start) = lowercase[offset..].find("<img") {
+        let tag_start = offset + relative_start;
+        let tag_end = tag_start + lowercase[tag_start..].find('>')?;
+        let tag_lower = &lowercase[tag_start..tag_end];
+        let tag_original = &html[tag_start..tag_end];
+        let mut search_from = 0;
+
+        while let Some(relative_src) = tag_lower[search_from..].find("src") {
+            let src_start = search_from + relative_src;
+            let before_is_boundary = src_start == 0
+                || tag_lower.as_bytes()[src_start - 1].is_ascii_whitespace();
+            let mut cursor = src_start + 3;
+            while tag_lower
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(u8::is_ascii_whitespace)
+            {
+                cursor += 1;
+            }
+            if before_is_boundary && tag_lower.as_bytes().get(cursor) == Some(&b'=') {
+                cursor += 1;
+                while tag_lower
+                    .as_bytes()
+                    .get(cursor)
+                    .is_some_and(u8::is_ascii_whitespace)
+                {
+                    cursor += 1;
+                }
+                let quote = *tag_original.as_bytes().get(cursor)?;
+                let value_start = if matches!(quote, b'\'' | b'"') {
+                    cursor + 1
+                } else {
+                    cursor
+                };
+                let value_end = if matches!(quote, b'\'' | b'"') {
+                    tag_original[value_start..].find(char::from(quote))? + value_start
+                } else {
+                    tag_original[value_start..]
+                        .find(char::is_whitespace)
+                        .map(|end| value_start + end)
+                        .unwrap_or(tag_original.len())
+                };
+                if let Some(source) = source_from_value(&tag_original[value_start..value_end]) {
+                    return Some(source);
+                }
+            }
+            search_from = src_start + 3;
+        }
+        offset = tag_end + 1;
+    }
+    None
+}
+
+fn preferred_uri_mime<'a>(types: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    types.into_iter().find(|mime| {
+        mime.split(';').next() == Some("text/uri-list")
+            || *mime == "x-special/gnome-copied-files"
+    })
+}
+
+fn local_file_path(line: &str) -> Option<PathBuf> {
+    let value = line.trim();
+    if value.is_empty()
+        || value.starts_with('#')
+        || matches!(value, "copy" | "cut")
+    {
+        return None;
+    }
+
+    let encoded_path = if let Some(value) = value.strip_prefix("file://") {
+        if let Some(value) = value.strip_prefix("localhost") {
+            value.starts_with('/').then_some(value)?
+        } else {
+            value.starts_with('/').then_some(value)?
+        }
+    } else {
+        value.starts_with('/').then_some(value)?
+    };
+    let decoded = percent_decode(encoded_path)?;
+    let path = PathBuf::from(OsString::from_vec(decoded));
+    path.is_absolute().then_some(path)
+}
+
+fn percent_decode(value: &str) -> Option<Vec<u8>> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_value(*bytes.get(index + 1)?)?;
+            let low = hex_value(*bytes.get(index + 2)?)?;
+            let byte = (high << 4) | low;
+            if byte == 0 {
+                return None;
+            }
+            decoded.push(byte);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Some(decoded)
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn detected_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    [
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+        "image/svg+xml",
+    ]
+    .into_iter()
+    .find(|mime| bytes_match_mime(bytes, mime))
 }
 
 pub fn store_stdin(mime: &str) -> Result<()> {

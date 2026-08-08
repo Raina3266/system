@@ -4,8 +4,9 @@ mod rofi;
 mod store;
 
 use std::env;
+use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
@@ -28,7 +29,8 @@ pub fn run() -> Result<()> {
             let mode = Mode::parse(args.next().as_deref().unwrap_or("pinned"))?;
             let preview = args.next().as_deref() == Some("preview");
             let selected_id = args.next().and_then(|value| value.parse().ok());
-            thread::sleep(Duration::from_millis(120));
+            let previous_rofi_pid = args.next().and_then(|value| value.parse().ok());
+            wait_for_process_exit(previous_rofi_pid);
             launch_rofi(mode, preview, selected_id)
         }
         Some("script") => {
@@ -44,6 +46,21 @@ pub fn run() -> Result<()> {
     }
 }
 
+fn wait_for_process_exit(pid: Option<u32>) {
+    let Some(pid) = pid else {
+        // ROFI_OUTSIDE is available in script mode, but leave a small fallback
+        // delay for manually invoked relaunch commands.
+        thread::sleep(Duration::from_millis(150));
+        return;
+    };
+
+    let process_path = Path::new("/proc").join(pid.to_string());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while process_path.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn parse_mime_argument(mut args: impl Iterator<Item = String>) -> Result<String> {
     let flag = args.next();
     match (flag.as_deref(), args.next()) {
@@ -51,4 +68,3 @@ fn parse_mime_argument(mut args: impl Iterator<Item = String>) -> Result<String>
         _ => bail!("store requires --mime MIME"),
     }
 }
-

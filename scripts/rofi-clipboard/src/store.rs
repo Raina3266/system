@@ -12,6 +12,7 @@ use crate::model::{ClipboardItem, HISTORY_VERSION, History, ItemKind};
 const LOCK_SHARED: i32 = 1;
 const LOCK_EXCLUSIVE: i32 = 2;
 const LOCK_UN: i32 = 8;
+const MAX_HISTORY_ITEMS: usize = 2000;
 
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
@@ -86,6 +87,7 @@ impl ClipboardStore {
                     kind: ItemKind::Text,
                     text: Some(text),
                     image_file: None,
+                    name: None,
                     mime,
                     pinned: false,
                     created_at: now,
@@ -97,6 +99,15 @@ impl ClipboardStore {
     }
 
     pub fn add_image(&self, bytes: &[u8], mime: String) -> Result<Option<u64>> {
+        self.add_image_named(bytes, mime, None)
+    }
+
+    pub fn add_image_named(
+        &self,
+        bytes: &[u8],
+        mime: String,
+        name: Option<String>,
+    ) -> Result<Option<u64>> {
         if bytes.is_empty() {
             return Ok(None);
         }
@@ -112,6 +123,8 @@ impl ClipboardStore {
             {
                 let mut item = history.items.remove(position);
                 item.created_at = now;
+                item.mime = mime;
+                item.name = name.or(item.name);
                 let id = item.id;
                 history.items.insert(0, item);
                 return Ok(Some(id));
@@ -132,6 +145,7 @@ impl ClipboardStore {
                     kind: ItemKind::Image,
                     text: None,
                     image_file: Some(filename),
+                    name,
                     mime,
                     pinned: false,
                     created_at: now,
@@ -245,8 +259,24 @@ impl ClipboardStore {
         let lock = self.lock(true)?;
         let mut history = self.load_unlocked()?;
         let result = operation(&mut history)?;
+        let removed_images = trim_history(&mut history);
         self.save_unlocked(&history)?;
         unlock(&lock)?;
+
+        // The updated history is already safely stored. Image cleanup is
+        // best-effort so a filesystem cleanup error cannot invalidate a new
+        // history entry that was successfully committed.
+        for filename in removed_images {
+            let path = self.image_dir.join(filename);
+            if let Err(error) = fs::remove_file(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!(
+                    "rofi-clipboard: failed to delete pruned image {}: {error}",
+                    path.display()
+                );
+            }
+        }
         Ok(result)
     }
 
@@ -298,6 +328,26 @@ impl ClipboardStore {
         let json = history.to_json()?;
         write_atomic(&self.history_path, json.as_bytes())
     }
+}
+
+fn trim_history(history: &mut History) -> Vec<String> {
+    if history.items.len() <= MAX_HISTORY_ITEMS {
+        return Vec::new();
+    }
+
+    // Items are kept newest-first, so everything after the limit is older
+    // than every retained entry.
+    history
+        .items
+        .split_off(MAX_HISTORY_ITEMS)
+        .into_iter()
+        .filter_map(|item| {
+            item.image_file
+                .as_deref()
+                .and_then(safe_filename)
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 fn take_id(history: &mut History) -> u64 {
@@ -387,4 +437,3 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     write_result
 }
-

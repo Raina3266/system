@@ -142,6 +142,11 @@ element {
     border-color: rgba(122, 252, 255, 0.10);
 }
 
+element-icon {
+    enabled: false;
+    size: 400px;
+}
+
 element normal.active,
 element alternate.active {
     border-color: rgba(122, 252, 255, 0.45);

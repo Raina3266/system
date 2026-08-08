@@ -9,6 +9,8 @@ pub struct ClipboardItem {
     pub kind: ItemKind,
     pub text: Option<String>,
     pub image_file: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
     pub mime: String,
     pub pinned: bool,
     pub created_at: u64,
