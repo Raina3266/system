@@ -1,19 +1,5 @@
 // Niri window manager config. Docs: https://niri-wm.github.io/niri/Configuration:-Introduction
 
-input {
-    keyboard {
-        xkb {
-            layout "gb"
-        }
-        numlock
-    }
-    touchpad {
-        tap
-        dwt  
-        scroll-factor 0.5
-    }
-}
-
 // Laptop screen: centered below external monitors
 output "eDP-1" {
     mode "1920x1200@60.026"
@@ -42,15 +28,29 @@ overview {
     zoom 0.3
 }
 
-layer-rule {
-    match namespace="^wallpaper$"
-    place-within-backdrop true
+input {
+    keyboard {
+        xkb {
+            layout "gb"
+        }
+        numlock
+    }
+    touchpad {
+        tap
+        dwt  
+        scroll-factor 0.5
+    }
+}
+
+gestures {
+    hot-corners {
+        off
+    }
 }
 
 layout {
     gaps 10
     background-color "transparent"
-    center-focused-column "never"
 
     preset-column-widths {
         // Column width presets: 33%, 50%, 67%
@@ -81,17 +81,10 @@ layout {
     }
 }
 
-spawn-at-startup "xwayland-satellite"
-spawn-at-startup "handy" "--start-hidden"
-spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
-spawn-at-startup "sh" "-c" "sleep 3 && snixembed"
-spawn-at-startup "sh" "-c" "sleep 5 && birdtray"
-
-hotkey-overlay {
-    // skip-at-startup
+layer-rule {
+    match namespace="^wallpaper$"
+    place-within-backdrop true
 }
-
-screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 window-rule {
     geometry-corner-radius 12
@@ -106,9 +99,21 @@ window-rule {
 window-rule {
     match app-id=r#"^com\.mitchellh\.ghostty$"#
     open-floating true
-    default-column-width { fixed 800; }
+    default-column-width { fixed 500; }
     default-window-height { fixed 700; }
 }
+
+spawn-at-startup "xwayland-satellite"
+spawn-at-startup "handy" "--start-hidden"
+spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
+spawn-at-startup "sh" "-c" "sleep 3 && snixembed"
+spawn-at-startup "sh" "-c" "sleep 5 && birdtray"
+
+hotkey-overlay {
+    // skip-at-startup
+}
+
+screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 binds {
     Mod+Shift+Slash { show-hotkey-overlay; }

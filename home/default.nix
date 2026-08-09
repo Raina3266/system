@@ -52,7 +52,6 @@
 
     # media playback
     vlc
-    tauon
     waylyrics
 
     # media creation / editing
@@ -68,5 +67,12 @@
     # downloads / torrent
     qbittorrent
     clash-verge-rev
+
+    # can be removed when it update later
+    (tauon.overrideAttrs (old: {
+      makeWrapperArgs = (old.makeWrapperArgs or []) ++ [
+        "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libappindicator ]}"
+      ];
+    }))
   ];
 }

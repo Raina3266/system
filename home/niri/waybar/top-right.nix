@@ -43,8 +43,8 @@ in
     "restart-interval" = 1;
     "exec-on-event" = false;
 
-    on-click = "${waybar-timer}/bin/waybar-timer toggle";
-    on-click-middle = "${waybar-timer}/bin/waybar-timer add";
+    on-click = "${waybar-timer}/bin/waybar-timer add";
+    on-click-middle = "${waybar-timer}/bin/waybar-timer toggle";
     on-click-right = "${waybar-timer}/bin/waybar-timer clear";
   };
 

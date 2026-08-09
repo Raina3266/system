@@ -153,18 +153,11 @@ window.csd notebook > header > tabs > tab:checked {
  * Nemo-only parts that no other app has. */
 
 /* ---------- window / base ---------- */
-.neno-window .view {
-    border: 1px solid rgba(255, 126, 219, 0.6);
-}
-.neno-window .toolbar .view {
-    padding: 2px;
-    border-top: 1px solid rgba(255, 126, 219, 0.5);
-    border-bottom: 1px solid rgba(255, 126, 219, 0.5);
-}
 
 .nemo-window .sidebar .view,
 .nemo-window .view {
-    padding: 5px;
+    padding: 3px;
+    padding-right: 0px;
     border: none;
     font-size: 12pt;
 }
@@ -179,7 +172,8 @@ window.csd notebook > header > tabs > tab:checked {
     box-shadow: none;
 }
 
-.nemo-window .view:hover {
+.nemo-window .view:hover,
+.nemo-window .sidebar .view:hover {
     background-color: rgba(122, 252, 255, 0.2);
     background-image: none;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);

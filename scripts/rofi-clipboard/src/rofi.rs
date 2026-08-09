@@ -319,17 +319,12 @@ fn render_history(
         let raw = row_value(item);
         write!(&mut output, "{}", sanitize_record_value(&raw))?;
         let mut first_option = true;
-        // textbox-current-entry and the list use the same display value. In
-        // preview mode the full value is supplied; listview's one-line element
-        // height clips/ellipsizes it while the preview pane shows the value.
-        if !state.preview {
-            write_row_option(
-                &mut output,
-                &mut first_option,
-                "display",
-                &row_preview(item),
-            );
-        }
+        write_row_option(
+            &mut output,
+            &mut first_option,
+            "display",
+            &row_preview(item),
+        );
         write_row_option(
             &mut output,
             &mut first_option,
@@ -554,5 +549,40 @@ mod tests {
         let item = image_item(None);
 
         assert_eq!(row_value(&item), "Image · png");
+    }
+
+    #[test]
+    fn text_row_preview_collapses_whitespace_to_one_line() {
+        let item = ClipboardItem {
+            id: 2,
+            kind: ItemKind::Text,
+            text: Some("first line\nsecond\tline   third".to_owned()),
+            image_file: None,
+            name: None,
+            mime: "text/plain".to_owned(),
+            pinned: false,
+            created_at: 0,
+            digest: "digest".to_owned(),
+        };
+
+        assert_eq!(row_preview(&item), "first line second line third");
+        assert_eq!(row_value(&item), "first line\nsecond\tline   third");
+    }
+
+    #[test]
+    fn text_row_preview_truncates_long_text() {
+        let item = ClipboardItem {
+            id: 3,
+            kind: ItemKind::Text,
+            text: Some("x".repeat(111)),
+            image_file: None,
+            name: None,
+            mime: "text/plain".to_owned(),
+            pinned: false,
+            created_at: 0,
+            digest: "digest".to_owned(),
+        };
+
+        assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
     }
 }
