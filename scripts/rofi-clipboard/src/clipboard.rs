@@ -147,6 +147,21 @@ fn clipboard_image_source(types: &str) -> Result<Option<String>> {
         return Ok(Some(source));
     }
 
+    // Browsers can put image bytes and their origin on the clipboard as
+    // separate targets. Chromium uses chromium/x-source-url on Linux, while
+    // Firefox and compatible applications use one of the Mozilla URL flavors.
+    // Prefer an <img src> above because Chromium's source URL can be the page
+    // containing the image rather than the image itself.
+    for mime in types.lines().filter(|mime| is_browser_image_source_mime(mime)) {
+        if let Some(text) = read_clipboard_text(mime)? {
+            for line in text.lines() {
+                if let Some(source) = source_from_value(line) {
+                    return Ok(Some(source));
+                }
+            }
+        }
+    }
+
     if let Some(mime) = types
         .lines()
         .find(|mime| mime.split(';').next() == Some("text/plain"))
@@ -159,6 +174,16 @@ fn clipboard_image_source(types: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+fn is_browser_image_source_mime(mime: &str) -> bool {
+    matches!(
+        mime.split(';').next().unwrap_or(mime),
+        "chromium/x-source-url"
+            | "text/x-moz-url"
+            | "text/x-moz-url-data"
+            | "application/x-moz-file-promise-url"
+    )
+}
+
 fn read_clipboard_text(mime: &str) -> Result<Option<String>> {
     let output = Command::new(wl_paste_binary())
         .args(["--type", mime])
@@ -167,7 +192,49 @@ fn read_clipboard_text(mime: &str) -> Result<Option<String>> {
     if !output.status.success() || output.stdout.is_empty() {
         return Ok(None);
     }
-    Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+    Ok(Some(decode_clipboard_text(&output.stdout)))
+}
+
+fn decode_clipboard_text(bytes: &[u8]) -> String {
+    if let Some(bytes) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        return decode_utf16(bytes, u16::from_le_bytes);
+    }
+    if let Some(bytes) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        return decode_utf16(bytes, u16::from_be_bytes);
+    }
+
+    // text/x-moz-url is commonly UTF-16 without a BOM. Detect the byte order
+    // from the NUL bytes used by ASCII URL characters before falling back to
+    // the UTF-8 used by Wayland-native clipboard targets.
+    let pairs = bytes.len() / 2;
+    if pairs > 0 {
+        let even_nuls = bytes.iter().step_by(2).filter(|byte| **byte == 0).count();
+        let odd_nuls = bytes
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .filter(|byte| **byte == 0)
+            .count();
+        if odd_nuls > pairs / 2 && even_nuls < pairs / 4 {
+            return decode_utf16(bytes, u16::from_le_bytes);
+        }
+        if even_nuls > pairs / 2 && odd_nuls < pairs / 4 {
+            return decode_utf16(bytes, u16::from_be_bytes);
+        }
+    }
+
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches('\0')
+        .to_owned()
+}
+
+fn decode_utf16(bytes: &[u8], from_bytes: fn([u8; 2]) -> u16) -> String {
+    let words: Vec<_> = bytes
+        .chunks_exact(2)
+        .map(|pair| from_bytes([pair[0], pair[1]]))
+        .take_while(|word| *word != 0)
+        .collect();
+    String::from_utf16_lossy(&words)
 }
 
 fn source_from_value(value: &str) -> Option<String> {
@@ -389,4 +456,49 @@ fn env_binary(variable: &str, fallback: &str) -> PathBuf {
     env::var_os(variable)
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(fallback).to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_utf8_clipboard_url() {
+        let value = decode_clipboard_text(b"https://example.com/image.png\n");
+
+        assert_eq!(value, "https://example.com/image.png\n");
+    }
+
+    #[test]
+    fn decodes_bomless_utf16_little_endian_mozilla_url() {
+        let mut bytes = Vec::new();
+        for word in "https://example.com/image.png\nImage title".encode_utf16() {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+
+        assert_eq!(
+            decode_clipboard_text(&bytes),
+            "https://example.com/image.png\nImage title"
+        );
+    }
+
+    #[test]
+    fn recognizes_chromium_and_mozilla_image_source_targets() {
+        assert!(is_browser_image_source_mime("chromium/x-source-url"));
+        assert!(is_browser_image_source_mime("text/x-moz-url"));
+        assert!(is_browser_image_source_mime(
+            "text/x-moz-url-data;charset=utf-8"
+        ));
+        assert!(!is_browser_image_source_mime("image/png"));
+    }
+
+    #[test]
+    fn extracts_image_source_from_html() {
+        let html = r#"<div><img alt="photo" src="https://example.com/image.png?a=1&amp;b=2"></div>"#;
+
+        assert_eq!(
+            image_source_from_html(html).as_deref(),
+            Some("https://example.com/image.png?a=1&b=2")
+        );
+    }
 }

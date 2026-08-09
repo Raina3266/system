@@ -106,6 +106,7 @@ pub fn launch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Resul
         .args([
             "-show",
             mode.name(),
+            "-show-icons",
             "-modes",
             &modes,
             "-display-pinned",
@@ -432,7 +433,7 @@ fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &s
 fn row_value(item: &ClipboardItem) -> String {
     match item.kind {
         ItemKind::Text => item.text.clone().unwrap_or_default(),
-        ItemKind::Image => format!("Image · {}", short_mime(&item.mime)),
+        ItemKind::Image => image_label(item),
     }
 }
 
@@ -443,8 +444,16 @@ fn row_preview(item: &ClipboardItem) -> String {
             let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
             truncate_chars(&one_line, 110)
         }
-        ItemKind::Image => format!("Image · {}", short_mime(&item.mime)),
+        ItemKind::Image => truncate_chars(&image_label(item), 110),
     }
+}
+
+fn image_label(item: &ClipboardItem) -> String {
+    item.name
+        .as_deref()
+        .filter(|source| !source.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("Image · {}", short_mime(&item.mime)))
 }
 
 fn short_mime(mime: &str) -> &str {
@@ -506,4 +515,44 @@ fn rofi_binary() -> PathBuf {
     env::var_os("ROFI_CLIPBOARD_ROFI")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image_item(name: Option<&str>) -> ClipboardItem {
+        ClipboardItem {
+            id: 1,
+            kind: ItemKind::Image,
+            text: None,
+            image_file: Some("1.png".to_owned()),
+            name: name.map(str::to_owned),
+            mime: "image/png".to_owned(),
+            pinned: false,
+            created_at: 0,
+            digest: "digest".to_owned(),
+        }
+    }
+
+    #[test]
+    fn image_row_uses_internet_source_url() {
+        let item = image_item(Some("https://example.com/images/photo.png"));
+
+        assert_eq!(row_value(&item), "https://example.com/images/photo.png");
+    }
+
+    #[test]
+    fn image_row_uses_local_source_path() {
+        let item = image_item(Some("/home/raina/Pictures/photo.png"));
+
+        assert_eq!(row_value(&item), "/home/raina/Pictures/photo.png");
+    }
+
+    #[test]
+    fn image_row_falls_back_to_mime_for_entries_without_a_source() {
+        let item = image_item(None);
+
+        assert_eq!(row_value(&item), "Image · png");
+    }
 }

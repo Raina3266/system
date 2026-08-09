@@ -135,7 +135,7 @@ scrollbar {
 
 /* Rows contain text only. The image path and database ID are rofi metadata. */
 element {
-    children: [ element-text ];
+    children: [ element-icon, element-text ];
     padding: 10px;
     border: 1px;
     border-radius: 7px;
