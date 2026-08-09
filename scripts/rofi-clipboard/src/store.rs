@@ -13,6 +13,7 @@ const LOCK_SHARED: i32 = 1;
 const LOCK_EXCLUSIVE: i32 = 2;
 const LOCK_UN: i32 = 8;
 const MAX_HISTORY_ITEMS: usize = 2000;
+const MAX_IMAGE_ITEMS: usize = 100;
 
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
@@ -331,23 +332,184 @@ impl ClipboardStore {
 }
 
 fn trim_history(history: &mut History) -> Vec<String> {
-    if history.items.len() <= MAX_HISTORY_ITEMS {
-        return Vec::new();
+    let mut removed_images = Vec::new();
+    let mut excess_images = history
+        .items
+        .iter()
+        .filter(|item| item.kind == ItemKind::Image)
+        .count()
+        .saturating_sub(MAX_IMAGE_ITEMS);
+
+    // Items are kept newest-first. Remove images from the end so text entries
+    // do not count toward the independent local-image limit.
+    for index in (0..history.items.len()).rev() {
+        if excess_images == 0 {
+            break;
+        }
+        if history.items[index].kind != ItemKind::Image {
+            continue;
+        }
+
+        let item = history.items.remove(index);
+        if let Some(filename) = item
+            .image_file
+            .as_deref()
+            .and_then(safe_filename)
+            .map(str::to_owned)
+        {
+            removed_images.push(filename);
+        }
+        excess_images -= 1;
     }
 
-    // Items are kept newest-first, so everything after the limit is older
-    // than every retained entry.
-    history
-        .items
-        .split_off(MAX_HISTORY_ITEMS)
-        .into_iter()
-        .filter_map(|item| {
-            item.image_file
-                .as_deref()
-                .and_then(safe_filename)
-                .map(str::to_owned)
-        })
-        .collect()
+    if history.items.len() > MAX_HISTORY_ITEMS {
+        // Everything after the overall limit is older than every retained
+        // entry. Image files from those entries must also be removed.
+        removed_images.extend(
+            history
+                .items
+                .split_off(MAX_HISTORY_ITEMS)
+                .into_iter()
+                .filter_map(|item| {
+                    item.image_file
+                        .as_deref()
+                        .and_then(safe_filename)
+                        .map(str::to_owned)
+                }),
+        );
+    }
+
+    removed_images
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestRoot(PathBuf);
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_root() -> TestRoot {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        TestRoot(std::env::temp_dir().join(format!(
+            "rofi-clipboard-test-{}-{unique}",
+            std::process::id()
+        )))
+    }
+
+    fn item(id: u64, kind: ItemKind) -> ClipboardItem {
+        ClipboardItem {
+            id,
+            kind,
+            text: (kind == ItemKind::Text).then(|| format!("text {id}")),
+            image_file: (kind == ItemKind::Image).then(|| format!("{id}.png")),
+            name: None,
+            mime: match kind {
+                ItemKind::Text => "text/plain",
+                ItemKind::Image => "image/png",
+            }
+            .to_owned(),
+            pinned: false,
+            created_at: 0,
+            digest: format!("digest-{id}"),
+        }
+    }
+
+    #[test]
+    fn removes_oldest_image_above_image_limit() {
+        let mut history = History::default();
+        history.items = (1..=101)
+            .rev()
+            .map(|id| item(id, ItemKind::Image))
+            .collect();
+
+        let removed = trim_history(&mut history);
+
+        assert_eq!(history.items.len(), MAX_IMAGE_ITEMS);
+        assert_eq!(history.items.last().map(|item| item.id), Some(2));
+        assert_eq!(removed, vec!["1.png"]);
+    }
+
+    #[test]
+    fn image_limit_does_not_remove_text_items() {
+        let mut history = History::default();
+        history.items = (1..=251)
+            .rev()
+            .map(|id| {
+                let kind = if id >= 151 {
+                    ItemKind::Image
+                } else {
+                    ItemKind::Text
+                };
+                item(id, kind)
+            })
+            .collect();
+
+        let removed = trim_history(&mut history);
+
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .filter(|item| item.kind == ItemKind::Text)
+                .count(),
+            150
+        );
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .filter(|item| item.kind == ItemKind::Image)
+                .count(),
+            MAX_IMAGE_ITEMS
+        );
+        assert_eq!(removed, vec!["151.png"]);
+    }
+
+    #[test]
+    fn adding_image_above_limit_deletes_oldest_cached_file() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        fs::create_dir_all(&store.image_dir)?;
+
+        let mut history = History::default();
+        history.next_id = 101;
+        history.items = (1..=100)
+            .rev()
+            .map(|id| item(id, ItemKind::Image))
+            .collect();
+        store.save_unlocked(&history)?;
+
+        let oldest_path = store.image_dir.join("1.png");
+        fs::write(&oldest_path, b"oldest image")?;
+
+        assert_eq!(
+            store.add_image(b"new image", "image/png".to_owned())?,
+            Some(101)
+        );
+        assert!(!oldest_path.exists());
+
+        let history = store.load()?;
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .filter(|item| item.kind == ItemKind::Image)
+                .count(),
+            MAX_IMAGE_ITEMS
+        );
+        assert_eq!(history.items.first().map(|item| item.id), Some(101));
+        assert!(store.image_dir.join("101.png").exists());
+        Ok(())
+    }
 }
 
 fn take_id(history: &mut History) -> u64 {
