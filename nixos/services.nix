@@ -16,7 +16,6 @@
     sushi
     ffmpegthumbnailer
     gdk-pixbuf
-    simple-scan
     system-config-printer
     nemo-with-extensions
     gnomeExtensions.simple-timer
@@ -41,7 +40,6 @@
     yelp
     seahorse
     totem
-    simple-scan
     snapshot
     decibels
     papers
@@ -110,7 +108,9 @@
     nssmdns4 = true;
     openFirewall = true;
   };
-
+  services.udev.packages = with pkgs; [
+    sane-airscan
+  ];
   services.ipp-usb.enable = true;
 
   # ── Network services ──────────────────────────────────────────────────
