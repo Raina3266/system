@@ -19,8 +19,8 @@ use crate::ipc::Message;
 const CONFIG_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) {
-    // NON_UNIQUE is important for launchers: every View action gets its own
-    // document rather than activating an older window and losing new stdin.
+    // NON_UNIQUE is important for launchers: every Edit action gets its own
+    // item rather than activating an older panel and losing the new content.
     let application = Application::builder()
         .application_id("io.github.raina.PreviewPanel")
         .flags(gio::ApplicationFlags::NON_UNIQUE)
@@ -263,15 +263,19 @@ fn apply_companion_geometry(window: &ApplicationWindow, geometry: &WindowConfig)
         Side::Left => (Edge::Left, Edge::Right),
         Side::Right => (Edge::Right, Edge::Left),
     };
-    // Layer-shell geometry must be established before the window is mapped.
+    // Anchor one horizontal edge and the top edge so both position offsets can
+    // be expressed as layer-shell margins and changed while the panel is open.
     window.set_anchor(opposite_edge, false);
     window.set_margin(opposite_edge, 0);
     window.set_anchor(edge, true);
-    update_companion_margin(window, edge, geometry);
+    window.set_anchor(Edge::Bottom, false);
+    window.set_margin(Edge::Bottom, 0);
+    window.set_anchor(Edge::Top, true);
+    update_companion_margins(window, edge, geometry);
     window.queue_resize();
 }
 
-fn update_companion_margin(
+fn update_companion_margins(
     window: &ApplicationWindow,
     edge: Edge,
     geometry: &WindowConfig,
@@ -282,14 +286,21 @@ fn update_companion_margin(
     let Some(monitor) = gtk::prelude::RootExt::display(window).monitor_at_surface(&surface) else {
         return;
     };
+    let monitor = monitor.geometry();
     window.set_margin(
         edge,
-        companion_margin(
-            monitor.geometry().width(),
+        horizontal_margin(
+            monitor.width(),
             geometry.companion_width,
             geometry.width,
             geometry.gap,
+            geometry.side,
+            geometry.x,
         ),
+    );
+    window.set_margin(
+        Edge::Top,
+        vertical_margin(monitor.height(), geometry.height, geometry.y),
     );
 }
 
@@ -300,6 +311,31 @@ fn companion_margin(
     gap: i32,
 ) -> i32 {
     ((monitor_width - companion_width) / 2 - panel_width - gap).max(0)
+}
+
+fn horizontal_margin(
+    monitor_width: i32,
+    companion_width: i32,
+    panel_width: i32,
+    gap: i32,
+    side: Side,
+    x: i32,
+) -> i32 {
+    let automatic = companion_margin(monitor_width, companion_width, panel_width, gap);
+    let adjusted = match side {
+        Side::Left => automatic + x,
+        Side::Right => automatic - x,
+    };
+    clamp_margin(adjusted, monitor_width, panel_width)
+}
+
+fn vertical_margin(monitor_height: i32, panel_height: i32, y: i32) -> i32 {
+    let centered = (monitor_height - panel_height) / 2;
+    clamp_margin(centered + y, monitor_height, panel_height)
+}
+
+fn clamp_margin(margin: i32, monitor_size: i32, panel_size: i32) -> i32 {
+    margin.clamp(0, (monitor_size - panel_size).max(0))
 }
 
 fn connect_live_updates(
@@ -368,7 +404,10 @@ fn accept_serial(latest: &mut u64, candidate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{accept_serial, companion_margin};
+    use super::{
+        accept_serial, companion_margin, horizontal_margin, vertical_margin,
+    };
+    use crate::cli::Side;
 
     #[test]
     fn rapid_updates_cannot_restore_an_older_selection() {
@@ -383,5 +422,25 @@ mod tests {
     fn companion_margin_places_the_panel_beside_a_centered_window() {
         assert_eq!(companion_margin(1920, 400, 480, 10), 270);
         assert_eq!(companion_margin(1280, 400, 480, 10), 0);
+    }
+
+    #[test]
+    fn x_offset_moves_in_the_same_screen_direction_on_both_sides() {
+        assert_eq!(
+            horizontal_margin(1920, 400, 480, 10, Side::Left, 25),
+            295
+        );
+        assert_eq!(
+            horizontal_margin(1920, 400, 480, 10, Side::Right, 25),
+            245
+        );
+    }
+
+    #[test]
+    fn y_offset_moves_from_center_and_stays_on_screen() {
+        assert_eq!(vertical_margin(1080, 615, 0), 232);
+        assert_eq!(vertical_margin(1080, 615, 40), 272);
+        assert_eq!(vertical_margin(1080, 615, -500), 0);
+        assert_eq!(vertical_margin(1080, 615, 1000), 465);
     }
 }

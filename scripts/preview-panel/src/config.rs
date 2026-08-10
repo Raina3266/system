@@ -23,6 +23,8 @@ pub struct WindowConfig {
     pub companion_width: i32,
     pub side: Side,
     pub gap: i32,
+    pub x: i32,
+    pub y: i32,
 }
 
 impl WindowConfig {
@@ -33,6 +35,8 @@ impl WindowConfig {
             companion_width: overrides.companion_width.unwrap_or(self.companion_width),
             side: overrides.side.unwrap_or(self.side),
             gap: overrides.gap.unwrap_or(self.gap),
+            x: self.x,
+            y: self.y,
         }
     }
 }
@@ -65,6 +69,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
         .as_table()
         .ok_or_else(|| ConfigError::new("the TOML root must be a table"))?;
     let window = table(root, "window")?;
+    let position = table(root, "position")?;
     let appearance = table(root, "appearance")?;
 
     Ok(Config {
@@ -74,6 +79,8 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             companion_width: dimension(window, "companion_width")?,
             side: side(window)?,
             gap: gap(window)?,
+            x: offset(position, "x")?,
+            y: offset(position, "y")?,
         },
         css: string(appearance, "css")?.to_owned(),
     })
@@ -144,6 +151,16 @@ fn gap(table: &toml::Table) -> Result<i32, ConfigError> {
     Ok(value as i32)
 }
 
+fn offset(table: &toml::Table, key: &str) -> Result<i32, ConfigError> {
+    let value = integer(table, key)?;
+    if !(-8192..=8192).contains(&value) {
+        return Err(ConfigError::new(format!(
+            "{key} must be between -8192 and 8192 pixels"
+        )));
+    }
+    Ok(value as i32)
+}
+
 fn side(table: &toml::Table) -> Result<Side, ConfigError> {
     match string(table, "side")? {
         "left" => Ok(Side::Left),
@@ -174,6 +191,10 @@ mod tests {
                 side = "right"
                 gap = 14
 
+                [position]
+                x = 35
+                y = -20
+
                 [appearance]
                 css = '''window { color: #cbe3e7; }'''
             "##,
@@ -185,6 +206,8 @@ mod tests {
         assert_eq!(config.window.companion_width, 400);
         assert_eq!(config.window.side, Side::Right);
         assert_eq!(config.window.gap, 14);
+        assert_eq!(config.window.x, 35);
+        assert_eq!(config.window.y, -20);
         assert_eq!(config.css, "window { color: #cbe3e7; }");
     }
 
@@ -196,6 +219,8 @@ mod tests {
             companion_width: 400,
             side: Side::Left,
             gap: 10,
+            x: 25,
+            y: -15,
         };
         let overrides = WindowOverrides {
             width: Some(600),
@@ -211,6 +236,8 @@ mod tests {
                 companion_width: 400,
                 side: Side::Right,
                 gap: 10,
+                x: 25,
+                y: -15,
             }
         );
     }
@@ -226,12 +253,39 @@ mod tests {
                 side = "middle"
                 gap = -1
 
+                [position]
+                x = 0
+                y = 0
+
                 [appearance]
                 css = ""
             "#,
         )
         .unwrap_err();
         assert!(error.to_string().contains("width"));
+    }
+
+    #[test]
+    fn rejects_position_outside_supported_range() {
+        let error = parse(
+            r#"
+                [window]
+                width = 400
+                height = 615
+                companion_width = 400
+                side = "left"
+                gap = 10
+
+                [position]
+                x = 9000
+                y = 0
+
+                [appearance]
+                css = ""
+            "#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("x"));
     }
 
     #[test]

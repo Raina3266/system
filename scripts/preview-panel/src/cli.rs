@@ -31,8 +31,9 @@ OPTIONS:
 CONFIGURATION:
     TOML is loaded from $PREVIEW_PANEL_CONFIG when set, otherwise from
     $XDG_CONFIG_HOME/preview-panel/config.toml (or ~/.config/preview-panel/config.toml).
-    [window] controls panel size and placement. [appearance].css contains raw
-    GTK4 CSS. Saving valid TOML reloads an open panel automatically.
+    [window] controls panel size and automatic companion placement.
+    [position] provides x/y screen offsets. [appearance].css contains raw GTK4
+    CSS. Saving valid TOML reloads an open panel automatically.
     Explicit window options above override their matching TOML values.
 
 BUILT-IN GTK CONTROLS:

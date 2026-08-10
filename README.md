@@ -15,7 +15,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 - Text and image clipboard history
 - Image previews inside Rofi
 - Pin and delete actions
-- Soft-wrapped full-text editing in a companion panel
+- One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - Restores the selected item with its original MIME type
 - Detects local image files copied from a file manager
 - Deduplicates repeated clipboard entries
@@ -37,7 +37,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 | `Enter` | Copy the selected item |
 | `Alt+P` | Pin or unpin the selected item |
 | `Alt+D` | Delete the selected item |
-| `Alt+E` | Open the selected text item in the editor; press again to save and close |
+| `Alt+E` | Open text for editing or show the full image; press again to save text or close the image |
 
 The interface contains three modes:
 
@@ -87,8 +87,10 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 
 Panel placement, size, and GTK CSS normally come from
 `scripts/preview-panel/config.toml`. Home Manager links that file into the
-runtime config directory, so valid saves hot-reload without rebuilding. The
-environment variables above remain available for one-launch overrides.
+runtime config directory, so valid saves hot-reload without rebuilding.
+`[position].x` and `[position].y` move the panel from its automatic position
+beside Rofi: positive `x` moves right and positive `y` moves down. The environment
+variables above remain available for one-launch overrides.
 
 For a session-wide environment override, set values such as:
 

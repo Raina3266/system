@@ -194,8 +194,8 @@ pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
             }
             render_history(&store, mode, state, selected_id)
         }
-        // First click opens an editor pinned to this text item. The next Edit
-        // click saves that panel's complete buffer and closes it.
+        // First click opens the selected text editor or image preview. The next
+        // Edit click saves text or closes the read-only image panel.
         12 => {
             let selected_id = preview::toggle_edit(&store, selected_id)?.or(selected_id);
             render_history(&store, mode, state, selected_id)
