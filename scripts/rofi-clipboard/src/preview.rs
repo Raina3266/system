@@ -2,7 +2,6 @@ use std::env;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -16,25 +15,12 @@ use crate::model::{ClipboardItem, ItemKind};
 use crate::store::ClipboardStore;
 
 pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
-const UPDATE_TEXT: u8 = 1;
 const CLOSE: u8 = 2;
-const UPDATE_IMAGE: u8 = 3;
 const SAVE_AND_CLOSE: u8 = 4;
 const SAVED_TEXT: u8 = 5;
 const HEADER_SIZE: usize = 17;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum PreviewContent {
-    Text(String),
-    Image(PathBuf),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PanelMode {
-    View,
-    Edit,
-}
+const EDITOR_ARGUMENTS: [&str; 4] = ["--stdin", "--title", "Edit clipboard text", "--panel"];
 
 pub fn session_socket_path() -> Result<PathBuf> {
     let runtime = env::var_os("XDG_RUNTIME_DIR").context("XDG_RUNTIME_DIR is not set")?;
@@ -67,21 +53,6 @@ pub fn close(path: &Path) {
     }
 }
 
-pub fn toggle_view(store: &ClipboardStore, id: u64) -> Result<()> {
-    let path = socket_from_environment()?;
-    if send(&path, CLOSE, 0, &[])? {
-        wait_for_socket_removal(&path)?;
-        cleanup_edit_state(&path)?;
-        return Ok(());
-    }
-    cleanup_session(&path)?;
-
-    let Some(content) = item_content(store, id)? else {
-        return Ok(());
-    };
-    launch_panel(&path, &content, PanelMode::View)
-}
-
 pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<Option<u64>> {
     let path = socket_from_environment()?;
 
@@ -100,28 +71,28 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
     let Some(selected_id) = selected_id else {
         return Ok(None);
     };
-    let Some(content @ PreviewContent::Text(_)) = item_content(store, selected_id)? else {
+    let Some(text) = item_text(store, selected_id)? else {
         return Ok(None);
     };
 
     if send(&path, CLOSE, 0, &[])? {
-        // Replace an open read-only View panel with an editor immediately.
+        // Close a stale panel before opening the selected item in the editor.
         wait_for_socket_removal(&path)?;
     } else {
         cleanup_socket(&path)?;
     }
 
     write_edit_state(&path, selected_id)?;
-    if let Err(error) = launch_panel(&path, &content, PanelMode::Edit) {
+    if let Err(error) = launch_editor(&path, &text) {
         let _ = cleanup_edit_state(&path);
         return Err(error);
     }
     Ok(Some(selected_id))
 }
 
-fn launch_panel(path: &Path, content: &PreviewContent, mode: PanelMode) -> Result<()> {
+fn launch_editor(path: &Path, text: &str) -> Result<()> {
     let mut command = Command::new(preview_panel_binary());
-    command.args(panel_arguments(mode));
+    command.args(EDITOR_ARGUMENTS);
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_WIDTH", "--width");
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_HEIGHT", "--height");
     append_preview_override(
@@ -133,7 +104,7 @@ fn launch_panel(path: &Path, content: &PreviewContent, mode: PanelMode) -> Resul
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_GAP", "--gap");
     command
         .arg("--listen")
-        .arg(&path)
+        .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
     let mut child = command.spawn().context("launch preview-panel")?;
@@ -142,67 +113,19 @@ fn launch_panel(path: &Path, content: &PreviewContent, mode: PanelMode) -> Resul
         .stdin
         .take()
         .context("open preview-panel standard input")?;
-    if let PreviewContent::Text(text) = &content {
-        input
-            .write_all(text.as_bytes())
-            .context("send initial preview text")?;
-    }
+    input
+        .write_all(text.as_bytes())
+        .context("send initial editor text")?;
     drop(input);
 
-    wait_for_socket(&mut child, &path)?;
-    if matches!(&content, PreviewContent::Image(_)) && !send_content(&path, 0, &content)? {
-        bail!("preview-panel closed before the initial image could be displayed");
-    }
+    wait_for_socket(&mut child, path)?;
     drop(child);
     Ok(())
-}
-
-fn panel_arguments(mode: PanelMode) -> Vec<&'static str> {
-    let title = match mode {
-        PanelMode::View => "Clipboard preview",
-        PanelMode::Edit => "Edit clipboard text",
-    };
-    let mut arguments = vec!["--stdin", "--title", title, "--panel"];
-    if mode == PanelMode::View {
-        arguments.push("--read-only");
-    }
-    arguments
 }
 
 fn append_preview_override(command: &mut Command, environment: &str, option: &str) {
     if let Some(value) = env::var_os(environment) {
         command.arg(option).arg(value);
-    }
-}
-
-pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
-    let Some(path) = env::var_os(SOCKET_ENV).map(PathBuf::from) else {
-        return Ok(());
-    };
-    if !path.exists() {
-        return Ok(());
-    }
-    // Editing is intentionally pinned to the item that opened the panel.
-    // Rofi may continue changing selection in the background, but those
-    // callbacks must never replace the editor buffer or its target item.
-    if read_edit_state(&path)?.is_some() {
-        return Ok(());
-    }
-
-    let store = ClipboardStore::discover()?;
-    let Some(content) = item_content(&store, id)? else {
-        return Ok(());
-    };
-    let _ = send_content(&path, serial, &content)?;
-    Ok(())
-}
-
-fn send_content(socket: &Path, serial: u64, content: &PreviewContent) -> Result<bool> {
-    match content {
-        PreviewContent::Text(text) => send(socket, UPDATE_TEXT, serial, text.as_bytes()),
-        PreviewContent::Image(path) => {
-            send(socket, UPDATE_IMAGE, serial, path.as_os_str().as_bytes())
-        }
     }
 }
 
@@ -289,34 +212,17 @@ fn cleanup_edit_state(socket: &Path) -> Result<()> {
     Ok(())
 }
 
-fn item_content(store: &ClipboardStore, id: u64) -> Result<Option<PreviewContent>> {
+fn item_text(store: &ClipboardStore, id: u64) -> Result<Option<String>> {
     let history = store.load()?;
     Ok(history
         .items
         .iter()
         .find(|item| item.id == id)
-        .map(|item| match item.kind {
-            ItemKind::Image => store
-                .image_path(item)
-                .filter(|path| path.is_file())
-                .map(PreviewContent::Image)
-                .unwrap_or_else(|| PreviewContent::Text(preview_text(item))),
-            ItemKind::Text => PreviewContent::Text(preview_text(item)),
-        }))
+        .and_then(editable_text))
 }
 
-fn preview_text(item: &ClipboardItem) -> String {
-    match item.kind {
-        ItemKind::Text => item.text.clone().unwrap_or_default(),
-        ItemKind::Image => {
-            let source = item
-                .name
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or("Image clipboard item");
-            format!("{source}\n\nMIME type: {}", item.mime)
-        }
-    }
+fn editable_text(item: &ClipboardItem) -> Option<String> {
+    (item.kind == ItemKind::Text).then(|| item.text.clone().unwrap_or_default())
 }
 
 fn request_text_and_close(path: &Path) -> Result<Option<String>> {
@@ -434,47 +340,26 @@ mod tests {
     }
 
     #[test]
-    fn text_preview_is_byte_for_byte_unchanged() {
+    fn editable_text_is_byte_for_byte_unchanged() {
         let original = "heading\r\n\t  repeated    spaces\n中文 👩🏽‍💻  \n";
         assert_eq!(
-            preview_text(&item(ItemKind::Text, Some(original), None)).as_bytes(),
+            editable_text(&item(ItemKind::Text, Some(original), None))
+                .unwrap()
+                .as_bytes(),
             original.as_bytes()
         );
     }
 
     #[test]
-    fn image_preview_identifies_the_source_and_mime_type() {
-        let preview = preview_text(&item(
-            ItemKind::Image,
-            None,
-            Some("/home/raina/Pictures/example.png"),
-        ));
-        assert!(preview.contains("/home/raina/Pictures/example.png"));
-        assert!(preview.contains("image/png"));
-    }
-
-    #[test]
-    fn update_frame_contains_exact_text_bytes() {
-        let text = "first\n\tsecond  \n";
-        let mut frame = Vec::new();
-        write_frame(&mut frame, UPDATE_TEXT, 42, text.as_bytes()).unwrap();
-        assert_eq!(frame[0], UPDATE_TEXT);
-        assert_eq!(u64::from_be_bytes(frame[1..9].try_into().unwrap()), 42);
+    fn image_items_cannot_open_the_text_editor() {
         assert_eq!(
-            u64::from_be_bytes(frame[9..17].try_into().unwrap()),
-            text.len() as u64
+            editable_text(&item(
+                ItemKind::Image,
+                None,
+                Some("/home/raina/Pictures/example.png"),
+            )),
+            None
         );
-        assert_eq!(&frame[17..], text.as_bytes());
-    }
-
-    #[test]
-    fn image_update_frame_contains_the_cached_path() {
-        let path = "/home/raina/.local/share/rofi-clipboard/images/7.png";
-        let mut frame = Vec::new();
-        write_frame(&mut frame, UPDATE_IMAGE, 43, path.as_bytes()).unwrap();
-        assert_eq!(frame[0], UPDATE_IMAGE);
-        assert_eq!(u64::from_be_bytes(frame[1..9].try_into().unwrap()), 43);
-        assert_eq!(&frame[17..], path.as_bytes());
     }
 
     #[test]
@@ -513,13 +398,8 @@ mod tests {
     }
 
     #[test]
-    fn view_is_read_only_and_both_panel_modes_soft_wrap() {
-        let view = panel_arguments(PanelMode::View);
-        let edit = panel_arguments(PanelMode::Edit);
-
-        assert!(view.contains(&"--read-only"));
-        assert!(!edit.contains(&"--read-only"));
-        assert!(!view.contains(&"--no-wrap"));
-        assert!(!edit.contains(&"--no-wrap"));
+    fn editor_is_editable_and_soft_wraps() {
+        assert!(!EDITOR_ARGUMENTS.contains(&"--read-only"));
+        assert!(!EDITOR_ARGUMENTS.contains(&"--no-wrap"));
     }
 }
