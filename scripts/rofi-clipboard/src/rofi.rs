@@ -1,12 +1,13 @@
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
 use crate::clipboard::copy_item;
 use crate::model::{ClipboardItem, ItemKind};
+use crate::preview;
 use crate::store::ClipboardStore;
 
 const RECORD_SEPARATOR: u8 = 0x1e;
@@ -88,12 +89,19 @@ impl UiState {
 pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
     let executable = executable.to_string_lossy();
+    let preview_socket = preview::session_socket_path()?;
+    preview::cleanup_socket(&preview_socket)?;
     let modes = format!(
         "pinned:{executable} script pinned,text:{executable} script text,images:{executable} script images"
+    );
+    let selection_command = format!(
+        "{} preview-selection {{completion}} {{selection-serial}}",
+        shell_quote(&executable)
     );
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
     command
+        .env(preview::SOCKET_ENV, &preview_socket)
         .args([
             "-show",
             mode.name(),
@@ -114,6 +122,8 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
             "Alt+e",
             "-kb-custom-4",
             "Alt+v",
+            "-on-selection-changed",
+            &selection_command,
             "-theme",
         ])
         .arg(theme);
@@ -122,7 +132,12 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
         command.arg("-selected-row").arg(row.to_string());
     }
 
-    let status = command.status().context("launch rofi")?;
+    let status = command.status();
+    preview::close(&preview_socket);
+    if let Err(error) = preview::cleanup_socket(&preview_socket) {
+        eprintln!("rofi-clipboard: {error:#}");
+    }
+    let status = status.context("launch rofi")?;
     if !status.success() && status.code() != Some(1) {
         bail!("rofi exited with {status}");
     }
@@ -139,36 +154,6 @@ fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
         .iter()
         .filter(|item| mode.includes(item))
         .position(|item| item.id == selected_id))
-}
-
-fn open_preview(store: &ClipboardStore, id: u64) -> Result<()> {
-    let history = store.load()?;
-    let Some(item) = history.items.iter().find(|item| item.id == id) else {
-        return Ok(());
-    };
-    if item.kind != ItemKind::Text {
-        return Ok(());
-    }
-
-    let mut child = Command::new(preview_panel_binary())
-        .args(["--stdin", "--title", "Clipboard preview"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()
-        .context("launch preview-panel")?;
-    let mut preview_stdin = child
-        .stdin
-        .take()
-        .context("open preview-panel standard input")?;
-    preview_stdin
-        .write_all(item.text.as_deref().unwrap_or_default().as_bytes())
-        .context("send clipboard text to preview-panel")?;
-    drop(preview_stdin);
-
-    // The Rofi script process exits immediately after returning its refreshed
-    // rows. Dropping Child detaches the GTK process so its window stays open.
-    drop(child);
-    Ok(())
 }
 
 fn theme_path() -> Result<PathBuf> {
@@ -247,10 +232,10 @@ pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
             Some(id) => render_editor(&store, mode, state, id),
             None => render_history(&store, mode, state, None),
         },
-        // Open the selected item's original text in the detached GTK viewer.
+        // Toggle the companion panel for the selected item.
         13 => {
             if let Some(id) = selected_id {
-                open_preview(&store, id)?;
+                preview::toggle(&store, id)?;
             }
             render_history(&store, mode, state, selected_id)
         },
@@ -298,8 +283,7 @@ fn render_history(
     }
 
     for item in items {
-        let raw = row_value(item);
-        write!(&mut output, "{}", sanitize_record_value(&raw))?;
+        write!(&mut output, "{}", item.id)?;
         let mut first_option = true;
         write_row_option(
             &mut output,
@@ -313,6 +297,7 @@ fn render_history(
             "info",
             &item.id.to_string(),
         );
+        write_row_option(&mut output, &mut first_option, "meta", &row_value(item));
         if let Some(path) = store.image_path(item) {
             write_row_option(
                 &mut output,
@@ -488,16 +473,14 @@ fn decode_edit_input(value: &str) -> String {
     result
 }
 
-fn preview_panel_binary() -> PathBuf {
-    env::var_os("ROFI_CLIPBOARD_PREVIEW_PANEL")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new("preview-panel").to_path_buf())
-}
-
 fn rofi_binary() -> PathBuf {
     env::var_os("ROFI_CLIPBOARD_ROFI")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -572,5 +555,14 @@ mod tests {
         };
 
         assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
+    }
+
+    #[test]
+    fn selection_callback_executable_is_shell_quoted() {
+        assert_eq!(
+            shell_quote("/nix/store/example/bin/tool"),
+            "'/nix/store/example/bin/tool'"
+        );
+        assert_eq!(shell_quote("/tmp/raina's tool"), "'/tmp/raina'\\''s tool'");
     }
 }

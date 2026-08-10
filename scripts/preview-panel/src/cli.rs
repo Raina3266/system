@@ -18,8 +18,12 @@ OPTIONS:
     -t, --title TITLE   Window title (default: Preview)
     --read-only         Allow selection and copying, but disable editing
     --no-wrap           Keep long lines intact and enable horizontal scrolling
+    --listen SOCKET     Accept live text updates and a close command on SOCKET
+    --panel             Use a borderless Wayland layer-shell companion panel
     --width PIXELS      Initial width (default: 720)
     --height PIXELS     Initial height (default: 520)
+    --companion-width N Width of the centered window to sit left of (default: 400)
+    --gap PIXELS        Gap beside the companion window (default: 10)
     -h, --help          Show this help
     -V, --version       Show the version
 
@@ -33,6 +37,8 @@ BUILT-IN GTK CONTROLS:
 EXAMPLES:
     printf 'first line\n\tindented line\n' | preview-panel --title Clipboard
     preview-panel --read-only --no-wrap ./source.rs
+    printf 'initial text' | preview-panel --listen /run/user/1000/preview.sock \
+        --panel --width 300 --height 615
 "#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +55,10 @@ pub struct Options {
     pub wrap: bool,
     pub width: i32,
     pub height: i32,
+    pub listen: Option<PathBuf>,
+    pub panel: bool,
+    pub companion_width: i32,
+    pub gap: i32,
 }
 
 impl Default for Options {
@@ -60,6 +70,10 @@ impl Default for Options {
             wrap: true,
             width: 720,
             height: 520,
+            listen: None,
+            panel: false,
+            companion_width: 400,
+            gap: 10,
         }
     }
 }
@@ -121,6 +135,14 @@ where
                     options.wrap = false;
                     continue;
                 }
+                Some("--panel") => {
+                    options.panel = true;
+                    continue;
+                }
+                Some("--listen") => {
+                    options.listen = Some(PathBuf::from(next_os(&mut arguments, "--listen")?));
+                    continue;
+                }
                 Some("-t" | "--title") => {
                     options.title = next_text(&mut arguments, "--title")?;
                     continue;
@@ -133,6 +155,15 @@ where
                     options.height = next_dimension(&mut arguments, "--height")?;
                     continue;
                 }
+                Some("--companion-width") => {
+                    options.companion_width =
+                        next_dimension(&mut arguments, "--companion-width")?;
+                    continue;
+                }
+                Some("--gap") => {
+                    options.gap = next_gap(&mut arguments)?;
+                    continue;
+                }
                 Some(value) if value.starts_with("--title=") => {
                     options.title = value["--title=".len()..].to_owned();
                     continue;
@@ -143,6 +174,17 @@ where
                 }
                 Some(value) if value.starts_with("--height=") => {
                     options.height = parse_dimension(&value["--height=".len()..], "--height")?;
+                    continue;
+                }
+                Some(value) if value.starts_with("--companion-width=") => {
+                    options.companion_width = parse_dimension(
+                        &value["--companion-width=".len()..],
+                        "--companion-width",
+                    )?;
+                    continue;
+                }
+                Some(value) if value.starts_with("--gap=") => {
+                    options.gap = parse_gap(&value["--gap=".len()..])?;
                     continue;
                 }
                 Some(value) if value.starts_with('-') => {
@@ -181,6 +223,15 @@ fn next_text(
         .map_err(|_| CliError::new(format!("{option} must be valid UTF-8")))
 }
 
+fn next_os(
+    arguments: &mut impl Iterator<Item = OsString>,
+    option: &str,
+) -> Result<OsString, CliError> {
+    arguments
+        .next()
+        .ok_or_else(|| CliError::new(format!("{option} requires a value")))
+}
+
 fn next_dimension(
     arguments: &mut impl Iterator<Item = OsString>,
     option: &str,
@@ -197,6 +248,21 @@ fn parse_dimension(value: &str, option: &str) -> Result<i32, CliError> {
         return Err(CliError::new(format!(
             "{option} must be between 200 and 8192 pixels"
         )));
+    }
+    Ok(pixels)
+}
+
+fn next_gap(arguments: &mut impl Iterator<Item = OsString>) -> Result<i32, CliError> {
+    let value = next_text(arguments, "--gap")?;
+    parse_gap(&value)
+}
+
+fn parse_gap(value: &str) -> Result<i32, CliError> {
+    let pixels = value
+        .parse::<i32>()
+        .map_err(|_| CliError::new("--gap must be a whole number"))?;
+    if !(0..=512).contains(&pixels) {
+        return Err(CliError::new("--gap must be between 0 and 512 pixels"));
     }
     Ok(pixels)
 }
@@ -233,14 +299,27 @@ mod tests {
             "Clipboard preview",
             "--read-only",
             "--no-wrap",
+            "--listen",
+            "/run/user/1000/preview.sock",
+            "--panel",
             "--width=900",
             "--height",
             "700",
+            "--companion-width=420",
+            "--gap",
+            "12",
         ]);
         assert_eq!(options.title, "Clipboard preview");
         assert!(!options.editable);
         assert!(!options.wrap);
         assert_eq!((options.width, options.height), (900, 700));
+        assert_eq!(
+            options.listen,
+            Some(PathBuf::from("/run/user/1000/preview.sock"))
+        );
+        assert!(options.panel);
+        assert_eq!(options.companion_width, 420);
+        assert_eq!(options.gap, 12);
     }
 
     #[test]
@@ -259,5 +338,11 @@ mod tests {
     fn rejects_dimensions_that_would_make_an_unusable_window() {
         let error = parse_from(["--width", "50"]).unwrap_err();
         assert!(error.to_string().contains("between 200 and 8192"));
+    }
+
+    #[test]
+    fn rejects_negative_panel_gaps() {
+        let error = parse_from(["--gap=-1"]).unwrap_err();
+        assert!(error.to_string().contains("between 0 and 512"));
     }
 }

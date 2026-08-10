@@ -1,11 +1,12 @@
 mod clipboard;
 mod model;
+mod preview;
 mod rofi;
 mod store;
 
 use std::env;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::clipboard::{capture_clipboard, store_stdin};
 use crate::rofi::{Mode, launch_rofi, run_script};
@@ -27,6 +28,19 @@ pub fn run() -> Result<()> {
             run_script(mode, args.next())
         }
         Some("capture") => capture_clipboard(),
+        Some("preview-selection") => {
+            let id = args
+                .next()
+                .context("preview-selection requires a clipboard item ID")?
+                .parse::<u64>()
+                .context("preview-selection ID must be a positive integer")?;
+            let serial = args
+                .next()
+                .context("preview-selection requires a selection serial")?
+                .parse::<u64>()
+                .context("preview-selection serial must be a positive integer")?;
+            preview::selection_changed(id, serial)
+        }
         Some("store") => {
             let mime = parse_mime_argument(args)?;
             store_stdin(&mime)

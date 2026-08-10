@@ -10,5 +10,8 @@ final: prev: {
       fetchSubmodules = true;
       hash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
     };
+    # Keep the visible script row short while allowing the selection-change
+    # callback to receive that row's original, stable value.
+    patches = (old.patches or [ ]) ++ [ ./on-selection-changed-completion.patch ];
   });
 }
