@@ -140,13 +140,12 @@ action-bar {
     expand: false;
     orientation: horizontal;
     spacing: 10px;
-    children: [ button-pin, button-preview, button-edit, button-delete ];
+    children: [ button-pin, button-edit, button-delete ];
 }
 
 button-pin,
 button-delete,
-button-edit,
-button-preview {
+button-edit {
     cursor: pointer;
     horizontal-align: 0.5;
     margin: 5px 0px;
@@ -174,12 +173,6 @@ button-edit {
     action: "kb-custom-3";
 }
 
-button-preview {
-    content: "󰈈 View";
-    action: "kb-custom-4";
-    border-color: rgba(242, 158, 116, 0.40);
-    text-color: @amber;
-}
 
 textbox {
     markup: false;
