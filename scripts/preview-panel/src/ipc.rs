@@ -1,6 +1,8 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -8,12 +10,14 @@ use std::thread;
 
 const UPDATE_TEXT: u8 = 1;
 const CLOSE: u8 = 2;
+const UPDATE_IMAGE: u8 = 3;
 const HEADER_SIZE: usize = 17;
-const MAX_TEXT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Message {
-    Update { serial: u64, text: String },
+    UpdateText { serial: u64, text: String },
+    UpdateImage { serial: u64, path: PathBuf },
     Close,
 }
 
@@ -90,7 +94,7 @@ fn read_message(mut reader: impl Read) -> io::Result<Message> {
     );
     let length = usize::try_from(length)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "message is too large"))?;
-    if length > MAX_TEXT_BYTES {
+    if length > MAX_PAYLOAD_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "message is too large",
@@ -102,8 +106,16 @@ fn read_message(mut reader: impl Read) -> io::Result<Message> {
             let mut bytes = vec![0; length];
             reader.read_exact(&mut bytes)?;
             String::from_utf8(bytes)
-                .map(|text| Message::Update { serial, text })
+                .map(|text| Message::UpdateText { serial, text })
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        }
+        UPDATE_IMAGE => {
+            let mut bytes = vec![0; length];
+            reader.read_exact(&mut bytes)?;
+            Ok(Message::UpdateImage {
+                serial,
+                path: PathBuf::from(OsString::from_vec(bytes)),
+            })
         }
         CLOSE if length == 0 => Ok(Message::Close),
         CLOSE => Err(io::Error::new(
@@ -137,9 +149,21 @@ mod tests {
         let message = read_message(Cursor::new(frame(UPDATE_TEXT, 17, text.as_bytes()))).unwrap();
         assert_eq!(
             message,
-            Message::Update {
+            Message::UpdateText {
                 serial: 17,
                 text: text.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn image_update_preserves_the_cached_file_path() {
+        let path = "/home/raina/.local/share/rofi-clipboard/images/7.png";
+        assert_eq!(
+            read_message(Cursor::new(frame(UPDATE_IMAGE, 19, path.as_bytes()))).unwrap(),
+            Message::UpdateImage {
+                serial: 19,
+                path: PathBuf::from(path),
             }
         );
     }

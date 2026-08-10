@@ -9,11 +9,11 @@ use std::time::Duration;
 use gtk::prelude::*;
 use gtk::{
     gdk, gio, glib, Application, ApplicationWindow, CssProvider, PolicyType, ScrolledWindow,
-    TextView, WrapMode,
+    Picture, Stack, TextView, WrapMode,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::cli::Options;
+use crate::cli::{Options, Side};
 use crate::ipc::Message;
 
 const DEFAULT_CSS: &str = include_str!("../style.css");
@@ -87,6 +87,23 @@ fn build_window(
     );
     scrolled_window.set_vexpand(true);
 
+    let picture = Picture::new();
+    picture.set_can_shrink(true);
+    picture.set_hexpand(true);
+    picture.set_vexpand(true);
+    picture.set_margin_start(14);
+    picture.set_margin_end(14);
+    picture.set_margin_top(12);
+    picture.set_margin_bottom(12);
+    picture.add_css_class("preview-image");
+
+    let stack = Stack::new();
+    stack.set_hexpand(true);
+    stack.set_vexpand(true);
+    stack.add_named(&scrolled_window, Some("text"));
+    stack.add_named(&picture, Some("image"));
+    stack.set_visible_child_name("text");
+
     let window = ApplicationWindow::builder()
         .application(application)
         .default_height(options.height)
@@ -95,13 +112,20 @@ fn build_window(
         .build();
     window.add_css_class("preview-panel");
     window.set_decorated(!options.panel);
-    window.set_child(Some(&scrolled_window));
+    window.set_child(Some(&stack));
 
     if options.panel {
         configure_companion_panel(&window, options);
     }
     if let Some(receiver) = receiver {
-        connect_live_updates(application, &window, &text_view, receiver);
+        connect_live_updates(
+            application,
+            &window,
+            &stack,
+            &text_view,
+            &picture,
+            receiver,
+        );
     }
 
     window.present();
@@ -172,39 +196,80 @@ fn configure_companion_panel(window: &ApplicationWindow, options: &Options) {
     window.set_namespace(Some("rofi-preview-panel"));
     window.set_keyboard_mode(KeyboardMode::OnDemand);
 
+    let (edge, opposite_edge) = match options.side {
+        Side::Left => (Edge::Left, Edge::Right),
+        Side::Right => (Edge::Right, Edge::Left),
+    };
+    // Layer-shell geometry must be established before the window is mapped.
+    // Applying the anchor from the map handler lets the compositor commit the
+    // first surface in the centre and some compositors never reposition it.
+    window.set_anchor(edge, true);
+    window.set_anchor(opposite_edge, false);
+
     let panel_width = options.width;
     let companion_width = options.companion_width;
     let gap = options.gap;
-    window.connect_map(move |window| {
-        let Some(surface) = window.surface() else {
-            return;
-        };
-        let Some(monitor) =
-            gtk::prelude::RootExt::display(window).monitor_at_surface(&surface)
-        else {
-            return;
-        };
-        let monitor_width = monitor.geometry().width();
-        let left_margin = ((monitor_width - companion_width) / 2 - panel_width - gap).max(0);
-        window.set_anchor(Edge::Left, true);
-        window.set_margin(Edge::Left, left_margin);
+    window.connect_realize(move |window| {
+        update_companion_margin(window, edge, companion_width, panel_width, gap);
     });
+    window.connect_map(move |window| {
+        // Recalculate once the compositor has assigned the final output. This
+        // matters when the focused output is not GDK's initial output.
+        update_companion_margin(window, edge, companion_width, panel_width, gap);
+    });
+}
+
+fn update_companion_margin(
+    window: &ApplicationWindow,
+    edge: Edge,
+    companion_width: i32,
+    panel_width: i32,
+    gap: i32,
+) {
+    let Some(surface) = window.surface() else {
+        return;
+    };
+    let Some(monitor) = gtk::prelude::RootExt::display(window).monitor_at_surface(&surface) else {
+        return;
+    };
+    window.set_margin(
+        edge,
+        companion_margin(
+            monitor.geometry().width(),
+            companion_width,
+            panel_width,
+            gap,
+        ),
+    );
+}
+
+fn companion_margin(
+    monitor_width: i32,
+    companion_width: i32,
+    panel_width: i32,
+    gap: i32,
+) -> i32 {
+    ((monitor_width - companion_width) / 2 - panel_width - gap).max(0)
 }
 
 fn connect_live_updates(
     application: &Application,
     window: &ApplicationWindow,
+    stack: &Stack,
     text_view: &TextView,
+    picture: &Picture,
     receiver: Receiver<Message>,
 ) {
     let application = application.clone();
     let window = window.clone();
+    let stack = stack.clone();
     let text_view = text_view.clone();
+    let picture = picture.clone();
     let mut latest_serial = 0;
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(message) = receiver.try_recv() {
             match message {
-                Message::Update { serial, text } => {
+                Message::UpdateText { serial, text } => {
                     if !accept_serial(&mut latest_serial, serial) {
                         continue;
                     }
@@ -213,6 +278,14 @@ fn connect_live_updates(
                     let mut start = buffer.start_iter();
                     buffer.place_cursor(&start);
                     text_view.scroll_to_iter(&mut start, 0.0, false, 0.0, 0.0);
+                    stack.set_visible_child_name("text");
+                }
+                Message::UpdateImage { serial, path } => {
+                    if !accept_serial(&mut latest_serial, serial) {
+                        continue;
+                    }
+                    picture.set_filename(Some(path.as_path()));
+                    stack.set_visible_child_name("image");
                 }
                 Message::Close => {
                     window.close();
@@ -238,7 +311,7 @@ mod tests {
     use std::ffi::OsStr;
     use std::path::PathBuf;
 
-    use super::{accept_serial, css_path_from};
+    use super::{accept_serial, companion_margin, css_path_from};
 
     #[test]
     fn rapid_updates_cannot_restore_an_older_selection() {
@@ -247,6 +320,12 @@ mod tests {
         assert!(!accept_serial(&mut latest, 6));
         assert_eq!(latest, 8);
         assert!(accept_serial(&mut latest, 9));
+    }
+
+    #[test]
+    fn companion_margin_places_the_panel_beside_a_centered_window() {
+        assert_eq!(companion_margin(1920, 400, 480, 10), 270);
+        assert_eq!(companion_margin(1280, 400, 480, 10), 0);
     }
 
     #[test]

@@ -20,6 +20,10 @@ textview.preview-text text {
     font-size: 11pt;
 }
 
+picture.preview-image {
+    background: transparent;
+}
+
 scrollbar slider {
     min-width: 4px;
     min-height: 24px;

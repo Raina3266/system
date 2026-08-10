@@ -22,7 +22,8 @@ OPTIONS:
     --panel             Use a borderless Wayland layer-shell companion panel
     --width PIXELS      Initial width (default: 720)
     --height PIXELS     Initial height (default: 520)
-    --companion-width N Width of the centered window to sit left of (default: 400)
+    --companion-width N Width of the centered companion window (default: 400)
+    --side SIDE         Place the panel on the left or right (default: left)
     --gap PIXELS        Gap beside the companion window (default: 10)
     -h, --help          Show this help
     -V, --version       Show the version
@@ -46,6 +47,12 @@ EXAMPLES:
         --panel --width 300 --height 615
 "#;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Source {
     Stdin,
@@ -63,6 +70,7 @@ pub struct Options {
     pub listen: Option<PathBuf>,
     pub panel: bool,
     pub companion_width: i32,
+    pub side: Side,
     pub gap: i32,
 }
 
@@ -78,6 +86,7 @@ impl Default for Options {
             listen: None,
             panel: false,
             companion_width: 400,
+            side: Side::Left,
             gap: 10,
         }
     }
@@ -165,6 +174,10 @@ where
                         next_dimension(&mut arguments, "--companion-width")?;
                     continue;
                 }
+                Some("--side") => {
+                    options.side = parse_side(&next_text(&mut arguments, "--side")?)?;
+                    continue;
+                }
                 Some("--gap") => {
                     options.gap = next_gap(&mut arguments)?;
                     continue;
@@ -186,6 +199,10 @@ where
                         &value["--companion-width=".len()..],
                         "--companion-width",
                     )?;
+                    continue;
+                }
+                Some(value) if value.starts_with("--side=") => {
+                    options.side = parse_side(&value["--side=".len()..])?;
                     continue;
                 }
                 Some(value) if value.starts_with("--gap=") => {
@@ -272,6 +289,14 @@ fn parse_gap(value: &str) -> Result<i32, CliError> {
     Ok(pixels)
 }
 
+fn parse_side(value: &str) -> Result<Side, CliError> {
+    match value {
+        "left" => Ok(Side::Left),
+        "right" => Ok(Side::Right),
+        _ => Err(CliError::new("--side must be either left or right")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +336,8 @@ mod tests {
             "--height",
             "700",
             "--companion-width=420",
+            "--side",
+            "right",
             "--gap",
             "12",
         ]);
@@ -324,6 +351,7 @@ mod tests {
         );
         assert!(options.panel);
         assert_eq!(options.companion_width, 420);
+        assert_eq!(options.side, Side::Right);
         assert_eq!(options.gap, 12);
     }
 
@@ -349,5 +377,11 @@ mod tests {
     fn rejects_negative_panel_gaps() {
         let error = parse_from(["--gap=-1"]).unwrap_err();
         assert!(error.to_string().contains("between 0 and 512"));
+    }
+
+    #[test]
+    fn rejects_unknown_panel_sides() {
+        let error = parse_from(["--side", "middle"]).unwrap_err();
+        assert!(error.to_string().contains("left or right"));
     }
 }

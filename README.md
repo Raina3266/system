@@ -80,7 +80,22 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_ROFI` | Override the `rofi` executable |
 | `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
-| `ROFI_CLIPBOARD_PREVIEW` | Start Rofi with the preview layout enabled |
+| `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
+| `ROFI_CLIPBOARD_PREVIEW_WIDTH` | Preview width in pixels (default: `480`) |
+| `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
+| `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of Rofi (default: `left`) |
+| `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
+| `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
+
+For a permanent Home Manager override, set the values before rebuilding:
+
+```nix
+home.sessionVariables = {
+  ROFI_CLIPBOARD_PREVIEW_WIDTH = "560";
+  ROFI_CLIPBOARD_PREVIEW_SIDE = "right";
+  ROFI_CLIPBOARD_PREVIEW_GAP = "10";
+};
+```
 
 ---
 
