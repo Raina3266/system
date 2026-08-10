@@ -43,6 +43,8 @@
         "networkmanager"
         "wheel"
         "input"
+        "lp"
+        "scanner"
       ];
     };
 
@@ -122,7 +124,7 @@
       enable = true;
       type = "fcitx5";
       fcitx5 = {
-        waylandFrontend = true;   # if you're on Wayland
+        waylandFrontend = true; # if you're on Wayland
         addons = with pkgs; [
           fcitx5-gtk
           qt6Packages.fcitx5-chinese-addons
@@ -139,6 +141,13 @@
       libvdpau-va-gl
       vpl-gpu-rt
     ];
+    hardware.sane = {
+      enable = true;
+      extraBackends = with pkgs; [
+        sane-airscan
+      ];
+    };
+
     environment.sessionVariables = {
       LIBVA_DRIVER_NAME = "iHD"; # Force intel-media-driver
       # Tell Electron apps (Discord, etc.) to use the Wayland backend
@@ -164,10 +173,32 @@
       fontconfig = {
         enable = true;
         defaultFonts = {
-          sansSerif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans" "Noto Sans CJK SC" "Noto Sans CJK JP" "Noto Sans CJK KR" ];
-          serif = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Serif" "Noto Serif CJK SC" "Noto Serif CJK JP" "Noto Serif CJK KR" ];
-          monospace = [ "JetBrainsMono Nerd Font" "Symbols Nerd Font Mono" "Noto Sans Mono CJK SC" "Noto Sans Mono CJK KR" ];
-          emoji = [ "Symbols Nerd Font Mono" "Noto Color Emoji" ];
+          sansSerif = [
+            "JetBrainsMono Nerd Font"
+            "Symbols Nerd Font Mono"
+            "Noto Sans"
+            "Noto Sans CJK SC"
+            "Noto Sans CJK JP"
+            "Noto Sans CJK KR"
+          ];
+          serif = [
+            "JetBrainsMono Nerd Font"
+            "Symbols Nerd Font Mono"
+            "Noto Serif"
+            "Noto Serif CJK SC"
+            "Noto Serif CJK JP"
+            "Noto Serif CJK KR"
+          ];
+          monospace = [
+            "JetBrainsMono Nerd Font"
+            "Symbols Nerd Font Mono"
+            "Noto Sans Mono CJK SC"
+            "Noto Sans Mono CJK KR"
+          ];
+          emoji = [
+            "Symbols Nerd Font Mono"
+            "Noto Color Emoji"
+          ];
         };
       };
     };

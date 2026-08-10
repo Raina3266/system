@@ -16,6 +16,8 @@
     sushi
     ffmpegthumbnailer
     gdk-pixbuf
+    simple-scan
+    system-config-printer
     nemo-with-extensions
     gnomeExtensions.simple-timer
     gnomeExtensions.clipboard-history
@@ -69,7 +71,7 @@
   # hard to the efficiency floor. Complements (does not replace)
   # power-profiles-daemon, which sets the EPP/platform profile.
   services.thermald.enable = true;
- 
+
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [ xdg-desktop-portal-gtk ];
@@ -92,8 +94,24 @@
   services.gvfs.enable = true;
   services.fprintd.enable = true;
   services.fwupd.enable = true;
-  services.printing.enable = true;
   services.udev.enable = true;
+
+  # ── Printing services ──────────────────────────────────────────────────
+
+  services.printing = {
+    enable = true;
+    drivers = with pkgs; [
+      cups-filters
+      cups-browsed
+    ];
+  };
+  services.avahi = {
+    enable = true;
+    nssmdns4 = true;
+    openFirewall = true;
+  };
+
+  services.ipp-usb.enable = true;
 
   # ── Network services ──────────────────────────────────────────────────
   services.openssh.enable = true;
@@ -146,7 +164,6 @@
     partOf = [ "media-stack.target" ];
   };
 
-
   services.sunshine = {
     enable = true;
     autoStart = false;
@@ -165,7 +182,10 @@
   '';
   services.postgresql.ensureDatabases = [ "raina" ];
   services.postgresql.ensureUsers = [
-    { name = "raina"; ensureDBOwnership = true; }
+    {
+      name = "raina";
+      ensureDBOwnership = true;
+    }
   ];
 
   # ── Misc ──────────────────────────────────────────────────────────────
