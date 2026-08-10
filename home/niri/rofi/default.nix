@@ -59,4 +59,9 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-finder.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-clipboard.rasi";
+
+  # preview-panel reads this file at runtime and reloads it while open, so CSS
+  # changes do not require rebuilding the Rust package or Home Manager profile.
+  xdg.configFile."preview-panel/style.css".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/scripts/preview-panel/style.css";
 }

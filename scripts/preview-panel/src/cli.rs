@@ -27,6 +27,11 @@ OPTIONS:
     -h, --help          Show this help
     -V, --version       Show the version
 
+STYLING:
+    CSS is loaded from $PREVIEW_PANEL_CSS when set, otherwise from
+    $XDG_CONFIG_HOME/preview-panel/style.css (or ~/.config/preview-panel/style.css).
+    Saving the file reloads the open panel automatically.
+
 BUILT-IN GTK CONTROLS:
     Mouse drag          Select text
     Ctrl+C              Copy the selection

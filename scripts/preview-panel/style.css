@@ -1,0 +1,28 @@
+/*
+ * Runtime stylesheet for preview-panel.
+ *
+ * Home Manager links this file to ~/.config/preview-panel/style.css.
+ * Save your changes here and every open preview panel will reload them.
+ */
+
+window.preview-panel {
+    background: rgba(14, 6, 22, 0.95);
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+}
+
+textview.preview-text,
+textview.preview-text text {
+    background: transparent;
+    color: #cbe3e7;
+    caret-color: #7afcff;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 11pt;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    min-height: 24px;
+    background: #ff7edb;
+    border-radius: 4px;
+}

@@ -1,3 +1,7 @@
+use std::env;
+use std::ffi::OsStr;
+use std::fs;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -12,29 +16,8 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::cli::Options;
 use crate::ipc::Message;
 
-const PANEL_CSS: &str = r#"
-window.preview-panel {
-    background: rgba(14, 6, 22, 0.95);
-    border: 1px solid rgba(255, 126, 219, 0.55);
-    border-radius: 15px;
-}
-
-textview.preview-text,
-textview.preview-text text {
-    background: transparent;
-    color: #cbe3e7;
-    caret-color: #7afcff;
-    font-family: "JetBrains Mono Nerd Font", monospace;
-    font-size: 11pt;
-}
-
-scrollbar slider {
-    min-width: 4px;
-    min-height: 24px;
-    background: #ff7edb;
-    border-radius: 4px;
-}
-"#;
+const DEFAULT_CSS: &str = include_str!("../style.css");
+const CSS_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) {
     // NON_UNIQUE is important for launchers: every View action gets its own
@@ -129,12 +112,58 @@ fn build_window(
 
 fn install_css() {
     let provider = CssProvider::new();
-    provider.load_from_data(PANEL_CSS);
+    let css_path = configured_css_path();
+    let mut loaded_css = css_path
+        .as_deref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_else(|| DEFAULT_CSS.to_owned());
+
+    provider.load_from_data(&loaded_css);
     gtk::style_context_add_provider_for_display(
         &gdk::Display::default().expect("GTK display is available"),
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+
+    let Some(css_path) = css_path else {
+        return;
+    };
+    glib::timeout_add_local(CSS_RELOAD_INTERVAL, move || {
+        if let Ok(css) = fs::read_to_string(&css_path)
+            && css != loaded_css
+        {
+            provider.load_from_data(&css);
+            loaded_css = css;
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+fn configured_css_path() -> Option<PathBuf> {
+    css_path_from(
+        env::var_os("PREVIEW_PANEL_CSS").as_deref(),
+        env::var_os("XDG_CONFIG_HOME").as_deref(),
+        env::var_os("HOME").as_deref(),
+    )
+}
+
+fn css_path_from(
+    override_path: Option<&OsStr>,
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> Option<PathBuf> {
+    if let Some(path) = override_path.filter(|path| !path.is_empty()) {
+        return Some(PathBuf::from(path));
+    }
+
+    let config_home = xdg_config_home
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home.filter(|path| !path.is_empty())
+                .map(|path| PathBuf::from(path).join(".config"))
+        })?;
+    Some(config_home.join("preview-panel/style.css"))
 }
 
 fn configure_companion_panel(window: &ApplicationWindow, options: &Options) {
@@ -150,7 +179,9 @@ fn configure_companion_panel(window: &ApplicationWindow, options: &Options) {
         let Some(surface) = window.surface() else {
             return;
         };
-        let Some(monitor) = window.display().monitor_at_surface(&surface) else {
+        let Some(monitor) =
+            gtk::prelude::RootExt::display(window).monitor_at_surface(&surface)
+        else {
             return;
         };
         let monitor_width = monitor.geometry().width();
@@ -204,7 +235,10 @@ fn accept_serial(latest: &mut u64, candidate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::accept_serial;
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+
+    use super::{accept_serial, css_path_from};
 
     #[test]
     fn rapid_updates_cannot_restore_an_older_selection() {
@@ -213,5 +247,29 @@ mod tests {
         assert!(!accept_serial(&mut latest, 6));
         assert_eq!(latest, 8);
         assert!(accept_serial(&mut latest, 9));
+    }
+
+    #[test]
+    fn explicit_css_path_takes_priority() {
+        let path = css_path_from(
+            Some(OsStr::new("/tmp/custom.css")),
+            Some(OsStr::new("/tmp/config")),
+            Some(OsStr::new("/home/raina")),
+        );
+        assert_eq!(path, Some(PathBuf::from("/tmp/custom.css")));
+    }
+
+    #[test]
+    fn css_path_uses_xdg_then_home_fallback() {
+        assert_eq!(
+            css_path_from(None, Some(OsStr::new("/tmp/config")), None),
+            Some(PathBuf::from("/tmp/config/preview-panel/style.css"))
+        );
+        assert_eq!(
+            css_path_from(None, None, Some(OsStr::new("/home/raina"))),
+            Some(PathBuf::from(
+                "/home/raina/.config/preview-panel/style.css"
+            ))
+        );
     }
 }
