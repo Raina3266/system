@@ -28,10 +28,12 @@ OPTIONS:
     -h, --help          Show this help
     -V, --version       Show the version
 
-STYLING:
-    CSS is loaded from $PREVIEW_PANEL_CSS when set, otherwise from
-    $XDG_CONFIG_HOME/preview-panel/style.css (or ~/.config/preview-panel/style.css).
-    Saving the file reloads the open panel automatically.
+CONFIGURATION:
+    TOML is loaded from $PREVIEW_PANEL_CONFIG when set, otherwise from
+    $XDG_CONFIG_HOME/preview-panel/config.toml (or ~/.config/preview-panel/config.toml).
+    [window] controls panel size and placement. [appearance].css contains raw
+    GTK4 CSS. Saving valid TOML reloads an open panel automatically.
+    Explicit window options above override their matching TOML values.
 
 BUILT-IN GTK CONTROLS:
     Mouse drag          Select text
@@ -53,6 +55,15 @@ pub enum Side {
     Right,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WindowOverrides {
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub companion_width: Option<i32>,
+    pub side: Option<Side>,
+    pub gap: Option<i32>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Source {
     Stdin,
@@ -72,6 +83,7 @@ pub struct Options {
     pub companion_width: i32,
     pub side: Side,
     pub gap: i32,
+    pub window_overrides: WindowOverrides,
 }
 
 impl Default for Options {
@@ -88,6 +100,7 @@ impl Default for Options {
             companion_width: 400,
             side: Side::Left,
             gap: 10,
+            window_overrides: WindowOverrides::default(),
         }
     }
 }
@@ -123,6 +136,7 @@ where
 {
     let mut arguments = arguments.into_iter().map(Into::into);
     let mut options = Options::default();
+    let mut window_overrides = WindowOverrides::default();
     let mut file = None;
     let mut explicit_stdin = false;
     let mut options_finished = false;
@@ -163,23 +177,27 @@ where
                 }
                 Some("--width") => {
                     options.width = next_dimension(&mut arguments, "--width")?;
+                    window_overrides.width = Some(options.width);
                     continue;
                 }
                 Some("--height") => {
                     options.height = next_dimension(&mut arguments, "--height")?;
+                    window_overrides.height = Some(options.height);
                     continue;
                 }
                 Some("--companion-width") => {
-                    options.companion_width =
-                        next_dimension(&mut arguments, "--companion-width")?;
+                    options.companion_width = next_dimension(&mut arguments, "--companion-width")?;
+                    window_overrides.companion_width = Some(options.companion_width);
                     continue;
                 }
                 Some("--side") => {
                     options.side = parse_side(&next_text(&mut arguments, "--side")?)?;
+                    window_overrides.side = Some(options.side);
                     continue;
                 }
                 Some("--gap") => {
                     options.gap = next_gap(&mut arguments)?;
+                    window_overrides.gap = Some(options.gap);
                     continue;
                 }
                 Some(value) if value.starts_with("--title=") => {
@@ -188,25 +206,28 @@ where
                 }
                 Some(value) if value.starts_with("--width=") => {
                     options.width = parse_dimension(&value["--width=".len()..], "--width")?;
+                    window_overrides.width = Some(options.width);
                     continue;
                 }
                 Some(value) if value.starts_with("--height=") => {
                     options.height = parse_dimension(&value["--height=".len()..], "--height")?;
+                    window_overrides.height = Some(options.height);
                     continue;
                 }
                 Some(value) if value.starts_with("--companion-width=") => {
-                    options.companion_width = parse_dimension(
-                        &value["--companion-width=".len()..],
-                        "--companion-width",
-                    )?;
+                    options.companion_width =
+                        parse_dimension(&value["--companion-width=".len()..], "--companion-width")?;
+                    window_overrides.companion_width = Some(options.companion_width);
                     continue;
                 }
                 Some(value) if value.starts_with("--side=") => {
                     options.side = parse_side(&value["--side=".len()..])?;
+                    window_overrides.side = Some(options.side);
                     continue;
                 }
                 Some(value) if value.starts_with("--gap=") => {
                     options.gap = parse_gap(&value["--gap=".len()..])?;
+                    window_overrides.gap = Some(options.gap);
                     continue;
                 }
                 Some(value) if value.starts_with('-') => {
@@ -229,6 +250,7 @@ where
     if let Some(path) = file {
         options.source = Source::File(path);
     }
+    options.window_overrides = window_overrides;
 
     Ok(Action::Run(options))
 }
@@ -353,6 +375,16 @@ mod tests {
         assert_eq!(options.companion_width, 420);
         assert_eq!(options.side, Side::Right);
         assert_eq!(options.gap, 12);
+        assert_eq!(
+            options.window_overrides,
+            WindowOverrides {
+                width: Some(900),
+                height: Some(700),
+                companion_width: Some(420),
+                side: Some(Side::Right),
+                gap: Some(12),
+            }
+        );
     }
 
     #[test]

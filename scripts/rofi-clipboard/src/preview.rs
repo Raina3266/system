@@ -1,5 +1,4 @@
 use std::env;
-use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -18,11 +17,6 @@ pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
 const UPDATE_TEXT: u8 = 1;
 const CLOSE: u8 = 2;
 const UPDATE_IMAGE: u8 = 3;
-const DEFAULT_PANEL_WIDTH: &str = "480";
-const DEFAULT_PANEL_HEIGHT: &str = "615";
-const DEFAULT_ROFI_WIDTH: &str = "400";
-const DEFAULT_PANEL_SIDE: &str = "left";
-const DEFAULT_PANEL_GAP: &str = "10";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PreviewContent {
@@ -64,39 +58,23 @@ pub fn toggle(store: &ClipboardStore, id: u64) -> Result<()> {
         return Ok(());
     };
     let mut command = Command::new(preview_panel_binary());
+    command.args([
+        "--stdin",
+        "--title",
+        "Clipboard preview",
+        "--panel",
+        "--no-wrap",
+    ]);
+    append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_WIDTH", "--width");
+    append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_HEIGHT", "--height");
+    append_preview_override(
+        &mut command,
+        "ROFI_CLIPBOARD_ROFI_WIDTH",
+        "--companion-width",
+    );
+    append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_SIDE", "--side");
+    append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_GAP", "--gap");
     command
-        .args([
-            "--stdin",
-            "--title",
-            "Clipboard preview",
-            "--panel",
-            "--no-wrap",
-            "--width",
-        ])
-        .arg(preview_setting(
-            "ROFI_CLIPBOARD_PREVIEW_WIDTH",
-            DEFAULT_PANEL_WIDTH,
-        ))
-        .arg("--height")
-        .arg(preview_setting(
-            "ROFI_CLIPBOARD_PREVIEW_HEIGHT",
-            DEFAULT_PANEL_HEIGHT,
-        ))
-        .arg("--companion-width")
-        .arg(preview_setting(
-            "ROFI_CLIPBOARD_ROFI_WIDTH",
-            DEFAULT_ROFI_WIDTH,
-        ))
-        .arg("--side")
-        .arg(preview_setting(
-            "ROFI_CLIPBOARD_PREVIEW_SIDE",
-            DEFAULT_PANEL_SIDE,
-        ))
-        .arg("--gap")
-        .arg(preview_setting(
-            "ROFI_CLIPBOARD_PREVIEW_GAP",
-            DEFAULT_PANEL_GAP,
-        ))
         .arg("--listen")
         .arg(&path)
         .stdin(Stdio::piped())
@@ -124,8 +102,10 @@ pub fn toggle(store: &ClipboardStore, id: u64) -> Result<()> {
     Ok(())
 }
 
-fn preview_setting(name: &str, default: &str) -> OsString {
-    env::var_os(name).unwrap_or_else(|| OsString::from(default))
+fn append_preview_override(command: &mut Command, environment: &str, option: &str) {
+    if let Some(value) = env::var_os(environment) {
+        command.arg(option).arg(value);
+    }
 }
 
 pub fn selection_changed(id: u64, serial: u64) -> Result<()> {

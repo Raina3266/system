@@ -1,7 +1,6 @@
-use std::env;
-use std::ffi::OsStr;
+use std::cell::RefCell;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -13,11 +12,11 @@ use gtk::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::cli::{Options, Side};
+use crate::cli::{Options, Side, WindowOverrides};
+use crate::config::{self, Config, WindowConfig};
 use crate::ipc::Message;
 
-const DEFAULT_CSS: &str = include_str!("../style.css");
-const CSS_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
+const CONFIG_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) {
     // NON_UNIQUE is important for launchers: every View action gets its own
@@ -49,7 +48,12 @@ fn build_window(
     text: &str,
     receiver: Option<Receiver<Message>>,
 ) {
-    install_css();
+    let config_path = config::configured_path();
+    let (observed_config, loaded_config) = load_initial_config(config_path.as_deref());
+    let css_provider = install_css(&loaded_config.css);
+    let panel_config = loaded_config
+        .window
+        .with_overrides(options.window_overrides);
 
     let text_view = TextView::new();
     text_view.buffer().set_text(text);
@@ -104,19 +108,32 @@ fn build_window(
     stack.add_named(&picture, Some("image"));
     stack.set_visible_child_name("text");
 
+    let (window_width, window_height) = if options.panel {
+        (panel_config.width, panel_config.height)
+    } else {
+        (options.width, options.height)
+    };
     let window = ApplicationWindow::builder()
         .application(application)
-        .default_height(options.height)
-        .default_width(options.width)
+        .default_height(window_height)
+        .default_width(window_width)
         .title(&options.title)
         .build();
     window.add_css_class("preview-panel");
     window.set_decorated(!options.panel);
     window.set_child(Some(&stack));
 
-    if options.panel {
-        configure_companion_panel(&window, options);
-    }
+    let panel_geometry = options
+        .panel
+        .then(|| configure_companion_panel(&window, panel_config));
+    watch_config(
+        &window,
+        config_path,
+        observed_config,
+        css_provider,
+        options.window_overrides,
+        panel_geometry,
+    );
     if let Some(receiver) = receiver {
         connect_live_updates(
             application,
@@ -134,97 +151,130 @@ fn build_window(
     }
 }
 
-fn install_css() {
-    let provider = CssProvider::new();
-    let css_path = configured_css_path();
-    let mut loaded_css = css_path
-        .as_deref()
-        .and_then(|path| fs::read_to_string(path).ok())
-        .unwrap_or_else(|| DEFAULT_CSS.to_owned());
+fn load_initial_config(path: Option<&Path>) -> (Option<String>, Config) {
+    let Some(path) = path else {
+        return (None, config::embedded());
+    };
 
-    provider.load_from_data(&loaded_css);
+    match fs::read_to_string(path) {
+        Ok(source) => match config::parse(&source) {
+            Ok(config) => (Some(source), config),
+            Err(error) => {
+                eprintln!(
+                    "preview-panel: ignoring invalid config {}: {error}",
+                    path.display()
+                );
+                (Some(source), config::embedded())
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (None, config::embedded())
+        }
+        Err(error) => {
+            eprintln!(
+                "preview-panel: cannot read config {}: {error}",
+                path.display()
+            );
+            (None, config::embedded())
+        }
+    }
+}
+
+fn install_css(css: &str) -> CssProvider {
+    let provider = CssProvider::new();
+    provider.load_from_data(css);
     gtk::style_context_add_provider_for_display(
         &gdk::Display::default().expect("GTK display is available"),
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+    provider
+}
 
-    let Some(css_path) = css_path else {
+fn watch_config(
+    window: &ApplicationWindow,
+    config_path: Option<PathBuf>,
+    mut observed_config: Option<String>,
+    css_provider: CssProvider,
+    window_overrides: WindowOverrides,
+    panel_geometry: Option<Rc<RefCell<WindowConfig>>>,
+) {
+    let Some(config_path) = config_path else {
         return;
     };
-    glib::timeout_add_local(CSS_RELOAD_INTERVAL, move || {
-        if let Ok(css) = fs::read_to_string(&css_path)
-            && css != loaded_css
-        {
-            provider.load_from_data(&css);
-            loaded_css = css;
+    let window = window.clone();
+    glib::timeout_add_local(CONFIG_RELOAD_INTERVAL, move || {
+        let Ok(source) = fs::read_to_string(&config_path) else {
+            return glib::ControlFlow::Continue;
+        };
+        if observed_config.as_deref() == Some(source.as_str()) {
+            return glib::ControlFlow::Continue;
+        }
+        observed_config = Some(source.clone());
+
+        match config::parse(&source) {
+            Ok(config) => {
+                css_provider.load_from_data(&config.css);
+                if let Some(panel_geometry) = panel_geometry.as_ref() {
+                    let geometry = config.window.with_overrides(window_overrides);
+                    *panel_geometry.borrow_mut() = geometry.clone();
+                    apply_companion_geometry(&window, &geometry);
+                }
+            }
+            Err(error) => eprintln!(
+                "preview-panel: ignoring invalid config {}: {error}",
+                config_path.display()
+            ),
         }
         glib::ControlFlow::Continue
     });
 }
 
-fn configured_css_path() -> Option<PathBuf> {
-    css_path_from(
-        env::var_os("PREVIEW_PANEL_CSS").as_deref(),
-        env::var_os("XDG_CONFIG_HOME").as_deref(),
-        env::var_os("HOME").as_deref(),
-    )
-}
-
-fn css_path_from(
-    override_path: Option<&OsStr>,
-    xdg_config_home: Option<&OsStr>,
-    home: Option<&OsStr>,
-) -> Option<PathBuf> {
-    if let Some(path) = override_path.filter(|path| !path.is_empty()) {
-        return Some(PathBuf::from(path));
-    }
-
-    let config_home = xdg_config_home
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            home.filter(|path| !path.is_empty())
-                .map(|path| PathBuf::from(path).join(".config"))
-        })?;
-    Some(config_home.join("preview-panel/style.css"))
-}
-
-fn configure_companion_panel(window: &ApplicationWindow, options: &Options) {
+fn configure_companion_panel(
+    window: &ApplicationWindow,
+    geometry: WindowConfig,
+) -> Rc<RefCell<WindowConfig>> {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_namespace(Some("rofi-preview-panel"));
     window.set_keyboard_mode(KeyboardMode::OnDemand);
 
-    let (edge, opposite_edge) = match options.side {
+    let geometry = Rc::new(RefCell::new(geometry));
+    apply_companion_geometry(window, &geometry.borrow());
+
+    let realize_geometry = Rc::clone(&geometry);
+    window.connect_realize(move |window| {
+        apply_companion_geometry(window, &realize_geometry.borrow());
+    });
+    let map_geometry = Rc::clone(&geometry);
+    window.connect_map(move |window| {
+        // Recalculate once the compositor has assigned the final output. This
+        // matters when the focused output is not GDK's initial output.
+        apply_companion_geometry(window, &map_geometry.borrow());
+    });
+    geometry
+}
+
+fn apply_companion_geometry(window: &ApplicationWindow, geometry: &WindowConfig) {
+    window.set_default_size(geometry.width, geometry.height);
+    window.set_size_request(geometry.width, geometry.height);
+
+    let (edge, opposite_edge) = match geometry.side {
         Side::Left => (Edge::Left, Edge::Right),
         Side::Right => (Edge::Right, Edge::Left),
     };
     // Layer-shell geometry must be established before the window is mapped.
-    // Applying the anchor from the map handler lets the compositor commit the
-    // first surface in the centre and some compositors never reposition it.
-    window.set_anchor(edge, true);
     window.set_anchor(opposite_edge, false);
-
-    let panel_width = options.width;
-    let companion_width = options.companion_width;
-    let gap = options.gap;
-    window.connect_realize(move |window| {
-        update_companion_margin(window, edge, companion_width, panel_width, gap);
-    });
-    window.connect_map(move |window| {
-        // Recalculate once the compositor has assigned the final output. This
-        // matters when the focused output is not GDK's initial output.
-        update_companion_margin(window, edge, companion_width, panel_width, gap);
-    });
+    window.set_margin(opposite_edge, 0);
+    window.set_anchor(edge, true);
+    update_companion_margin(window, edge, geometry);
+    window.queue_resize();
 }
 
 fn update_companion_margin(
     window: &ApplicationWindow,
     edge: Edge,
-    companion_width: i32,
-    panel_width: i32,
-    gap: i32,
+    geometry: &WindowConfig,
 ) {
     let Some(surface) = window.surface() else {
         return;
@@ -236,9 +286,9 @@ fn update_companion_margin(
         edge,
         companion_margin(
             monitor.geometry().width(),
-            companion_width,
-            panel_width,
-            gap,
+            geometry.companion_width,
+            geometry.width,
+            geometry.gap,
         ),
     );
 }
@@ -308,10 +358,7 @@ fn accept_serial(latest: &mut u64, candidate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
-    use std::path::PathBuf;
-
-    use super::{accept_serial, companion_margin, css_path_from};
+    use super::{accept_serial, companion_margin};
 
     #[test]
     fn rapid_updates_cannot_restore_an_older_selection() {
@@ -326,29 +373,5 @@ mod tests {
     fn companion_margin_places_the_panel_beside_a_centered_window() {
         assert_eq!(companion_margin(1920, 400, 480, 10), 270);
         assert_eq!(companion_margin(1280, 400, 480, 10), 0);
-    }
-
-    #[test]
-    fn explicit_css_path_takes_priority() {
-        let path = css_path_from(
-            Some(OsStr::new("/tmp/custom.css")),
-            Some(OsStr::new("/tmp/config")),
-            Some(OsStr::new("/home/raina")),
-        );
-        assert_eq!(path, Some(PathBuf::from("/tmp/custom.css")));
-    }
-
-    #[test]
-    fn css_path_uses_xdg_then_home_fallback() {
-        assert_eq!(
-            css_path_from(None, Some(OsStr::new("/tmp/config")), None),
-            Some(PathBuf::from("/tmp/config/preview-panel/style.css"))
-        );
-        assert_eq!(
-            css_path_from(None, None, Some(OsStr::new("/home/raina"))),
-            Some(PathBuf::from(
-                "/home/raina/.config/preview-panel/style.css"
-            ))
-        );
     }
 }

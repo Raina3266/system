@@ -1,6 +1,7 @@
 use std::error::Error;
 
 mod cli;
+mod config;
 mod document;
 mod ipc;
 mod ui;

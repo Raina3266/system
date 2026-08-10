@@ -1,0 +1,46 @@
+# Runtime configuration for preview-panel.
+#
+# Home Manager links this file to ~/.config/preview-panel/config.toml.
+# Save changes here and every open preview panel reloads them automatically.
+
+[window]
+# Size of the preview panel in pixels.
+width = 480
+height = 615
+
+# Width of the centered Rofi window used to position the companion panel.
+companion_width = 400
+
+# Use "left" or "right" and choose the space between Rofi and the panel.
+side = "left"
+gap = 10
+
+[appearance]
+# This is unrestricted GTK4 CSS stored as a TOML multiline literal string.
+css = '''
+window.preview-panel {
+    background: rgba(14, 6, 22, 0.95);
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+}
+
+textview.preview-text,
+textview.preview-text text {
+    background: transparent;
+    color: #cbe3e7;
+    caret-color: #7afcff;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 11pt;
+}
+
+picture.preview-image {
+    background: transparent;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    min-height: 4px;
+    background: #ff7edb;
+    border-radius: 4px;
+}
+'''
