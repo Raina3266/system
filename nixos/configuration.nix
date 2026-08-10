@@ -121,18 +121,21 @@
     i18n.inputMethod = {
       enable = true;
       type = "fcitx5";
-      fcitx5.addons = with pkgs; [
-        qt6Packages.fcitx5-chinese-addons
-        fcitx5-mozc
-        fcitx5-hangul
-      ];
+      fcitx5 = {
+        waylandFrontend = true;   # if you're on Wayland
+        addons = with pkgs; [
+          fcitx5-gtk
+          qt6Packages.fcitx5-chinese-addons
+          fcitx5-mozc
+          fcitx5-hangul
+        ];
+      };
     };
 
     # Hardware (Intel graphics / video acceleration)
     hardware.intel-gpu-tools.enable = true;
     hardware.graphics.extraPackages = with pkgs; [
       intel-media-driver
-      intel-vaapi-driver
       libvdpau-va-gl
       vpl-gpu-rt
     ];
@@ -151,9 +154,6 @@
         noto-fonts
         noto-fonts-cjk-sans
         noto-fonts-cjk-serif
-        wqy_zenhei
-        wqy_microhei
-
         nerd-fonts.jetbrains-mono
         nerd-fonts.symbols-only
       ];

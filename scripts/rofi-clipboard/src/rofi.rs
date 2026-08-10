@@ -56,7 +56,6 @@ impl Mode {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct UiState {
-    preview: bool,
     editing: Option<u64>,
     initialized: bool,
 }
@@ -64,17 +63,11 @@ struct UiState {
 impl UiState {
     fn parse(value: Option<String>) -> Self {
         let Some(value) = value else {
-            return Self {
-                preview: env::var_os("ROFI_CLIPBOARD_PREVIEW").is_some(),
-                editing: None,
-                initialized: false,
-            };
+            return Self::default();
         };
         let mut state = Self::default();
         for part in value.split(';') {
-            if part == "preview=1" {
-                state.preview = true;
-            } else if let Some(id) = part.strip_prefix("edit=") {
+            if let Some(id) = part.strip_prefix("edit=") {
                 state.editing = id.parse().ok();
             } else if part == "init=1" {
                 state.initialized = true;
@@ -85,15 +78,14 @@ impl UiState {
 
     fn encode(self) -> String {
         format!(
-            "preview={};edit={};init={}",
-            u8::from(self.preview),
+            "edit={};init={}",
             self.editing.map(|id| id.to_string()).unwrap_or_default(),
             u8::from(self.initialized)
         )
     }
 }
 
-pub fn launch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<()> {
+pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
     let executable = executable.to_string_lossy();
     let modes = format!(
@@ -102,7 +94,6 @@ pub fn launch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Resul
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
     command
-        .env_remove("ROFI_CLIPBOARD_PREVIEW")
         .args([
             "-show",
             mode.name(),
@@ -127,9 +118,6 @@ pub fn launch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Resul
         ])
         .arg(theme);
 
-    if preview {
-        command.env("ROFI_CLIPBOARD_PREVIEW", "true");
-    }
     if let Some(row) = selected_row(mode, selected_id)? {
         command.arg("-selected-row").arg(row.to_string());
     }
@@ -153,43 +141,33 @@ fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
         .position(|item| item.id == selected_id))
 }
 
-fn relaunch_rofi(mode: Mode, preview: bool, selected_id: Option<u64>) -> Result<()> {
-    let executable = env::current_exe().context("locate rofi-clipboard executable")?;
-    let previous_rofi_pid = env::var("ROFI_OUTSIDE")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok());
-    let mut command = Command::new(executable);
-
-    for variable in [
-        "ROFI_RETV",
-        "ROFI_INFO",
-        "ROFI_DATA",
-        "ROFI_INPUT",
-        "ROFI_OUTSIDE",
-    ] {
-        command.env_remove(variable);
+fn open_preview(store: &ClipboardStore, id: u64) -> Result<()> {
+    let history = store.load()?;
+    let Some(item) = history.items.iter().find(|item| item.id == id) else {
+        return Ok(());
+    };
+    if item.kind != ItemKind::Text {
+        return Ok(());
     }
 
-    command
-        .args([
-            "relaunch",
-            mode.name(),
-            if preview { "preview" } else { "compact" },
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null());
+    let mut child = Command::new(preview_panel_binary())
+        .args(["--stdin", "--title", "Clipboard preview"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("launch preview-panel")?;
+    let mut preview_stdin = child
+        .stdin
+        .take()
+        .context("open preview-panel standard input")?;
+    preview_stdin
+        .write_all(item.text.as_deref().unwrap_or_default().as_bytes())
+        .context("send clipboard text to preview-panel")?;
+    drop(preview_stdin);
 
-    // Keep the positional arguments unambiguous when no row is selected.
-    command.arg(
-        selected_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "-".to_owned()),
-    );
-    if let Some(pid) = previous_rofi_pid {
-        command.arg(pid.to_string());
-    }
-
-    command.spawn().context("schedule rofi preview relaunch")?;
+    // The Rofi script process exits immediately after returning its refreshed
+    // rows. Dropping Child detaches the GTK process so its window stays open.
+    drop(child);
     Ok(())
 }
 
@@ -269,9 +247,13 @@ pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
             Some(id) => render_editor(&store, mode, state, id),
             None => render_history(&store, mode, state, None),
         },
-        // Layout cannot be changed by a script-mode theme update. Relaunch
-        // Rofi with the preview media-query environment set instead.
-        13 => relaunch_rofi(mode, !state.preview, selected_id),
+        // Open the selected item's original text in the detached GTK viewer.
+        13 => {
+            if let Some(id) = selected_id {
+                open_preview(&store, id)?;
+            }
+            render_history(&store, mode, state, selected_id)
+        },
         _ if state.editing.is_some() => render_editor(
             &store,
             mode,
@@ -504,6 +486,12 @@ fn decode_edit_input(value: &str) -> String {
         }
     }
     result
+}
+
+fn preview_panel_binary() -> PathBuf {
+    env::var_os("ROFI_CLIPBOARD_PREVIEW_PANEL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new("preview-panel").to_path_buf())
 }
 
 fn rofi_binary() -> PathBuf {

@@ -1,10 +1,24 @@
 { pkgs, ... }:
 let
+  previewPanel = pkgs.rustPlatform.buildRustPackage {
+    pname = "preview-panel";
+    version = "0.1.0";
+    
+    src = ../../../scripts/preview-panel;
+    cargoLock.lockFile = ../../../scripts/preview-panel/Cargo.lock;
+
+    nativeBuildInputs = [
+      pkg-config
+      wrapGAppsHook4
+    ];
+    buildInputs = [ gtk4 ];
+
+  };
+
   rofiClipboard = pkgs.rustPlatform.buildRustPackage {
     pname = "rofi-clipboard";
     version = "0.1.0";
 
-    # This module belongs at home/niri/rofi-clipboard.nix.
     src = ../../../scripts/rofi-clipboard;
     cargoLock.lockFile = ../../../scripts/rofi-clipboard/Cargo.lock;
 
@@ -13,13 +27,17 @@ let
     postInstall = ''
       wrapProgram "$out/bin/rofi-clipboard" \
         --set ROFI_CLIPBOARD_ROFI "${pkgs.rofi}/bin/rofi" \
+        --set ROFI_CLIPBOARD_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_CLIPBOARD_WL_COPY "${pkgs.wl-clipboard}/bin/wl-copy" \
         --set ROFI_CLIPBOARD_WL_PASTE "${pkgs.wl-clipboard}/bin/wl-paste"
     '';
   };
 in
 {
-  home.packages = [ rofiClipboard ];
+  home.packages = [
+    previewPanel
+    rofiClipboard
+  ];
 
   systemd.user.services.rofi-clipboard = {
     Unit = {
