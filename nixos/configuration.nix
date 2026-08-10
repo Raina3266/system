@@ -101,6 +101,14 @@
         }
       ];
       allowedUDPPortRanges = allowedTCPPortRanges;
+      allowedTCPPorts = [
+        631
+        9100
+      ]; # CUPS (631) & AppSocket/RAW (9100)
+      allowedUDPPorts = [
+        631
+        5353
+      ]; # IPP & mDNS/Avahi discovery
     };
 
     # Time & locale

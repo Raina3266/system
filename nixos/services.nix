@@ -99,8 +99,7 @@
   services.printing = {
     enable = true;
     drivers = with pkgs; [
-      cups-filters
-      cups-browsed
+      cnijfilter2
     ];
   };
   services.avahi = {

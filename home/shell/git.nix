@@ -4,6 +4,7 @@
     enable = true;
     signing.format = "openpgp";
     settings = {
+      user.name = "raina";
       user.email = "cgl0326@outlook.com";
       init.defaultBranch = "master";
       pull.rebase = true;
