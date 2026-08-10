@@ -37,9 +37,8 @@ This repository contains two Rust utilities used by the desktop configuration:
 | `Enter` | Copy the selected item |
 | `Alt+P` | Pin or unpin the selected item |
 | `Alt+D` | Delete the selected item |
-| `Alt+E` | Edit a text item |
-| `Alt+V` | Toggle the preview layout |
-| `Ctrl+Enter` | Save edited text |
+| `Alt+E` | Open the selected text item in the editor; press again to save and close |
+| `Alt+V` | Toggle the read-only preview panel |
 
 The interface contains three modes:
 
@@ -81,13 +80,18 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
 | `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
-| `ROFI_CLIPBOARD_PREVIEW_WIDTH` | Preview width in pixels (default: `480`) |
+| `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
 | `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
 | `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of Rofi (default: `left`) |
 | `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
-For a permanent Home Manager override, set the values before rebuilding:
+Panel placement, size, and GTK CSS normally come from
+`scripts/preview-panel/config.toml`. Home Manager links that file into the
+runtime config directory, so valid saves hot-reload without rebuilding. The
+environment variables above remain available for one-launch overrides.
+
+For a session-wide environment override, set values such as:
 
 ```nix
 home.sessionVariables = {

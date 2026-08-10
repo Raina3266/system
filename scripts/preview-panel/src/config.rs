@@ -159,6 +159,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn embedded_panel_width_is_400_pixels() {
+        assert_eq!(embedded().window.width, 400);
+    }
+
+    #[test]
     fn parses_window_values_and_raw_css() {
         let config = parse(
             r##"

@@ -337,6 +337,16 @@ fn connect_live_updates(
                     picture.set_filename(Some(path.as_path()));
                     stack.set_visible_child_name("image");
                 }
+                Message::SaveAndClose { reply } => {
+                    let buffer = text_view.buffer();
+                    let text = buffer
+                        .text(&buffer.start_iter(), &buffer.end_iter(), true)
+                        .to_string();
+                    let _ = reply.send(text);
+                    window.close();
+                    application.quit();
+                    return glib::ControlFlow::Break;
+                }
                 Message::Close => {
                     window.close();
                     application.quit();

@@ -57,7 +57,6 @@ impl Mode {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct UiState {
-    editing: Option<u64>,
     initialized: bool,
 }
 
@@ -68,9 +67,7 @@ impl UiState {
         };
         let mut state = Self::default();
         for part in value.split(';') {
-            if let Some(id) = part.strip_prefix("edit=") {
-                state.editing = id.parse().ok();
-            } else if part == "init=1" {
+            if part == "init=1" {
                 state.initialized = true;
             }
         }
@@ -78,11 +75,7 @@ impl UiState {
     }
 
     fn encode(self) -> String {
-        format!(
-            "edit={};init={}",
-            self.editing.map(|id| id.to_string()).unwrap_or_default(),
-            u8::from(self.initialized)
-        )
+        format!("init={}", u8::from(self.initialized))
     }
 }
 
@@ -90,7 +83,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
     let executable = executable.to_string_lossy();
     let preview_socket = preview::session_socket_path()?;
-    preview::cleanup_socket(&preview_socket)?;
+    preview::cleanup_session(&preview_socket)?;
     let modes = format!(
         "pinned:{executable} script pinned,text:{executable} script text,images:{executable} script images"
     );
@@ -172,7 +165,7 @@ fn theme_path() -> Result<PathBuf> {
         .join("rofi-clipboard.rasi"))
 }
 
-pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
+pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
     let store = ClipboardStore::discover()?;
     let retv = env::var("ROFI_RETV")
         .ok()
@@ -181,7 +174,7 @@ pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
     let selected_id = env::var("ROFI_INFO")
         .ok()
         .and_then(|value| value.parse::<u64>().ok());
-    let mut state = UiState::parse(env::var("ROFI_DATA").ok());
+    let state = UiState::parse(env::var("ROFI_DATA").ok());
 
     match retv {
         // Pre-arm keep-selection on the initial response so the first button
@@ -193,24 +186,6 @@ pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
                 copy_item(&store, id)?;
             }
             Ok(())
-        }
-        // Rofi 2.0 passes custom input as the script's final argument. Newer
-        // versions also expose ROFI_INPUT, so support both forms.
-        2 if state.editing.is_some() => {
-            let id = state.editing.expect("editing ID checked above");
-            let replacement_source = env::var("ROFI_INPUT")
-                .ok()
-                .or(script_argument)
-                .unwrap_or_default();
-            let replacement = decode_edit_input(&replacement_source);
-            if replacement.is_empty() {
-                return render_editor(&store, mode, state, id);
-            }
-            state.editing = None;
-            if !store.edit_text(id, replacement)? {
-                bail!("clipboard item no longer exists");
-            }
-            render_history(&store, mode, state, Some(id))
         }
         // Deletes the selected item. Rofi's native delete action reports 3;
         // the Delete button uses custom action 2 and reports 11.
@@ -227,24 +202,19 @@ pub fn run_script(mode: Mode, script_argument: Option<String>) -> Result<()> {
             }
             render_history(&store, mode, state, selected_id)
         }
-        // Opens the editor for a text item.
-        12 => match selected_id {
-            Some(id) => render_editor(&store, mode, state, id),
-            None => render_history(&store, mode, state, None),
-        },
+        // First click opens an editor pinned to this text item. The next Edit
+        // click saves that panel's complete buffer and closes it.
+        12 => {
+            let selected_id = preview::toggle_edit(&store, selected_id)?.or(selected_id);
+            render_history(&store, mode, state, selected_id)
+        }
         // Toggle the companion panel for the selected item.
         13 => {
             if let Some(id) = selected_id {
-                preview::toggle(&store, id)?;
+                preview::toggle_view(&store, id)?;
             }
             render_history(&store, mode, state, selected_id)
-        },
-        _ if state.editing.is_some() => render_editor(
-            &store,
-            mode,
-            state,
-            state.editing.expect("editing ID checked above"),
-        ),
+        }
         _ => render_history(&store, mode, state, selected_id),
     }
 }
@@ -312,31 +282,6 @@ fn render_history(
         output.push(RECORD_SEPARATOR);
     }
     io::stdout().write_all(&output).context("write rofi rows")
-}
-
-fn render_editor(
-    store: &ClipboardStore,
-    mode: Mode,
-    mut state: UiState,
-    id: u64,
-) -> Result<()> {
-    let history = store.load()?;
-    let Some(item) = history.items.iter().find(|item| item.id == id) else {
-        return render_history(store, mode, state, None);
-    };
-    if item.kind != ItemKind::Text {
-        return render_history(store, mode, state, Some(id));
-    }
-    state.editing = Some(id);
-
-    let mut output = Vec::new();
-    write_common_headers(&mut output, "Edit", state, false, true, Some(0));
-    write!(&mut output, "Type replacement text and press Ctrl+Enter")?;
-    let mut first_option = true;
-    write_row_option(&mut output, &mut first_option, "nonselectable", "true");
-    write_row_option(&mut output, &mut first_option, "permanent", "true");
-    output.push(RECORD_SEPARATOR);
-    io::stdout().write_all(&output).context("write rofi editor")
 }
 
 fn write_common_headers(
@@ -442,33 +387,6 @@ fn truncate_chars(value: &str, maximum: usize) -> String {
     let mut result: String = chars.by_ref().take(maximum).collect();
     if chars.next().is_some() {
         result.push('…');
-    }
-    result
-}
-
-fn decode_edit_input(value: &str) -> String {
-    let mut result = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character != '\\' {
-            result.push(character);
-            continue;
-        }
-        match chars.peek().copied() {
-            Some('n') => {
-                chars.next();
-                result.push('\n');
-            }
-            Some('t') => {
-                chars.next();
-                result.push('\t');
-            }
-            Some('\\') => {
-                chars.next();
-                result.push('\\');
-            }
-            _ => result.push('\\'),
-        }
     }
     result
 }

@@ -405,6 +405,35 @@ mod tests {
         )))
     }
 
+    #[test]
+    fn editing_by_id_preserves_complete_text_and_does_not_modify_another_item() {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let editing_id = store
+            .add_text("original".to_owned(), "text/plain".to_owned())
+            .unwrap()
+            .unwrap();
+        let other_id = store
+            .add_text("other selection".to_owned(), "text/plain".to_owned())
+            .unwrap()
+            .unwrap();
+        let edited = "first line\n\tsecond  line\n中文 👩🏽‍💻  \n";
+
+        assert!(store.edit_text(editing_id, edited.to_owned()).unwrap());
+
+        let history = store.load().unwrap();
+        assert_eq!(history.items[0].id, editing_id);
+        assert_eq!(history.items[0].text.as_deref(), Some(edited));
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .find(|item| item.id == other_id)
+                .and_then(|item| item.text.as_deref()),
+            Some("other selection")
+        );
+    }
+
     fn item(id: u64, kind: ItemKind) -> ClipboardItem {
         ClipboardItem {
             id,

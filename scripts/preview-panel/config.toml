@@ -5,7 +5,7 @@
 
 [window]
 # Size of the preview panel in pixels.
-width = 480
+width = 400
 height = 615
 
 # Width of the centered Rofi window used to position the companion panel.
