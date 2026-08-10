@@ -8,10 +8,10 @@ let
     cargoLock.lockFile = ../../../scripts/preview-panel/Cargo.lock;
 
     nativeBuildInputs = [
-      pkg-config
-      wrapGAppsHook4
+      pkgs.pkg-config
+      pkgs.wrapGAppsHook4
     ];
-    buildInputs = [ gtk4 ];
+    buildInputs = [ pkgs.gtk4 ];
 
   };
 
