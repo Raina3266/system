@@ -216,6 +216,7 @@ fn render_history(
     state: UiState,
     selected_id: Option<u64>,
 ) -> Result<()> {
+    store.prune_missing_local_images()?;
     let history = store.load()?;
     let items: Vec<_> = history
         .items

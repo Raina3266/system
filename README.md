@@ -20,6 +20,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 - Restores the selected item with its original MIME type
 - Detects local image files copied from a file manager
 - Shows the saved file path for Niri screenshots
+- Removes missing linked local images and their cached previews when Rofi next renders
 - Deduplicates repeated clipboard entries
 - Ignores empty and sensitive clipboard values
 - Keeps up to 2,000 history entries

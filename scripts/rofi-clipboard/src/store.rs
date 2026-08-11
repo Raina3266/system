@@ -263,6 +263,52 @@ impl ClipboardStore {
             .map(|filename| self.image_dir.join(filename))
     }
 
+    pub fn prune_missing_local_images(&self) -> Result<usize> {
+        let lock = self.lock(true)?;
+        let mut history = self.load_unlocked()?;
+        let original_len = history.items.len();
+        let mut cached_images = Vec::new();
+
+        history.items.retain(|item| {
+            if !linked_local_image_is_missing(item) {
+                return true;
+            }
+            if let Some(filename) = item
+                .image_file
+                .as_deref()
+                .and_then(safe_filename)
+                .map(str::to_owned)
+            {
+                cached_images.push(filename);
+            }
+            false
+        });
+
+        let removed = original_len - history.items.len();
+        if removed == 0 {
+            unlock(&lock)?;
+            return Ok(0);
+        }
+
+        self.save_unlocked(&history)?;
+        unlock(&lock)?;
+
+        // The history update is already committed. Cache cleanup is
+        // best-effort so a filesystem error cannot restore a stale row.
+        for filename in cached_images {
+            let path = self.image_dir.join(filename);
+            if let Err(error) = fs::remove_file(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!(
+                    "rofi-clipboard: failed to delete cached image {}: {error}",
+                    path.display()
+                );
+            }
+        }
+        Ok(removed)
+    }
+
     fn update<T>(&self, operation: impl FnOnce(&mut History) -> Result<T>) -> Result<T> {
         let lock = self.lock(true)?;
         let mut history = self.load_unlocked()?;
@@ -344,6 +390,36 @@ fn order_pinned_first(history: &mut History) {
     // section while repairing older histories that mixed pinned and normal
     // items together.
     history.items.sort_by_key(|item| !item.pinned);
+}
+
+fn linked_local_image_is_missing(item: &ClipboardItem) -> bool {
+    if item.kind != ItemKind::Image {
+        return false;
+    }
+    let Some(source) = item
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|source| !source.is_empty())
+    else {
+        return false;
+    };
+    let path = Path::new(source);
+    if !path.is_absolute() {
+        return false;
+    }
+
+    match fs::metadata(path) {
+        Ok(metadata) => !metadata.is_file(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => {
+            eprintln!(
+                "rofi-clipboard: failed to check linked image {}: {error}",
+                path.display()
+            );
+            false
+        }
+    }
 }
 
 fn trim_history(history: &mut History) -> Vec<String> {
@@ -624,6 +700,88 @@ mod tests {
         );
         assert!(history.items[..2].iter().all(|item| item.pinned));
         assert!(history.items[2..].iter().all(|item| !item.pinned));
+        Ok(())
+    }
+
+    #[test]
+    fn pruning_missing_local_images_removes_rows_and_cached_files() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.join("data"));
+        let existing_source = root.0.join("existing.png");
+        let deleted_source = root.0.join("deleted.png");
+        let deleted_pinned_source = root.0.join("deleted-pinned.png");
+        fs::create_dir_all(&root.0)?;
+        fs::write(&existing_source, b"existing source")?;
+        fs::write(&deleted_source, b"deleted source")?;
+        fs::write(&deleted_pinned_source, b"deleted pinned source")?;
+
+        let existing_id = store
+            .add_image_named(
+                b"existing cache",
+                "image/png".to_owned(),
+                Some(existing_source.to_string_lossy().into_owned()),
+            )?
+            .unwrap();
+        let deleted_id = store
+            .add_image_named(
+                b"deleted cache",
+                "image/png".to_owned(),
+                Some(deleted_source.to_string_lossy().into_owned()),
+            )?
+            .unwrap();
+        let deleted_pinned_id = store
+            .add_image_named(
+                b"deleted pinned cache",
+                "image/png".to_owned(),
+                Some(deleted_pinned_source.to_string_lossy().into_owned()),
+            )?
+            .unwrap();
+        assert!(store.pin(deleted_pinned_id)?);
+        let url_id = store
+            .add_image_named(
+                b"url cache",
+                "image/png".to_owned(),
+                Some("https://example.com/image.png".to_owned()),
+            )?
+            .unwrap();
+        let clipboard_only_id = store
+            .add_image(b"clipboard cache", "image/png".to_owned())?
+            .unwrap();
+        let text_id = store
+            .add_text("keep text".to_owned(), "text/plain".to_owned())?
+            .unwrap();
+
+        let history = store.load()?;
+        let deleted_cache = store.image_path(
+            history
+                .items
+                .iter()
+                .find(|item| item.id == deleted_id)
+                .unwrap(),
+        );
+        let deleted_pinned_cache = store.image_path(
+            history
+                .items
+                .iter()
+                .find(|item| item.id == deleted_pinned_id)
+                .unwrap(),
+        );
+        fs::remove_file(&deleted_source)?;
+        fs::remove_file(&deleted_pinned_source)?;
+
+        assert_eq!(store.prune_missing_local_images()?, 2);
+
+        let history = store.load()?;
+        let retained_ids: Vec<_> = history.items.iter().map(|item| item.id).collect();
+        assert!(!retained_ids.contains(&deleted_id));
+        assert!(!retained_ids.contains(&deleted_pinned_id));
+        assert!(retained_ids.contains(&existing_id));
+        assert!(retained_ids.contains(&url_id));
+        assert!(retained_ids.contains(&clipboard_only_id));
+        assert!(retained_ids.contains(&text_id));
+        assert!(!deleted_cache.unwrap().exists());
+        assert!(!deleted_pinned_cache.unwrap().exists());
+        assert_eq!(store.prune_missing_local_images()?, 0);
         Ok(())
     }
 }
