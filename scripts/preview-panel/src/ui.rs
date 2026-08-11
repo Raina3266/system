@@ -1,6 +1,9 @@
 use std::cell::RefCell;
+use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -96,6 +99,7 @@ fn build_window(
         WrapMode::None
     });
     text_view.add_css_class("preview-text");
+    connect_persistent_clipboard(&text_view);
 
     let scrolled_window = ScrolledWindow::new();
     scrolled_window.set_child(Some(&text_view));
@@ -174,6 +178,48 @@ fn build_window(
     if !options.panel {
         text_view.grab_focus();
     }
+}
+
+fn connect_persistent_clipboard(text_view: &TextView) {
+    let text_view_for_copy = text_view.clone();
+    // Run after GTK's default handler so wl-copy becomes the final clipboard
+    // owner and keeps serving the selection after this panel exits.
+    text_view.connect_local("copy-clipboard", true, move |_| {
+        let buffer = text_view_for_copy.buffer();
+        let Some((start, end)) = buffer.selection_bounds() else {
+            return None;
+        };
+        let text = buffer.text(&start, &end, true);
+        if let Err(error) = copy_text_to_wayland(&text) {
+            eprintln!("preview-panel: copy selection to Wayland clipboard: {error}");
+        }
+        None
+    });
+}
+
+fn copy_text_to_wayland(text: &str) -> io::Result<()> {
+    let mut child = Command::new(wl_copy_binary())
+        .args(["--type", "text/plain;charset=utf-8"])
+        .stdin(Stdio::piped())
+        .spawn()?;
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("wl-copy standard input is unavailable"))?;
+    input.write_all(text.as_bytes())?;
+    drop(input);
+
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::other(format!("wl-copy exited with {status}")));
+    }
+    Ok(())
+}
+
+fn wl_copy_binary() -> PathBuf {
+    env::var_os("ROFI_CLIPBOARD_WL_COPY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new("wl-copy").to_path_buf())
 }
 
 fn load_initial_config(path: Option<&Path>) -> (Option<String>, Config) {

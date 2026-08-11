@@ -90,6 +90,12 @@ pub fn close(path: &Path) {
     }
 }
 
+pub fn save_and_close(path: &Path) -> Result<()> {
+    let store = ClipboardStore::discover()?;
+    let _ = save_open_panel(&store, path)?;
+    Ok(())
+}
+
 pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<Option<u64>> {
     let path = socket_from_environment()?;
 

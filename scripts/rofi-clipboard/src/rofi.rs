@@ -135,7 +135,10 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     }
 
     let status = command.status();
-    preview::close(&preview_socket);
+    if let Err(error) = preview::save_and_close(&preview_socket) {
+        eprintln!("rofi-clipboard: save preview before closing: {error:#}");
+        preview::close(&preview_socket);
+    }
     if let Err(error) = preview::cleanup_socket(&preview_socket) {
         eprintln!("rofi-clipboard: {error:#}");
     }
@@ -147,15 +150,20 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
 }
 
 fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
-    let Some(selected_id) = selected_id else {
-        return Ok(None);
-    };
     let history = ClipboardStore::discover()?.load()?;
-    Ok(history
+    let items: Vec<_> = history
         .items
         .iter()
         .filter(|item| mode.includes(item))
-        .position(|item| item.id == selected_id))
+        .collect();
+    Ok(preferred_selection(&items, selected_id))
+}
+
+fn preferred_selection(items: &[&ClipboardItem], selected_id: Option<u64>) -> Option<usize> {
+    selected_id
+        .and_then(|id| items.iter().position(|item| item.id == id))
+        .or_else(|| items.iter().position(|item| !item.pinned))
+        .or_else(|| (!items.is_empty()).then_some(0))
 }
 
 fn theme_path() -> Result<PathBuf> {
@@ -271,8 +279,7 @@ fn render_history(
         .iter()
         .filter(|item| mode.includes(item))
         .collect();
-    let new_selection =
-        selected_id.and_then(|id| items.iter().position(|item| item.id == id));
+    let new_selection = preferred_selection(&items, selected_id);
 
     let mut output = Vec::new();
     write_common_headers(
@@ -603,5 +610,19 @@ mod tests {
         assert_eq!(replacement_selection(&items, second.id), Some(third.id));
         assert_eq!(replacement_selection(&items, third.id), Some(second.id));
         assert_eq!(replacement_selection(&[&first], first.id), None);
+    }
+
+    #[test]
+    fn initial_selection_prefers_the_first_unpinned_item_in_every_mode() {
+        let first_pin = textual_item(1, ItemKind::Text, "first pin", true);
+        let second_pin = textual_item(2, ItemKind::Text, "second pin", true);
+        let first_unpinned = textual_item(3, ItemKind::Text, "first normal", false);
+        let second_unpinned = textual_item(4, ItemKind::Text, "second normal", false);
+        let items = vec![&first_pin, &second_pin, &first_unpinned, &second_unpinned];
+
+        assert_eq!(preferred_selection(&items, None), Some(2));
+        assert_eq!(preferred_selection(&items, Some(first_pin.id)), Some(0));
+        assert_eq!(preferred_selection(&[&first_pin, &second_pin], None), Some(0));
+        assert_eq!(preferred_selection(&[], None), None);
     }
 }
