@@ -139,6 +139,28 @@ let
            textbox_text(state->tb_filtered_rows, r);
     '';
 
+  # A selected row index is only meaningful within its current mode. Reset the
+  # callback cache on real mode changes so the companion preview follows the
+  # newly selected entry even when it occupies the same row number.
+  selectionChangedModeSwitchPatch = final.writeText
+    "on-selection-changed-mode-switch.patch"
+    ''
+      diff --git a/source/view.c b/source/view.c
+      --- a/source/view.c
+      +++ b/source/view.c
+      @@ -2107,7 +2107,10 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
+      ${" "}
+       void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
+      +  if (state->sw != mode) {
+      +    state->previous_line = UINT32_MAX;
+      +  }
+         state->sw = mode;
+         // Update prompt;
+         if (state->prompt) {
+           rofi_view_update_prompt(state);
+         }
+    '';
+
   # Rofi normally takes exclusive layer-shell keyboard focus, which prevents
   # the clipboard's companion editor from receiving keys after it is clicked.
   # Keep the upstream default unless this opt-in environment variable is set.
@@ -179,6 +201,7 @@ in
     patches = (oldAttrs.patches or [ ]) ++ [
       selectionChangedCompletionPatch
       preserveFilteredSelectionPatch
+      selectionChangedModeSwitchPatch
       onDemandKeyboardPatch
     ];
   });
