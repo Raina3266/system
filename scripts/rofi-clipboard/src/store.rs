@@ -196,7 +196,12 @@ impl ClipboardStore {
             if item.pinned {
                 history.items.insert(0, item);
             } else {
-                history.items.push(item);
+                let first_unpinned = history
+                    .items
+                    .iter()
+                    .position(|item| !item.pinned)
+                    .unwrap_or(history.items.len());
+                history.items.insert(first_unpinned, item);
             }
             Ok(true)
         })
@@ -661,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn pinning_moves_items_to_top_and_unpinning_moves_them_to_normal_bottom() -> Result<()> {
+    fn pinning_moves_items_to_top_and_unpinning_moves_them_below_pins() -> Result<()> {
         let root = test_root();
         let store = ClipboardStore::at(root.0.clone());
         let older_text = store
@@ -690,7 +695,7 @@ mod tests {
         let history = store.load()?;
         assert_eq!(
             history.items.iter().map(|item| item.id).collect::<Vec<_>>(),
-            vec![older_text, newer_text, image]
+            vec![older_text, image, newer_text]
         );
         assert!(history.items[0].pinned);
         assert!(!history.items[1].pinned);

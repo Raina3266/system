@@ -199,9 +199,19 @@ pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
         // Deletes the selected item. Rofi's native delete action reports 3;
         // the Delete button uses custom action 2 and reports 11.
         3 | 11 => {
-            if let Some(id) = selected_id {
-                store.delete(id)?;
-            }
+            let selected_id = if let Some(id) = selected_id {
+                let replacement = selection_after_delete(&store, mode, id)?;
+                if store.delete(id)? {
+                    if let Err(error) = preview::refresh_after_delete(&store, replacement) {
+                        eprintln!("rofi-clipboard: refresh preview after delete: {error:#}");
+                    }
+                    replacement
+                } else {
+                    Some(id)
+                }
+            } else {
+                None
+            };
             render_history(&store, mode, state, selected_id)
         }
         // Pins or unpins the selected item.
@@ -224,6 +234,28 @@ pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
         }
         _ => render_history(&store, mode, state, selected_id),
     }
+}
+
+fn selection_after_delete(
+    store: &ClipboardStore,
+    mode: Mode,
+    selected_id: u64,
+) -> Result<Option<u64>> {
+    let history = store.load()?;
+    let items: Vec<_> = history
+        .items
+        .iter()
+        .filter(|item| mode.includes(item))
+        .collect();
+    Ok(replacement_selection(&items, selected_id))
+}
+
+fn replacement_selection(items: &[&ClipboardItem], selected_id: u64) -> Option<u64> {
+    let index = items.iter().position(|item| item.id == selected_id)?;
+    items
+        .get(index + 1)
+        .or_else(|| index.checked_sub(1).and_then(|index| items.get(index)))
+        .map(|item| item.id)
 }
 
 fn render_history(
@@ -558,5 +590,18 @@ mod tests {
             "'/nix/store/example/bin/tool'"
         );
         assert_eq!(shell_quote("/tmp/raina's tool"), "'/tmp/raina'\\''s tool'");
+    }
+
+    #[test]
+    fn deletion_selects_the_following_row_or_the_previous_row_at_the_end() {
+        let first = textual_item(1, ItemKind::Text, "first", false);
+        let second = textual_item(2, ItemKind::Text, "second", false);
+        let third = textual_item(3, ItemKind::Text, "third", false);
+        let items = vec![&first, &second, &third];
+
+        assert_eq!(replacement_selection(&items, first.id), Some(second.id));
+        assert_eq!(replacement_selection(&items, second.id), Some(third.id));
+        assert_eq!(replacement_selection(&items, third.id), Some(second.id));
+        assert_eq!(replacement_selection(&[&first], first.id), None);
     }
 }

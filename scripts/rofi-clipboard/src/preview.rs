@@ -181,6 +181,42 @@ pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
     Ok(())
 }
 
+pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) -> Result<()> {
+    let Some(path) = env::var_os(SOCKET_ENV).map(PathBuf::from) else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+
+    // Rofi keeps the same row index after a deletion and does not emit its
+    // selection callback. Recreate only an already-open panel on that row.
+    if !send(&path, CLOSE, 0, &[])? {
+        cleanup_socket(&path)?;
+        return Ok(());
+    }
+    wait_for_socket_removal(&path)?;
+    cleanup_socket(&path)?;
+
+    let Some(selected_id) = selected_id else {
+        return Ok(());
+    };
+    let Some(content) = item_content(store, selected_id)? else {
+        return Ok(());
+    };
+
+    let launch_result = match &content {
+        PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
+        PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
+    };
+    if let Err(error) = launch_result {
+        let _ = send(&path, CLOSE, 0, &[]);
+        let _ = cleanup_session(&path);
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn launch_text_editor(path: &Path, id: u64, text: &str) -> Result<()> {
     let content = PanelContent::Text(text.to_owned());
     launch_panel(path, &TEXT_EDITOR_ARGUMENTS, text, id, &content)
