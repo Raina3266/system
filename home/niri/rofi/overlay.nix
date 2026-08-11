@@ -95,6 +95,50 @@ let
        static void selection_changed_callback(G_GNUC_UNUSED listview *lv,
     '';
 
+  # Rofi normally preserves a visible list index during refiltering. Opt in to
+  # preserving the underlying entry instead so editing a clipboard search does
+  # not move the highlight to another history item.
+  preserveFilteredSelectionPatch = final.writeText
+    "preserve-filtered-selection.patch"
+    ''
+      diff --git a/source/view.c b/source/view.c
+      --- a/source/view.c
+      +++ b/source/view.c
+      @@ -777,6 +777,16 @@ static gboolean rofi_view_refilter_real(RofiViewState *state) {
+         if (state->sw == NULL) {
+           return G_SOURCE_REMOVE;
+         }
+      +  const gboolean preserve_filter_selection =
+      +      !state->reload &&
+      +      g_strcmp0(g_getenv("ROFI_PRESERVE_SELECTION_ON_FILTER"), "true") == 0;
+      +  unsigned int selected_line_before_filter = UINT32_MAX;
+      +  if (preserve_filter_selection && state->line_map != NULL) {
+      +    unsigned int selected = listview_get_selected(state->list_view);
+      +    if (selected < state->filtered_lines) {
+      +      selected_line_before_filter = state->line_map[selected];
+      +    }
+      +  }
+         GTimer *timer = g_timer_new();
+         TICK_N("Filter start");
+         if (state->reload) {
+      @@ -876,7 +886,15 @@ static gboolean rofi_view_refilter_real(RofiViewState *state) {
+         }
+         TICK_N("Filter matching done");
+         listview_set_num_elements(state->list_view, state->filtered_lines);
+      +  if (selected_line_before_filter != UINT32_MAX) {
+      +    for (unsigned int i = 0; i < state->filtered_lines; i++) {
+      +      if (state->line_map[i] == selected_line_before_filter) {
+      +        listview_set_selected(state->list_view, i);
+      +        break;
+      +      }
+      +    }
+      +  }
+      ${" "}
+         if (state->tb_filtered_rows) {
+           char *r = g_strdup_printf("%u", state->filtered_lines);
+           textbox_text(state->tb_filtered_rows, r);
+    '';
+
   # Rofi normally takes exclusive layer-shell keyboard focus, which prevents
   # the clipboard's companion editor from receiving keys after it is clicked.
   # Keep the upstream default unless this opt-in environment variable is set.
@@ -134,6 +178,7 @@ in
 
     patches = (oldAttrs.patches or [ ]) ++ [
       selectionChangedCompletionPatch
+      preserveFilteredSelectionPatch
       onDemandKeyboardPatch
     ];
   });

@@ -12,6 +12,8 @@ use crate::store::ClipboardStore;
 
 const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
 const WAYLAND_KEYBOARD_MODE_ON_DEMAND: &str = "on-demand";
+const PRESERVE_FILTER_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
+const PRESERVE_FILTER_SELECTION_ENABLED: &str = "true";
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
@@ -82,11 +84,17 @@ impl UiState {
     }
 }
 
-fn enable_companion_focus_switching(command: &mut Command) {
+fn configure_rofi_environment(command: &mut Command) {
     // The companion editor is another overlay layer surface. On-demand focus
     // lets Niri transfer keyboard input between Rofi and that panel when
     // either one is clicked.
     command.env(WAYLAND_KEYBOARD_MODE_ENV, WAYLAND_KEYBOARD_MODE_ON_DEMAND);
+    // Rofi normally keeps the same visible row number while refiltering. The
+    // patched opt-in behavior instead follows the selected clipboard item.
+    command.env(
+        PRESERVE_FILTER_SELECTION_ENV,
+        PRESERVE_FILTER_SELECTION_ENABLED,
+    );
 }
 
 pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
@@ -103,7 +111,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     );
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
-    enable_companion_focus_switching(&mut command);
+    configure_rofi_environment(&mut command);
     command
         .env(preview::SOCKET_ENV, &preview_socket)
         .args([
@@ -543,9 +551,9 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_rofi_allows_click_focus_to_move_to_the_editor() {
+    fn clipboard_rofi_enables_companion_focus_and_stable_filter_selection() {
         let mut command = Command::new("rofi");
-        enable_companion_focus_switching(&mut command);
+        configure_rofi_environment(&mut command);
 
         let keyboard_mode = command
             .get_envs()
@@ -553,6 +561,16 @@ mod tests {
             .and_then(|(_, value)| value)
             .and_then(std::ffi::OsStr::to_str);
         assert_eq!(keyboard_mode, Some(WAYLAND_KEYBOARD_MODE_ON_DEMAND));
+
+        let preserve_selection = command
+            .get_envs()
+            .find(|(name, _)| *name == std::ffi::OsStr::new(PRESERVE_FILTER_SELECTION_ENV))
+            .and_then(|(_, value)| value)
+            .and_then(std::ffi::OsStr::to_str);
+        assert_eq!(
+            preserve_selection,
+            Some(PRESERVE_FILTER_SELECTION_ENABLED)
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 - Pin and delete actions
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - The open panel follows Rofi selection changes and saves modified text before switching items
+- Keeps the highlighted clipboard item selected when search text is shortened or cleared
 - Restores the selected item with its original MIME type
 - Detects local image files copied from a file manager
 - Shows the saved file path for Niri screenshots
