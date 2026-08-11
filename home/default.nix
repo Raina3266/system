@@ -4,14 +4,16 @@
 }:
 {
   imports = [
+    ./cloud
     ./niri
     ./shell
     ./yazi
-    ./thunderbird.nix
-    ./cloud
-    ./ocr.nix
-    ./toolchains.nix
     ./desktop.nix
+    ./thunderbird.nix
+    ./ocr.nix
+    ./office.nix
+    ./toolchains.nix
+    
   ];
 
   home = {
@@ -43,7 +45,6 @@
     whatsie
 
     # productivity / office
-    onlyoffice-desktopeditors
     obsidian
     meld
     czkawka
@@ -70,7 +71,7 @@
 
     # can be removed when it update later
     (tauon.overrideAttrs (old: {
-      makeWrapperArgs = (old.makeWrapperArgs or []) ++ [
+      makeWrapperArgs = (old.makeWrapperArgs or [ ]) ++ [
         "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libappindicator ]}"
       ];
     }))

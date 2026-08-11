@@ -164,6 +164,11 @@
     wantedBy = lib.mkForce [ ];
     partOf = [ "media-stack.target" ];
   };
+  systemd.services.ensure-printers = {
+    wantedBy = lib.mkForce [ ];
+    restartIfChanged = false;
+    stopIfChanged = false;
+  };
 
   services.sunshine = {
     enable = true;

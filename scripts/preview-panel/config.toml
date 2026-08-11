@@ -6,7 +6,7 @@
 [window]
 # Size of the preview panel in pixels.
 width = 400
-height = 615
+height = 616
 
 # Width of the centered Rofi window used to position the companion panel.
 companion_width = 400
@@ -16,12 +16,10 @@ side = "left"
 gap = 10
 
 [position]
-# Fine-tune the automatic position beside Rofi, in pixels.
 # Positive x moves right; negative x moves left.
 # Positive y moves down; negative y moves up.
-# Changes apply to an open panel without rebuilding.
-x = 0
-y = 0
+x = 770
+y = -850
 
 [appearance]
 # This is unrestricted GTK4 CSS stored as a TOML multiline literal string.

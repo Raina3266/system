@@ -25,6 +25,11 @@ enum PanelKeyboardState {
     EditorArmed,
 }
 
+struct PanelGeometry {
+    config: WindowConfig,
+    monitor: Option<gdk::Monitor>,
+}
+
 impl PanelKeyboardState {
     fn mode(self) -> KeyboardMode {
         match self {
@@ -217,7 +222,7 @@ fn watch_config(
     mut observed_config: Option<String>,
     css_provider: CssProvider,
     window_overrides: WindowOverrides,
-    panel_geometry: Option<Rc<RefCell<WindowConfig>>>,
+    panel_geometry: Option<Rc<RefCell<PanelGeometry>>>,
 ) {
     let Some(config_path) = config_path else {
         return;
@@ -236,8 +241,8 @@ fn watch_config(
             Ok(config) => {
                 css_provider.load_from_data(&config.css);
                 if let Some(panel_geometry) = panel_geometry.as_ref() {
-                    let geometry = config.window.with_overrides(window_overrides);
-                    *panel_geometry.borrow_mut() = geometry.clone();
+                    let mut geometry = panel_geometry.borrow_mut();
+                    geometry.config = config.window.with_overrides(window_overrides);
                     apply_companion_geometry(&window, &geometry);
                 }
             }
@@ -253,7 +258,7 @@ fn watch_config(
 fn configure_companion_panel(
     window: &ApplicationWindow,
     geometry: WindowConfig,
-) -> Rc<RefCell<WindowConfig>> {
+) -> Rc<RefCell<PanelGeometry>> {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_namespace(Some("rofi-preview-panel"));
@@ -262,18 +267,27 @@ fn configure_companion_panel(
     // as soon as the companion panel is mapped.
     window.set_keyboard_mode(PanelKeyboardState::Browsing.mode());
 
-    let geometry = Rc::new(RefCell::new(geometry));
+    let geometry = Rc::new(RefCell::new(PanelGeometry {
+        config: geometry,
+        monitor: None,
+    }));
     apply_companion_geometry(window, &geometry.borrow());
 
     let realize_geometry = Rc::clone(&geometry);
     window.connect_realize(move |window| {
-        apply_companion_geometry(window, &realize_geometry.borrow());
-    });
-    let map_geometry = Rc::clone(&geometry);
-    window.connect_map(move |window| {
-        // Recalculate once the compositor has assigned the final output. This
-        // matters when the focused output is not GDK's initial output.
-        apply_companion_geometry(window, &map_geometry.borrow());
+        let Some(surface) = window.surface() else {
+            return;
+        };
+
+        let window = window.clone();
+        let geometry = Rc::clone(&realize_geometry);
+        surface.connect_enter_monitor(move |_, monitor| {
+            // The compositor has now assigned the layer surface to an output.
+            // Keep that monitor so config reloads can recalculate margins.
+            let mut geometry = geometry.borrow_mut();
+            geometry.monitor = Some(monitor.clone());
+            apply_companion_geometry(&window, &geometry);
+        });
     });
     geometry
 }
@@ -292,11 +306,13 @@ fn connect_panel_editor_focus(window: &ApplicationWindow, text_view: &TextView) 
     text_view.add_controller(motion);
 }
 
-fn apply_companion_geometry(window: &ApplicationWindow, geometry: &WindowConfig) {
-    window.set_default_size(geometry.width, geometry.height);
-    window.set_size_request(geometry.width, geometry.height);
+fn apply_companion_geometry(window: &ApplicationWindow, geometry: &PanelGeometry) {
+    let config = &geometry.config;
 
-    let (edge, opposite_edge) = match geometry.side {
+    window.set_default_size(config.width, config.height);
+    window.set_size_request(config.width, config.height);
+
+    let (edge, opposite_edge) = match config.side {
         Side::Left => (Edge::Left, Edge::Right),
         Side::Right => (Edge::Right, Edge::Left),
     };
@@ -308,21 +324,20 @@ fn apply_companion_geometry(window: &ApplicationWindow, geometry: &WindowConfig)
     window.set_anchor(Edge::Bottom, false);
     window.set_margin(Edge::Bottom, 0);
     window.set_anchor(Edge::Top, true);
-    update_companion_margins(window, edge, geometry);
+
+    if let Some(monitor) = geometry.monitor.as_ref() {
+        update_companion_margins(window, monitor, edge, config);
+    }
+
     window.queue_resize();
 }
 
 fn update_companion_margins(
     window: &ApplicationWindow,
+    monitor: &gdk::Monitor,
     edge: Edge,
     geometry: &WindowConfig,
 ) {
-    let Some(surface) = window.surface() else {
-        return;
-    };
-    let Some(monitor) = gtk::prelude::RootExt::display(window).monitor_at_surface(&surface) else {
-        return;
-    };
     let monitor = monitor.geometry();
     window.set_margin(
         edge,
