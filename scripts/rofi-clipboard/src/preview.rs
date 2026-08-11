@@ -1,9 +1,7 @@
 use std::env;
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -16,12 +14,20 @@ use crate::model::{ClipboardItem, ItemKind};
 use crate::store::ClipboardStore;
 
 pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
+const UPDATE_TEXT: u8 = 1;
 const UPDATE_IMAGE: u8 = 3;
 const CLOSE: u8 = 2;
 const SAVE_AND_CLOSE: u8 = 4;
-const SAVED_TEXT: u8 = 5;
+const PANEL_STATE: u8 = 5;
+const PREPARE_SWITCH: u8 = 6;
 const HEADER_SIZE: usize = 17;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+const SWITCH_REJECTED: u8 = 0;
+const SWITCH_SAME_ITEM: u8 = 1;
+const SWITCH_READY: u8 = 2;
+const CONTENT_NONE: u8 = 0;
+const CONTENT_TEXT: u8 = 1;
+const CONTENT_IMAGE: u8 = 2;
 const TEXT_EDITOR_ARGUMENTS: [&str; 4] =
     ["--stdin", "--title", "Edit clipboard text", "--panel"];
 const IMAGE_PREVIEW_ARGUMENTS: [&str; 5] = [
@@ -38,10 +44,17 @@ enum PanelContent {
     Image(PathBuf),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PanelState {
-    Text(u64),
-    Image(u64),
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PanelSnapshot {
+    Text { id: u64, text: String },
+    Image { id: u64 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SwitchReply {
+    Rejected,
+    SameItem,
+    Ready(Option<PanelSnapshot>),
 }
 
 pub fn session_socket_path() -> Result<PathBuf> {
@@ -62,46 +75,29 @@ pub fn cleanup_socket(path: &Path) -> Result<()> {
 }
 
 pub fn cleanup_session(path: &Path) -> Result<()> {
-    cleanup_socket(path)?;
-    cleanup_panel_state(path)
+    cleanup_socket(path)
 }
 
 pub fn close(path: &Path) {
     if let Err(error) = send(path, CLOSE, 0, &[]) {
         eprintln!("rofi-clipboard: close preview panel: {error:#}");
     }
-    if let Err(error) = cleanup_panel_state(path) {
-        eprintln!("rofi-clipboard: clean preview panel state: {error:#}");
-    }
 }
 
 pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<Option<u64>> {
     let path = socket_from_environment()?;
 
-    if let Some(panel_state) = read_panel_state(&path)? {
-        match panel_state {
-            PanelState::Text(editing_id) => {
-                if let Some(text) = request_text_and_close(&path)? {
-                    wait_for_socket_removal(&path)?;
-                    cleanup_panel_state(&path)?;
-                    if !store.edit_text(editing_id, text)? {
-                        bail!("clipboard item no longer exists");
-                    }
-                    return Ok(Some(editing_id));
-                }
+    if let Some(reply) = request(&path, SAVE_AND_CLOSE, 0, &[])? {
+        wait_for_socket_removal(&path)?;
+        if let SwitchReply::Ready(snapshot) = reply {
+            if let Some(snapshot) = snapshot {
+                return save_snapshot(store, snapshot);
             }
-            PanelState::Image(previewing_id) => {
-                if send(&path, CLOSE, 0, &[])? {
-                    wait_for_socket_removal(&path)?;
-                    cleanup_panel_state(&path)?;
-                    return Ok(Some(previewing_id));
-                }
-            }
+        } else {
+            bail!("preview panel returned an invalid save response");
         }
-        // The state file outlived its panel. Remove both before opening the
-        // currently selected item.
-        cleanup_session(&path)?;
     }
+    cleanup_socket(&path)?;
 
     let Some(selected_id) = selected_id else {
         return Ok(None);
@@ -110,22 +106,9 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
         return Ok(None);
     };
 
-    if send(&path, CLOSE, 0, &[])? {
-        // Close a stale panel before opening the selected item.
-        wait_for_socket_removal(&path)?;
-    } else {
-        cleanup_socket(&path)?;
-    }
-
-    let panel_state = match &content {
-        PanelContent::Text(_) => PanelState::Text(selected_id),
-        PanelContent::Image(_) => PanelState::Image(selected_id),
-    };
-    write_panel_state(&path, panel_state)?;
-
-    let launch_result = match content {
-        PanelContent::Text(text) => launch_text_editor(&path, &text),
-        PanelContent::Image(image_path) => launch_image_preview(&path, &image_path),
+    let launch_result = match &content {
+        PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
+        PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
     };
     if let Err(error) = launch_result {
         let _ = send(&path, CLOSE, 0, &[]);
@@ -136,19 +119,48 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
     Ok(Some(selected_id))
 }
 
-fn launch_text_editor(path: &Path, text: &str) -> Result<()> {
-    launch_panel(path, &TEXT_EDITOR_ARGUMENTS, text, None)
+pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
+    let Some(path) = env::var_os(SOCKET_ENV).map(PathBuf::from) else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let store = ClipboardStore::discover()?;
+    let Some(content) = item_content(&store, id)? else {
+        return Ok(());
+    };
+    let Some(reply) = request(&path, PREPARE_SWITCH, serial, &id.to_be_bytes())? else {
+        return Ok(());
+    };
+    let SwitchReply::Ready(snapshot) = reply else {
+        return Ok(());
+    };
+
+    if let Some(snapshot) = snapshot {
+        let _ = save_snapshot(&store, snapshot)?;
+    }
+    let _ = send_content(&path, serial, id, &content)?;
+    Ok(())
 }
 
-fn launch_image_preview(path: &Path, image_path: &Path) -> Result<()> {
-    launch_panel(path, &IMAGE_PREVIEW_ARGUMENTS, "", Some(image_path))
+fn launch_text_editor(path: &Path, id: u64, text: &str) -> Result<()> {
+    let content = PanelContent::Text(text.to_owned());
+    launch_panel(path, &TEXT_EDITOR_ARGUMENTS, text, id, &content)
+}
+
+fn launch_image_preview(path: &Path, id: u64, image_path: &Path) -> Result<()> {
+    let content = PanelContent::Image(image_path.to_path_buf());
+    launch_panel(path, &IMAGE_PREVIEW_ARGUMENTS, "", id, &content)
 }
 
 fn launch_panel(
     path: &Path,
     arguments: &[&str],
     initial_text: &str,
-    image_path: Option<&Path>,
+    id: u64,
+    content: &PanelContent,
 ) -> Result<()> {
     let mut command = Command::new(preview_panel_binary());
     command.args(arguments);
@@ -178,15 +190,8 @@ fn launch_panel(
     drop(input);
 
     wait_for_socket(&mut child, path)?;
-    if let Some(image_path) = image_path
-        && !send(
-            path,
-            UPDATE_IMAGE,
-            0,
-            image_path.as_os_str().as_bytes(),
-        )?
-    {
-        bail!("preview-panel closed before displaying the image");
+    if !send_content(path, 0, id, content)? {
+        bail!("preview-panel closed before displaying the selected item");
     }
     drop(child);
     Ok(())
@@ -236,68 +241,6 @@ fn socket_from_environment() -> Result<PathBuf> {
         .context("preview panel is only available inside rofi-clipboard")
 }
 
-fn panel_state_path(socket: &Path) -> PathBuf {
-    let mut path = socket.as_os_str().to_os_string();
-    path.push(".state");
-    PathBuf::from(path)
-}
-
-fn write_panel_state(socket: &Path, state: PanelState) -> Result<()> {
-    let path = panel_state_path(socket);
-    let value = match state {
-        PanelState::Text(id) => format!("text:{id}"),
-        PanelState::Image(id) => format!("image:{id}"),
-    };
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&path)
-        .with_context(|| format!("create preview panel state {}", path.display()))?;
-    writeln!(file, "{value}")
-        .with_context(|| format!("write preview panel state {}", path.display()))
-}
-
-fn read_panel_state(socket: &Path) -> Result<Option<PanelState>> {
-    let path = panel_state_path(socket);
-    let source = match fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("read preview panel state {}", path.display()));
-        }
-    };
-    parse_panel_state(&source)
-        .map(Some)
-        .with_context(|| format!("parse preview panel state {}", path.display()))
-}
-
-fn parse_panel_state(source: &str) -> Result<PanelState> {
-    let (kind, id) = source
-        .trim()
-        .split_once(':')
-        .context("panel state must use kind:id")?;
-    let id = id.parse::<u64>().context("panel state ID must be numeric")?;
-    match kind {
-        "text" => Ok(PanelState::Text(id)),
-        "image" => Ok(PanelState::Image(id)),
-        _ => bail!("unknown panel state kind {kind:?}"),
-    }
-}
-
-fn cleanup_panel_state(socket: &Path) -> Result<()> {
-    let path = panel_state_path(socket);
-    if let Err(error) = fs::remove_file(&path)
-        && error.kind() != io::ErrorKind::NotFound
-    {
-        return Err(error)
-            .with_context(|| format!("remove preview panel state {}", path.display()));
-    }
-    Ok(())
-}
-
 fn item_content(store: &ClipboardStore, id: u64) -> Result<Option<PanelContent>> {
     let history = store.load()?;
     Ok(history
@@ -316,42 +259,124 @@ fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<Pa
     }
 }
 
-fn request_text_and_close(path: &Path) -> Result<Option<String>> {
+fn save_snapshot(store: &ClipboardStore, snapshot: PanelSnapshot) -> Result<Option<u64>> {
+    let (id, text) = match snapshot {
+        PanelSnapshot::Image { id } => return Ok(Some(id)),
+        PanelSnapshot::Text { id, text } => (id, text),
+    };
+
+    let changed = {
+        let history = store.load()?;
+        let Some(item) = history.items.iter().find(|item| item.id == id) else {
+            return Ok(None);
+        };
+        text_is_changed(item, &text)?
+    };
+    if !changed {
+        return Ok(Some(id));
+    }
+
+    if store.edit_text(id, text)? {
+        Ok(Some(id))
+    } else {
+        Ok(None)
+    }
+}
+
+fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
+    if item.kind != ItemKind::Text {
+        bail!("images cannot be edited as text");
+    }
+    Ok(item.text.as_deref() != Some(text))
+}
+
+fn send_content(path: &Path, serial: u64, id: u64, content: &PanelContent) -> Result<bool> {
+    let mut payload = id.to_be_bytes().to_vec();
+    let operation = match content {
+        PanelContent::Text(text) => {
+            payload.extend_from_slice(text.as_bytes());
+            UPDATE_TEXT
+        }
+        PanelContent::Image(image_path) => {
+            payload.extend_from_slice(image_path.as_os_str().as_bytes());
+            UPDATE_IMAGE
+        }
+    };
+    send(path, operation, serial, &payload)
+}
+
+fn request(path: &Path, operation: u8, serial: u64, payload: &[u8]) -> Result<Option<SwitchReply>> {
     let Some(mut stream) = connect(path)? else {
         return Ok(None);
     };
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .with_context(|| format!("set preview socket timeout {}", path.display()))?;
-    write_frame(&mut stream, SAVE_AND_CLOSE, 0, &[])
-        .with_context(|| format!("request edited text from {}", path.display()))?;
-    read_saved_text(&mut stream)
+    write_frame(&mut stream, operation, serial, payload)
+        .with_context(|| format!("request panel state from {}", path.display()))?;
+    read_switch_reply(&mut stream, serial)
         .map(Some)
-        .with_context(|| format!("read edited text from {}", path.display()))
+        .with_context(|| format!("read panel state from {}", path.display()))
 }
 
-fn read_saved_text(mut reader: impl Read) -> io::Result<String> {
+fn read_switch_reply(mut reader: impl Read, expected_serial: u64) -> io::Result<SwitchReply> {
     let mut header = [0_u8; HEADER_SIZE];
     reader.read_exact(&mut header)?;
-    if header[0] != SAVED_TEXT {
+    if header[0] != PANEL_STATE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "preview panel returned an unknown response",
         ));
     }
+    let serial = u64::from_be_bytes(header[1..9].try_into().expect("fixed serial length"));
+    if serial != expected_serial {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "preview panel returned a mismatched selection serial",
+        ));
+    }
     let length = u64::from_be_bytes(header[9..17].try_into().expect("fixed payload length"));
     let length = usize::try_from(length)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "response is too large"))?;
-    if length > MAX_PAYLOAD_BYTES {
+    if !(10..=MAX_PAYLOAD_BYTES).contains(&length) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "response is too large",
+            "preview panel returned an invalid state response",
         ));
     }
 
     let mut bytes = vec![0; length];
     reader.read_exact(&mut bytes)?;
-    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    let disposition = bytes[0];
+    let kind = bytes[1];
+    let id = u64::from_be_bytes(bytes[2..10].try_into().expect("fixed item ID length"));
+    let content = &bytes[10..];
+
+    match disposition {
+        SWITCH_REJECTED if kind == CONTENT_NONE && id == 0 && content.is_empty() => {
+            Ok(SwitchReply::Rejected)
+        }
+        SWITCH_SAME_ITEM if kind == CONTENT_NONE && id == 0 && content.is_empty() => {
+            Ok(SwitchReply::SameItem)
+        }
+        SWITCH_READY => match kind {
+            CONTENT_NONE if id == 0 && content.is_empty() => Ok(SwitchReply::Ready(None)),
+            CONTENT_TEXT => String::from_utf8(content.to_vec())
+                .map(|text| SwitchReply::Ready(Some(PanelSnapshot::Text { id, text })))
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
+            CONTENT_IMAGE if content.is_empty() => {
+                Ok(SwitchReply::Ready(Some(PanelSnapshot::Image { id })))
+            }
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "preview panel returned an invalid content state",
+            )),
+        },
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "preview panel returned an invalid switch response",
+        )),
+    }
 }
 
 fn connect(path: &Path) -> Result<Option<UnixStream>> {
@@ -477,29 +502,42 @@ mod tests {
     }
 
     #[test]
-    fn saved_text_response_preserves_the_complete_buffer() {
+    fn panel_response_preserves_item_ownership_and_complete_buffer() {
         let text = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
+        let mut payload = vec![SWITCH_READY, CONTENT_TEXT];
+        payload.extend_from_slice(&73_u64.to_be_bytes());
+        payload.extend_from_slice(text.as_bytes());
         let mut frame = Vec::new();
-        write_frame(&mut frame, SAVED_TEXT, 0, text.as_bytes()).unwrap();
+        write_frame(&mut frame, PANEL_STATE, 29, &payload).unwrap();
 
-        assert_eq!(read_saved_text(frame.as_slice()).unwrap(), text);
-    }
-
-    #[test]
-    fn panel_state_uses_a_session_scoped_sibling_path() {
         assert_eq!(
-            panel_state_path(Path::new("/run/user/1000/preview.sock")),
-            PathBuf::from("/run/user/1000/preview.sock.state")
+            read_switch_reply(frame.as_slice(), 29).unwrap(),
+            SwitchReply::Ready(Some(PanelSnapshot::Text {
+                id: 73,
+                text: text.to_owned(),
+            }))
         );
     }
 
     #[test]
-    fn panel_state_distinguishes_editable_text_from_image_preview() {
-        assert_eq!(parse_panel_state("text:17\n").unwrap(), PanelState::Text(17));
-        assert_eq!(
-            parse_panel_state("image:23\n").unwrap(),
-            PanelState::Image(23)
-        );
+    fn rejected_and_same_item_responses_are_distinct() {
+        for (disposition, expected) in [
+            (SWITCH_REJECTED, SwitchReply::Rejected),
+            (SWITCH_SAME_ITEM, SwitchReply::SameItem),
+        ] {
+            let mut payload = vec![disposition, CONTENT_NONE];
+            payload.extend_from_slice(&0_u64.to_be_bytes());
+            let mut frame = Vec::new();
+            write_frame(&mut frame, PANEL_STATE, 7, &payload).unwrap();
+            assert_eq!(read_switch_reply(frame.as_slice(), 7).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unchanged_text_does_not_need_a_database_rewrite() {
+        let item = item(ItemKind::Text, Some("typed text"), None);
+        assert!(!text_is_changed(&item, "typed text").unwrap());
+        assert!(text_is_changed(&item, "modified text").unwrap());
     }
 
     #[test]

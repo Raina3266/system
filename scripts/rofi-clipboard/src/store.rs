@@ -166,10 +166,17 @@ impl ClipboardStore {
 
     pub fn pin(&self, id: u64) -> Result<bool> {
         self.update(|history| {
-            let Some(item) = history.items.iter_mut().find(|item| item.id == id) else {
+            let Some(position) = history.items.iter().position(|item| item.id == id) else {
                 return Ok(false);
             };
+
+            let mut item = history.items.remove(position);
             item.pinned = !item.pinned;
+            if item.pinned {
+                history.items.insert(0, item);
+            } else {
+                history.items.push(item);
+            }
             Ok(true)
         })
     }
@@ -260,6 +267,7 @@ impl ClipboardStore {
         let lock = self.lock(true)?;
         let mut history = self.load_unlocked()?;
         let result = operation(&mut history)?;
+        order_pinned_first(&mut history);
         let removed_images = trim_history(&mut history);
         self.save_unlocked(&history)?;
         unlock(&lock)?;
@@ -329,6 +337,13 @@ impl ClipboardStore {
         let json = history.to_json()?;
         write_atomic(&self.history_path, json.as_bytes())
     }
+}
+
+fn order_pinned_first(history: &mut History) {
+    // Stable sorting keeps the existing newest-first order inside each
+    // section while repairing older histories that mixed pinned and normal
+    // items together.
+    history.items.sort_by_key(|item| !item.pinned);
 }
 
 fn trim_history(history: &mut History) -> Vec<String> {
@@ -537,6 +552,78 @@ mod tests {
         );
         assert_eq!(history.items.first().map(|item| item.id), Some(101));
         assert!(store.image_dir.join("101.png").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn pinning_moves_items_to_top_and_unpinning_moves_them_to_normal_bottom() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let older_text = store
+            .add_text("older text".to_owned(), "text/plain".to_owned())?
+            .unwrap();
+        let image = store
+            .add_image(b"image bytes", "image/png".to_owned())?
+            .unwrap();
+        let newer_text = store
+            .add_text("newer text".to_owned(), "text/plain".to_owned())?
+            .unwrap();
+
+        assert!(store.pin(image)?);
+        assert!(store.pin(older_text)?);
+        assert_eq!(
+            store
+                .load()?
+                .items
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![older_text, image, newer_text]
+        );
+
+        assert!(store.pin(image)?);
+        let history = store.load()?;
+        assert_eq!(
+            history.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![older_text, newer_text, image]
+        );
+        assert!(history.items[0].pinned);
+        assert!(!history.items[1].pinned);
+        assert!(!history.items[2].pinned);
+        Ok(())
+    }
+
+    #[test]
+    fn new_items_stay_below_pins_and_existing_history_is_repaired() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let mut history = History::default();
+        history.next_id = 5;
+        history.items = vec![
+            item(1, ItemKind::Text),
+            ClipboardItem {
+                pinned: true,
+                ..item(2, ItemKind::Image)
+            },
+            item(3, ItemKind::Image),
+            ClipboardItem {
+                pinned: true,
+                ..item(4, ItemKind::Text)
+            },
+        ];
+        store.save_unlocked(&history)?;
+
+        let new_id = store
+            .add_text("new item".to_owned(), "text/plain".to_owned())?
+            .unwrap();
+        let history = store.load()?;
+
+        assert_eq!(
+            history.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![2, 4, new_id, 1, 3]
+        );
+        assert!(history.items[..2].iter().all(|item| item.pinned));
+        assert!(history.items[2..].iter().all(|item| !item.pinned));
         Ok(())
     }
 }

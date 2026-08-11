@@ -87,6 +87,10 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let modes = format!(
         "pinned:{executable} script pinned,text:{executable} script text,images:{executable} script images"
     );
+    let selection_command = format!(
+        "{} preview-selection {{completion}} {{selection-serial}}",
+        shell_quote(&executable)
+    );
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
     command
@@ -109,6 +113,8 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
             "Alt+d",
             "-kb-custom-3",
             "Alt+e",
+            "-on-selection-changed",
+            &selection_command,
             "-theme",
         ])
         .arg(theme);
@@ -382,6 +388,9 @@ fn rofi_binary() -> PathBuf {
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
 
 #[cfg(test)]
 mod tests {
@@ -457,4 +466,12 @@ mod tests {
         assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
     }
 
+    #[test]
+    fn selection_callback_executable_is_shell_quoted() {
+        assert_eq!(
+            shell_quote("/nix/store/example/bin/tool"),
+            "'/nix/store/example/bin/tool'"
+        );
+        assert_eq!(shell_quote("/tmp/raina's tool"), "'/tmp/raina'\\''s tool'");
+    }
 }

@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod document;
 mod ipc;
+mod panel_state;
 mod ui;
 
 use crate::cli::Action;

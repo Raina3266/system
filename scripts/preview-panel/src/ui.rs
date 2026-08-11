@@ -14,7 +14,8 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::cli::{Options, Side, WindowOverrides};
 use crate::config::{self, Config, WindowConfig};
-use crate::ipc::Message;
+use crate::ipc::{ContentSnapshot, Message, SwitchReply};
+use crate::panel_state::{ContentKind, CurrentItem, LiveState, SwitchDisposition};
 
 const CONFIG_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -351,12 +352,12 @@ fn connect_live_updates(
     let stack = stack.clone();
     let text_view = text_view.clone();
     let picture = picture.clone();
-    let mut latest_serial = 0;
+    let mut state = LiveState::default();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(message) = receiver.try_recv() {
             match message {
-                Message::UpdateText { serial, text } => {
-                    if !accept_serial(&mut latest_serial, serial) {
+                Message::UpdateText { serial, id, text } => {
+                    if !state.apply_update(serial, id, ContentKind::Text) {
                         continue;
                     }
                     let buffer = text_view.buffer();
@@ -366,19 +367,29 @@ fn connect_live_updates(
                     text_view.scroll_to_iter(&mut start, 0.0, false, 0.0, 0.0);
                     stack.set_visible_child_name("text");
                 }
-                Message::UpdateImage { serial, path } => {
-                    if !accept_serial(&mut latest_serial, serial) {
+                Message::UpdateImage { serial, id, path } => {
+                    if !state.apply_update(serial, id, ContentKind::Image) {
                         continue;
                     }
                     picture.set_filename(Some(path.as_path()));
                     stack.set_visible_child_name("image");
                 }
+                Message::PrepareSwitch {
+                    serial,
+                    target_id,
+                    reply,
+                } => {
+                    let response = match state.prepare_switch(serial, target_id) {
+                        SwitchDisposition::Rejected => SwitchReply::Rejected,
+                        SwitchDisposition::SameItem => SwitchReply::SameItem,
+                        SwitchDisposition::Ready => {
+                            SwitchReply::Ready(current_snapshot(&state, &text_view))
+                        }
+                    };
+                    let _ = reply.send(response);
+                }
                 Message::SaveAndClose { reply } => {
-                    let buffer = text_view.buffer();
-                    let text = buffer
-                        .text(&buffer.start_iter(), &buffer.end_iter(), true)
-                        .to_string();
-                    let _ = reply.send(text);
+                    let _ = reply.send(current_snapshot(&state, &text_view));
                     window.close();
                     application.quit();
                     return glib::ControlFlow::Break;
@@ -394,29 +405,29 @@ fn connect_live_updates(
     });
 }
 
-fn accept_serial(latest: &mut u64, candidate: u64) -> bool {
-    if candidate < *latest {
-        return false;
+fn current_snapshot(state: &LiveState, text_view: &TextView) -> Option<ContentSnapshot> {
+    match state.current? {
+        CurrentItem {
+            id,
+            kind: ContentKind::Text,
+        } => {
+            let buffer = text_view.buffer();
+            let text = buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), true)
+                .to_string();
+            Some(ContentSnapshot::Text { id, text })
+        }
+        CurrentItem {
+            id,
+            kind: ContentKind::Image,
+        } => Some(ContentSnapshot::Image { id }),
     }
-    *latest = candidate;
-    true
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        accept_serial, companion_margin, horizontal_margin, vertical_margin,
-    };
+    use super::{companion_margin, horizontal_margin, vertical_margin};
     use crate::cli::Side;
-
-    #[test]
-    fn rapid_updates_cannot_restore_an_older_selection() {
-        let mut latest = 0;
-        assert!(accept_serial(&mut latest, 8));
-        assert!(!accept_serial(&mut latest, 6));
-        assert_eq!(latest, 8);
-        assert!(accept_serial(&mut latest, 9));
-    }
 
     #[test]
     fn companion_margin_places_the_panel_beside_a_centered_window() {

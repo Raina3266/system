@@ -1,14 +1,112 @@
-final: prev: {
-  # Pinned to the merge commit of PR #2272, which implements
-  # click-to-exit on Wayland (fullscreen capture surface).
-  rofi-unwrapped = prev.rofi-unwrapped.overrideAttrs (_: {
+final: prev:
+
+let
+  # Rofi commit containing Wayland click-to-exit support from PR #2272.
+  rofiRevision = "6d2a5281e45dee92dfbdaf6f9ba6081c4c608682";
+  rofiSourceHash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
+
+  # Extend -on-selection-changed with two placeholders used by the clipboard
+  # editor. {completion} is the stable clipboard item ID and
+  # {selection-serial} lets Rust reject stale callbacks during fast navigation.
+  selectionChangedCompletionPatch = final.writeText
+    "on-selection-changed-completion.patch"
+    ''
+      diff --git a/doc/rofi-actions.5.markdown b/doc/rofi-actions.5.markdown
+      --- a/doc/rofi-actions.5.markdown
+      +++ b/doc/rofi-actions.5.markdown
+      @@ -16,7 +16,10 @@ Following is the list of rofi flags for specifying custom commands or scripts t
+      ${" "}
+       `-on-selection-changed` *cmd*
+      ${" "}
+      -Command or script to run when the current selection changes. Selected text is forwarded to the command replacing the pattern *{entry}*.
+      +Command or script to run when the current selection changes. Selected display
+      +text replaces *{entry}*. For script modes, the original row value replaces
+      +*{completion}*. A monotonically increasing callback number replaces
+      +*{selection-serial}*.
+      ${" "}
+       `-on-entry-accepted` *cmd*
+      ${" "}
+      diff --git a/source/modes/script.c b/source/modes/script.c
+      --- a/source/modes/script.c
+      +++ b/source/modes/script.c
+      @@ -508,6 +508,11 @@ static char *_get_display_value(const Mode *sw, unsigned int selected_line,
+         }
+       }
+      ${" "}
+      +static char *script_get_completion(const Mode *sw, unsigned int selected_line) {
+      +  ScriptModePrivateData *pd = sw->private_data;
+      +  return g_strdup(pd->cmd_list[selected_line].entry);
+      +}
+      +
+       static int script_token_match(const Mode *sw, rofi_int_matcher **tokens,
+                                     unsigned int index) {
+         ScriptModePrivateData *rmpd = sw->private_data;
+      @@ -678,7 +683,8 @@ Mode *script_mode_parse_setup(const char *str) {
+           sw->_token_match = script_token_match;
+           sw->_get_message = script_get_message;
+           sw->_get_icon = script_get_icon;
+      -    sw->_get_completion = NULL, sw->_preprocess_input = NULL,
+      +    sw->_get_completion = script_get_completion;
+      +    sw->_preprocess_input = NULL;
+           sw->_get_display_value = _get_display_value;
+           sw->type = MODE_TYPE_SWITCHER;
+           return sw;
+      @@ -702,7 +708,8 @@ Mode *script_mode_parse_setup(const char *str) {
+           sw->_token_match = script_token_match;
+           sw->_get_message = script_get_message;
+           sw->_get_icon = script_get_icon;
+      -    sw->_get_completion = NULL, sw->_preprocess_input = NULL,
+      +    sw->_get_completion = script_get_completion;
+      +    sw->_preprocess_input = NULL;
+           sw->_get_display_value = _get_display_value;
+           sw->type = MODE_TYPE_SWITCHER;
+      ${" "}
+      diff --git a/source/view.c b/source/view.c
+      --- a/source/view.c
+      +++ b/source/view.c
+      @@ -652,5 +652,7 @@ inline static void rofi_view_nav_last(RofiViewState *state) {
+         listview_set_selected(state->list_view, -1);
+       }
+      +static guint64 selection_changed_serial = 0;
+      +
+       static void selection_changed_user_callback(unsigned int index,
+                                                   RofiViewState *state) {
+         if (config.on_selection_changed == NULL)
+      @@ -660,12 +662,18 @@ static void selection_changed_user_callback(unsigned int index,
+         int fstate = 0;
+         char *text = mode_get_display_value(state->sw, state->line_map[index],
+                                             &fstate, NULL, TRUE);
+      +  char *completion = mode_get_completion(state->sw, state->line_map[index]);
+      +  char *serial = g_strdup_printf("%" G_GUINT64_FORMAT,
+      +                                 ++selection_changed_serial);
+         char **args = NULL;
+         int argv = 0;
+      -  helper_parse_setup(config.on_selection_changed, &args, &argv, "{entry}", text,
+      -                     (char *)0);
+      +  helper_parse_setup(config.on_selection_changed, &args, &argv,
+      +                     "{entry}", text, "{completion}", completion,
+      +                     "{selection-serial}", serial, (char *)0);
+         if (args != NULL)
+           helper_execute(NULL, args, "", config.on_selection_changed, NULL);
+      +  g_free(serial);
+      +  g_free(completion);
+         g_free(text);
+       }
+       static void selection_changed_callback(G_GNUC_UNUSED listview *lv,
+    '';
+in
+{
+  rofi-unwrapped = prev.rofi-unwrapped.overrideAttrs (oldAttrs: {
     version = "2.0.0-dev";
+
     src = final.fetchFromGitHub {
       owner = "davatorium";
       repo = "rofi";
-      rev = "6d2a5281e45dee92dfbdaf6f9ba6081c4c608682";
+      rev = rofiRevision;
       fetchSubmodules = true;
-      hash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
+      hash = rofiSourceHash;
     };
+
+    patches = (oldAttrs.patches or [ ]) ++ [ selectionChangedCompletionPatch ];
   });
 }

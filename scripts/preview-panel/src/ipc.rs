@@ -13,23 +13,61 @@ const UPDATE_TEXT: u8 = 1;
 const CLOSE: u8 = 2;
 const UPDATE_IMAGE: u8 = 3;
 const SAVE_AND_CLOSE: u8 = 4;
-const SAVED_TEXT: u8 = 5;
+const PANEL_STATE: u8 = 5;
+const PREPARE_SWITCH: u8 = 6;
 const HEADER_SIZE: usize = 17;
+const ITEM_ID_SIZE: usize = 8;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const SAVE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+const SWITCH_REJECTED: u8 = 0;
+const SWITCH_SAME_ITEM: u8 = 1;
+const SWITCH_READY: u8 = 2;
+const CONTENT_NONE: u8 = 0;
+const CONTENT_TEXT: u8 = 1;
+const CONTENT_IMAGE: u8 = 2;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ContentSnapshot {
+    Text { id: u64, text: String },
+    Image { id: u64 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SwitchReply {
+    Rejected,
+    SameItem,
+    Ready(Option<ContentSnapshot>),
+}
+
 #[derive(Debug)]
 pub enum Message {
-    UpdateText { serial: u64, text: String },
-    UpdateImage { serial: u64, path: PathBuf },
-    SaveAndClose { reply: Sender<String> },
+    UpdateText {
+        serial: u64,
+        id: u64,
+        text: String,
+    },
+    UpdateImage {
+        serial: u64,
+        id: u64,
+        path: PathBuf,
+    },
+    PrepareSwitch {
+        serial: u64,
+        target_id: u64,
+        reply: Sender<SwitchReply>,
+    },
+    SaveAndClose {
+        reply: Sender<Option<ContentSnapshot>>,
+    },
     Close,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Request {
-    UpdateText { serial: u64, text: String },
-    UpdateImage { serial: u64, path: PathBuf },
+    UpdateText { serial: u64, id: u64, text: String },
+    UpdateImage { serial: u64, id: u64, path: PathBuf },
+    PrepareSwitch { serial: u64, target_id: u64 },
     SaveAndClose,
     Close,
 }
@@ -88,26 +126,47 @@ pub fn bind(path: &Path) -> io::Result<(Receiver<Message>, SocketGuard)> {
 
 fn handle_connection(stream: &mut UnixStream, sender: &Sender<Message>) -> io::Result<bool> {
     match read_request(&mut *stream)? {
-        Request::UpdateText { serial, text } => {
-            send_to_ui(sender, Message::UpdateText { serial, text })?;
+        Request::UpdateText { serial, id, text } => {
+            send_to_ui(sender, Message::UpdateText { serial, id, text })?;
             Ok(false)
         }
-        Request::UpdateImage { serial, path } => {
-            send_to_ui(sender, Message::UpdateImage { serial, path })?;
+        Request::UpdateImage { serial, id, path } => {
+            send_to_ui(sender, Message::UpdateImage { serial, id, path })?;
+            Ok(false)
+        }
+        Request::PrepareSwitch { serial, target_id } => {
+            let (reply, response) = mpsc::channel();
+            send_to_ui(
+                sender,
+                Message::PrepareSwitch {
+                    serial,
+                    target_id,
+                    reply,
+                },
+            )?;
+            let response = response
+                .recv_timeout(SAVE_RESPONSE_TIMEOUT)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("wait for current panel state: {error}"),
+                    )
+                })?;
+            write_panel_state(stream, serial, &response)?;
             Ok(false)
         }
         Request::SaveAndClose => {
             let (reply, response) = mpsc::channel();
             send_to_ui(sender, Message::SaveAndClose { reply })?;
-            let text = response
+            let snapshot = response
                 .recv_timeout(SAVE_RESPONSE_TIMEOUT)
                 .map_err(|error| {
                     io::Error::new(
                         io::ErrorKind::TimedOut,
-                        format!("wait for edited text: {error}"),
+                        format!("wait for current panel state: {error}"),
                     )
                 })?;
-            write_saved_text(stream, &text)?;
+            write_panel_state(stream, 0, &SwitchReply::Ready(snapshot))?;
             Ok(true)
         }
         Request::Close => {
@@ -140,20 +199,31 @@ fn read_request(mut reader: impl Read) -> io::Result<Request> {
 
     match operation {
         UPDATE_TEXT => {
-            let mut bytes = vec![0; length];
-            reader.read_exact(&mut bytes)?;
+            let (id, bytes) = read_item_payload(&mut reader, length)?;
             String::from_utf8(bytes)
-                .map(|text| Request::UpdateText { serial, text })
+                .map(|text| Request::UpdateText { serial, id, text })
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
         }
         UPDATE_IMAGE => {
-            let mut bytes = vec![0; length];
-            reader.read_exact(&mut bytes)?;
+            let (id, bytes) = read_item_payload(&mut reader, length)?;
             Ok(Request::UpdateImage {
                 serial,
+                id,
                 path: PathBuf::from(OsString::from_vec(bytes)),
             })
         }
+        PREPARE_SWITCH if length == ITEM_ID_SIZE => {
+            let mut bytes = [0_u8; ITEM_ID_SIZE];
+            reader.read_exact(&mut bytes)?;
+            Ok(Request::PrepareSwitch {
+                serial,
+                target_id: u64::from_be_bytes(bytes),
+            })
+        }
+        PREPARE_SWITCH => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "prepare-switch message must contain one item ID",
+        )),
         CLOSE if length == 0 => Ok(Request::Close),
         CLOSE => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -171,11 +241,55 @@ fn read_request(mut reader: impl Read) -> io::Result<Request> {
     }
 }
 
-fn write_saved_text(mut writer: impl Write, text: &str) -> io::Result<()> {
-    writer.write_all(&[SAVED_TEXT])?;
-    writer.write_all(&0_u64.to_be_bytes())?;
-    writer.write_all(&(text.len() as u64).to_be_bytes())?;
-    writer.write_all(text.as_bytes())
+fn read_item_payload(mut reader: impl Read, length: usize) -> io::Result<(u64, Vec<u8>)> {
+    if length < ITEM_ID_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "item update is missing its clipboard item ID",
+        ));
+    }
+    let mut id = [0_u8; ITEM_ID_SIZE];
+    reader.read_exact(&mut id)?;
+    let mut bytes = vec![0; length - ITEM_ID_SIZE];
+    reader.read_exact(&mut bytes)?;
+    Ok((u64::from_be_bytes(id), bytes))
+}
+
+fn write_panel_state(mut writer: impl Write, serial: u64, reply: &SwitchReply) -> io::Result<()> {
+    let mut payload = Vec::new();
+    match reply {
+        SwitchReply::Rejected => {
+            payload.extend_from_slice(&[SWITCH_REJECTED, CONTENT_NONE]);
+            payload.extend_from_slice(&0_u64.to_be_bytes());
+        }
+        SwitchReply::SameItem => {
+            payload.extend_from_slice(&[SWITCH_SAME_ITEM, CONTENT_NONE]);
+            payload.extend_from_slice(&0_u64.to_be_bytes());
+        }
+        SwitchReply::Ready(snapshot) => {
+            payload.push(SWITCH_READY);
+            match snapshot {
+                None => {
+                    payload.push(CONTENT_NONE);
+                    payload.extend_from_slice(&0_u64.to_be_bytes());
+                }
+                Some(ContentSnapshot::Text { id, text }) => {
+                    payload.push(CONTENT_TEXT);
+                    payload.extend_from_slice(&id.to_be_bytes());
+                    payload.extend_from_slice(text.as_bytes());
+                }
+                Some(ContentSnapshot::Image { id }) => {
+                    payload.push(CONTENT_IMAGE);
+                    payload.extend_from_slice(&id.to_be_bytes());
+                }
+            }
+        }
+    }
+
+    writer.write_all(&[PANEL_STATE])?;
+    writer.write_all(&serial.to_be_bytes())?;
+    writer.write_all(&(payload.len() as u64).to_be_bytes())?;
+    writer.write_all(&payload)
 }
 
 #[cfg(test)]
@@ -193,14 +307,27 @@ mod tests {
         bytes
     }
 
+    fn item_frame(operation: u8, serial: u64, id: u64, payload: &[u8]) -> Vec<u8> {
+        let mut item = id.to_be_bytes().to_vec();
+        item.extend_from_slice(payload);
+        frame(operation, serial, &item)
+    }
+
     #[test]
     fn update_preserves_whitespace_and_unicode_exactly() {
         let text = "heading\r\n\t  first    value\n\n中文 👩🏽‍💻  \n";
-        let message = read_request(Cursor::new(frame(UPDATE_TEXT, 17, text.as_bytes()))).unwrap();
+        let message = read_request(Cursor::new(item_frame(
+            UPDATE_TEXT,
+            17,
+            42,
+            text.as_bytes(),
+        )))
+        .unwrap();
         assert_eq!(
             message,
             Request::UpdateText {
                 serial: 17,
+                id: 42,
                 text: text.to_owned()
             }
         );
@@ -210,10 +337,33 @@ mod tests {
     fn image_update_preserves_the_cached_file_path() {
         let path = "/home/raina/.local/share/rofi-clipboard/images/7.png";
         assert_eq!(
-            read_request(Cursor::new(frame(UPDATE_IMAGE, 19, path.as_bytes()))).unwrap(),
+            read_request(Cursor::new(item_frame(
+                UPDATE_IMAGE,
+                19,
+                7,
+                path.as_bytes()
+            )))
+            .unwrap(),
             Request::UpdateImage {
                 serial: 19,
+                id: 7,
                 path: PathBuf::from(path),
+            }
+        );
+    }
+
+    #[test]
+    fn prepare_switch_preserves_target_id_and_serial() {
+        assert_eq!(
+            read_request(Cursor::new(frame(
+                PREPARE_SWITCH,
+                23,
+                &91_u64.to_be_bytes()
+            )))
+            .unwrap(),
+            Request::PrepareSwitch {
+                serial: 23,
+                target_id: 91,
             }
         );
     }
@@ -239,18 +389,29 @@ mod tests {
     }
 
     #[test]
-    fn saved_text_response_preserves_the_complete_buffer() {
+    fn panel_state_response_preserves_item_id_and_complete_buffer() {
         let text = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
         let mut response = Vec::new();
-        write_saved_text(&mut response, text).unwrap();
+        write_panel_state(
+            &mut response,
+            31,
+            &SwitchReply::Ready(Some(ContentSnapshot::Text {
+                id: 77,
+                text: text.to_owned(),
+            })),
+        )
+        .unwrap();
 
-        assert_eq!(response[0], SAVED_TEXT);
-        assert_eq!(u64::from_be_bytes(response[1..9].try_into().unwrap()), 0);
+        assert_eq!(response[0], PANEL_STATE);
+        assert_eq!(u64::from_be_bytes(response[1..9].try_into().unwrap()), 31);
         assert_eq!(
             u64::from_be_bytes(response[9..17].try_into().unwrap()),
-            text.len() as u64
+            (10 + text.len()) as u64
         );
-        assert_eq!(&response[17..], text.as_bytes());
+        assert_eq!(response[17], SWITCH_READY);
+        assert_eq!(response[18], CONTENT_TEXT);
+        assert_eq!(u64::from_be_bytes(response[19..27].try_into().unwrap()), 77);
+        assert_eq!(&response[27..], text.as_bytes());
     }
 
     #[test]
@@ -262,15 +423,23 @@ mod tests {
 
         let edited = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
         match receiver.recv_timeout(Duration::from_secs(1)).unwrap() {
-            Message::SaveAndClose { reply } => reply.send(edited.to_owned()).unwrap(),
+            Message::SaveAndClose { reply } => reply
+                .send(Some(ContentSnapshot::Text {
+                    id: 55,
+                    text: edited.to_owned(),
+                }))
+                .unwrap(),
             message => panic!("expected save request, got {message:?}"),
         }
 
         let mut response = Vec::new();
         client.read_to_end(&mut response).unwrap();
         assert!(server.join().unwrap());
-        assert_eq!(response[0], SAVED_TEXT);
-        assert_eq!(&response[17..], edited.as_bytes());
+        assert_eq!(response[0], PANEL_STATE);
+        assert_eq!(response[17], SWITCH_READY);
+        assert_eq!(response[18], CONTENT_TEXT);
+        assert_eq!(u64::from_be_bytes(response[19..27].try_into().unwrap()), 55);
+        assert_eq!(&response[27..], edited.as_bytes());
     }
 
     #[test]

@@ -16,6 +16,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 - Image previews inside Rofi
 - Pin and delete actions
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
+- The open panel follows Rofi selection changes and saves modified text before switching items
 - Restores the selected item with its original MIME type
 - Detects local image files copied from a file manager
 - Deduplicates repeated clipboard entries
@@ -37,7 +38,8 @@ This repository contains two Rust utilities used by the desktop configuration:
 | `Enter` | Copy the selected item |
 | `Alt+P` | Pin or unpin the selected item |
 | `Alt+D` | Delete the selected item |
-| `Alt+E` | Open text for editing or show the full image; press again to save text or close the image |
+| `Alt+E` | Open text for editing or show the full image; press again to save and close the panel |
+| `Up` / `Down` while panel is open | Save modified text, then show the newly selected text or image |
 
 The interface contains three modes:
 
