@@ -87,8 +87,8 @@ fn build_window(
     text_view.set_hexpand(true);
     text_view.set_left_margin(14);
     text_view.set_monospace(true);
-    text_view.set_pixels_above_lines(1);
-    text_view.set_pixels_below_lines(1);
+    text_view.set_pixels_above_lines(2);
+    text_view.set_pixels_below_lines(2);
     text_view.set_right_margin(14);
     text_view.set_top_margin(12);
     text_view.set_bottom_margin(12);
