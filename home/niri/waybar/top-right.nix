@@ -49,7 +49,7 @@ in
   };
 
   "custom/clipboard" = {
-    format = "<span size='large'>󰕛 </span>";
+    format = "<span size='large'>󰍩</span>";
     tooltip-format = "Clipboard";
     on-click = "rofi-clipboard";
   };

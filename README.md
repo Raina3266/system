@@ -1,8 +1,8 @@
-# Scripts
+# Custom Scripts
 
 This repository contains two Rust utilities used by the desktop configuration:
 
-- [`rofi-clipboard`](#rofi-clipboard) — a Wayland clipboard history manager with a Rofi interface
+- [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 
 ## rofi-clipboard
@@ -11,10 +11,9 @@ This repository contains two Rust utilities used by the desktop configuration:
 
 ### Features
 
-- Separate views for memos, captured text, and images
+- Separate modes for memos, captured text, and images
 - Editable memos with selection-change autosave
-- Text and image clipboard history
-- Image previews inside Rofi
+- Text and Image previews inside Rofi
 - Pin and delete actions
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - The open panel follows Rofi selection changes and saves modified text before switching items
@@ -27,13 +26,6 @@ This repository contains two Rust utilities used by the desktop configuration:
 - Ignores empty and sensitive clipboard values
 - Keeps up to 2,000 history entries
 - Uses file locking and atomic writes to protect the history file
-
-### Requirements
-
-- Rust and Cargo
-- [Rofi](https://github.com/davatorium/rofi)
-- [wl-clipboard](https://github.com/bugaevc/wl-clipboard)
-- A Wayland session
 
 ### Controls
 
