@@ -53,8 +53,6 @@ in
 
   xdg.configFile."rofi/config.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/config.rasi";
-  xdg.configFile."rofi/rofi-network.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-network.rasi";
   xdg.configFile."rofi/rofi-finder.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-finder.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =

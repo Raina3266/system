@@ -155,6 +155,17 @@
         sane-airscan
       ];
     };
+    hardware.printers = {
+      ensureDefaultPrinter = "Canon-TS3350";
+      ensurePrinters = [
+        {
+          name = "Canon-TS3350";
+          location = "Home";
+          deviceUri = "ipp://192.168.2.217/ipp/print";
+          model = "everywhere";
+        }
+      ];
+    };
 
     environment.sessionVariables = {
       LIBVA_DRIVER_NAME = "iHD"; # Force intel-media-driver
