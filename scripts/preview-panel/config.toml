@@ -13,7 +13,7 @@ companion_width = 400
 
 # Use "left" or "right" and choose the space between Rofi and the panel.
 side = "left"
-gap = 10
+gap = 5
 
 [position]
 # Positive x moves right; negative x moves left.
@@ -28,6 +28,7 @@ window.preview-panel {
     background: rgba(14, 6, 22, 0.95);
     border: 1px solid rgba(255, 126, 219, 0.55);
     border-radius: 15px;
+    padding: 10px;
 }
 
 textview.preview-text,
@@ -36,7 +37,7 @@ textview.preview-text text {
     color: #cbe3e7;
     caret-color: #7afcff;
     font-family: "JetBrains Mono Nerd Font", monospace;
-    font-size: 11pt;
+    font-size: 12pt;
 }
 
 picture.preview-image {

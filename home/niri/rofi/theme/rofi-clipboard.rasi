@@ -8,7 +8,7 @@
     pink:     #FF7EDB;
     cyan:     #7AFCFF;
     amber:    #F29E74;
-    red:      #FF5C57;
+    red:      #800000;
     dim:      #5C6776;
 
     background-color: transparent;
@@ -90,34 +90,29 @@ listview {
 scrollbar {
     width: 4px;
     handle-width: 4px;
-    handle-color: @pink;
+    handle-color: rgba(255, 126, 219, 0.55);
     border: 0;
     margin: 0 0 0 5px;
 }
 
 /* Visible rows stay textual; stable IDs and full values travel separately. */
 element {
-    children: [ element-icon, element-text ];
+    children: [ element-text ];
     padding: 10px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.10);
 }
 
-element-icon {
-    enabled: false;
-    size: 400px;
-}
-
 element normal.active,
 element alternate.active {
-    border-color: rgba(122, 252, 255, 0.45);
+    border-color: @red;
     background-color: rgba(122, 252, 255, 0.07);
 }
 
 element selected.normal,
 element selected.active {
-    border-color: rgba(255, 126, 219, 0.65);
+    border-color: @pink;
     background-color: rgba(255, 126, 219, 0.10);
 }
 
@@ -164,8 +159,6 @@ button-pin {
 button-delete {
     content: "󰆴 Delete";
     action: "kb-custom-2";
-    border-color: rgba(255, 92, 87, 0.35);
-    text-color: @red;
 }
 
 button-edit {
