@@ -19,6 +19,7 @@ This repository contains two Rust utilities used by the desktop configuration:
 - The open panel follows Rofi selection changes and saves modified text before switching items
 - Restores the selected item with its original MIME type
 - Detects local image files copied from a file manager
+- Shows the saved file path for Niri screenshots
 - Deduplicates repeated clipboard entries
 - Ignores empty and sensitive clipboard values
 - Keeps up to 2,000 history entries
@@ -81,6 +82,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
 | `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
+| `ROFI_CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify and label saved screenshots (default: `~/Pictures/Screenshots`) |
 | `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
 | `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
 | `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of Rofi (default: `left`) |

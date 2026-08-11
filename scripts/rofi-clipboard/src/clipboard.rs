@@ -5,10 +5,17 @@ use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
 use crate::store::ClipboardStore;
+
+const SCREENSHOT_DIRECTORY_ENV: &str = "ROFI_CLIPBOARD_SCREENSHOT_DIR";
+const SCREENSHOT_MATCH_ATTEMPTS: usize = 20;
+const SCREENSHOT_MATCH_DELAY: Duration = Duration::from_millis(25);
+const SCREENSHOT_CANDIDATE_LIMIT: usize = 16;
 
 pub fn copy_item(store: &ClipboardStore, id: u64) -> Result<()> {
     let history = store.load()?;
@@ -69,7 +76,8 @@ pub fn capture_clipboard() -> Result<()> {
             }
             output.stdout
         };
-        let source = clipboard_image_source(&types)?;
+        let source = clipboard_image_source(&types)?
+            .or_else(|| screenshot_image_source(&types, &bytes));
         ClipboardStore::discover()?.add_image_named(&bytes, mime.to_owned(), source)?;
         return Ok(());
     }
@@ -172,6 +180,61 @@ fn clipboard_image_source(types: &str) -> Result<Option<String>> {
     }
 
     Ok(None)
+}
+
+fn screenshot_image_source(types: &str, bytes: &[u8]) -> Option<String> {
+    if !is_pathless_png(types) {
+        return None;
+    }
+
+    let directory = screenshot_directory()?;
+    for attempt in 0..SCREENSHOT_MATCH_ATTEMPTS {
+        if let Some(path) = matching_screenshot_path(&directory, bytes) {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        if attempt + 1 < SCREENSHOT_MATCH_ATTEMPTS {
+            thread::sleep(SCREENSHOT_MATCH_DELAY);
+        }
+    }
+    None
+}
+
+fn is_pathless_png(types: &str) -> bool {
+    let mut types = types.lines().filter(|mime| !mime.is_empty());
+    types.next() == Some("image/png") && types.next().is_none()
+}
+
+fn screenshot_directory() -> Option<PathBuf> {
+    env::var_os(SCREENSHOT_DIRECTORY_ENV)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .map(|home| home.join("Pictures/Screenshots"))
+        })
+}
+
+fn matching_screenshot_path(directory: &Path, bytes: &[u8]) -> Option<PathBuf> {
+    let mut candidates: Vec<_> = fs::read_dir(directory)
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() || metadata.len() != bytes.len() as u64 {
+                return None;
+            }
+            Some((metadata.modified().unwrap_or(UNIX_EPOCH), entry.path()))
+        })
+        .collect();
+
+    candidates
+        .sort_unstable_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    candidates
+        .into_iter()
+        .take(SCREENSHOT_CANDIDATE_LIMIT)
+        .find_map(|(_, path)| (fs::read(&path).ok().as_deref() == Some(bytes)).then_some(path))
 }
 
 fn is_browser_image_source_mime(mime: &str) -> bool {
@@ -461,6 +524,26 @@ fn env_binary(variable: &str, fallback: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::SystemTime;
+
+    struct TestDirectory(PathBuf);
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_directory() -> TestDirectory {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        TestDirectory(env::temp_dir().join(format!(
+            "rofi-clipboard-screenshot-test-{}-{unique}",
+            std::process::id()
+        )))
+    }
 
     #[test]
     fn decodes_utf8_clipboard_url() {
@@ -499,6 +582,47 @@ mod tests {
         assert_eq!(
             image_source_from_html(html).as_deref(),
             Some("https://example.com/image.png?a=1&b=2")
+        );
+    }
+
+    #[test]
+    fn recognizes_niri_pathless_png_selection() {
+        assert!(is_pathless_png("image/png\n"));
+        assert!(!is_pathless_png("image/png\ntext/plain\n"));
+        assert!(!is_pathless_png("image/jpeg\n"));
+    }
+
+    #[test]
+    fn finds_screenshot_with_identical_png_bytes() {
+        let directory = test_directory();
+        fs::create_dir_all(&directory.0).unwrap();
+        let matching = directory.0.join("Screenshot from 2026-08-11 12-00-00.png");
+        fs::write(&matching, b"same PNG bytes").unwrap();
+        fs::write(
+            directory.0.join("Screenshot from 2026-08-11 12-00-01.png"),
+            b"different bytes",
+        )
+        .unwrap();
+
+        assert_eq!(
+            matching_screenshot_path(&directory.0, b"same PNG bytes"),
+            Some(matching)
+        );
+    }
+
+    #[test]
+    fn does_not_guess_a_screenshot_path_from_length_alone() {
+        let directory = test_directory();
+        fs::create_dir_all(&directory.0).unwrap();
+        fs::write(
+            directory.0.join("Screenshot from 2026-08-11 12-00-00.png"),
+            b"different bytes",
+        )
+        .unwrap();
+
+        assert_eq!(
+            matching_screenshot_path(&directory.0, b"same byte count"),
+            None
         );
     }
 }
