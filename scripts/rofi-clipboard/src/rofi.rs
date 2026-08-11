@@ -10,6 +10,9 @@ use crate::model::{ClipboardItem, ItemKind};
 use crate::preview;
 use crate::store::ClipboardStore;
 
+const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
+const WAYLAND_KEYBOARD_MODE_ON_DEMAND: &str = "on-demand";
+
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
 
@@ -79,6 +82,13 @@ impl UiState {
     }
 }
 
+fn enable_companion_focus_switching(command: &mut Command) {
+    // The companion editor is another overlay layer surface. On-demand focus
+    // lets Niri transfer keyboard input between Rofi and that panel when
+    // either one is clicked.
+    command.env(WAYLAND_KEYBOARD_MODE_ENV, WAYLAND_KEYBOARD_MODE_ON_DEMAND);
+}
+
 pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let executable = env::current_exe().context("locate rofi-clipboard executable")?;
     let executable = executable.to_string_lossy();
@@ -93,6 +103,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     );
     let theme = theme_path()?;
     let mut command = Command::new(rofi_binary());
+    enable_companion_focus_switching(&mut command);
     command
         .env(preview::SOCKET_ENV, &preview_socket)
         .args([
@@ -490,6 +501,19 @@ mod tests {
 
         assert_eq!(row_preview(&memo), "New memo");
         assert_eq!(row_value(&memo), "");
+    }
+
+    #[test]
+    fn clipboard_rofi_allows_click_focus_to_move_to_the_editor() {
+        let mut command = Command::new("rofi");
+        enable_companion_focus_switching(&mut command);
+
+        let keyboard_mode = command
+            .get_envs()
+            .find(|(name, _)| *name == std::ffi::OsStr::new(WAYLAND_KEYBOARD_MODE_ENV))
+            .and_then(|(_, value)| value)
+            .and_then(std::ffi::OsStr::to_str);
+        assert_eq!(keyboard_mode, Some(WAYLAND_KEYBOARD_MODE_ON_DEMAND));
     }
 
     #[test]

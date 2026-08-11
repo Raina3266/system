@@ -94,6 +94,31 @@ let
        }
        static void selection_changed_callback(G_GNUC_UNUSED listview *lv,
     '';
+
+  # Rofi normally takes exclusive layer-shell keyboard focus, which prevents
+  # the clipboard's companion editor from receiving keys after it is clicked.
+  # Keep the upstream default unless this opt-in environment variable is set.
+  onDemandKeyboardPatch = final.writeText
+    "wayland-on-demand-keyboard.patch"
+    ''
+      diff --git a/source/wayland/display.c b/source/wayland/display.c
+      --- a/source/wayland/display.c
+      +++ b/source/wayland/display.c
+      @@ -1768,6 +1768,12 @@ static gboolean wayland_display_late_setup(void) {
+                                              ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+                                              ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+         zwlr_layer_surface_v1_set_size(wayland->wlr_surface, 0, 0);
+      -  zwlr_layer_surface_v1_set_keyboard_interactivity(wayland->wlr_surface, 1);
+      +  uint32_t keyboard_interactivity = 1;
+      +  if (g_strcmp0(g_getenv("ROFI_WAYLAND_KEYBOARD_MODE"), "on-demand") == 0) {
+      +    // Version 4 of wlr-layer-shell assigns 2 to the on-demand mode.
+      +    keyboard_interactivity = 2;
+      +  }
+      +  zwlr_layer_surface_v1_set_keyboard_interactivity(
+      +      wayland->wlr_surface, keyboard_interactivity);
+         zwlr_layer_surface_v1_add_listener(
+             wayland->wlr_surface, &wayland_layer_shell_surface_listener, NULL);
+     '';
 in
 {
   rofi-unwrapped = prev.rofi-unwrapped.overrideAttrs (oldAttrs: {
@@ -107,6 +132,9 @@ in
       hash = rofiSourceHash;
     };
 
-    patches = (oldAttrs.patches or [ ]) ++ [ selectionChangedCompletionPatch ];
+    patches = (oldAttrs.patches or [ ]) ++ [
+      selectionChangedCompletionPatch
+      onDemandKeyboardPatch
+    ];
   });
 }
