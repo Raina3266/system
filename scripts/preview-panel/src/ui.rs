@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{
-    gdk, gio, glib, Application, ApplicationWindow, CssProvider, PolicyType, ScrolledWindow,
-    Picture, Stack, TextView, WrapMode,
+    Application, ApplicationWindow, CssProvider, EventControllerMotion, Picture, PolicyType,
+    ScrolledWindow, Stack, TextView, WrapMode, gdk, gio, glib,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -18,6 +18,21 @@ use crate::ipc::{ContentSnapshot, Message, SwitchReply};
 use crate::panel_state::{ContentKind, CurrentItem, LiveState, SwitchDisposition};
 
 const CONFIG_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Copy)]
+enum PanelKeyboardState {
+    Browsing,
+    EditorArmed,
+}
+
+impl PanelKeyboardState {
+    fn mode(self) -> KeyboardMode {
+        match self {
+            Self::Browsing => KeyboardMode::None,
+            Self::EditorArmed => KeyboardMode::OnDemand,
+        }
+    }
+}
 
 pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) {
     // NON_UNIQUE is important for launchers: every Edit action gets its own
@@ -124,9 +139,13 @@ fn build_window(
     window.set_decorated(!options.panel);
     window.set_child(Some(&stack));
 
-    let panel_geometry = options
-        .panel
-        .then(|| configure_companion_panel(&window, panel_config));
+    let panel_geometry = options.panel.then(|| {
+        let geometry = configure_companion_panel(&window, panel_config);
+        if options.editable {
+            connect_panel_editor_focus(&window, &text_view);
+        }
+        geometry
+    });
     watch_config(
         &window,
         config_path,
@@ -238,7 +257,10 @@ fn configure_companion_panel(
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_namespace(Some("rofi-preview-panel"));
-    window.set_keyboard_mode(KeyboardMode::OnDemand);
+    // Rofi keeps keyboard focus while the pointer is in the list. The editor
+    // becomes focusable just before its first click instead of stealing focus
+    // as soon as the companion panel is mapped.
+    window.set_keyboard_mode(PanelKeyboardState::Browsing.mode());
 
     let geometry = Rc::new(RefCell::new(geometry));
     apply_companion_geometry(window, &geometry.borrow());
@@ -254,6 +276,20 @@ fn configure_companion_panel(
         apply_companion_geometry(window, &map_geometry.borrow());
     });
     geometry
+}
+
+fn connect_panel_editor_focus(window: &ApplicationWindow, text_view: &TextView) {
+    let motion = EventControllerMotion::new();
+    let window_for_enter = window.clone();
+    let text_view_for_enter = text_view.clone();
+    motion.connect_enter(move |_, _, _| {
+        // Wayland decides the keyboard target before delivering the click.
+        // Arm on pointer entry so that click can focus this layer surface and
+        // GTK can then route key events to the TextView.
+        window_for_enter.set_keyboard_mode(PanelKeyboardState::EditorArmed.mode());
+        text_view_for_enter.grab_focus();
+    });
+    text_view.add_controller(motion);
 }
 
 fn apply_companion_geometry(window: &ApplicationWindow, geometry: &WindowConfig) {
@@ -426,8 +462,21 @@ fn current_snapshot(state: &LiveState, text_view: &TextView) -> Option<ContentSn
 
 #[cfg(test)]
 mod tests {
-    use super::{companion_margin, horizontal_margin, vertical_margin};
+    use super::{PanelKeyboardState, companion_margin, horizontal_margin, vertical_margin};
     use crate::cli::Side;
+    use gtk4_layer_shell::KeyboardMode;
+
+    #[test]
+    fn panel_only_accepts_keyboard_focus_after_the_editor_is_armed() {
+        assert!(matches!(
+            PanelKeyboardState::Browsing.mode(),
+            KeyboardMode::None
+        ));
+        assert!(matches!(
+            PanelKeyboardState::EditorArmed.mode(),
+            KeyboardMode::OnDemand
+        ));
+    }
 
     #[test]
     fn companion_margin_places_the_panel_beside_a_centered_window() {
