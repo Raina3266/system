@@ -20,8 +20,15 @@ pub struct ClipboardItem {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {
+    Memo,
     Text,
     Image,
+}
+
+impl ItemKind {
+    pub fn is_textual(self) -> bool {
+        matches!(self, Self::Memo | Self::Text)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

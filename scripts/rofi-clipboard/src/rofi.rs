@@ -15,7 +15,7 @@ const UNIT_SEPARATOR: u8 = 0x1f;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
-    Pinned,
+    Memo,
     Text,
     Images,
 }
@@ -23,7 +23,7 @@ pub enum Mode {
 impl Mode {
     pub fn parse(value: &str) -> Result<Self> {
         match value.to_ascii_lowercase().as_str() {
-            "pinned" => Ok(Self::Pinned),
+            "memo" => Ok(Self::Memo),
             "text" => Ok(Self::Text),
             "images" => Ok(Self::Images),
             _ => bail!("unknown clipboard mode {value:?}"),
@@ -32,7 +32,7 @@ impl Mode {
 
     fn prompt(self) -> &'static str {
         match self {
-            Self::Pinned => "󰐃 Pinned",
+            Self::Memo => "󰍩 Memo",
             Self::Text => "󰦨 Text",
             Self::Images => "󰋩 Images",
         }
@@ -40,7 +40,7 @@ impl Mode {
 
     fn name(self) -> &'static str {
         match self {
-            Self::Pinned => "pinned",
+            Self::Memo => "memo",
             Self::Text => "text",
             Self::Images => "images",
         }
@@ -48,7 +48,7 @@ impl Mode {
 
     fn includes(self, item: &ClipboardItem) -> bool {
         match self {
-            Self::Pinned => item.pinned,
+            Self::Memo => item.kind == ItemKind::Memo,
             Self::Text => item.kind == ItemKind::Text,
             Self::Images => item.kind == ItemKind::Image,
         }
@@ -85,7 +85,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let preview_socket = preview::session_socket_path()?;
     preview::cleanup_session(&preview_socket)?;
     let modes = format!(
-        "pinned:{executable} script pinned,text:{executable} script text,images:{executable} script images"
+        "memo:{executable} script memo,text:{executable} script text,images:{executable} script images"
     );
     let selection_command = format!(
         "{} preview-selection {{completion}} {{selection-serial}}",
@@ -101,8 +101,8 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
             "-show-icons",
             "-modes",
             &modes,
-            "-display-pinned",
-            "󰐃 Pinned",
+            "-display-memo",
+            "󰍩 Memo",
             "-display-text",
             "󰦨 Text",
             "-display-images",
@@ -200,10 +200,15 @@ pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
             }
             render_history(&store, mode, state, selected_id)
         }
-        // First click opens the selected text editor or image preview. The next
-        // Edit click saves text or closes the read-only image panel.
+        // In Memo mode, the first click creates a draft and opens its editor.
+        // Otherwise, the first click opens the selected text editor or image
+        // preview. The next Edit click saves text or closes the image panel.
         12 => {
-            let selected_id = preview::toggle_edit(&store, selected_id)?.or(selected_id);
+            let selected_id = match mode {
+                Mode::Memo => preview::toggle_memo(&store)?,
+                Mode::Text | Mode::Images => preview::toggle_edit(&store, selected_id)?,
+            }
+            .or(selected_id);
             render_history(&store, mode, state, selected_id)
         }
         _ => render_history(&store, mode, state, selected_id),
@@ -331,20 +336,30 @@ fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &s
 
 fn row_value(item: &ClipboardItem) -> String {
     match item.kind {
-        ItemKind::Text => item.text.clone().unwrap_or_default(),
+        ItemKind::Memo | ItemKind::Text => item.text.clone().unwrap_or_default(),
         ItemKind::Image => image_label(item),
     }
 }
 
 fn row_preview(item: &ClipboardItem) -> String {
     match item.kind {
-        ItemKind::Text => {
-            let text = item.text.as_deref().unwrap_or_default();
-            let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            truncate_chars(&one_line, 110)
+        ItemKind::Memo => {
+            let preview = text_row_preview(item);
+            if preview.is_empty() {
+                "New memo".to_owned()
+            } else {
+                preview
+            }
         }
+        ItemKind::Text => text_row_preview(item),
         ItemKind::Image => truncate_chars(&image_label(item), 110),
     }
+}
+
+fn text_row_preview(item: &ClipboardItem) -> String {
+    let text = item.text.as_deref().unwrap_or_default();
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_chars(&one_line, 110)
 }
 
 fn image_label(item: &ClipboardItem) -> String {
@@ -397,6 +412,20 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::*;
 
+    fn textual_item(id: u64, kind: ItemKind, text: &str, pinned: bool) -> ClipboardItem {
+        ClipboardItem {
+            id,
+            kind,
+            text: Some(text.to_owned()),
+            image_file: None,
+            name: None,
+            mime: "text/plain".to_owned(),
+            pinned,
+            created_at: 0,
+            digest: format!("digest-{id}"),
+        }
+    }
+
     fn image_item(name: Option<&str>) -> ClipboardItem {
         ClipboardItem {
             id: 1,
@@ -430,6 +459,37 @@ mod tests {
         let item = image_item(None);
 
         assert_eq!(row_value(&item), "Image · png");
+    }
+
+    #[test]
+    fn memo_mode_excludes_pinned_clipboard_items() {
+        let memo = textual_item(1, ItemKind::Memo, "memo", false);
+        let pinned_text = textual_item(2, ItemKind::Text, "clipboard", true);
+        let mut pinned_image = image_item(None);
+        pinned_image.id = 3;
+        pinned_image.pinned = true;
+
+        assert!(Mode::Memo.includes(&memo));
+        assert!(!Mode::Memo.includes(&pinned_text));
+        assert!(!Mode::Memo.includes(&pinned_image));
+        assert!(Mode::Text.includes(&pinned_text));
+        assert!(Mode::Images.includes(&pinned_image));
+    }
+
+    #[test]
+    fn memo_is_the_named_replacement_for_pinned_mode() {
+        assert_eq!(Mode::parse("memo").unwrap(), Mode::Memo);
+        assert_eq!(Mode::Memo.name(), "memo");
+        assert_eq!(Mode::Memo.prompt(), "󰍩 Memo");
+        assert!(Mode::parse("pinned").is_err());
+    }
+
+    #[test]
+    fn empty_memo_has_a_visible_draft_label() {
+        let memo = textual_item(4, ItemKind::Memo, "", false);
+
+        assert_eq!(row_preview(&memo), "New memo");
+        assert_eq!(row_value(&memo), "");
     }
 
     #[test]

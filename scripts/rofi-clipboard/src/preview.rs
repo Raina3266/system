@@ -57,6 +57,12 @@ enum SwitchReply {
     Ready(Option<PanelSnapshot>),
 }
 
+enum SaveOutcome {
+    NoPanel,
+    NoSnapshot,
+    Saved(Option<u64>),
+}
+
 pub fn session_socket_path() -> Result<PathBuf> {
     let runtime = env::var_os("XDG_RUNTIME_DIR").context("XDG_RUNTIME_DIR is not set")?;
     Ok(PathBuf::from(runtime).join(format!(
@@ -87,15 +93,9 @@ pub fn close(path: &Path) {
 pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<Option<u64>> {
     let path = socket_from_environment()?;
 
-    if let Some(reply) = request(&path, SAVE_AND_CLOSE, 0, &[])? {
-        wait_for_socket_removal(&path)?;
-        if let SwitchReply::Ready(snapshot) = reply {
-            if let Some(snapshot) = snapshot {
-                return save_snapshot(store, snapshot);
-            }
-        } else {
-            bail!("preview panel returned an invalid save response");
-        }
+    match save_open_panel(store, &path)? {
+        SaveOutcome::Saved(saved_id) => return Ok(saved_id),
+        SaveOutcome::NoPanel | SaveOutcome::NoSnapshot => {}
     }
     cleanup_socket(&path)?;
 
@@ -117,6 +117,42 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
     }
 
     Ok(Some(selected_id))
+}
+
+pub fn toggle_memo(store: &ClipboardStore) -> Result<Option<u64>> {
+    let path = socket_from_environment()?;
+
+    match save_open_panel(store, &path)? {
+        SaveOutcome::NoPanel => {}
+        SaveOutcome::NoSnapshot => return Ok(None),
+        SaveOutcome::Saved(saved_id) => return Ok(saved_id),
+    }
+    cleanup_socket(&path)?;
+
+    let memo_id = store.add_memo()?;
+    if let Err(error) = launch_text_editor(&path, memo_id, "") {
+        let _ = send(&path, CLOSE, 0, &[]);
+        let _ = cleanup_session(&path);
+        let _ = store.delete(memo_id);
+        return Err(error);
+    }
+
+    Ok(Some(memo_id))
+}
+
+fn save_open_panel(store: &ClipboardStore, path: &Path) -> Result<SaveOutcome> {
+    let Some(reply) = request(path, SAVE_AND_CLOSE, 0, &[])? else {
+        return Ok(SaveOutcome::NoPanel);
+    };
+    wait_for_socket_removal(path)?;
+
+    let SwitchReply::Ready(snapshot) = reply else {
+        bail!("preview panel returned an invalid save response");
+    };
+    match snapshot {
+        Some(snapshot) => Ok(SaveOutcome::Saved(save_snapshot(store, snapshot)?)),
+        None => Ok(SaveOutcome::NoSnapshot),
+    }
 }
 
 pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
@@ -252,9 +288,9 @@ fn item_content(store: &ClipboardStore, id: u64) -> Result<Option<PanelContent>>
 
 fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<PanelContent> {
     match item.kind {
-        ItemKind::Text => Some(PanelContent::Text(
-            item.text.clone().unwrap_or_default(),
-        )),
+        ItemKind::Memo | ItemKind::Text => {
+            Some(PanelContent::Text(item.text.clone().unwrap_or_default()))
+        }
         ItemKind::Image => image_path.map(PanelContent::Image),
     }
 }
@@ -284,7 +320,7 @@ fn save_snapshot(store: &ClipboardStore, snapshot: PanelSnapshot) -> Result<Opti
 }
 
 fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
-    if item.kind != ItemKind::Text {
+    if !item.kind.is_textual() {
         bail!("images cannot be edited as text");
     }
     Ok(item.text.as_deref() != Some(text))
@@ -445,7 +481,7 @@ mod tests {
             image_file: (kind == ItemKind::Image).then(|| "7.png".to_owned()),
             name: name.map(str::to_owned),
             mime: match kind {
-                ItemKind::Text => "text/plain",
+                ItemKind::Memo | ItemKind::Text => "text/plain",
                 ItemKind::Image => "image/png",
             }
             .to_owned(),
@@ -464,6 +500,14 @@ mod tests {
                 None,
             ),
             Some(PanelContent::Text(original.to_owned()))
+        );
+    }
+
+    #[test]
+    fn memo_content_uses_the_editable_text_panel() {
+        assert_eq!(
+            panel_content(&item(ItemKind::Memo, Some("draft memo"), None), None),
+            Some(PanelContent::Text("draft memo".to_owned()))
         );
     }
 
