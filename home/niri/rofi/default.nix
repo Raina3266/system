@@ -19,7 +19,6 @@ in
 {
   imports = [
     ./clipboard.nix
-    #./copyq.nix
   ];
 
   home.packages = with pkgs; [

@@ -36,11 +36,6 @@ in
   programs.onlyoffice = {
     enable = true;
     package = onlyofficeScaled;
-
-    settings = {
-      UITheme = "theme-contrast-dark";
-      maximized = false;
-    };
   };
 
   home.activation.onlyofficeFonts = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
