@@ -125,27 +125,6 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
     Ok(Some(selected_id))
 }
 
-pub fn toggle_memo(store: &ClipboardStore) -> Result<Option<u64>> {
-    let path = socket_from_environment()?;
-
-    match save_open_panel(store, &path)? {
-        SaveOutcome::NoPanel => {}
-        SaveOutcome::NoSnapshot => return Ok(None),
-        SaveOutcome::Saved(saved_id) => return Ok(saved_id),
-    }
-    cleanup_socket(&path)?;
-
-    let memo_id = store.add_memo()?;
-    if let Err(error) = launch_text_editor(&path, memo_id, "") {
-        let _ = send(&path, CLOSE, 0, &[]);
-        let _ = cleanup_session(&path);
-        let _ = store.delete(memo_id);
-        return Err(error);
-    }
-
-    Ok(Some(memo_id))
-}
-
 fn save_open_panel(store: &ClipboardStore, path: &Path) -> Result<SaveOutcome> {
     let Some(reply) = request(path, SAVE_AND_CLOSE, 0, &[])? else {
         return Ok(SaveOutcome::NoPanel);

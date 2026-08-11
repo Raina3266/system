@@ -17,6 +17,12 @@ pub struct ClipboardItem {
     pub digest: String,
 }
 
+impl ClipboardItem {
+    pub fn is_empty_memo(&self) -> bool {
+        self.kind == ItemKind::Memo && self.text.as_deref().unwrap_or_default().is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {

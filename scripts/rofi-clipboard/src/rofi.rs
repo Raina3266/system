@@ -158,13 +158,23 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
 }
 
 fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
-    let history = ClipboardStore::discover()?.load()?;
-    let items: Vec<_> = history
-        .items
-        .iter()
-        .filter(|item| mode.includes(item))
-        .collect();
+    let store = ClipboardStore::discover()?;
+    if mode == Mode::Memo {
+        store.ensure_memo_draft()?;
+    }
+    let history = store.load()?;
+    let items = mode_items(&history.items, mode);
     Ok(preferred_selection(&items, selected_id))
+}
+
+fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
+    let mut items: Vec<_> = items.iter().filter(|item| mode.includes(item)).collect();
+    if mode == Mode::Memo {
+        // The draft is stored near the newest entries so history trimming can
+        // never discard it, but it is presented as the final Memo row.
+        items.sort_by_key(|item| item.is_empty_memo());
+    }
+    items
 }
 
 fn preferred_selection(items: &[&ClipboardItem], selected_id: Option<u64>) -> Option<usize> {
@@ -237,15 +247,10 @@ pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
             }
             render_history(&store, mode, state, selected_id)
         }
-        // In Memo mode, the first click creates a draft and opens its editor.
-        // Otherwise, the first click opens the selected text editor or image
-        // preview. The next Edit click saves text or closes the image panel.
+        // The first click opens the selected text editor or image preview. The
+        // next Edit click saves text or closes the image panel.
         12 => {
-            let selected_id = match mode {
-                Mode::Memo => preview::toggle_memo(&store)?,
-                Mode::Text | Mode::Images => preview::toggle_edit(&store, selected_id)?,
-            }
-            .or(selected_id);
+            let selected_id = preview::toggle_edit(&store, selected_id)?.or(selected_id);
             render_history(&store, mode, state, selected_id)
         }
         _ => render_history(&store, mode, state, selected_id),
@@ -258,11 +263,7 @@ fn selection_after_delete(
     selected_id: u64,
 ) -> Result<Option<u64>> {
     let history = store.load()?;
-    let items: Vec<_> = history
-        .items
-        .iter()
-        .filter(|item| mode.includes(item))
-        .collect();
+    let items = mode_items(&history.items, mode);
     Ok(replacement_selection(&items, selected_id))
 }
 
@@ -281,12 +282,11 @@ fn render_history(
     selected_id: Option<u64>,
 ) -> Result<()> {
     store.prune_missing_local_images()?;
+    if mode == Mode::Memo {
+        store.ensure_memo_draft()?;
+    }
     let history = store.load()?;
-    let items: Vec<_> = history
-        .items
-        .iter()
-        .filter(|item| mode.includes(item))
-        .collect();
+    let items = mode_items(&history.items, mode);
     let new_selection = preferred_selection(&items, selected_id);
 
     let mut output = Vec::new();
@@ -323,6 +323,10 @@ fn render_history(
             &item.id.to_string(),
         );
         write_row_option(&mut output, &mut first_option, "meta", &row_value(item));
+        if item.is_empty_memo() {
+            // Keep the creation row available even while Rofi is filtering.
+            write_row_option(&mut output, &mut first_option, "permanent", "true");
+        }
         if let Some(path) = store.image_path(item) {
             write_row_option(
                 &mut output,
@@ -548,6 +552,22 @@ mod tests {
 
         assert_eq!(row_preview(&memo), "New memo");
         assert_eq!(row_value(&memo), "");
+    }
+
+    #[test]
+    fn empty_memo_is_the_last_item_in_memo_mode() {
+        let draft = textual_item(4, ItemKind::Memo, "", false);
+        let newer = textual_item(3, ItemKind::Memo, "newer", false);
+        let clipboard_text = textual_item(2, ItemKind::Text, "clipboard", false);
+        let older = textual_item(1, ItemKind::Memo, "older", true);
+        let history = vec![draft, newer, clipboard_text, older];
+
+        let items = mode_items(&history, Mode::Memo);
+
+        assert_eq!(
+            items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![3, 1, 4]
+        );
     }
 
     #[test]

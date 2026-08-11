@@ -99,25 +99,8 @@ impl ClipboardStore {
         })
     }
 
-    pub fn add_memo(&self) -> Result<u64> {
-        self.update(|history| {
-            let id = take_id(history);
-            history.items.insert(
-                0,
-                ClipboardItem {
-                    id,
-                    kind: ItemKind::Memo,
-                    text: Some(String::new()),
-                    image_file: None,
-                    name: None,
-                    mime: "text/plain;charset=utf-8".to_owned(),
-                    pinned: false,
-                    created_at: unix_timestamp(),
-                    digest: digest(b""),
-                },
-            );
-            Ok(id)
-        })
+    pub fn ensure_memo_draft(&self) -> Result<u64> {
+        self.update(|history| Ok(ensure_memo_draft(history)))
     }
 
     pub fn add_image(&self, bytes: &[u8], mime: String) -> Result<Option<u64>> {
@@ -269,6 +252,9 @@ impl ClipboardStore {
             item.digest = new_digest;
             item.created_at = unix_timestamp();
             history.items.insert(0, item);
+            if kind == ItemKind::Memo {
+                ensure_memo_draft(history);
+            }
             Ok(true)
         })
     }
@@ -426,6 +412,49 @@ fn order_pinned_first(history: &mut History) {
     history.items.sort_by_key(|item| !item.pinned);
 }
 
+fn ensure_memo_draft(history: &mut History) -> u64 {
+    let draft_id = history
+        .items
+        .iter()
+        .find(|item| item.is_empty_memo())
+        .map(|item| item.id);
+
+    if let Some(draft_id) = draft_id {
+        // Empty memos are interchangeable drafts. Keep a single stable row so
+        // histories created by the old button behavior do not accumulate
+        // several "New memo" entries.
+        history
+            .items
+            .retain(|item| !item.is_empty_memo() || item.id == draft_id);
+        let position = history
+            .items
+            .iter()
+            .position(|item| item.id == draft_id)
+            .expect("retained memo draft");
+        let mut draft = history.items.remove(position);
+        draft.pinned = false;
+        history.items.insert(0, draft);
+        return draft_id;
+    }
+
+    let id = take_id(history);
+    history.items.insert(
+        0,
+        ClipboardItem {
+            id,
+            kind: ItemKind::Memo,
+            text: Some(String::new()),
+            image_file: None,
+            name: None,
+            mime: "text/plain;charset=utf-8".to_owned(),
+            pinned: false,
+            created_at: unix_timestamp(),
+            digest: digest(b""),
+        },
+    );
+    id
+}
+
 fn linked_local_image_is_missing(item: &ClipboardItem) -> bool {
     if item.kind != ItemKind::Image {
         return false;
@@ -487,21 +516,23 @@ fn trim_history(history: &mut History) -> Vec<String> {
         excess_images -= 1;
     }
 
-    if history.items.len() > MAX_HISTORY_ITEMS {
-        // Everything after the overall limit is older than every retained
-        // entry. Image files from those entries must also be removed.
-        removed_images.extend(
-            history
-                .items
-                .split_off(MAX_HISTORY_ITEMS)
-                .into_iter()
-                .filter_map(|item| {
-                    item.image_file
-                        .as_deref()
-                        .and_then(safe_filename)
-                        .map(str::to_owned)
-                }),
-        );
+    while history.items.len() > MAX_HISTORY_ITEMS {
+        // The empty Memo row is UI state as well as history data, so retain it
+        // and remove the oldest ordinary item when the overall limit is hit.
+        let index = history
+            .items
+            .iter()
+            .rposition(|item| !item.is_empty_memo())
+            .unwrap_or(history.items.len() - 1);
+        let item = history.items.remove(index);
+        if let Some(filename) = item
+            .image_file
+            .as_deref()
+            .and_then(safe_filename)
+            .map(str::to_owned)
+        {
+            removed_images.push(filename);
+        }
     }
 
     removed_images
@@ -629,6 +660,27 @@ mod tests {
     }
 
     #[test]
+    fn overall_history_limit_preserves_the_empty_memo_draft() {
+        let mut history = History::default();
+        history.next_id = MAX_HISTORY_ITEMS as u64 + 1;
+        history.items = (1..=MAX_HISTORY_ITEMS as u64)
+            .rev()
+            .map(|id| ClipboardItem {
+                pinned: true,
+                ..item(id, ItemKind::Text)
+            })
+            .collect();
+
+        let draft_id = ensure_memo_draft(&mut history);
+        order_pinned_first(&mut history);
+        let removed = trim_history(&mut history);
+
+        assert_eq!(history.items.len(), MAX_HISTORY_ITEMS);
+        assert!(history.items.iter().any(|item| item.id == draft_id));
+        assert!(removed.is_empty());
+    }
+
+    #[test]
     fn adding_image_above_limit_deletes_oldest_cached_file() -> Result<()> {
         let root = test_root();
         let store = ClipboardStore::at(root.0.clone());
@@ -704,13 +756,14 @@ mod tests {
     }
 
     #[test]
-    fn memos_are_independent_from_captured_text_and_allow_an_empty_draft() -> Result<()> {
+    fn memo_draft_is_unique_and_replaced_after_it_is_filled() -> Result<()> {
         let root = test_root();
         let store = ClipboardStore::at(root.0.clone());
         let text_id = store
             .add_text("same content".to_owned(), "text/plain".to_owned())?
             .unwrap();
-        let memo_id = store.add_memo()?;
+        let memo_id = store.ensure_memo_draft()?;
+        assert_eq!(store.ensure_memo_draft()?, memo_id);
 
         let draft = store
             .load()?
@@ -722,10 +775,22 @@ mod tests {
         assert_eq!(draft.text.as_deref(), Some(""));
 
         assert!(store.edit_text(memo_id, "same content".to_owned())?);
-        let second_memo_id = store.add_memo()?;
+        let second_memo_id = store.ensure_memo_draft()?;
+        assert_ne!(second_memo_id, memo_id);
         assert!(store.edit_text(second_memo_id, "same content".to_owned())?);
+        let final_draft_id = store.ensure_memo_draft()?;
+        assert_ne!(final_draft_id, second_memo_id);
+
         let history = store.load()?;
-        assert_eq!(history.items.len(), 3);
+        assert_eq!(history.items.len(), 4);
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .filter(|item| item.is_empty_memo())
+                .count(),
+            1
+        );
         assert!(
             history
                 .items
@@ -742,6 +807,12 @@ mod tests {
                 && item.kind == ItemKind::Memo
                 && item.text.as_deref() == Some("same content")
         }));
+        assert!(history.items.iter().any(|item| {
+            item.id == final_draft_id
+                && item.kind == ItemKind::Memo
+                && item.text.as_deref() == Some("")
+                && !item.pinned
+        }));
         Ok(())
     }
 
@@ -749,18 +820,42 @@ mod tests {
     fn pinning_a_memo_moves_it_above_other_memos() -> Result<()> {
         let root = test_root();
         let store = ClipboardStore::at(root.0.clone());
-        let older = store.add_memo()?;
-        let newer = store.add_memo()?;
+        let older = store.ensure_memo_draft()?;
+        assert!(store.edit_text(older, "older".to_owned())?);
+        let newer = store.ensure_memo_draft()?;
+        assert!(store.edit_text(newer, "newer".to_owned())?);
 
         assert!(store.pin(older)?);
         let memo_ids: Vec<_> = store
             .load()?
             .items
             .iter()
-            .filter(|item| item.kind == ItemKind::Memo)
+            .filter(|item| item.kind == ItemKind::Memo && !item.is_empty_memo())
             .map(|item| item.id)
             .collect();
         assert_eq!(memo_ids, vec![older, newer]);
+        Ok(())
+    }
+
+    #[test]
+    fn clearing_a_memo_reuses_it_as_the_only_draft() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let memo_id = store.ensure_memo_draft()?;
+        assert!(store.edit_text(memo_id, "keep me".to_owned())?);
+        let old_draft_id = store.ensure_memo_draft()?;
+
+        assert!(store.edit_text(memo_id, String::new())?);
+
+        let history = store.load()?;
+        let drafts: Vec<_> = history
+            .items
+            .iter()
+            .filter(|item| item.is_empty_memo())
+            .collect();
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].id, memo_id);
+        assert!(!history.items.iter().any(|item| item.id == old_draft_id));
         Ok(())
     }
 

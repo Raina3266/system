@@ -39,14 +39,16 @@ This repository contains two Rust utilities used by the desktop configuration:
 
 The interface contains three modes:
 
-- **Memo** — editable notes created from the Edit action; pinned memos stay at the top
+- **Memo** — editable notes plus a permanent empty creation row at the bottom; pinned memos stay at the top
 - **Text** — captured text entries
 - **Images** — captured images with previews
 
-Rofi opens in Memo mode. Clicking **Edit** there creates a new memo and opens
-the companion editor. Clicking **Edit** again saves and closes it. While the
-editor is open, moving through the Memo list saves the previous memo and loads
-the newly selected one, matching the Text mode preview behavior.
+Rofi opens in Memo mode with an empty **New memo** row at the bottom. Clicking
+**Edit** opens the currently selected memo in the companion editor. Saving text
+in the empty row turns it into a regular memo and immediately creates a new
+empty row at the bottom. While the editor is open, moving through the Memo list
+saves the previous memo and loads the newly selected one, matching the Text
+mode preview behavior.
 
 ### Commands
 
