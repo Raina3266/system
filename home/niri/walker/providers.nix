@@ -1,6 +1,6 @@
 # Walker providers config: default/empty query providers, prefixes, and keybinds.
 # Action keybinds are required (walker's settings replaces default config entirely).
-# Without these, providers like todo won't respond to Enter/Ctrl+D.
+# Without these, provider actions won't respond to their configured keybinds.
 {
   # Default providers (shown on launch and empty query)
   default = [
@@ -13,10 +13,6 @@
     {
       provider = "clipboard";
       prefix = ":";
-    }
-    {
-      provider = "todo";
-      prefix = "!";
     }
     {
       provider = "providerlist";
@@ -64,57 +60,6 @@
     }
   ];
   actions = {
-    todo = [
-      {
-        action = "save";
-        default = true;
-        bind = "Return";
-        after = "AsyncClearReload";
-      }
-      {
-        action = "save_next";
-        label = "save & new";
-        bind = "shift Return";
-        after = "AsyncClearReload";
-      }
-      {
-        action = "delete";
-        bind = "ctrl d";
-        after = "AsyncClearReload";
-      }
-      # Pin/unpin via "active"/"inactive" (sorted to top, shown first in waybar)
-      # AsyncReload keeps menu open while updating
-      {
-        action = "active";
-        label = "pin";
-        default = true;
-        bind = "Return";
-        after = "AsyncReload";
-      }
-      {
-        action = "inactive";
-        label = "unpin";
-        default = true;
-        bind = "Return";
-        after = "AsyncReload";
-      }
-      {
-        action = "change_category";
-        bind = "ctrl y";
-        label = "change category";
-        after = "Nothing";
-      }
-      {
-        action = "create";
-        bind = "ctrl a";
-        after = "AsyncClearReload";
-      }
-      {
-        action = "search";
-        bind = "ctrl s";
-        after = "AsyncClearReload";
-      }
-    ];
     desktopapplications = [
       {
         action = "start";

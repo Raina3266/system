@@ -30,33 +30,6 @@ let
       max_items = 1000;
       pinned_on_top = true;
     };
-    # Todo: task list in ~/.cache/elephant/todo.csv
-    # Type task name and press Return to create when empty.
-    provider.todo.settings = {
-      # Urgent time window: ±30min from scheduled time
-      urgent_time_frame = 30;
-      # Duck audio volume during task notifications
-      duck_player_volumes = true;
-      # Show creation time when no other time info available
-      show_creation_time = false;
-      # Time format (Go layout)
-      time_format = "01-02 15:04";
-      # Categories: prefix new tasks (e.g., w:fix report)
-      # Change category with Ctrl+Y
-      categories = [
-        {
-          name = "work";
-          prefix = "w:";
-        }
-        {
-          name = "personal";
-          prefix = "p:";
-        }
-      ];
-      # Notification on task due (%TASK% = task text)
-      title = "Task Due";
-      body = "🔔 %TASK%";
-    };
     # Audio menu (see ./audio.nix)
     provider.menus.lua."audio" = import ./audio.nix { inherit pkgs; };
     provider.menus.toml."power" = {
@@ -135,7 +108,6 @@ in
         "runner"
         "snippets"
         "symbols"
-        "todo"
         "unicode"
         "websearch"
         "windows"

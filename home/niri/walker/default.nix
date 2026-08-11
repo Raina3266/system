@@ -1,12 +1,10 @@
 # Walker: GTK4 Wayland launcher with cyberpunk theme.
 # Replaces rofi, supports click-outside-to-close and elephant providers
-# (clipboard/todo/files).
+# (clipboard/files).
 #
 # Extensions beyond upstream home-manager modules:
 #   1. elephant per-provider config (see ./elephant.nix)
-#   2. alternate theme layouts written directly (services.walker.theme
-#      only supports one theme)
-#   3. providers config (default/empty/prefixes/actions in ./providers.nix)
+#   2. providers config (default/empty/prefixes/actions in ./providers.nix)
 {
   pkgs,
   lib,
@@ -36,8 +34,6 @@ let
       "default".list = "No Results";
       clipboard.input = "Clipboard";
       clipboard.list = "Clipboard is empty";
-      todo.input = "Add or search a task…";
-      todo.list = "No tasks";
       windows.input = "Search windows…";
       windows.list = "No open windows";
       files.input = "Search files…";
@@ -97,16 +93,6 @@ let
     layouts.layout = "walker-top-right.xml";
   };
 
-  # Alternate theme for waybar todo button: same top-right layout, but
-  # includes the item_todo template override (upstream hardcodes 48px icon).
-  extraThemes = themeFiles "cyberpunk-center" {
-    style = "walker.css";
-    layouts = {
-      "layout" = "walker-top-right.xml";
-      "item_todo" = "walker-top-right.xml";
-    };
-  };
-
   # Restart walker on config changes (only reads config at startup)
   restartTrigger = value: [ (builtins.hashString "sha256" (builtins.toJSON value)) ];
 in
@@ -126,7 +112,7 @@ in
     # Theme files themselves are symlinked below for live editing.
   };
 
-  xdg.configFile = defaultTheme // extraThemes;
+  xdg.configFile = defaultTheme;
 
   # Additional systemd service config not in upstream modules
   systemd.user.services.walker.Unit = {

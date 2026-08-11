@@ -20,7 +20,6 @@ let
         "group/hardware"
       ];
       modules-center = [
-        "custom/todo"
         "custom/media-prev"
         "custom/media"
         "custom/lyrics"

@@ -65,14 +65,13 @@ window#waybar.bottom {
     border: 2px solid rgba(255, 126, 219, 0.3);
 }
 
-/* ── Borderless modules (media / todo / workspaces) ── */
+/* ── Borderless modules (media / workspaces) ── */
 
 #workspaces,
 #custom-media,
 #custom-media-prev,
 #custom-media-next,
-#custom-lyrics,
-#custom-todo {
+#custom-lyrics {
     padding-left: 10px;
     padding-right: 10px;
     border: none;
@@ -81,7 +80,6 @@ window#waybar.bottom {
 
 #custom-media,
 #custom-lyrics,
-#custom-todo,
 #custom-media-prev:hover,
 #custom-media-next:hover {
     color: #7afcff;

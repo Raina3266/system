@@ -1,78 +1,5 @@
 { pkgs }:
 let
-  walker = "${pkgs.walker}/bin/walker";
-  elephant = "${pkgs.elephant}/bin/elephant";
-  jq = "${pkgs.jq}/bin/jq";
-
-  todoFile = "\${XDG_CACHE_HOME:-$HOME/.cache}/elephant/todo.csv";
-
-  # Todo: shows current task + count, tooltip lists pending
-  todoPoll = pkgs.writeShellScript "waybar-todo-poll" ''
-    icon="<span size='x-large'>󰄲 </span>"
-    if [ ! -f "${todoFile}" ]; then
-      printf '{"text":"%s","tooltip":"Todo","class":"clear"}' "$icon"
-      exit 0
-    fi
-
-    # Use "active" as pin: sorts to top and shows first (no native pin action)
-    pending=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {c++} END{print c+0}' "${todoFile}")
-    total=$(awk -F';' 'NR>1 {c++} END{print c+0}' "${todoFile}")
-
-    if [ "$pending" -eq 0 ] 2>/dev/null; then
-      text="$icon <span size='medium'>Add a task!</span>"
-      ${jq} -cn --arg text "$text" --arg tooltip "No pending tasks 🎉" --arg class "clear" \
-        '{text:$text, tooltip:$tooltip, class:$class}'
-      exit 0
-    fi
-
-    actionable=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") && $6!="" {
-      cmd="date -d \"" $6 "\" +%s 2>/dev/null"
-      cmd | getline ts; close(cmd)
-      cmd="date -d \"today 23:59:59\" +%s"
-      cmd | getline eod; close(cmd)
-      if (ts!="" && ts+0 <= eod+0) c++
-    } END{print c+0}' "${todoFile}")
-
-    # Display priority: pinned > urgent > deadline > file order
-    current=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
-      pinned = ($3=="active") ? 0 : 1
-      urgent = ($3=="urgent") ? 0 : 1
-      ts = 9999999999
-      if ($6!="") {
-        cmd="date -d \"" $6 "\" +%s 2>/dev/null"
-        cmd | getline t; close(cmd)
-        if (t!="") ts = t+0
-      }
-      key = pinned "" urgent "" sprintf("%010d", ts)
-      if (!found || key < best) { found=1; best=key; text=$2; st=$3 }
-    } END{print (st=="active" ? "" : "") text}' "${todoFile}")
-
-    # Truncate to 40 characters
-    current_short=$(printf '%s' "$current" | cut -c1-30)
-    if [ "''${#current}" -gt 40 ]; then
-      current_short="$current_short…"
-    fi
-
-    if [ "$actionable" -gt 0 ] 2>/dev/null; then
-      class="urgent"
-    else
-      class="pending"
-    fi
-
-    text="$icon <span size='medium'>$current_short</span>  <span size='small'>($total)</span>          "
-
-    # Tooltip: pending tasks with pinned first
-    list=$(awk -F';' 'NR>1 && ($3=="pending" || $3=="urgent" || $3=="active") {
-      if ($3=="active") print "0\t  " $2
-      else print "1\t  " $2
-    }' "${todoFile}" | sort -k1,1 | cut -f2- | head -10)
-
-    tooltip="$pending pending · $actionable due today/overdue"$'\n\n'"$list"
-
-    ${jq} -cn --arg text "$text" --arg tooltip "$tooltip" --arg class "$class" \
-      '{text:$text, tooltip:$tooltip, class:$class}'
-  '';
-
   # Media control buttons (prev/play/next)
   mediaButton = glyph: cmd: {
     format = "<span size='x-large'>${glyph}</span>";
@@ -157,19 +84,4 @@ in
   };
 
   "custom/media-next" = mediaButton "⏭" "next";
-
-  "custom/todo" = {
-    return-type = "json";
-    interval = 2;
-    exec = todoPoll;
-    # Left-click: search | Right-click: create
-    on-click = pkgs.writeShellScript "waybar-todo-search" ''
-      ${elephant} activate "todo;;search;;" || true
-      exec ${walker} -t cyberpunk-center -m todo
-    '';
-    on-click-right = pkgs.writeShellScript "waybar-todo-create" ''
-      ${elephant} activate "todo;;create;;" || true
-      exec ${walker} -t cyberpunk-center -m todo
-    '';
-  };
 }

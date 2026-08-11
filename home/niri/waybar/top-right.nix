@@ -50,7 +50,7 @@ in
 
   "custom/clipboard" = {
     format = "<span size='large'>󰕛 </span>";
-    tooltip-format = "Clipboard + Todo";
+    tooltip-format = "Clipboard";
     on-click = "rofi-clipboard";
   };
 

@@ -173,19 +173,7 @@ child:selected .item-subtext {
   border: 1px solid #cbe3e7;
 }
 
-/* ── Provider-specific items (todo / bluetooth) ── */
-
-.todo.urgent {
-  font-size: 24px;
-  color: #ff3333;
-  text-shadow: 0 0 8px rgba(255, 51, 51, 0.6);
-}
-
-.todo.active {
-  font-weight: bold;
-  color: #ff7edb;
-  text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-}
+/* ── Provider-specific items ── */
 
 .bluetooth.disconnected {
   opacity: 0.5;
