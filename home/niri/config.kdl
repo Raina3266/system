@@ -37,7 +37,7 @@ input {
     }
     touchpad {
         tap
-        dwt  
+        dwt
         scroll-factor 0.5
     }
 }
@@ -119,14 +119,14 @@ binds {
     Mod+Shift+Slash { show-hotkey-overlay; }
 
     // Application launchers and session controls
+    Mod+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     Mod+T hotkey-overlay-title="Open a Terminal: ghostty" { spawn "ghostty"; }
     Mod+F hotkey-overlay-title="App & File Finder: rofi" { spawn "rofi" "-show" "combi"; }
-
-    Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
     Mod+Y hotkey-overlay-title="Open Yazi" { spawn "ghostty" "--class=yazi" "-e" "yazi"; }
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
+    Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn "niri msg pick-color | wl-copy"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }

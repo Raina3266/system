@@ -9,46 +9,93 @@
     settings.Exec = "rofi-theme-selector";
     settings.Type = "Application";
   };
-  
+
+  xdg.desktopEntries.zed-new-window = {
+    name = "Zed (new window)";
+    genericName = "Text Editor";
+    exec = "zeditor -n %U";
+    icon = "zed";
+    terminal = false;
+    categories = [ "Utility" "TextEditor" "Development" ];
+    mimeType = [
+      "text/plain"
+      "text/markdown"
+      "text/x-python"
+      "text/x-csrc"
+      "text/x-chdr"
+      "text/x-c++src"
+      "text/x-c++hdr"
+      "text/x-shellscript"
+      "application/json"
+      "application/x-yaml"
+      "text/x-yaml"
+      "application/toml"
+      "text/x-rust"
+      "text/x-go"
+      "application/xml"
+      "text/xml"
+      "text/css"
+      "application/javascript"
+      "text/javascript"
+      "text/x-log"
+      "text/csv"
+    ];
+  };
+
   xdg.portal = {
     enable = true;
-
     extraPortals = with pkgs; [
       xdg-desktop-portal-gtk
       xdg-desktop-portal-gnome
     ];
-
     config.niri = {
       default = [
         "gnome"
         "gtk"
       ];
-
       "org.freedesktop.impl.portal.FileChooser" = [
         "gtk"
       ];
     };
   };
-  
+
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
       # File manager
       "inode/directory" = [ "nemo.desktop" ];
-
       # Terminal
       "x-scheme-handler/terminal" = [ "com.mitchellh.ghostty.desktop" ];
-
       # Web
       "text/html" = "google-chrome.desktop";
       "x-scheme-handler/http" = "google-chrome.desktop";
       "x-scheme-handler/https" = "google-chrome.desktop";
       "x-scheme-handler/about" = "google-chrome.desktop";
       "x-scheme-handler/unknown" = "google-chrome.desktop";
-
       # PDF
       "application/pdf" = [ "google-chrome.desktop" ];
-
+      # Text / code
+      "text/plain" = [ "zed-new-window.desktop" ];
+      "text/markdown" = [ "zed-new-window.desktop" ];
+      "text/x-python" = [ "zed-new-window.desktop" ];
+      "text/x-csrc" = [ "zed-new-window.desktop" ];
+      "text/x-chdr" = [ "zed-new-window.desktop" ];
+      "text/x-c++src" = [ "zed-new-window.desktop" ];
+      "text/x-c++hdr" = [ "zed-new-window.desktop" ];
+      "text/x-shellscript" = [ "zed-new-window.desktop" ];
+      "application/json" = [ "zed-new-window.desktop" ];
+      "application/x-yaml" = [ "zed-new-window.desktop" ];
+      "text/x-yaml" = [ "zed-new-window.desktop" ];
+      "application/toml" = [ "zed-new-window.desktop" ];
+      "text/x-rust" = [ "zed-new-window.desktop" ];
+      "text/x-go" = [ "zed-new-window.desktop" ];
+      "application/xml" = [ "zed-new-window.desktop" ];
+      "text/xml" = [ "zed-new-window.desktop" ];
+      "text/css" = [ "zed-new-window.desktop" ];
+      "application/javascript" = [ "zed-new-window.desktop" ];
+      "text/javascript" = [ "zed-new-window.desktop" ];
+      "text/x-log" = [ "zed-new-window.desktop" ];
+      "text/csv" = [ "zed-new-window.desktop" ];
       # Video
       "video/mp4" = [ "vlc.desktop" ];
       "video/x-matroska" = [ "vlc.desktop" ];
@@ -64,7 +111,6 @@
       "video/x-ms-asf" = [ "vlc.desktop" ];
       "video/divx" = [ "vlc.desktop" ];
       "video/mp2t" = [ "vlc.desktop" ];
-
       # Audio
       "audio/mpeg" = [ "vlc.desktop" ];
       "audio/mp4" = [ "vlc.desktop" ];
