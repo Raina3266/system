@@ -22,9 +22,9 @@ fn main() {
 pub fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
-        None | Some("run") => launch_rofi(Mode::Pinned, None),
+        None | Some("run") => launch_rofi(Mode::Memo, None),
         Some("script") => {
-            let mode = Mode::parse(args.next().as_deref().unwrap_or("pinned"))?;
+            let mode = Mode::parse(args.next().as_deref().unwrap_or("memo"))?;
             run_script(mode, args.next())
         }
         Some("capture") => capture_clipboard(),

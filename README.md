@@ -11,7 +11,8 @@ This repository contains two Rust utilities used by the desktop configuration:
 
 ### Features
 
-- Separate views for pinned items, text, and images
+- Separate views for memos, captured text, and images
+- Editable memos with selection-change autosave
 - Text and image clipboard history
 - Image previews inside Rofi
 - Pin and delete actions
@@ -45,9 +46,14 @@ This repository contains two Rust utilities used by the desktop configuration:
 
 The interface contains three modes:
 
-- **Pinned** — items marked for quick access
+- **Memo** — editable notes created from the Edit action; pinned memos stay at the top
 - **Text** — captured text entries
 - **Images** — captured images with previews
+
+Rofi opens in Memo mode. Clicking **Edit** there creates a new memo and opens
+the companion editor. Clicking **Edit** again saves and closes it. While the
+editor is open, moving through the Memo list saves the previous memo and loads
+the newly selected one, matching the Text mode preview behavior.
 
 ### Commands
 
@@ -55,7 +61,7 @@ The interface contains three modes:
 rofi-clipboard [run]
 rofi-clipboard capture
 rofi-clipboard store --mime MIME
-rofi-clipboard script <pinned|text|images>
+rofi-clipboard script <memo|text|images>
 ```
 
 `capture` is designed to receive clipboard data from `wl-paste --watch`. The `store` command reads an item from standard input and stores it with the supplied MIME type.

@@ -99,6 +99,27 @@ impl ClipboardStore {
         })
     }
 
+    pub fn add_memo(&self) -> Result<u64> {
+        self.update(|history| {
+            let id = take_id(history);
+            history.items.insert(
+                0,
+                ClipboardItem {
+                    id,
+                    kind: ItemKind::Memo,
+                    text: Some(String::new()),
+                    image_file: None,
+                    name: None,
+                    mime: "text/plain;charset=utf-8".to_owned(),
+                    pinned: false,
+                    created_at: unix_timestamp(),
+                    digest: digest(b""),
+                },
+            );
+            Ok(id)
+        })
+    }
+
     pub fn add_image(&self, bytes: &[u8], mime: String) -> Result<Option<u64>> {
         self.add_image_named(bytes, mime, None)
     }
@@ -207,23 +228,29 @@ impl ClipboardStore {
     }
 
     pub fn edit_text(&self, id: u64, text: String) -> Result<bool> {
-        if text.is_empty() {
-            bail!("clipboard text cannot be empty");
-        }
-
         self.update(|history| {
             let Some(position) = history.items.iter().position(|item| item.id == id) else {
                 return Ok(false);
             };
-            if history.items[position].kind != ItemKind::Text {
+            let kind = history.items[position].kind;
+            if !kind.is_textual() {
                 bail!("images cannot be edited as text");
+            }
+            if kind == ItemKind::Text && text.is_empty() {
+                bail!("clipboard text cannot be empty");
             }
 
             let new_digest = digest(text.as_bytes());
-            let duplicate = history.items.iter().enumerate().find_map(|(index, item)| {
-                (index != position && item.kind == ItemKind::Text && item.digest == new_digest)
-                    .then_some(index)
-            });
+            let duplicate = (kind == ItemKind::Text)
+                .then(|| {
+                    history.items.iter().enumerate().find_map(|(index, item)| {
+                        (index != position
+                            && item.kind == ItemKind::Text
+                            && item.digest == new_digest)
+                            .then_some(index)
+                    })
+                })
+                .flatten();
 
             let mut item = history.items.remove(position);
             if let Some(mut duplicate_position) = duplicate {
@@ -243,7 +270,9 @@ impl ClipboardStore {
 
     pub fn item_bytes(&self, item: &ClipboardItem) -> Result<Vec<u8>> {
         match item.kind {
-            ItemKind::Text => Ok(item.text.as_deref().unwrap_or_default().as_bytes().to_vec()),
+            ItemKind::Memo | ItemKind::Text => {
+                Ok(item.text.as_deref().unwrap_or_default().as_bytes().to_vec())
+            }
             ItemKind::Image => {
                 let filename = item
                     .image_file
@@ -529,11 +558,11 @@ mod tests {
         ClipboardItem {
             id,
             kind,
-            text: (kind == ItemKind::Text).then(|| format!("text {id}")),
+            text: kind.is_textual().then(|| format!("text {id}")),
             image_file: (kind == ItemKind::Image).then(|| format!("{id}.png")),
             name: None,
             mime: match kind {
-                ItemKind::Text => "text/plain",
+                ItemKind::Memo | ItemKind::Text => "text/plain",
                 ItemKind::Image => "image/png",
             }
             .to_owned(),
@@ -666,6 +695,67 @@ mod tests {
         assert!(history.items[0].pinned);
         assert!(!history.items[1].pinned);
         assert!(!history.items[2].pinned);
+        Ok(())
+    }
+
+    #[test]
+    fn memos_are_independent_from_captured_text_and_allow_an_empty_draft() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let text_id = store
+            .add_text("same content".to_owned(), "text/plain".to_owned())?
+            .unwrap();
+        let memo_id = store.add_memo()?;
+
+        let draft = store
+            .load()?
+            .items
+            .into_iter()
+            .find(|item| item.id == memo_id)
+            .unwrap();
+        assert_eq!(draft.kind, ItemKind::Memo);
+        assert_eq!(draft.text.as_deref(), Some(""));
+
+        assert!(store.edit_text(memo_id, "same content".to_owned())?);
+        let second_memo_id = store.add_memo()?;
+        assert!(store.edit_text(second_memo_id, "same content".to_owned())?);
+        let history = store.load()?;
+        assert_eq!(history.items.len(), 3);
+        assert!(
+            history
+                .items
+                .iter()
+                .any(|item| item.id == text_id && item.kind == ItemKind::Text)
+        );
+        assert!(history.items.iter().any(|item| {
+            item.id == memo_id
+                && item.kind == ItemKind::Memo
+                && item.text.as_deref() == Some("same content")
+        }));
+        assert!(history.items.iter().any(|item| {
+            item.id == second_memo_id
+                && item.kind == ItemKind::Memo
+                && item.text.as_deref() == Some("same content")
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn pinning_a_memo_moves_it_above_other_memos() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let older = store.add_memo()?;
+        let newer = store.add_memo()?;
+
+        assert!(store.pin(older)?);
+        let memo_ids: Vec<_> = store
+            .load()?
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Memo)
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(memo_ids, vec![older, newer]);
         Ok(())
     }
 

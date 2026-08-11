@@ -1,4 +1,4 @@
-/* Clipboard menu: pinned/text/image tabs and action buttons. */
+/* Clipboard menu: memo/text/image tabs and action buttons. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";
@@ -32,7 +32,7 @@ mainbox {
     children: [ mode-switcher, inputbar, clipboard-body, action-bar ];
 }
 
-/* Pinned / Text / Images are native mode buttons and are mouse-clickable. */
+/* Memo / Text / Images are native mode buttons and are mouse-clickable. */
 mode-switcher {
     orientation: horizontal;
     spacing: 10px;
