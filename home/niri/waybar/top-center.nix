@@ -1,71 +1,22 @@
 { pkgs }:
 let
-  # Media control buttons (prev/play/next)
-  mediaButton = glyph: cmd: {
-    format = "<span size='x-large'>${glyph}</span>";
-    return-type = "json";
-    exec = ''printf '{"text":"${glyph}"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
-    interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl ${cmd}";
-  };
+  mediaControl = pkgs.callPackage ../../../scripts/media-control/package.nix { };
 in
 {
-  "custom/media-prev" = mediaButton "⏮" "previous";
-
   "custom/media" = {
-    hide-empty = true;
-    format = "{icon} {text}";
-    format-icons = {
-      "Playing" = "▶";
-      "Paused" = "⏸";
-      "Stopped" = "⏹";
-    };
+    hide-empty-text = true;
+    format = "{}";
     return-type = "json";
-    exec = pkgs.writeShellScript "waybar-media-poll" ''
-      all_players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
-      if [ -z "$all_players" ]; then
-          printf '{"text":"","class":"stopped"}'
-          exit 0
-      fi
-      # First active player (exclude tauon/kid3)
-      player_name=$(echo "$all_players" | grep -ivE 'tauon|kid3' | head -1)
-      if [ -z "$player_name" ]; then
-          printf '{"text":"","class":"stopped"}'
-          exit 0
-      fi
-      status=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" status 2>/dev/null)
-      [ -z "$status" ] && status="Stopped"
-      artist=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{artist}}' 2>/dev/null)
-      title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{title}}' 2>/dev/null)
-      player=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{playerName}}' 2>/dev/null)
-      # Extract filename if title empty (e.g., VLC video files)
-      [ -z "$title" ] && title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata xesam:url 2>/dev/null)
-      case "$title" in
-        file://*|/*)
-          path="''${title#file://}"
-          title=$(basename -- "$(printf '%b' "''${path//%/\\x}")")
-          ;;
-      esac
-      title_short=$(printf '%s' "$title" | cut -c1-40)
-      artist_short=$(printf '%s' "$artist" | cut -c1-20)
-      if [ -n "$artist_short" ]; then
-        text="$artist_short - $title_short"
-      else
-        text="$title_short"
-      fi
-      if [ -n "$artist" ]; then
-        tooltip="$artist - $title"
-      else
-        tooltip="$title"
-      fi
-      [ -n "$player" ] && tooltip="$tooltip\\nPlayer: $player"
-      class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
-      ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" --arg tooltip "$tooltip" \
-        '{text:$text, class:$class, alt:$class, tooltip:$tooltip}'
-    '';
-    interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
+    exec = "${mediaControl}/bin/media-control waybar --watch --interval-ms 750";
+    tooltip = true;
+    escape = true;
+    "restart-interval" = 2;
+    "exec-on-event" = false;
+
+    # The requested left click pauses every currently playing MPRIS source.
+    on-click = "${mediaControl}/bin/media-control pause-all";
+    # Keep opening the controller available without changing left-click.
+    on-click-right = "${mediaControl}/bin/media-control menu";
   };
 
   "custom/lyrics" = {
@@ -82,6 +33,5 @@ in
     exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
     on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
   };
-
-  "custom/media-next" = mediaButton "⏭" "next";
 }
+
