@@ -19,7 +19,6 @@ in
 {
   imports = [
     ./clipboard.nix
-    ./media-control.nix
   ];
 
   home.packages = with pkgs; [
@@ -65,4 +64,3 @@ in
   xdg.configFile."preview-panel/config.toml".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/scripts/preview-panel/config.toml";
 }
-
