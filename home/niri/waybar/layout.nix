@@ -20,10 +20,8 @@ let
         "group/hardware"
       ];
       modules-center = [
-        "custom/media-prev"
         "custom/media"
         "custom/lyrics"
-        "custom/media-next"
       ];
       modules-right = [
         "tray"
@@ -88,3 +86,4 @@ in
 {
   inherit topBar bottomBar;
 }
+
