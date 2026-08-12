@@ -215,12 +215,26 @@ fn launch_menu() -> Result<(), String> {
     command.args([
         "-show",
         "media",
-        "-modi",
+        "-modes",
         &mode,
         "-no-custom",
         "-matching",
         "fuzzy",
-        "-timeout",
+        "-kb-custom-1",
+        "Alt+p",
+        "-kb-custom-2",
+        "Alt+h",
+        "-kb-custom-3",
+        "Alt+l",
+        "-kb-custom-4",
+        "Alt+space",
+        "-kb-custom-5",
+        "Alt+Up",
+        "-kb-custom-6",
+        "Alt+Down",
+        "-kb-custom-7",
+        "Alt+d",
+        "-timeout-delay",
         "1",
         "-timeout-action",
         "kb-custom-8",
@@ -702,4 +716,3 @@ mod tests {
         assert_eq!(values[1].id, "new");
     }
 }
-
