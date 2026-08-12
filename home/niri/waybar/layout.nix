@@ -1,6 +1,8 @@
 # Waybar layouts
 { pkgs }:
 let
+  topCenter = import ./top-center.nix { inherit pkgs; };
+
   common = {
     layer = "top";
     height = 40;
@@ -20,10 +22,8 @@ let
         "group/hardware"
       ];
       modules-center = [
-        "custom/media-prev"
         "custom/media"
         "custom/lyrics"
-        "custom/media-next"
       ];
       modules-right = [
         "tray"
@@ -36,7 +36,7 @@ let
       ];
     }
     // (import ./top-left.nix { inherit pkgs; })
-    // (import ./top-center.nix { inherit pkgs; })
+    // topCenter.modules
     // (import ./top-right.nix { inherit pkgs; })
     // (import ./network.nix { inherit pkgs; });
 
@@ -87,4 +87,5 @@ let
 in
 {
   inherit topBar bottomBar;
+  inherit (topCenter) mediaControl;
 }

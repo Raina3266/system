@@ -1,87 +1,60 @@
 { pkgs }:
 let
-  # Media control buttons (prev/play/next)
-  mediaButton = glyph: cmd: {
-    format = "<span size='x-large'>${glyph}</span>";
-    return-type = "json";
-    exec = ''printf '{"text":"${glyph}"}' '';
-    exec-if = "${pkgs.playerctl}/bin/playerctl -a status 2>/dev/null | grep -qE '^(Playing|Paused)$'";
-    interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl ${cmd}";
+  # Package and Waybar integration stay together; only the Rasi theme is kept
+  # separately so it remains easy to edit.
+  mediaControl = pkgs.rustPlatform.buildRustPackage {
+    pname = "media-control";
+    version = "0.1.0";
+
+    src = ../../../scripts/media-control;
+    cargoLock.lockFile = ../../../scripts/media-control/Cargo.lock;
+
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+
+    postInstall = ''
+      install -Dm644 ${../rofi/theme/media-control.rasi} \
+        "$out/share/rofi/themes/media-control.rasi"
+
+      wrapProgram "$out/bin/media-control" \
+        --set MEDIA_CONTROL_PLAYERCTL "${pkgs.lib.getExe pkgs.playerctl}" \
+        --set MEDIA_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
+        --set MEDIA_CONTROL_GDBUS "${pkgs.lib.getExe' pkgs.glib "gdbus"}" \
+        --set MEDIA_CONTROL_FALLBACK_THEME "$out/share/rofi/themes/media-control.rasi"
+    '';
   };
 in
 {
-  "custom/media-prev" = mediaButton "⏮" "previous";
+  inherit mediaControl;
 
-  "custom/media" = {
-    hide-empty = true;
-    format = "{icon} {text}";
-    format-icons = {
-      "Playing" = "▶";
-      "Paused" = "⏸";
-      "Stopped" = "⏹";
+  modules = {
+    "custom/media" = {
+      hide-empty-text = true;
+      format = "{}";
+      return-type = "json";
+      exec = "${mediaControl}/bin/media-control waybar --watch --interval-ms 750";
+      tooltip = true;
+      escape = true;
+      "restart-interval" = 2;
+      "exec-on-event" = false;
+
+      # Left pauses every player; right opens the full controller.
+      on-click = "${mediaControl}/bin/media-control pause-all";
+      on-click-right = "${mediaControl}/bin/media-control menu";
     };
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-media-poll" ''
-      all_players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
-      if [ -z "$all_players" ]; then
-          printf '{"text":"","class":"stopped"}'
-          exit 0
-      fi
-      # First active player (exclude tauon/kid3)
-      player_name=$(echo "$all_players" | grep -ivE 'tauon|kid3' | head -1)
-      if [ -z "$player_name" ]; then
-          printf '{"text":"","class":"stopped"}'
-          exit 0
-      fi
-      status=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" status 2>/dev/null)
-      [ -z "$status" ] && status="Stopped"
-      artist=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{artist}}' 2>/dev/null)
-      title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{title}}' 2>/dev/null)
-      player=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata --format '{{playerName}}' 2>/dev/null)
-      # Extract filename if title empty (e.g., VLC video files)
-      [ -z "$title" ] && title=$(${pkgs.playerctl}/bin/playerctl -p "$player_name" metadata xesam:url 2>/dev/null)
-      case "$title" in
-        file://*|/*)
-          path="''${title#file://}"
-          title=$(basename -- "$(printf '%b' "''${path//%/\\x}")")
-          ;;
-      esac
-      title_short=$(printf '%s' "$title" | cut -c1-40)
-      artist_short=$(printf '%s' "$artist" | cut -c1-20)
-      if [ -n "$artist_short" ]; then
-        text="$artist_short - $title_short"
-      else
-        text="$title_short"
-      fi
-      if [ -n "$artist" ]; then
-        tooltip="$artist - $title"
-      else
-        tooltip="$title"
-      fi
-      [ -n "$player" ] && tooltip="$tooltip\\nPlayer: $player"
-      class=$(echo "$status" | tr '[:upper:]' '[:lower:]')
-      ${pkgs.jq}/bin/jq -cn --arg text "$text" --arg class "$class" --arg tooltip "$tooltip" \
-        '{text:$text, class:$class, alt:$class, tooltip:$tooltip}'
-    '';
-    interval = 2;
-    on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
-  };
 
-  "custom/lyrics" = {
-    hide-empty-text = true;
-    return-type = "json";
-    format = "{icon} {0}";
-    format-icons = {
-      playing = "󰝚 ";
-      paused = "󰝚 ";
-      lyric = "";
-      music = "󰝚 ";
+    "custom/lyrics" = {
+      hide-empty-text = true;
+      return-type = "json";
+      format = "{icon} {0}";
+      format-icons = {
+        playing = "󰝚 ";
+        paused = "󰝚 ";
+        lyric = "";
+        music = "󰝚 ";
+      };
+      exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
+      exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
+      on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
     };
-    exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
-    exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
-    on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
   };
-
-  "custom/media-next" = mediaButton "⏭" "next";
 }

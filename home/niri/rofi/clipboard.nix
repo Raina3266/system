@@ -1,9 +1,11 @@
-{ pkgs, ... }:
+# Packages, wrappers, service, and runtime links for the clipboard stack.
+# UI code stays in the Rust sources, Rasi theme, and preview-panel config.
+{ pkgs, config, ... }:
 let
   previewPanel = pkgs.rustPlatform.buildRustPackage {
     pname = "preview-panel";
     version = "0.1.0";
-    
+
     src = ../../../scripts/preview-panel;
     cargoLock.lockFile = ../../../scripts/preview-panel/Cargo.lock;
 
@@ -15,7 +17,6 @@ let
       pkgs.gtk4
       pkgs.gtk4-layer-shell
     ];
-
   };
 
   rofiClipboard = pkgs.rustPlatform.buildRustPackage {
@@ -42,6 +43,14 @@ in
     rofiClipboard
   ];
 
+  # Keep theme and preview styling live-editable without rebuilding.
+  xdg.configFile."rofi/rofi-clipboard.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/home/niri/rofi/theme/rofi-clipboard.rasi";
+  xdg.configFile."preview-panel/config.toml".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/scripts/preview-panel/config.toml";
+
   systemd.user.services.rofi-clipboard = {
     Unit = {
       Description = "Rofi clipboard history collector";
@@ -56,8 +65,6 @@ in
       RestartSec = 2;
     };
 
-    Install = {
-      WantedBy = [ "graphical-session.target" ];
-    };
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 }

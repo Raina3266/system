@@ -1,6 +1,6 @@
 # Waybar: top and bottom status bars with cyberpunk theme.
 # Bar layouts: layout.nix (top: clock/hardware/media/utilities; bottom: taskbar)
-# Polling scripts: media in top-center.nix; timer in top-right.nix
+# Local Rust packages: media in top-center.nix; timer in top-right.nix
 {
   pkgs,
   lib,
@@ -35,6 +35,7 @@ in
           wl-clipboard
           jq
           playerctl
+          layout.mediaControl
         ];
 
         systemd.user.services.waybar = {

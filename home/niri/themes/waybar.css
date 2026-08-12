@@ -69,8 +69,6 @@ window#waybar.bottom {
 
 #workspaces,
 #custom-media,
-#custom-media-prev,
-#custom-media-next,
 #custom-lyrics {
     padding-left: 10px;
     padding-right: 10px;
@@ -79,9 +77,7 @@ window#waybar.bottom {
 }
 
 #custom-media,
-#custom-lyrics,
-#custom-media-prev:hover,
-#custom-media-next:hover {
+#custom-lyrics {
     color: #7afcff;
 }
 
@@ -91,8 +87,6 @@ window#waybar.bottom {
     margin-top: 2px;
 }
 
-#custom-media-prev,
-#custom-media-next,
 .scroll-arrow-left,
 .scroll-arrow-right {
     color: rgba(122, 252, 255, 0.5);
@@ -157,6 +151,7 @@ window#waybar.bottom {
 #custom-wifi:hover,
 #custom-audio:hover,
 #custom-clipboard:hover,
+#custom-media:hover,
 #custom-files:hover,
 #custom-timer:hover,
 #custom-obsidian:hover,
@@ -223,3 +218,11 @@ tooltip label {
         text-shadow: none;
     }
 }
+
+/* ── Dynamic media state ── */
+
+#custom-media.empty {
+    margin: 0;
+    padding: 0;
+}
+
