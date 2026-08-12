@@ -54,13 +54,6 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/config.rasi";
   xdg.configFile."rofi/rofi-finder.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-finder.rasi";
-  xdg.configFile."rofi/rofi-clipboard.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-clipboard.rasi";
   xdg.configFile."rofi/media-control.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/media-control.rasi";
-
-  # preview-panel reads this file at runtime and reloads it while open, so
-  # placement and CSS changes need neither a rebuild nor a panel restart.
-  xdg.configFile."preview-panel/config.toml".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/scripts/preview-panel/config.toml";
 }
