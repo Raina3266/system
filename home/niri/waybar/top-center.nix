@@ -1,7 +1,7 @@
 { pkgs }:
 let
-  # Keep this local package beside the Waybar module, matching the timer
-  # package in top-right.nix and avoiding a separate package.nix.
+  # Package and Waybar integration stay together; only the Rasi theme is kept
+  # separately so it remains easy to edit.
   mediaControl = pkgs.rustPlatform.buildRustPackage {
     pname = "media-control";
     version = "0.1.0";
@@ -37,9 +37,8 @@ in
       "restart-interval" = 2;
       "exec-on-event" = false;
 
-      # The requested left click pauses every currently playing MPRIS source.
+      # Left pauses every player; right opens the full controller.
       on-click = "${mediaControl}/bin/media-control pause-all";
-      # Keep opening the controller available without changing left-click.
       on-click-right = "${mediaControl}/bin/media-control menu";
     };
 
