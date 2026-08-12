@@ -1,0 +1,15 @@
+[package]
+name = "media-control"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Dynamic MPRIS media controller for Rofi and Waybar"
+
+[[bin]]
+name = "media-control"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+strip = true
+
