@@ -35,6 +35,7 @@ in
           wl-clipboard
           jq
           playerctl
+          layout.mediaControl
         ];
 
         systemd.user.services.waybar = {
