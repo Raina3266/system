@@ -123,6 +123,34 @@ fn player_property(player: &str, arguments: &[&str]) -> Option<String> {
     playerctl_text(&command)
 }
 
+fn player_source(player: &str) -> String {
+    let source = player_property(player, &["metadata", "--format", "{{playerName}}"]);
+    source
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| friendly_source(player))
+}
+
+fn display_source(player: &str, source: &str) -> String {
+    if player.to_ascii_lowercase().contains("mprisence_web")
+        || source.eq_ignore_ascii_case("mprisence_web")
+    {
+        "Chrome".to_owned()
+    } else {
+        clean_text(source)
+    }
+}
+
+fn is_excluded_player(player: &str, source: &str) -> bool {
+    [player, source].iter().any(|value| {
+        let normalized = value
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(|character| character.to_lowercase())
+            .collect::<String>();
+        normalized.contains("tauon") || normalized.contains("kid3")
+    })
+}
+
 fn player_ids() -> Vec<String> {
     let Some(output) = playerctl_text(&["-l"]) else {
         return Vec::new();
@@ -150,6 +178,12 @@ fn snapshot() -> Vec<Player> {
             _ => continue,
         };
 
+        let source = player_source(&id);
+        if is_excluded_player(&id, &source) {
+            state.remove(&id);
+            continue;
+        }
+
         let entry = state.entry(id.clone()).or_insert_with(|| PlayerState {
             activity: now,
             ..PlayerState::default()
@@ -159,9 +193,6 @@ fn snapshot() -> Vec<Player> {
         }
         entry.was_playing = status.is_playing();
 
-        let source = player_property(&id, &["metadata", "--format", "{{playerName}}"]) 
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| friendly_source(&id));
         let title = player_property(&id, &["metadata", "--format", "{{title}}"]) 
             .filter(|value| !value.is_empty())
             .or_else(|| player_property(&id, &["metadata", "xesam:url"]))
@@ -173,10 +204,11 @@ fn snapshot() -> Vec<Player> {
         let volume = player_property(&id, &["volume"])
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8);
+        let source = display_source(&id, &source);
 
         players.push(Player {
             id,
-            source: clean_text(&source),
+            source,
             title: clean_text(&title),
             artist: clean_text(&artist),
             status,
@@ -391,6 +423,9 @@ fn waybar_toggle_action(players: &[Player]) -> Option<(&str, &'static str)> {
 
 fn pause_all() -> Result<(), String> {
     for player in player_ids() {
+        if is_excluded_player(&player, &player_source(&player)) {
+            continue;
+        }
         if player_property(&player, &["status"]).as_deref() == Some("Playing") {
             let _ = player_command(&player, "pause");
         }
@@ -766,5 +801,27 @@ mod tests {
         assert_eq!(volume_label(None), "  --");
         assert_eq!(volume_label(Some(7)), "  7%");
         assert_eq!(volume_label(Some(100)), "100%");
+    }
+
+    #[test]
+    fn mprisence_web_uses_chrome_as_its_display_source() {
+        assert_eq!(
+            display_source("mprisence_web.web.youtube.p123", "mprisence_web"),
+            "Chrome"
+        );
+        assert_eq!(display_source("spotify", "Spotify"), "Spotify");
+    }
+
+    #[test]
+    fn tauon_and_kid3_are_excluded_from_media_control() {
+        assert!(is_excluded_player("tauon", "Tauon Music Box"));
+        assert!(is_excluded_player(
+            "org.mpris.MediaPlayer2.kid3",
+            "Kid3"
+        ));
+        assert!(!is_excluded_player(
+            "mprisence_web.web.youtube.p123",
+            "mprisence_web"
+        ));
     }
 }
