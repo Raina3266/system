@@ -31,8 +31,8 @@ in
       "restart-interval" = 2;
       "exec-on-event" = false;
 
-      # Left pauses every player; right opens the full controller.
-      on-click = "${mediaControl}/bin/media-control pause-all";
+      # Left toggles the player shown in Waybar; right opens the full controller.
+      on-click = "${mediaControl}/bin/media-control toggle";
       on-click-right = "${mediaControl}/bin/media-control menu";
     };
 

@@ -63,6 +63,7 @@ fn main() -> ExitCode {
         Some("menu") => launch_menu(),
         Some("rofi") => rofi_mode(),
         Some("waybar") => waybar(&args[1..]),
+        Some("toggle") => toggle(),
         Some("pause-all") => pause_all(),
         Some("list") => print_list(),
         Some("help") | Some("--help") | Some("-h") | None => {
@@ -87,6 +88,7 @@ fn print_help() {
          Usage:\n\
            media-control menu\n\
            media-control waybar --watch [--interval-ms 750]\n\
+           media-control toggle\n\
            media-control pause-all\n\
            media-control list"
     );
@@ -362,6 +364,20 @@ fn toggle_pin(player: &str) {
     });
     entry.pinned = !entry.pinned;
     write_state(&state);
+}
+
+fn toggle() -> Result<(), String> {
+    let players = snapshot();
+    if let Some((player, command)) = waybar_toggle_action(&players) {
+        player_command(player, command)?;
+    }
+    Ok(())
+}
+
+fn waybar_toggle_action(players: &[Player]) -> Option<(&str, &'static str)> {
+    players
+        .first()
+        .map(|player| (player.id.as_str(), "play-pause"))
 }
 
 fn pause_all() -> Result<(), String> {
@@ -714,5 +730,25 @@ mod tests {
         values.sort_by(compare_players);
         assert_eq!(values[0].id, "pin");
         assert_eq!(values[1].id, "new");
+    }
+
+    #[test]
+    fn waybar_click_toggles_the_displayed_player_even_when_paused() {
+        let paused = Player {
+            id: "paused-player".to_owned(),
+            source: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            status: PlaybackStatus::Paused,
+            volume: 0,
+            pinned: false,
+            activity: 1,
+        };
+
+        assert_eq!(
+            waybar_toggle_action(&[paused]),
+            Some(("paused-player", "play-pause"))
+        );
+        assert_eq!(waybar_toggle_action(&[]), None);
     }
 }
