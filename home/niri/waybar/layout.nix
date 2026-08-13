@@ -1,5 +1,5 @@
 # Waybar layouts
-{ pkgs }:
+{ pkgs, topRight }:
 let
   topCenter = import ./top-center.nix { inherit pkgs; };
 
@@ -37,7 +37,7 @@ let
     }
     // (import ./top-left.nix { inherit pkgs; })
     // topCenter.modules
-    // (import ./top-right.nix { inherit pkgs; })
+    // topRight.modules
     // (import ./network.nix { inherit pkgs; });
 
   # ------------ BottomBar -------------
