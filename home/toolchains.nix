@@ -1,17 +1,20 @@
 { inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
+    rustc
+    rustup
+    diesel-cli
+    cargo-machete
+    cargo-audit
+    cargo-autoinherit
+
+    elan
     openssl
     gcc
     nil
     nixd
     uv
-    rustup
-    cargo-machete
-    diesel-cli
-    cargo-audit
-    elan
-    cargo-autoinherit
+
   ];
 
   targets.genericLinux.nixGL.packages = inputs.nixGL.packages;
