@@ -375,8 +375,6 @@ fn launch_menu() -> Result<(), String> {
         "Alt+Up",
         "-kb-custom-6",
         "Alt+Down",
-        "-kb-custom-7",
-        "Alt+d",
         "-timeout-delay",
         "1",
         "-timeout-action",
@@ -418,7 +416,7 @@ fn rofi_mode() -> Result<(), String> {
         .unwrap_or(0);
     let selected = env::var("ROFI_INFO").ok().filter(|value| !value.is_empty());
 
-    if (1..=16).contains(&return_value) {
+    if (1..=15).contains(&return_value) {
         let fallback = snapshot().first().map(|player| player.id.clone());
         if let Some(player) = selected.or(fallback) {
             match return_value {
@@ -428,7 +426,6 @@ fn rofi_mode() -> Result<(), String> {
                 12 => player_command(&player, "next")?,
                 14 => change_volume(&player, 0.10)?,
                 15 => change_volume(&player, -0.10)?,
-                16 => remove_player(&player)?,
                 _ => {}
             }
             thread::sleep(Duration::from_millis(90));
@@ -556,53 +553,6 @@ fn pause_all() -> Result<(), String> {
             let _ = player_command(&player, "pause");
         }
     }
-    Ok(())
-}
-
-fn remove_player(player: &str) -> Result<(), String> {
-    let _ = player_command(player, "stop");
-
-    if let Ok(hook) = env::var("MEDIA_CONTROL_REMOVE_HOOK") {
-        if !hook.is_empty() {
-            Command::new(hook)
-                .arg(player)
-                .spawn()
-                .map_err(|error| format!("remove hook failed: {error}"))?;
-            return Ok(());
-        }
-    }
-
-    // MPRIS exposes Quit for many desktop players, but it cannot identify an
-    // individual browser tab. Avoid closing a whole browser unless the user
-    // supplies a MEDIA_CONTROL_REMOVE_HOOK that knows the compositor/browser.
-    let lower = player.to_ascii_lowercase();
-    if ["chrome", "chromium", "brave", "firefox", "vivaldi"]
-        .iter()
-        .any(|browser| lower.contains(browser))
-    {
-        return Ok(());
-    }
-
-    let destination = if player.starts_with("org.mpris.MediaPlayer2.") {
-        player.to_owned()
-    } else {
-        format!("org.mpris.MediaPlayer2.{player}")
-    };
-    let _ = Command::new(executable("MEDIA_CONTROL_GDBUS", "gdbus"))
-        .args([
-            "call",
-            "--session",
-            "--dest",
-            &destination,
-            "--object-path",
-            "/org/mpris/MediaPlayer2",
-            "--method",
-            "org.mpris.MediaPlayer2.Quit",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
     Ok(())
 }
 

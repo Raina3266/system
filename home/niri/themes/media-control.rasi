@@ -1,4 +1,4 @@
-/* Dynamic media menu: live MPRIS rows plus seven mouse-action buttons. */
+/* Dynamic media menu: live MPRIS rows plus six mouse-action buttons. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";
@@ -7,7 +7,6 @@
     fg:       #CBE3E7;
     pink:     #FF7EDB;
     cyan:     #7AFCFF;
-    amber:    #F29E74;
     red:      #FF3333;
     dim:      #5C6776;
 
@@ -94,7 +93,7 @@ element-text selected.urgent {
     text-color: @cyan;
 }
 
-/* These are native Rofi buttons. Each action becomes ROFI_RETV 10..16 in
+/* These are native Rofi buttons. Each action becomes ROFI_RETV 10..15 in
    script mode, so Rust can act on the row selected in the list above. */
 action-bar {
     expand: false;
@@ -106,8 +105,7 @@ action-bar {
         button-next,
         button-play,
         button-vol-up,
-        button-vol-down,
-        button-remove
+        button-vol-down
     ];
 }
 
@@ -116,8 +114,7 @@ button-prev,
 button-next,
 button-play,
 button-vol-up,
-button-vol-down,
-button-remove {
+button-vol-down {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
@@ -157,13 +154,6 @@ button-vol-up {
 button-vol-down {
     content:  "󰝞 ";
     action: "kb-custom-6";
-}
-
-button-remove {
-    content: " 󰆴 ";
-    action: "kb-custom-7";
-    border-color: rgba(255, 51, 51, 0.45);
-    text-color: @amber;
 }
 
 error-message {
