@@ -14,6 +14,7 @@ use crate::model::{ClipboardItem, ItemKind};
 use crate::store::ClipboardStore;
 
 const SCREENSHOT_DIRECTORY_ENV: &str = "ROFI_CLIPBOARD_SCREENSHOT_DIR";
+const GNOME_COPIED_FILES_MIME: &str = "x-special/gnome-copied-files";
 const SCREENSHOT_MATCH_ATTEMPTS: usize = 20;
 const SCREENSHOT_MATCH_DELAY: Duration = Duration::from_millis(25);
 const SCREENSHOT_CANDIDATE_LIMIT: usize = 16;
@@ -47,7 +48,6 @@ pub fn copy_item(store: &ClipboardStore, id: u64) -> Result<()> {
 fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String, Vec<u8>)> {
     if item.kind == ItemKind::File
         && item.image_file.is_none()
-        && !is_file_reference_mime(&item.mime)
         && let Some(path) = item
             .name
             .as_deref()
@@ -56,20 +56,22 @@ fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String,
             .map(Path::new)
             .filter(|path| path.is_absolute())
     {
-        return Ok(("text/uri-list".to_owned(), local_file_uri_payload(path)));
+        return Ok((
+            GNOME_COPIED_FILES_MIME.to_owned(),
+            local_file_copy_payload(path),
+        ));
     }
 
     Ok((item.mime.clone(), store.item_bytes(item)?))
 }
 
-fn is_file_reference_mime(mime: &str) -> bool {
-    mime.split(';').next() == Some("text/uri-list") || mime == "x-special/gnome-copied-files"
-}
-
-fn local_file_uri_payload(path: &Path) -> Vec<u8> {
+fn local_file_copy_payload(path: &Path) -> Vec<u8> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
-    let mut payload = b"file://".to_vec();
+    // Nemo treats every line after the action as a source URI. A trailing
+    // newline would therefore create an empty source entry and a spurious
+    // "Operation not supported" error, even though the real file is copied.
+    let mut payload = b"copy\nfile://".to_vec();
     for byte in path.as_os_str().as_bytes() {
         if byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'.' | b'_' | b'~' | b'/') {
             payload.push(*byte);
@@ -81,7 +83,6 @@ fn local_file_uri_payload(path: &Path) -> Vec<u8> {
             ]);
         }
     }
-    payload.push(b'\n');
     payload
 }
 
@@ -189,7 +190,7 @@ fn file_reference_payload(mime: &str, clipboard_text: &str, reference: &str) -> 
             .map(str::trim)
             .find(|line| matches!(*line, "copy" | "cut"))
             .unwrap_or("copy");
-        format!("{action}\n{reference}\n")
+        format!("{action}\n{reference}")
     } else {
         format!("{reference}\n")
     }
@@ -667,20 +668,20 @@ mod tests {
                 "cut\nfile:///tmp/report.pdf\n",
                 "file:///tmp/report.pdf",
             ),
-            "cut\nfile:///tmp/report.pdf\n"
+            "cut\nfile:///tmp/report.pdf"
         );
     }
 
     #[test]
-    fn standalone_local_paths_copy_back_as_percent_encoded_file_uris() {
-        assert_eq!(
-            local_file_uri_payload(Path::new("/home/raina/My Report #1.pdf")),
-            b"file:///home/raina/My%20Report%20%231.pdf\n"
-        );
+    fn local_paths_copy_back_as_nemo_file_operations_without_an_empty_entry() {
+        let payload = local_file_copy_payload(Path::new("/home/raina/My Report #1.pdf"));
+
+        assert_eq!(payload, b"copy\nfile:///home/raina/My%20Report%20%231.pdf");
+        assert!(!payload.ends_with(b"\n"));
     }
 
     #[test]
-    fn local_path_text_is_upgraded_but_urls_and_uri_payloads_are_preserved() -> Result<()> {
+    fn local_paths_use_nemo_file_copy_payloads_while_urls_stay_text() -> Result<()> {
         let root = test_directory();
         let store = ClipboardStore::at(root.0.join("data"));
         let mut item = ClipboardItem {
@@ -698,8 +699,8 @@ mod tests {
         assert_eq!(
             copy_payload(&store, &item)?,
             (
-                "text/uri-list".to_owned(),
-                b"file:///home/raina/My%20Report.pdf\n".to_vec()
+                GNOME_COPIED_FILES_MIME.to_owned(),
+                b"copy\nfile:///home/raina/My%20Report.pdf".to_vec()
             )
         );
 
@@ -719,8 +720,18 @@ mod tests {
         assert_eq!(
             copy_payload(&store, &item)?,
             (
-                "text/uri-list".to_owned(),
-                b"file:///home/raina/My%20Report.pdf\n".to_vec()
+                GNOME_COPIED_FILES_MIME.to_owned(),
+                b"copy\nfile:///home/raina/My%20Report.pdf".to_vec()
+            )
+        );
+
+        item.text = Some("cut\nfile:///home/raina/My%20Report.pdf\n".to_owned());
+        item.mime = GNOME_COPIED_FILES_MIME.to_owned();
+        assert_eq!(
+            copy_payload(&store, &item)?,
+            (
+                GNOME_COPIED_FILES_MIME.to_owned(),
+                b"copy\nfile:///home/raina/My%20Report.pdf".to_vec()
             )
         );
         Ok(())
