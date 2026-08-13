@@ -28,12 +28,27 @@ impl ClipboardItem {
 pub enum ItemKind {
     Memo,
     Text,
-    Image,
+    #[serde(alias = "image")]
+    File,
 }
 
 impl ItemKind {
     pub fn is_textual(self) -> bool {
         matches!(self, Self::Memo | Self::Text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_image_kind_loads_as_file() {
+        assert_eq!(
+            serde_json::from_str::<ItemKind>("\"image\"").unwrap(),
+            ItemKind::File
+        );
+        assert_eq!(serde_json::to_string(&ItemKind::File).unwrap(), "\"file\"");
     }
 }
 

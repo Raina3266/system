@@ -7,19 +7,20 @@ This repository contains two Rust utilities used by the desktop configuration:
 
 ## rofi-clipboard
 
-`scripts/rofi-clipboard` is a clipboard history manager for Wayland and Rofi. It watches the clipboard with `wl-paste`, stores text and images locally, and presents the history through custom Rofi modes.
+`scripts/rofi-clipboard` is a clipboard history manager for Wayland and Rofi. It watches the clipboard with `wl-paste`, stores text, file references, and images locally, and presents the history through custom Rofi modes.
 
 ### Features
 
-- Separate modes for memos, captured text, and images
+- Separate modes for memos, captured text, and files
 - Editable memos with selection-change autosave
-- Text and Image previews inside Rofi
+- Text, file-reference, and image previews inside Rofi
 - Pin and delete actions
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - The open panel follows Rofi selection changes and saves modified text before switching items
 - Keeps the highlighted clipboard item selected when search text is shortened or cleared
 - Restores the selected item with its original MIME type
-- Detects local image files copied from a file manager
+- Detects local files copied from a file manager and keeps them in File mode
+- Detects standalone web URLs and keeps them in File mode
 - Shows the saved file path for Niri screenshots
 - Removes missing linked local images and their cached previews when Rofi next renders
 - Deduplicates repeated clipboard entries
@@ -41,7 +42,7 @@ The interface contains three modes:
 
 - **Memo** — editable notes plus a permanent empty creation row at the bottom; pinned memos stay at the top
 - **Text** — captured text entries
-- **Images** — captured images with previews
+- **Files** — copied local files, web URLs, and captured images with previews
 
 Rofi opens in Memo mode with an empty **New memo** row at the bottom. Clicking
 **Edit** opens the currently selected memo in the companion editor. Saving text
@@ -56,7 +57,7 @@ mode preview behavior.
 rofi-clipboard [run]
 rofi-clipboard capture
 rofi-clipboard store --mime MIME
-rofi-clipboard script <memo|text|images>
+rofi-clipboard script <memo|text|files>
 ```
 
 `capture` is designed to receive clipboard data from `wl-paste --watch`. The `store` command reads an item from standard input and stores it with the supplied MIME type.

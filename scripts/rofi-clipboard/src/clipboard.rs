@@ -82,7 +82,7 @@ pub fn capture_clipboard() -> Result<()> {
         return Ok(());
     }
 
-    if store_local_image_files(&types, &watched_bytes)? {
+    if store_file_references(&types, &watched_bytes)? {
         return Ok(());
     }
 
@@ -91,12 +91,17 @@ pub fn capture_clipboard() -> Result<()> {
     }
     if let Ok(text) = String::from_utf8(watched_bytes) {
         let mime = preferred_text_mime(types.lines()).unwrap_or("text/plain;charset=utf-8");
-        ClipboardStore::discover()?.add_text(text, mime.to_owned())?;
+        let store = ClipboardStore::discover()?;
+        if let Some(name) = standalone_file_source(&text) {
+            store.add_file(text, mime.to_owned(), Some(name))?;
+        } else {
+            store.add_text(text, mime.to_owned())?;
+        }
     }
     Ok(())
 }
 
-fn store_local_image_files(types: &str, watched_bytes: &[u8]) -> Result<bool> {
+fn store_file_references(types: &str, watched_bytes: &[u8]) -> Result<bool> {
     let Some(uri_mime) = preferred_uri_mime(types.lines()) else {
         return Ok(false);
     };
@@ -109,27 +114,43 @@ fn store_local_image_files(types: &str, watched_bytes: &[u8]) -> Result<bool> {
     } else {
         watched_bytes.to_vec()
     };
-    let uri_list = String::from_utf8_lossy(&uri_bytes);
-    let paths: Vec<_> = uri_list.lines().filter_map(local_file_path).collect();
-    if paths.is_empty() {
-        return Ok(false);
-    }
-
+    let uri_list = decode_clipboard_text(&uri_bytes);
     let store = ClipboardStore::discover()?;
     let mut stored = false;
-    for path in paths {
-        let Ok(bytes) = fs::read(&path) else {
+    for line in uri_list.lines() {
+        let Some(name) = source_from_value(line) else {
             continue;
         };
-        let Some(mime) = detected_image_mime(&bytes) else {
+        if let Some(path) = local_file_path(line)
+            && let Ok(bytes) = fs::read(&path)
+            && let Some(mime) = detected_image_mime(&bytes)
+        {
+            stored |= store
+                .add_image_named(&bytes, mime.to_owned(), Some(name))?
+                .is_some();
             continue;
-        };
-        let name = Some(path.to_string_lossy().into_owned());
+        }
+
+        let payload = file_reference_payload(uri_mime, &uri_list, line);
         stored |= store
-            .add_image_named(&bytes, mime.to_owned(), name)?
+            .add_file(payload, uri_mime.to_owned(), Some(name))?
             .is_some();
     }
     Ok(stored)
+}
+
+fn file_reference_payload(mime: &str, clipboard_text: &str, reference: &str) -> String {
+    let reference = reference.trim();
+    if mime == "x-special/gnome-copied-files" {
+        let action = clipboard_text
+            .lines()
+            .map(str::trim)
+            .find(|line| matches!(*line, "copy" | "cut"))
+            .unwrap_or("copy");
+        format!("{action}\n{reference}\n")
+    } else {
+        format!("{reference}\n")
+    }
 }
 
 fn clipboard_image_source(types: &str) -> Result<Option<String>> {
@@ -302,10 +323,20 @@ fn decode_utf16(bytes: &[u8], from_bytes: fn([u8; 2]) -> u16) -> String {
 
 fn source_from_value(value: &str) -> Option<String> {
     let value = value.trim().replace("&amp;", "&");
-    if value.starts_with("https://") || value.starts_with("http://") {
+    if (value.starts_with("https://") || value.starts_with("http://"))
+        && !value.chars().any(char::is_whitespace)
+    {
         return Some(value);
     }
     local_file_path(&value).map(|path| path.to_string_lossy().into_owned())
+}
+
+fn standalone_file_source(text: &str) -> Option<String> {
+    let value = text.trim();
+    if value.is_empty() || value.lines().count() != 1 {
+        return None;
+    }
+    source_from_value(value)
 }
 
 fn image_source_from_html(html: &str) -> Option<String> {
@@ -447,7 +478,11 @@ pub fn store_stdin(mime: &str) -> Result<()> {
         store.add_image(&bytes, mime.to_owned())?;
     } else {
         let text = String::from_utf8(bytes).context("clipboard text is not UTF-8")?;
-        store.add_text(text, mime.to_owned())?;
+        if let Some(name) = standalone_file_source(&text) {
+            store.add_file(text, mime.to_owned(), Some(name))?;
+        } else {
+            store.add_text(text, mime.to_owned())?;
+        }
     }
     Ok(())
 }
@@ -550,6 +585,48 @@ mod tests {
         let value = decode_clipboard_text(b"https://example.com/image.png\n");
 
         assert_eq!(value, "https://example.com/image.png\n");
+    }
+
+    #[test]
+    fn recognizes_standalone_urls_and_local_file_paths() {
+        assert_eq!(
+            standalone_file_source("https://example.com/docs/report.pdf\n").as_deref(),
+            Some("https://example.com/docs/report.pdf")
+        );
+        assert_eq!(
+            standalone_file_source("file:///home/raina/My%20Report.pdf").as_deref(),
+            Some("/home/raina/My Report.pdf")
+        );
+        assert_eq!(
+            standalone_file_source("/home/raina/My Report.pdf").as_deref(),
+            Some("/home/raina/My Report.pdf")
+        );
+    }
+
+    #[test]
+    fn ordinary_text_that_mentions_a_url_stays_text() {
+        assert!(standalone_file_source("See https://example.com for details").is_none());
+        assert!(standalone_file_source("https://example.com\npage title").is_none());
+    }
+
+    #[test]
+    fn builds_single_file_payloads_for_wayland_uri_targets() {
+        assert_eq!(
+            file_reference_payload(
+                "text/uri-list",
+                "file:///tmp/one.pdf\nfile:///tmp/two.pdf\n",
+                "file:///tmp/two.pdf",
+            ),
+            "file:///tmp/two.pdf\n"
+        );
+        assert_eq!(
+            file_reference_payload(
+                "x-special/gnome-copied-files",
+                "cut\nfile:///tmp/report.pdf\n",
+                "file:///tmp/report.pdf",
+            ),
+            "cut\nfile:///tmp/report.pdf\n"
+        );
     }
 
     #[test]

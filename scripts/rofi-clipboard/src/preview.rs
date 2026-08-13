@@ -37,10 +37,18 @@ const IMAGE_PREVIEW_ARGUMENTS: [&str; 5] = [
     "--read-only",
     "--panel",
 ];
+const FILE_PREVIEW_ARGUMENTS: [&str; 5] = [
+    "--stdin",
+    "--title",
+    "Preview clipboard file",
+    "--read-only",
+    "--panel",
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PanelContent {
     Text(String),
+    ReadOnlyText(String),
     Image(PathBuf),
 }
 
@@ -114,6 +122,7 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
 
     let launch_result = match &content {
         PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
+        PanelContent::ReadOnlyText(text) => launch_file_preview(&path, selected_id, text),
         PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
     };
     if let Err(error) = launch_result {
@@ -192,6 +201,7 @@ pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) ->
 
     let launch_result = match &content {
         PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
+        PanelContent::ReadOnlyText(text) => launch_file_preview(&path, selected_id, text),
         PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
     };
     if let Err(error) = launch_result {
@@ -205,6 +215,11 @@ pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) ->
 fn launch_text_editor(path: &Path, id: u64, text: &str) -> Result<()> {
     let content = PanelContent::Text(text.to_owned());
     launch_panel(path, &TEXT_EDITOR_ARGUMENTS, text, id, &content)
+}
+
+fn launch_file_preview(path: &Path, id: u64, text: &str) -> Result<()> {
+    let content = PanelContent::ReadOnlyText(text.to_owned());
+    launch_panel(path, &FILE_PREVIEW_ARGUMENTS, text, id, &content)
 }
 
 fn launch_image_preview(path: &Path, id: u64, image_path: &Path) -> Result<()> {
@@ -312,7 +327,14 @@ fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<Pa
         ItemKind::Memo | ItemKind::Text => {
             Some(PanelContent::Text(item.text.clone().unwrap_or_default()))
         }
-        ItemKind::Image => image_path.map(PanelContent::Image),
+        ItemKind::File => image_path.map(PanelContent::Image).or_else(|| {
+            item.name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .or_else(|| item.text.as_deref())
+                .map(|text| PanelContent::ReadOnlyText(text.to_owned()))
+        }),
     }
 }
 
@@ -327,6 +349,9 @@ fn save_snapshot(store: &ClipboardStore, snapshot: PanelSnapshot) -> Result<Opti
         let Some(item) = history.items.iter().find(|item| item.id == id) else {
             return Ok(None);
         };
+        if item.kind == ItemKind::File {
+            return Ok(Some(id));
+        }
         text_is_changed(item, &text)?
     };
     if !changed {
@@ -342,7 +367,7 @@ fn save_snapshot(store: &ClipboardStore, snapshot: PanelSnapshot) -> Result<Opti
 
 fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
     if !item.kind.is_textual() {
-        bail!("images cannot be edited as text");
+        bail!("files cannot be edited as text");
     }
     Ok(item.text.as_deref() != Some(text))
 }
@@ -350,7 +375,7 @@ fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
 fn send_content(path: &Path, serial: u64, id: u64, content: &PanelContent) -> Result<bool> {
     let mut payload = id.to_be_bytes().to_vec();
     let operation = match content {
-        PanelContent::Text(text) => {
+        PanelContent::Text(text) | PanelContent::ReadOnlyText(text) => {
             payload.extend_from_slice(text.as_bytes());
             UPDATE_TEXT
         }
@@ -499,11 +524,11 @@ mod tests {
             id: 7,
             kind,
             text: text.map(str::to_owned),
-            image_file: (kind == ItemKind::Image).then(|| "7.png".to_owned()),
+            image_file: (kind == ItemKind::File).then(|| "7.png".to_owned()),
             name: name.map(str::to_owned),
             mime: match kind {
                 ItemKind::Memo | ItemKind::Text => "text/plain",
-                ItemKind::Image => "image/png",
+                ItemKind::File => "image/png",
             }
             .to_owned(),
             pinned: false,
@@ -538,13 +563,30 @@ mod tests {
         assert_eq!(
             panel_content(
                 &item(
-                    ItemKind::Image,
+                    ItemKind::File,
                     None,
                     Some("/home/raina/Pictures/example.png"),
                 ),
                 Some(path.clone()),
             ),
             Some(PanelContent::Image(path))
+        );
+    }
+
+    #[test]
+    fn file_references_open_a_read_only_text_preview() {
+        let mut file = item(
+            ItemKind::File,
+            Some("file:///home/raina/Documents/report.pdf\n"),
+            Some("/home/raina/Documents/report.pdf"),
+        );
+        file.image_file = None;
+
+        assert_eq!(
+            panel_content(&file, None),
+            Some(PanelContent::ReadOnlyText(
+                "/home/raina/Documents/report.pdf".to_owned()
+            ))
         );
     }
 
@@ -614,5 +656,6 @@ mod tests {
     #[test]
     fn image_preview_is_read_only() {
         assert!(IMAGE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
+        assert!(FILE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
     }
 }

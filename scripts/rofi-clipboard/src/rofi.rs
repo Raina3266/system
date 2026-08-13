@@ -22,7 +22,7 @@ const UNIT_SEPARATOR: u8 = 0x1f;
 pub enum Mode {
     Memo,
     Text,
-    Images,
+    Files,
 }
 
 impl Mode {
@@ -30,7 +30,7 @@ impl Mode {
         match value.to_ascii_lowercase().as_str() {
             "memo" => Ok(Self::Memo),
             "text" => Ok(Self::Text),
-            "images" => Ok(Self::Images),
+            "files" | "images" => Ok(Self::Files),
             _ => bail!("unknown clipboard mode {value:?}"),
         }
     }
@@ -39,7 +39,7 @@ impl Mode {
         match self {
             Self::Memo => "󰍩 Memo",
             Self::Text => "󰦨 Text",
-            Self::Images => "󰋩 Images",
+            Self::Files => "󰈔 Files",
         }
     }
 
@@ -47,7 +47,7 @@ impl Mode {
         match self {
             Self::Memo => "memo",
             Self::Text => "text",
-            Self::Images => "images",
+            Self::Files => "files",
         }
     }
 
@@ -55,7 +55,7 @@ impl Mode {
         match self {
             Self::Memo => item.kind == ItemKind::Memo,
             Self::Text => item.kind == ItemKind::Text,
-            Self::Images => item.kind == ItemKind::Image,
+            Self::Files => item.kind == ItemKind::File,
         }
     }
 }
@@ -103,7 +103,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
     let preview_socket = preview::session_socket_path()?;
     preview::cleanup_session(&preview_socket)?;
     let modes = format!(
-        "memo:{executable} script memo,text:{executable} script text,images:{executable} script images"
+        "memo:{executable} script memo,text:{executable} script text,files:{executable} script files"
     );
     let selection_command = format!(
         "{} preview-selection {{completion}} {{selection-serial}}",
@@ -124,8 +124,8 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
             "󰍩 Memo",
             "-display-text",
             "󰦨 Text",
-            "-display-images",
-            "󰋩 Images",
+            "-display-files",
+            "󰈔 Files",
             "-kb-custom-1",
             "Alt+p",
             "-kb-custom-2",
@@ -399,7 +399,7 @@ fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &s
 fn row_value(item: &ClipboardItem) -> String {
     match item.kind {
         ItemKind::Memo | ItemKind::Text => item.text.clone().unwrap_or_default(),
-        ItemKind::Image => image_label(item),
+        ItemKind::File => file_label(item),
     }
 }
 
@@ -414,7 +414,7 @@ fn row_preview(item: &ClipboardItem) -> String {
             }
         }
         ItemKind::Text => text_row_preview(item),
-        ItemKind::Image => truncate_chars(&image_label(item), 110),
+        ItemKind::File => truncate_chars(&file_label(item), 110),
     }
 }
 
@@ -424,12 +424,28 @@ fn text_row_preview(item: &ClipboardItem) -> String {
     truncate_chars(&one_line, 110)
 }
 
-fn image_label(item: &ClipboardItem) -> String {
-    item.name
+fn file_label(item: &ClipboardItem) -> String {
+    if let Some(name) = item
+        .name
         .as_deref()
-        .filter(|source| !source.trim().is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("Image · {}", short_mime(&item.mime)))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_owned();
+    }
+    if let Some(text) = item
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return text.to_owned();
+    }
+    if item.image_file.is_some() {
+        format!("Image · {}", short_mime(&item.mime))
+    } else {
+        format!("File · {}", short_mime(&item.mime))
+    }
 }
 
 fn short_mime(mime: &str) -> &str {
@@ -491,7 +507,7 @@ mod tests {
     fn image_item(name: Option<&str>) -> ClipboardItem {
         ClipboardItem {
             id: 1,
-            kind: ItemKind::Image,
+            kind: ItemKind::File,
             text: None,
             image_file: Some("1.png".to_owned()),
             name: name.map(str::to_owned),
@@ -535,7 +551,29 @@ mod tests {
         assert!(!Mode::Memo.includes(&pinned_text));
         assert!(!Mode::Memo.includes(&pinned_image));
         assert!(Mode::Text.includes(&pinned_text));
-        assert!(Mode::Images.includes(&pinned_image));
+        assert!(Mode::Files.includes(&pinned_image));
+    }
+
+    #[test]
+    fn file_mode_contains_urls_and_excludes_them_from_text_mode() {
+        let url = textual_item(
+            5,
+            ItemKind::File,
+            "https://example.com/download.tar.zst",
+            false,
+        );
+
+        assert!(Mode::Files.includes(&url));
+        assert!(!Mode::Text.includes(&url));
+        assert_eq!(row_value(&url), "https://example.com/download.tar.zst");
+    }
+
+    #[test]
+    fn file_is_the_named_replacement_for_image_mode() {
+        assert_eq!(Mode::parse("files").unwrap(), Mode::Files);
+        assert_eq!(Mode::parse("images").unwrap(), Mode::Files);
+        assert_eq!(Mode::Files.name(), "files");
+        assert_eq!(Mode::Files.prompt(), "󰈔 Files");
     }
 
     #[test]

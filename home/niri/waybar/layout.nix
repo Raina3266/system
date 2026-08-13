@@ -81,7 +81,7 @@ let
       "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
       "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
     }
-    // (import ./window_buttons.nix { inherit pkgs; });
+    // (import ./bottom.nix { inherit pkgs; });
 in
 {
   inherit topBar bottomBar;

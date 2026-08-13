@@ -99,6 +99,53 @@ impl ClipboardStore {
         })
     }
 
+    pub fn add_file(
+        &self,
+        text: String,
+        mime: String,
+        name: Option<String>,
+    ) -> Result<Option<u64>> {
+        if text.is_empty() {
+            return Ok(None);
+        }
+
+        self.update(|history| {
+            let digest = digest(text.as_bytes());
+            let now = unix_timestamp();
+            if let Some(position) = history.items.iter().position(|item| {
+                item.kind == ItemKind::File
+                    && item.image_file.is_none()
+                    && item.digest == digest
+            }) {
+                let mut item = history.items.remove(position);
+                item.created_at = now;
+                item.mime = mime;
+                item.text = Some(text);
+                item.name = name.or(item.name);
+                let id = item.id;
+                history.items.insert(0, item);
+                return Ok(Some(id));
+            }
+
+            let id = take_id(history);
+            history.items.insert(
+                0,
+                ClipboardItem {
+                    id,
+                    kind: ItemKind::File,
+                    text: Some(text),
+                    image_file: None,
+                    name,
+                    mime,
+                    pinned: false,
+                    created_at: now,
+                    digest,
+                },
+            );
+            Ok(Some(id))
+        })
+    }
+
     pub fn ensure_memo_draft(&self) -> Result<u64> {
         self.update(|history| Ok(ensure_memo_draft(history)))
     }
@@ -124,7 +171,11 @@ impl ClipboardStore {
             if let Some(position) = history
                 .items
                 .iter()
-                .position(|item| item.kind == ItemKind::Image && item.digest == digest)
+                .position(|item| {
+                    item.kind == ItemKind::File
+                        && item.image_file.is_some()
+                        && item.digest == digest
+                })
             {
                 let mut item = history.items.remove(position);
                 item.created_at = now;
@@ -147,7 +198,7 @@ impl ClipboardStore {
                 0,
                 ClipboardItem {
                     id,
-                    kind: ItemKind::Image,
+                    kind: ItemKind::File,
                     text: None,
                     image_file: Some(filename),
                     name,
@@ -222,7 +273,7 @@ impl ClipboardStore {
             };
             let kind = history.items[position].kind;
             if !kind.is_textual() {
-                bail!("images cannot be edited as text");
+                bail!("files cannot be edited as text");
             }
             if kind == ItemKind::Text && text.is_empty() {
                 bail!("clipboard text cannot be empty");
@@ -264,14 +315,18 @@ impl ClipboardStore {
             ItemKind::Memo | ItemKind::Text => {
                 Ok(item.text.as_deref().unwrap_or_default().as_bytes().to_vec())
             }
-            ItemKind::Image => {
-                let filename = item
-                    .image_file
-                    .as_deref()
-                    .and_then(safe_filename)
-                    .context("invalid image filename in clipboard history")?;
-                let path = self.image_dir.join(filename);
-                fs::read(&path).with_context(|| format!("read image {}", path.display()))
+            ItemKind::File => {
+                if let Some(filename) = item.image_file.as_deref() {
+                    let filename = safe_filename(filename)
+                        .context("invalid image filename in clipboard history")?;
+                    let path = self.image_dir.join(filename);
+                    fs::read(&path).with_context(|| format!("read image {}", path.display()))
+                } else {
+                    item.text
+                        .as_deref()
+                        .map(|text| text.as_bytes().to_vec())
+                        .context("file item has no clipboard payload")
+                }
             }
         }
     }
@@ -456,7 +511,7 @@ fn ensure_memo_draft(history: &mut History) -> u64 {
 }
 
 fn linked_local_image_is_missing(item: &ClipboardItem) -> bool {
-    if item.kind != ItemKind::Image {
+    if item.kind != ItemKind::File || item.image_file.is_none() {
         return false;
     }
     let Some(source) = item
@@ -490,7 +545,7 @@ fn trim_history(history: &mut History) -> Vec<String> {
     let mut excess_images = history
         .items
         .iter()
-        .filter(|item| item.kind == ItemKind::Image)
+        .filter(|item| item.image_file.is_some())
         .count()
         .saturating_sub(MAX_IMAGE_ITEMS);
 
@@ -500,7 +555,7 @@ fn trim_history(history: &mut History) -> Vec<String> {
         if excess_images == 0 {
             break;
         }
-        if history.items[index].kind != ItemKind::Image {
+        if history.items[index].image_file.is_none() {
             continue;
         }
 
@@ -590,16 +645,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn file_reference_preserves_its_clipboard_payload_and_display_name() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let payload = "file:///home/raina/Documents/report.pdf\n";
+        let id = store
+            .add_file(
+                payload.to_owned(),
+                "text/uri-list".to_owned(),
+                Some("/home/raina/Documents/report.pdf".to_owned()),
+            )?
+            .unwrap();
+
+        let history = store.load()?;
+        let item = history.items.iter().find(|item| item.id == id).unwrap();
+        assert_eq!(item.kind, ItemKind::File);
+        assert_eq!(item.text.as_deref(), Some(payload));
+        assert_eq!(
+            item.name.as_deref(),
+            Some("/home/raina/Documents/report.pdf")
+        );
+        assert_eq!(store.item_bytes(item)?.as_slice(), payload.as_bytes());
+        Ok(())
+    }
+
     fn item(id: u64, kind: ItemKind) -> ClipboardItem {
         ClipboardItem {
             id,
             kind,
             text: kind.is_textual().then(|| format!("text {id}")),
-            image_file: (kind == ItemKind::Image).then(|| format!("{id}.png")),
+            image_file: (kind == ItemKind::File).then(|| format!("{id}.png")),
             name: None,
             mime: match kind {
                 ItemKind::Memo | ItemKind::Text => "text/plain",
-                ItemKind::Image => "image/png",
+                ItemKind::File => "image/png",
             }
             .to_owned(),
             pinned: false,
@@ -613,7 +693,7 @@ mod tests {
         let mut history = History::default();
         history.items = (1..=101)
             .rev()
-            .map(|id| item(id, ItemKind::Image))
+            .map(|id| item(id, ItemKind::File))
             .collect();
 
         let removed = trim_history(&mut history);
@@ -624,13 +704,37 @@ mod tests {
     }
 
     #[test]
+    fn file_references_do_not_count_toward_cached_image_limit() {
+        let mut history = History::default();
+        history.items = (1..=101)
+            .rev()
+            .map(|id| ClipboardItem {
+                id,
+                kind: ItemKind::File,
+                text: Some(format!("file:///tmp/{id}.pdf\n")),
+                image_file: None,
+                name: Some(format!("/tmp/{id}.pdf")),
+                mime: "text/uri-list".to_owned(),
+                pinned: false,
+                created_at: 0,
+                digest: format!("file-digest-{id}"),
+            })
+            .collect();
+
+        let removed = trim_history(&mut history);
+
+        assert_eq!(history.items.len(), 101);
+        assert!(removed.is_empty());
+    }
+
+    #[test]
     fn image_limit_does_not_remove_text_items() {
         let mut history = History::default();
         history.items = (1..=251)
             .rev()
             .map(|id| {
                 let kind = if id >= 151 {
-                    ItemKind::Image
+                    ItemKind::File
                 } else {
                     ItemKind::Text
                 };
@@ -652,7 +756,7 @@ mod tests {
             history
                 .items
                 .iter()
-                .filter(|item| item.kind == ItemKind::Image)
+                .filter(|item| item.image_file.is_some())
                 .count(),
             MAX_IMAGE_ITEMS
         );
@@ -690,7 +794,7 @@ mod tests {
         history.next_id = 101;
         history.items = (1..=100)
             .rev()
-            .map(|id| item(id, ItemKind::Image))
+            .map(|id| item(id, ItemKind::File))
             .collect();
         store.save_unlocked(&history)?;
 
@@ -708,7 +812,7 @@ mod tests {
             history
                 .items
                 .iter()
-                .filter(|item| item.kind == ItemKind::Image)
+                .filter(|item| item.image_file.is_some())
                 .count(),
             MAX_IMAGE_ITEMS
         );
@@ -869,9 +973,9 @@ mod tests {
             item(1, ItemKind::Text),
             ClipboardItem {
                 pinned: true,
-                ..item(2, ItemKind::Image)
+                ..item(2, ItemKind::File)
             },
-            item(3, ItemKind::Image),
+            item(3, ItemKind::File),
             ClipboardItem {
                 pinned: true,
                 ..item(4, ItemKind::Text)
