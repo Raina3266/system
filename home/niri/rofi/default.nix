@@ -17,10 +17,6 @@ let
   };
 in
 {
-  imports = [
-    ./clipboard.nix
-  ];
-
   home.packages = with pkgs; [
     rofi
     rofi-rbw
