@@ -4,11 +4,47 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 
-use toml::Value;
-
 use crate::cli::{Side, WindowOverrides};
 
-const EMBEDDED_CONFIG: &str = include_str!("../config.toml");
+const SETTINGS_START: &str = "/* preview-panel-settings";
+
+const EMBEDDED_THEME: &str = r#"/* preview-panel-settings
+width: 400px;
+height: 616px;
+companion_width: 400px;
+side: left;
+gap: 5px;
+x: 770px;
+y: -850px;
+*/
+
+window.preview-panel {
+    background: rgba(14, 6, 22, 0.95);
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    padding: 10px;
+}
+
+textview.preview-text,
+textview.preview-text text {
+    background: transparent;
+    color: #cbe3e7;
+    caret-color: #7afcff;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 12pt;
+}
+
+picture.preview-image {
+    background: transparent;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    min-height: 4px;
+    background: #ff7edb;
+    border-radius: 4px;
+}
+"#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Config {
@@ -59,42 +95,78 @@ impl fmt::Display for ConfigError {
 impl Error for ConfigError {}
 
 pub fn embedded() -> Config {
-    parse(EMBEDDED_CONFIG).expect("the embedded preview-panel config must be valid")
+    parse(EMBEDDED_THEME).expect("the embedded preview-panel theme must be valid")
 }
 
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
-    let document = toml::from_str::<Value>(source)
-        .map_err(|error| ConfigError::new(format!("invalid TOML: {error}")))?;
-    let root = document
-        .as_table()
-        .ok_or_else(|| ConfigError::new("the TOML root must be a table"))?;
-    let window = table(root, "window")?;
-    let position = table(root, "position")?;
-    let appearance = table(root, "appearance")?;
+    let settings = settings_block(source)?;
+    let mut width = None;
+    let mut height = None;
+    let mut companion_width = None;
+    let mut panel_side = None;
+    let mut panel_gap = None;
+    let mut x = None;
+    let mut y = None;
+
+    for line in settings.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let (key, value) = line.split_once(':').ok_or_else(|| {
+            ConfigError::new(format!("invalid setting {line:?}; expected name: value;"))
+        })?;
+        let key = key.trim();
+        let value = value
+            .trim()
+            .strip_suffix(';')
+            .ok_or_else(|| ConfigError::new(format!("{key} must end with a semicolon")))?
+            .trim();
+
+        match key {
+            "width" => set_once(&mut width, dimension(value, "width")?, "width")?,
+            "height" => set_once(&mut height, dimension(value, "height")?, "height")?,
+            "companion_width" | "companion-width" => set_once(
+                &mut companion_width,
+                dimension(value, "companion_width")?,
+                "companion_width",
+            )?,
+            "side" => set_once(&mut panel_side, side(value)?, "side")?,
+            "gap" => set_once(&mut panel_gap, gap(value)?, "gap")?,
+            "x" => set_once(&mut x, offset(value, "x")?, "x")?,
+            "y" => set_once(&mut y, offset(value, "y")?, "y")?,
+            _ => {
+                return Err(ConfigError::new(format!(
+                    "unknown preview-panel setting {key:?}"
+                )));
+            }
+        }
+    }
 
     Ok(Config {
         window: WindowConfig {
-            width: dimension(window, "width")?,
-            height: dimension(window, "height")?,
-            companion_width: dimension(window, "companion_width")?,
-            side: side(window)?,
-            gap: gap(window)?,
-            x: offset(position, "x")?,
-            y: offset(position, "y")?,
+            width: required(width, "width")?,
+            height: required(height, "height")?,
+            companion_width: required(companion_width, "companion_width")?,
+            side: required(panel_side, "side")?,
+            gap: required(panel_gap, "gap")?,
+            x: required(x, "x")?,
+            y: required(y, "y")?,
         },
-        css: string(appearance, "css")?.to_owned(),
+        css: source.to_owned(),
     })
 }
 
 pub fn configured_path() -> Option<PathBuf> {
-    config_path_from(
-        env::var_os("PREVIEW_PANEL_CONFIG").as_deref(),
+    theme_path_from(
+        env::var_os("PREVIEW_PANEL_CSS").as_deref(),
         env::var_os("XDG_CONFIG_HOME").as_deref(),
         env::var_os("HOME").as_deref(),
     )
 }
 
-fn config_path_from(
+fn theme_path_from(
     override_path: Option<&OsStr>,
     xdg_config_home: Option<&OsStr>,
     home: Option<&OsStr>,
@@ -110,31 +182,44 @@ fn config_path_from(
             home.filter(|path| !path.is_empty())
                 .map(|path| PathBuf::from(path).join(".config"))
         })?;
-    Some(config_home.join("preview-panel/config.toml"))
+    Some(config_home.join("preview-panel/preview-panel.css"))
 }
 
-fn table<'a>(root: &'a toml::Table, name: &str) -> Result<&'a toml::Table, ConfigError> {
-    root.get(name)
-        .and_then(Value::as_table)
-        .ok_or_else(|| ConfigError::new(format!("missing [{name}] table")))
+fn settings_block(source: &str) -> Result<&str, ConfigError> {
+    let marker = source
+        .find(SETTINGS_START)
+        .ok_or_else(|| ConfigError::new("missing /* preview-panel-settings configuration block"))?;
+    let settings = &source[marker + SETTINGS_START.len()..];
+    let end = settings.find("*/").ok_or_else(|| {
+        ConfigError::new("preview-panel-settings configuration block is not closed")
+    })?;
+    Ok(&settings[..end])
 }
 
-fn string<'a>(table: &'a toml::Table, key: &str) -> Result<&'a str, ConfigError> {
-    table
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| ConfigError::new(format!("{key} must be a string")))
+fn set_once<T>(slot: &mut Option<T>, value: T, key: &str) -> Result<(), ConfigError> {
+    if slot.replace(value).is_some() {
+        return Err(ConfigError::new(format!(
+            "preview-panel setting {key:?} is repeated"
+        )));
+    }
+    Ok(())
 }
 
-fn integer(table: &toml::Table, key: &str) -> Result<i64, ConfigError> {
-    table
-        .get(key)
-        .and_then(Value::as_integer)
-        .ok_or_else(|| ConfigError::new(format!("{key} must be a whole number")))
+fn required<T>(value: Option<T>, key: &str) -> Result<T, ConfigError> {
+    value.ok_or_else(|| ConfigError::new(format!("missing preview-panel setting {key:?}")))
 }
 
-fn dimension(table: &toml::Table, key: &str) -> Result<i32, ConfigError> {
-    let value = integer(table, key)?;
+fn pixels(value: &str, key: &str) -> Result<i64, ConfigError> {
+    let number = value.strip_suffix("px").unwrap_or(value).trim();
+    number.parse::<i64>().map_err(|_| {
+        ConfigError::new(format!(
+            "{key} must be a whole number, optionally followed by px"
+        ))
+    })
+}
+
+fn dimension(value: &str, key: &str) -> Result<i32, ConfigError> {
+    let value = pixels(value, key)?;
     if !(200..=8192).contains(&value) {
         return Err(ConfigError::new(format!(
             "{key} must be between 200 and 8192 pixels"
@@ -143,16 +228,16 @@ fn dimension(table: &toml::Table, key: &str) -> Result<i32, ConfigError> {
     Ok(value as i32)
 }
 
-fn gap(table: &toml::Table) -> Result<i32, ConfigError> {
-    let value = integer(table, "gap")?;
+fn gap(value: &str) -> Result<i32, ConfigError> {
+    let value = pixels(value, "gap")?;
     if !(0..=512).contains(&value) {
         return Err(ConfigError::new("gap must be between 0 and 512 pixels"));
     }
     Ok(value as i32)
 }
 
-fn offset(table: &toml::Table, key: &str) -> Result<i32, ConfigError> {
-    let value = integer(table, key)?;
+fn offset(value: &str, key: &str) -> Result<i32, ConfigError> {
+    let value = pixels(value, key)?;
     if !(-8192..=8192).contains(&value) {
         return Err(ConfigError::new(format!(
             "{key} must be between -8192 and 8192 pixels"
@@ -161,8 +246,8 @@ fn offset(table: &toml::Table, key: &str) -> Result<i32, ConfigError> {
     Ok(value as i32)
 }
 
-fn side(table: &toml::Table) -> Result<Side, ConfigError> {
-    match string(table, "side")? {
+fn side(value: &str) -> Result<Side, ConfigError> {
+    match value {
         "left" => Ok(Side::Left),
         "right" => Ok(Side::Right),
         _ => Err(ConfigError::new("side must be either left or right")),
@@ -175,31 +260,38 @@ mod tests {
 
     use super::*;
 
+    const THEME: &str = r#"/* preview-panel-settings
+width: 480px;
+height: 615px;
+companion_width: 400px;
+side: right;
+gap: 14px;
+x: 35px;
+y: -20px;
+*/
+
+window.preview-panel { color: #cbe3e7; }
+"#;
+
     #[test]
-    fn embedded_panel_width_is_400_pixels() {
-        assert_eq!(embedded().window.width, 400);
+    fn embedded_theme_has_expected_defaults() {
+        assert_eq!(
+            embedded().window,
+            WindowConfig {
+                width: 400,
+                height: 616,
+                companion_width: 400,
+                side: Side::Left,
+                gap: 5,
+                x: 770,
+                y: -850,
+            }
+        );
     }
 
     #[test]
-    fn parses_window_values_and_raw_css() {
-        let config = parse(
-            r##"
-                [window]
-                width = 480
-                height = 615
-                companion_width = 400
-                side = "right"
-                gap = 14
-
-                [position]
-                x = 35
-                y = -20
-
-                [appearance]
-                css = '''window { color: #cbe3e7; }'''
-            "##,
-        )
-        .unwrap();
+    fn parses_geometry_and_preserves_complete_css() {
+        let config = parse(THEME).unwrap();
 
         assert_eq!(config.window.width, 480);
         assert_eq!(config.window.height, 615);
@@ -208,23 +300,15 @@ mod tests {
         assert_eq!(config.window.gap, 14);
         assert_eq!(config.window.x, 35);
         assert_eq!(config.window.y, -20);
-        assert_eq!(config.css, "window { color: #cbe3e7; }");
+        assert_eq!(config.css, THEME);
     }
 
     #[test]
-    fn command_line_values_override_toml_window_values() {
-        let window = WindowConfig {
-            width: 480,
-            height: 615,
-            companion_width: 400,
-            side: Side::Left,
-            gap: 10,
-            x: 25,
-            y: -15,
-        };
+    fn command_line_values_override_css_window_values() {
+        let window = parse(THEME).unwrap().window;
         let overrides = WindowOverrides {
             width: Some(600),
-            side: Some(Side::Right),
+            side: Some(Side::Left),
             ..WindowOverrides::default()
         };
 
@@ -234,82 +318,89 @@ mod tests {
                 width: 600,
                 height: 615,
                 companion_width: 400,
-                side: Side::Right,
-                gap: 10,
-                x: 25,
-                y: -15,
+                side: Side::Left,
+                gap: 14,
+                x: 35,
+                y: -20,
             }
         );
     }
 
     #[test]
-    fn rejects_invalid_window_values() {
-        let error = parse(
-            r#"
-                [window]
-                width = 100
-                height = 615
-                companion_width = 400
-                side = "middle"
-                gap = -1
-
-                [position]
-                x = 0
-                y = 0
-
-                [appearance]
-                css = ""
-            "#,
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("width"));
+    fn accepts_companion_width_with_css_style_name() {
+        let source = THEME.replace("companion_width", "companion-width");
+        assert_eq!(parse(&source).unwrap().window.companion_width, 400);
     }
 
     #[test]
-    fn rejects_position_outside_supported_range() {
-        let error = parse(
-            r#"
-                [window]
-                width = 400
-                height = 615
-                companion_width = 400
-                side = "left"
-                gap = 10
+    fn rejects_missing_unknown_and_repeated_settings() {
+        let missing = THEME.replace("width: 480px;\n", "");
+        assert!(parse(&missing).unwrap_err().to_string().contains("width"));
 
-                [position]
-                x = 9000
-                y = 0
+        let unknown = THEME.replace("*/", "opacity: 1;\n*/");
+        assert!(parse(&unknown).unwrap_err().to_string().contains("unknown"));
 
-                [appearance]
-                css = ""
-            "#,
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("x"));
+        let repeated = THEME.replace("*/", "width: 500px;\n*/");
+        assert!(
+            parse(&repeated)
+                .unwrap_err()
+                .to_string()
+                .contains("repeated")
+        );
     }
 
     #[test]
-    fn explicit_config_path_takes_priority() {
+    fn rejects_values_outside_supported_ranges() {
+        let dimension = THEME.replace("width: 480px;", "width: 100px;");
+        assert!(parse(&dimension).unwrap_err().to_string().contains("width"));
+
+        let panel_gap = THEME.replace("gap: 14px;", "gap: -1px;");
+        assert!(parse(&panel_gap).unwrap_err().to_string().contains("gap"));
+
+        let position = THEME.replace("x: 35px;", "x: 9000px;");
+        assert!(parse(&position).unwrap_err().to_string().contains("x"));
+    }
+
+    #[test]
+    fn requires_a_closed_settings_comment() {
+        assert!(
+            parse("window { color: red; }")
+                .unwrap_err()
+                .to_string()
+                .contains("missing")
+        );
+
+        let unclosed = THEME.replacen("*/", "", 1);
+        assert!(
+            parse(&unclosed)
+                .unwrap_err()
+                .to_string()
+                .contains("not closed")
+        );
+    }
+
+    #[test]
+    fn explicit_css_path_takes_priority() {
         assert_eq!(
-            config_path_from(
-                Some(OsStr::new("/tmp/custom.toml")),
+            theme_path_from(
+                Some(OsStr::new("/tmp/custom.css")),
                 Some(OsStr::new("/tmp/config")),
                 Some(OsStr::new("/home/raina")),
             ),
-            Some(PathBuf::from("/tmp/custom.toml"))
+            Some(PathBuf::from("/tmp/custom.css"))
         );
     }
 
     #[test]
-    fn config_path_uses_xdg_then_home_fallback() {
+    fn css_path_uses_xdg_then_home_fallback() {
         assert_eq!(
-            config_path_from(None, Some(OsStr::new("/tmp/config")), None),
-            Some(PathBuf::from("/tmp/config/preview-panel/config.toml"))
+            theme_path_from(None, Some(OsStr::new("/tmp/config")), None),
+            Some(PathBuf::from("/tmp/config/preview-panel/preview-panel.css"))
         );
         assert_eq!(
-            config_path_from(None, None, Some(OsStr::new("/home/raina"))),
+            theme_path_from(None, None, Some(OsStr::new("/home/raina"))),
             Some(PathBuf::from(
-                "/home/raina/.config/preview-panel/config.toml"
+                "/home/raina/.config/preview-panel/preview-panel.css"
             ))
         );
     }

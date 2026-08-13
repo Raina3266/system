@@ -1,0 +1,41 @@
+/*
+ * Preview panel geometry. Keep these seven settings inside this comment so
+ * GTK can load the complete file as CSS while preview-panel reads the values.
+ * Numeric values may be written with or without px.
+ */
+/* preview-panel-settings
+width: 400px;
+height: 616px;
+companion_width: 400px;
+side: left;
+gap: 5px;
+x: 770px;
+y: -850px;
+*/
+
+window.preview-panel {
+    background: rgba(14, 6, 22, 0.95);
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    padding: 10px;
+}
+
+textview.preview-text,
+textview.preview-text text {
+    background: transparent;
+    color: #cbe3e7;
+    caret-color: #7afcff;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 12pt;
+}
+
+picture.preview-image {
+    background: transparent;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    min-height: 4px;
+    background: #ff7edb;
+    border-radius: 4px;
+}

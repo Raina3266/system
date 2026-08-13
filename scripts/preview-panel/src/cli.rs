@@ -29,12 +29,12 @@ OPTIONS:
     -V, --version       Show the version
 
 CONFIGURATION:
-    TOML is loaded from $PREVIEW_PANEL_CONFIG when set, otherwise from
-    $XDG_CONFIG_HOME/preview-panel/config.toml (or ~/.config/preview-panel/config.toml).
-    [window] controls panel size and automatic companion placement.
-    [position] provides x/y screen offsets. [appearance].css contains raw GTK4
-    CSS. Saving valid TOML reloads an open panel automatically.
-    Explicit window options above override their matching TOML values.
+    CSS is loaded from $PREVIEW_PANEL_CSS when set, otherwise from
+    $XDG_CONFIG_HOME/preview-panel/preview-panel.css (or the matching path under
+    ~/.config). Its /* preview-panel-settings ... */ comment controls width,
+    height, companion_width, side, gap, x, and y. The rest is normal GTK4 CSS.
+    Saving valid CSS reloads appearance and geometry in every open panel.
+    Explicit window options above override their matching CSS settings.
 
 BUILT-IN GTK CONTROLS:
     Mouse drag          Select text

@@ -84,6 +84,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
 | `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
+| `PREVIEW_PANEL_CSS` | Override the preview panel CSS/configuration path |
 | `ROFI_CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify and label saved screenshots (default: `~/Pictures/Screenshots`) |
 | `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
 | `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
@@ -91,11 +92,12 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
-Panel placement, size, and GTK CSS normally come from
-`scripts/preview-panel/config.toml`. Home Manager links that file into the
-runtime config directory, so valid saves hot-reload without rebuilding.
-`[position].x` and `[position].y` move the panel from its automatic position
-beside Rofi: positive `x` moves right and positive `y` moves down. The environment
+Panel placement, size, and GTK styling all come from
+`home/niri/themes/preview-panel.css`. Home Manager links that file to
+`~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
+rebuilding. The `preview-panel-settings` comment at the top controls `width`,
+`height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal
+GTK4 CSS. Positive `x` moves right and positive `y` moves down. The environment
 variables above remain available for one-launch overrides.
 
 For a session-wide environment override, set values such as:

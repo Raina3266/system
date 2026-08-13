@@ -20,7 +20,7 @@ use crate::config::{self, Config, WindowConfig};
 use crate::ipc::{ContentSnapshot, Message, SwitchReply};
 use crate::panel_state::{ContentKind, CurrentItem, LiveState, SwitchDisposition};
 
-const CONFIG_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
+const THEME_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy)]
 enum PanelKeyboardState {
@@ -72,10 +72,10 @@ fn build_window(
     text: &str,
     receiver: Option<Receiver<Message>>,
 ) {
-    let config_path = config::configured_path();
-    let (observed_config, loaded_config) = load_initial_config(config_path.as_deref());
-    let css_provider = install_css(&loaded_config.css);
-    let panel_config = loaded_config
+    let theme_path = config::configured_path();
+    let (observed_theme, loaded_theme) = load_initial_theme(theme_path.as_deref());
+    let css_provider = install_css(&loaded_theme.css);
+    let panel_config = loaded_theme
         .window
         .with_overrides(options.window_overrides);
 
@@ -155,10 +155,10 @@ fn build_window(
         }
         geometry
     });
-    watch_config(
+    watch_theme(
         &window,
-        config_path,
-        observed_config,
+        theme_path,
+        observed_theme,
         css_provider,
         options.window_overrides,
         panel_geometry,
@@ -222,7 +222,7 @@ fn wl_copy_binary() -> PathBuf {
         .unwrap_or_else(|| Path::new("wl-copy").to_path_buf())
 }
 
-fn load_initial_config(path: Option<&Path>) -> (Option<String>, Config) {
+fn load_initial_theme(path: Option<&Path>) -> (Option<String>, Config) {
     let Some(path) = path else {
         return (None, config::embedded());
     };
@@ -232,7 +232,7 @@ fn load_initial_config(path: Option<&Path>) -> (Option<String>, Config) {
             Ok(config) => (Some(source), config),
             Err(error) => {
                 eprintln!(
-                    "preview-panel: ignoring invalid config {}: {error}",
+                    "preview-panel: ignoring invalid CSS theme {}: {error}",
                     path.display()
                 );
                 (Some(source), config::embedded())
@@ -243,7 +243,7 @@ fn load_initial_config(path: Option<&Path>) -> (Option<String>, Config) {
         }
         Err(error) => {
             eprintln!(
-                "preview-panel: cannot read config {}: {error}",
+                "preview-panel: cannot read CSS theme {}: {error}",
                 path.display()
             );
             (None, config::embedded())
@@ -262,26 +262,26 @@ fn install_css(css: &str) -> CssProvider {
     provider
 }
 
-fn watch_config(
+fn watch_theme(
     window: &ApplicationWindow,
-    config_path: Option<PathBuf>,
-    mut observed_config: Option<String>,
+    theme_path: Option<PathBuf>,
+    mut observed_theme: Option<String>,
     css_provider: CssProvider,
     window_overrides: WindowOverrides,
     panel_geometry: Option<Rc<RefCell<PanelGeometry>>>,
 ) {
-    let Some(config_path) = config_path else {
+    let Some(theme_path) = theme_path else {
         return;
     };
     let window = window.clone();
-    glib::timeout_add_local(CONFIG_RELOAD_INTERVAL, move || {
-        let Ok(source) = fs::read_to_string(&config_path) else {
+    glib::timeout_add_local(THEME_RELOAD_INTERVAL, move || {
+        let Ok(source) = fs::read_to_string(&theme_path) else {
             return glib::ControlFlow::Continue;
         };
-        if observed_config.as_deref() == Some(source.as_str()) {
+        if observed_theme.as_deref() == Some(source.as_str()) {
             return glib::ControlFlow::Continue;
         }
-        observed_config = Some(source.clone());
+        observed_theme = Some(source.clone());
 
         match config::parse(&source) {
             Ok(config) => {
@@ -293,8 +293,8 @@ fn watch_config(
                 }
             }
             Err(error) => eprintln!(
-                "preview-panel: ignoring invalid config {}: {error}",
-                config_path.display()
+                "preview-panel: ignoring invalid CSS theme {}: {error}",
+                theme_path.display()
             ),
         }
         glib::ControlFlow::Continue
