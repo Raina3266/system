@@ -27,7 +27,7 @@ in
     ./ocr.nix
     ./office.nix
     ./toolchains.nix
-    
+
   ];
 
   home = {
@@ -43,17 +43,13 @@ in
   programs.google-chrome = {
     enable = true;
     commandLineArgs = [
-      # mprisence publishes one MPRIS player per media tab. Disable Chrome's
-      # built-in aggregate player so the same media is not listed twice.
       "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
     ];
     nativeMessagingHosts = [ mprisenceNativeHost ];
   };
+  programs.firefox.enable = true;
 
   home.packages = with pkgs; [
-    # browsers
-    firefox
-
     # handy
     handy
     wtype

@@ -7,6 +7,7 @@
     nixd
     uv
     rustup
+    mprisence
     cargo-machete
     diesel-cli
     cargo-audit
