@@ -39,7 +39,7 @@ in
     "custom/lyrics" = {
       hide-empty-text = true;
       return-type = "json";
-      format = "󰝚 {text}";
+      format = "󰝚  {text}";
       exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
       exec = "${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
       on-click = "${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
