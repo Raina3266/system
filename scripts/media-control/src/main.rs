@@ -130,10 +130,16 @@ fn player_source(player: &str) -> String {
         .unwrap_or_else(|| friendly_source(player))
 }
 
+fn is_mprisence_web_player(player: &str) -> bool {
+    player.to_ascii_lowercase().contains("mprisence_web")
+}
+
+fn player_url(player: &str) -> String {
+    player_property(player, &["metadata", "xesam:url"]).unwrap_or_default()
+}
+
 fn display_source(player: &str, source: &str) -> String {
-    if player.to_ascii_lowercase().contains("mprisence_web")
-        || source.eq_ignore_ascii_case("mprisence_web")
-    {
+    if is_mprisence_web_player(player) || source.eq_ignore_ascii_case("mprisence_web") {
         "Chrome".to_owned()
     } else {
         clean_text(source)
@@ -149,6 +155,99 @@ fn is_excluded_player(player: &str, source: &str) -> bool {
             .collect::<String>();
         normalized.contains("tauon") || normalized.contains("kid3")
     })
+}
+
+fn web_url_parts(url: &str) -> Option<(&str, &str, &str)> {
+    let url = url.trim();
+    let remainder = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let authority_end = remainder
+        .find(|character| matches!(character, '/' | '?' | '#'))
+        .unwrap_or(remainder.len());
+    let authority = &remainder[..authority_end];
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    if host.is_empty() {
+        return None;
+    }
+
+    let location = remainder[authority_end..]
+        .split('#')
+        .next()
+        .unwrap_or_default();
+    if let Some(query) = location.strip_prefix('?') {
+        return Some((host, "/", query));
+    }
+    let (path, query) = location.split_once('?').unwrap_or((location, ""));
+    Some((host, if path.is_empty() { "/" } else { path }, query))
+}
+
+fn host_matches(host: &str, domain: &str) -> bool {
+    host == domain
+        || host
+            .strip_suffix(domain)
+            .map(|prefix| prefix.ends_with('.'))
+            .unwrap_or(false)
+}
+
+fn path_has_value(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .map(|value| !value.is_empty() && value != "/")
+        .unwrap_or(false)
+}
+
+fn query_has_value(query: &str, key: &str) -> bool {
+    query.split('&').any(|field| {
+        field
+            .split_once('=')
+            .map(|(name, value)| name.eq_ignore_ascii_case(key) && !value.is_empty())
+            .unwrap_or(false)
+    })
+}
+
+fn is_publishable_web_media_url(url: &str) -> bool {
+    let Some((host, path, query)) = web_url_parts(url) else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    let path = path.to_ascii_lowercase();
+
+    if host_matches(&host, "youtu.be") {
+        return path_has_value(&path, "/");
+    }
+
+    if host_matches(&host, "youtube.com") {
+        if path == "/watch" {
+            return query_has_value(query, "v");
+        }
+        return path_has_value(&path, "/shorts/")
+            || path_has_value(&path, "/live/")
+            || path_has_value(&path, "/embed/");
+    }
+
+    if host_matches(&host, "bilibili.com") {
+        if host == "live.bilibili.com" {
+            let room = path.trim_matches('/').split('/').next().unwrap_or_default();
+            return !room.is_empty() && room.chars().all(|character| character.is_ascii_digit());
+        }
+        return path_has_value(&path, "/video/")
+            || path_has_value(&path, "/bangumi/play/");
+    }
+
+    if path == "/" {
+        return false;
+    }
+    let first_segment = path
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    !matches!(first_segment, "search" | "results")
+}
+
+fn should_include_player(player: &str, source: &str, url: &str) -> bool {
+    !is_excluded_player(player, source)
+        && (!is_mprisence_web_player(player) || is_publishable_web_media_url(url))
 }
 
 fn player_ids() -> Vec<String> {
@@ -179,7 +278,12 @@ fn snapshot() -> Vec<Player> {
         };
 
         let source = player_source(&id);
-        if is_excluded_player(&id, &source) {
+        let url = if is_mprisence_web_player(&id) {
+            player_url(&id)
+        } else {
+            String::new()
+        };
+        if !should_include_player(&id, &source, &url) {
             state.remove(&id);
             continue;
         }
@@ -195,7 +299,13 @@ fn snapshot() -> Vec<Player> {
 
         let title = player_property(&id, &["metadata", "--format", "{{title}}"]) 
             .filter(|value| !value.is_empty())
-            .or_else(|| player_property(&id, &["metadata", "xesam:url"]))
+            .or_else(|| {
+                if url.is_empty() {
+                    player_property(&id, &["metadata", "xesam:url"])
+                } else {
+                    Some(url.clone())
+                }
+            })
             .map(|value| title_from_value(&value))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Untitled media".to_owned());
@@ -423,7 +533,13 @@ fn waybar_toggle_action(players: &[Player]) -> Option<(&str, &'static str)> {
 
 fn pause_all() -> Result<(), String> {
     for player in player_ids() {
-        if is_excluded_player(&player, &player_source(&player)) {
+        let source = player_source(&player);
+        let url = if is_mprisence_web_player(&player) {
+            player_url(&player)
+        } else {
+            String::new()
+        };
+        if !should_include_player(&player, &source, &url) {
             continue;
         }
         if player_property(&player, &["status"]).as_deref() == Some("Playing") {
@@ -822,6 +938,45 @@ mod tests {
         assert!(!is_excluded_player(
             "mprisence_web.web.youtube.p123",
             "mprisence_web"
+        ));
+    }
+
+    #[test]
+    fn keeps_canonical_youtube_and_bilibili_media_urls() {
+        for url in [
+            "https://www.youtube.com/watch?v=H9vpsqr0U8A",
+            "https://music.youtube.com/watch?v=BTlj6Sls7KE",
+            "https://youtu.be/H9vpsqr0U8A",
+            "https://www.youtube.com/shorts/H9vpsqr0U8A",
+            "https://www.bilibili.com/video/BV1F54y127A8/?spm_id_from=333",
+            "https://www.bilibili.com/bangumi/play/ep123456",
+            "https://live.bilibili.com/123456",
+        ] {
+            assert!(is_publishable_web_media_url(url), "should keep {url}");
+        }
+    }
+
+    #[test]
+    fn hides_home_search_and_listing_pages_from_mprisence() {
+        for url in [
+            "https://www.bilibili.com/",
+            "https://search.bilibili.com/all?keyword=test",
+            "https://music.youtube.com/",
+            "https://www.youtube.com/results?search_query=test",
+            "https://www.google.com/search?q=test",
+            "https://example.com/",
+        ] {
+            assert!(!is_publishable_web_media_url(url), "should hide {url}");
+        }
+    }
+
+    #[test]
+    fn leaves_non_browser_players_and_real_generic_media_unchanged() {
+        assert!(should_include_player("vlc", "VLC", ""));
+        assert!(should_include_player(
+            "mprisence_web.generic.p123",
+            "mprisence_web",
+            "https://example.com/videos/episode-1"
         ));
     }
 }
