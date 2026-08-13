@@ -1,12 +1,10 @@
-{ pkgs }:
+{ pkgs, ycal }:
 let
   # Drawer config for system/hardware groups
   drawer = {
     transition-duration = 300;
     transition-left-to-right = true;
   };
-
-  ycal = import ./calender.nix { inherit pkgs; };
 in
 {
   "custom/ycal" = {

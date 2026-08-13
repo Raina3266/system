@@ -36,18 +36,21 @@ in
     stateVersion = "26.05";
   };
 
-  programs.home-manager.enable = true;
-  programs.zed-editor.enable = true;
-  programs.vscode.enable = true;
+  programs = {
+    home-manager.enable = true;
+    zed-editor.enable = true;
+    vscode.enable = true;
 
-  programs.google-chrome = {
-    enable = true;
-    commandLineArgs = [
-      "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
-    ];
-    nativeMessagingHosts = [ mprisenceNativeHost ];
+    google-chrome = {
+      enable = true;
+      commandLineArgs = [
+        "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
+      ];
+      nativeMessagingHosts = [ mprisenceNativeHost ];
+    };
+
+    firefox.enable = true;
   };
-  programs.firefox.enable = true;
 
   home.packages = with pkgs; [
     # handy

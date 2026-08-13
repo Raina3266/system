@@ -12,7 +12,7 @@ let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
   topRight = import ./top-right.nix { inherit pkgs; };
-  layout = import ./layout.nix { inherit pkgs topRight; };
+  layout = import ./layout.nix { inherit pkgs topRight ycal; };
 
   # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
   barOutputs = lib.optionalAttrs ((osConfig.services'.desktop.displays or [ ]) != [ ]) {
