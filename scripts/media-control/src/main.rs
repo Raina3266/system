@@ -454,12 +454,22 @@ fn render_rofi(players: &[Player]) -> io::Result<()> {
     for player in players {
         let row = row_text(player);
         write!(output, "{row}\0info\x1f{}", clean_field(&player.id))?;
-        if player.status.is_playing() {
-            output.write_all(b"\x1factive\x1ftrue")?;
+        if let Some(state) = rofi_row_state(player) {
+            write!(output, "\x1f{state}\x1ftrue")?;
         }
         output.write_all(b"\n")?;
     }
     output.flush()
+}
+
+fn rofi_row_state(player: &Player) -> Option<&'static str> {
+    if player.pinned {
+        Some("urgent")
+    } else if player.status.is_playing() {
+        Some("active")
+    } else {
+        None
+    }
 }
 
 fn row_text(player: &Player) -> String {
@@ -890,6 +900,33 @@ mod tests {
         values.sort_by(compare_players);
         assert_eq!(values[0].id, "pin");
         assert_eq!(values[1].id, "new");
+    }
+
+    #[test]
+    fn pinned_rofi_style_takes_priority_over_playback_status() {
+        let make = |pinned, status| Player {
+            id: String::new(),
+            source: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            status,
+            volume: None,
+            pinned,
+            activity: 0,
+        };
+
+        assert_eq!(
+            rofi_row_state(&make(true, PlaybackStatus::Playing)),
+            Some("urgent")
+        );
+        assert_eq!(
+            rofi_row_state(&make(false, PlaybackStatus::Playing)),
+            Some("active")
+        );
+        assert_eq!(
+            rofi_row_state(&make(false, PlaybackStatus::Paused)),
+            None
+        );
     }
 
     #[test]

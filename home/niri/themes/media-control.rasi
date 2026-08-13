@@ -65,23 +65,33 @@ element alternate.active {
 }
 
 element selected.normal,
-element selected.active {
+element selected.active,
+element selected.urgent {
     border-color: @pink;
     background-color: rgba(255, 126, 219, 0.12);
 }
 
 element-text {
     vertical-align: 0.5;
-    text-color: @fg;
+    text-color: @dim;
+}
+
+element-text normal.normal,
+element-text alternate.normal,
+element-text selected.normal {
+    text-color: @dim;
 }
 
 element-text normal.active,
-element-text alternate.active {
-    text-color: @cyan;
+element-text alternate.active,
+element-text selected.active {
+    text-color: @fg;
 }
 
-element-text selected {
-    text-color: @pink;
+element-text normal.urgent,
+element-text alternate.urgent,
+element-text selected.urgent {
+    text-color: @cyan;
 }
 
 /* These are native Rofi buttons. Each action becomes ROFI_RETV 10..16 in
