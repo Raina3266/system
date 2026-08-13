@@ -11,7 +11,7 @@
 let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
-  topRight = import ./top-right.nix { inherit pkgs config; };
+  topRight = import ./top-right.nix { inherit pkgs; };
   layout = import ./layout.nix { inherit pkgs topRight; };
 
   # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays

@@ -29,11 +29,7 @@
 
   outputs =
     {
-      self,
       nixpkgs,
-      home-manager,
-      nixGL,
-      nixvim,
       ...
     }@inputs:
     let
@@ -43,7 +39,7 @@
       nixosConfigurations.raina = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = {
-          inputs = inputs;
+          inherit inputs;
         };
         modules = [
           ./nixos/configuration.nix

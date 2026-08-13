@@ -144,28 +144,14 @@ fn handle_connection(stream: &mut UnixStream, sender: &Sender<Message>) -> io::R
                     reply,
                 },
             )?;
-            let response = response
-                .recv_timeout(SAVE_RESPONSE_TIMEOUT)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("wait for current panel state: {error}"),
-                    )
-                })?;
+            let response = receive_panel_response(response)?;
             write_panel_state(stream, serial, &response)?;
             Ok(false)
         }
         Request::SaveAndClose => {
             let (reply, response) = mpsc::channel();
             send_to_ui(sender, Message::SaveAndClose { reply })?;
-            let snapshot = response
-                .recv_timeout(SAVE_RESPONSE_TIMEOUT)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("wait for current panel state: {error}"),
-                    )
-                })?;
+            let snapshot = receive_panel_response(response)?;
             write_panel_state(stream, 0, &SwitchReply::Ready(snapshot))?;
             Ok(true)
         }
@@ -180,6 +166,15 @@ fn send_to_ui(sender: &Sender<Message>, message: Message) -> io::Result<()> {
     sender
         .send(message)
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "preview window has closed"))
+}
+
+fn receive_panel_response<T>(response: Receiver<T>) -> io::Result<T> {
+    response.recv_timeout(SAVE_RESPONSE_TIMEOUT).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("wait for current panel state: {error}"),
+        )
+    })
 }
 
 fn read_request(mut reader: impl Read) -> io::Result<Request> {

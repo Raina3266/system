@@ -57,7 +57,7 @@ in
     { mime = "application/x-sharedlib"; fg = dim; }
 
     # ── Fallback ──
-    { url = "*"; fg = fg; }
+    { url = "*"; inherit fg; }
   ];
 
   # ── Manager ─────────────────────────────────────────────────────────────
@@ -100,23 +100,23 @@ in
 
   # ── Status line ─────────────────────────────────────────────────────────
   status = {
-    overall = { fg = fg; bg = bg; };
+    overall = { inherit fg bg; };
     perm_type = { fg = cyan; };
     perm_read = { fg = amber; };
     perm_write = { fg = red; };
     perm_exec = { fg = pink; };
     perm_sep = { fg = dim; };
     progress_label = { bold = true; };
-    progress_normal = { fg = fg; bg = bgmod; };
+    progress_normal = { inherit fg; bg = bgmod; };
     progress_error = { fg = red; bg = bgmod; };
   };
 
   # ── Which (key hint popup) ──────────────────────────────────────────────
   which = {
-    mask = { bg = bg; };
+    mask = { inherit bg; };
     cand = { fg = pink; bold = true; };
     rest = { fg = cyan; };
-    desc = { fg = fg; };
+    desc = { inherit fg; };
     separator = "  ";
     separator_style = { fg = dim; };
   };
@@ -125,10 +125,10 @@ in
   confirm = {
     border = { fg = pink; };
     title = { fg = cyan; bold = true; };
-    body = { fg = fg; };
-    list = { fg = fg; };
+    body = { inherit fg; };
+    list = { inherit fg; };
     btn_yes = { fg = bg; bg = pink; bold = true; };
-    btn_no = { fg = fg; bg = bgmod; };
+    btn_no = { inherit fg; bg = bgmod; };
     btn_labels = [ "Yes" "No" ];
   };
 
@@ -158,7 +158,7 @@ in
   input = {
     border = { fg = pink; };
     title = { fg = cyan; };
-    value = { fg = fg; };
+    value = { inherit fg; };
     selected = { fg = bg; bg = pink; };
   };
 
@@ -180,7 +180,7 @@ in
   help = {
     on = { fg = pink; bold = true; };
     run = { fg = cyan; };
-    desc = { fg = fg; };
+    desc = { inherit fg; };
     hovered = { fg = bg; bg = pink; };
     footer = { fg = dim; };
   };

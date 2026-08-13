@@ -159,13 +159,18 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
 
 fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
     let store = ClipboardStore::discover()?;
+    prepare_mode(&store, mode)?;
+    let history = store.load()?;
+    let items = mode_items(&history.items, mode);
+    Ok(preferred_selection(&items, selected_id))
+}
+
+fn prepare_mode(store: &ClipboardStore, mode: Mode) -> Result<()> {
     store.prune_missing_local_files()?;
     if mode == Mode::Memo {
         store.ensure_memo_draft()?;
     }
-    let history = store.load()?;
-    let items = mode_items(&history.items, mode);
-    Ok(preferred_selection(&items, selected_id))
+    Ok(())
 }
 
 fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
@@ -282,10 +287,7 @@ fn render_history(
     state: UiState,
     selected_id: Option<u64>,
 ) -> Result<()> {
-    store.prune_missing_local_files()?;
-    if mode == Mode::Memo {
-        store.ensure_memo_draft()?;
-    }
+    prepare_mode(store, mode)?;
     let history = store.load()?;
     let items = mode_items(&history.items, mode);
     let new_selection = preferred_selection(&items, selected_id);
@@ -634,17 +636,7 @@ mod tests {
 
     #[test]
     fn text_row_preview_collapses_whitespace_to_one_line() {
-        let item = ClipboardItem {
-            id: 2,
-            kind: ItemKind::Text,
-            text: Some("first line\nsecond\tline   third".to_owned()),
-            image_file: None,
-            name: None,
-            mime: "text/plain".to_owned(),
-            pinned: false,
-            created_at: 0,
-            digest: "digest".to_owned(),
-        };
+        let item = textual_item(2, ItemKind::Text, "first line\nsecond\tline   third", false);
 
         assert_eq!(row_preview(&item), "first line second line third");
         assert_eq!(row_value(&item), "first line\nsecond\tline   third");
@@ -652,17 +644,8 @@ mod tests {
 
     #[test]
     fn text_row_preview_truncates_long_text() {
-        let item = ClipboardItem {
-            id: 3,
-            kind: ItemKind::Text,
-            text: Some("x".repeat(111)),
-            image_file: None,
-            name: None,
-            mime: "text/plain".to_owned(),
-            pinned: false,
-            created_at: 0,
-            digest: "digest".to_owned(),
-        };
+        let text = "x".repeat(111);
+        let item = textual_item(3, ItemKind::Text, &text, false);
 
         assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
     }

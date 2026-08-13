@@ -1,5 +1,5 @@
 # Top-right modules and their local Rust integrations.
-{ pkgs, config }:
+{ pkgs }:
 let
   previewPanel = pkgs.rustPlatform.buildRustPackage {
     pname = "preview-panel";
@@ -48,7 +48,7 @@ let
   };
 
   walker = "${pkgs.walker}/bin/walker";
-  btctl = (import ../walker/bluetooth.nix { inherit pkgs; }).btctl;
+  inherit ((import ../walker/bluetooth.nix { inherit pkgs; })) btctl;
 
   # Static launcher icons with walker integration
   staticLauncher = name: icon: tooltip: walkerArgs: {

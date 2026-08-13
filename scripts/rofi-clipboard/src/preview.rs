@@ -28,8 +28,7 @@ const SWITCH_READY: u8 = 2;
 const CONTENT_NONE: u8 = 0;
 const CONTENT_TEXT: u8 = 1;
 const CONTENT_IMAGE: u8 = 2;
-const TEXT_EDITOR_ARGUMENTS: [&str; 4] =
-    ["--stdin", "--title", "Edit clipboard text", "--panel"];
+const TEXT_EDITOR_ARGUMENTS: [&str; 4] = ["--stdin", "--title", "Edit clipboard text", "--panel"];
 const IMAGE_PREVIEW_ARGUMENTS: [&str; 5] = [
     "--stdin",
     "--title",
@@ -120,16 +119,7 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
         return Ok(None);
     };
 
-    let launch_result = match &content {
-        PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
-        PanelContent::ReadOnlyText(text) => launch_file_preview(&path, selected_id, text),
-        PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
-    };
-    if let Err(error) = launch_result {
-        let _ = send(&path, CLOSE, 0, &[]);
-        let _ = cleanup_session(&path);
-        return Err(error);
-    }
+    launch_content(&path, selected_id, &content)?;
 
     Ok(Some(selected_id))
 }
@@ -150,12 +140,9 @@ fn save_open_panel(store: &ClipboardStore, path: &Path) -> Result<SaveOutcome> {
 }
 
 pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
-    let Some(path) = env::var_os(SOCKET_ENV).map(PathBuf::from) else {
+    let Some(path) = active_socket_from_environment() else {
         return Ok(());
     };
-    if !path.exists() {
-        return Ok(());
-    }
 
     let store = ClipboardStore::discover()?;
     let Some(content) = item_content(&store, id)? else {
@@ -176,12 +163,9 @@ pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
 }
 
 pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) -> Result<()> {
-    let Some(path) = env::var_os(SOCKET_ENV).map(PathBuf::from) else {
+    let Some(path) = active_socket_from_environment() else {
         return Ok(());
     };
-    if !path.exists() {
-        return Ok(());
-    }
 
     // Rofi keeps the same row index after a deletion and does not emit its
     // selection callback. Recreate only an already-open panel on that row.
@@ -199,14 +183,24 @@ pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) ->
         return Ok(());
     };
 
-    let launch_result = match &content {
-        PanelContent::Text(text) => launch_text_editor(&path, selected_id, text),
-        PanelContent::ReadOnlyText(text) => launch_file_preview(&path, selected_id, text),
-        PanelContent::Image(image_path) => launch_image_preview(&path, selected_id, image_path),
+    launch_content(&path, selected_id, &content)
+}
+
+fn active_socket_from_environment() -> Option<PathBuf> {
+    env::var_os(SOCKET_ENV)
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+}
+
+fn launch_content(path: &Path, id: u64, content: &PanelContent) -> Result<()> {
+    let launch_result = match content {
+        PanelContent::Text(text) => launch_text_editor(path, id, text),
+        PanelContent::ReadOnlyText(text) => launch_file_preview(path, id, text),
+        PanelContent::Image(image_path) => launch_image_preview(path, id, image_path),
     };
     if let Err(error) = launch_result {
-        let _ = send(&path, CLOSE, 0, &[]);
-        let _ = cleanup_session(&path);
+        let _ = send(path, CLOSE, 0, &[]);
+        let _ = cleanup_session(path);
         return Err(error);
     }
     Ok(())
@@ -332,7 +326,7 @@ fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<Pa
                 .as_deref()
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .or_else(|| item.text.as_deref())
+                .or(item.text.as_deref())
                 .map(|text| PanelContent::ReadOnlyText(abbreviate_home_path(text)))
         }),
     }
@@ -541,10 +535,7 @@ mod tests {
     fn editable_text_is_byte_for_byte_unchanged() {
         let original = "heading\r\n\t  repeated    spaces\n中文 👩🏽‍💻  \n";
         assert_eq!(
-            panel_content(
-                &item(ItemKind::Text, Some(original), None),
-                None,
-            ),
+            panel_content(&item(ItemKind::Text, Some(original), None), None,),
             Some(PanelContent::Text(original.to_owned()))
         );
     }

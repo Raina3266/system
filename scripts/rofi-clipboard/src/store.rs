@@ -172,15 +172,9 @@ impl ClipboardStore {
         let result = self.update(|history| {
             let digest = digest(bytes);
             let now = unix_timestamp();
-            if let Some(position) = history
-                .items
-                .iter()
-                .position(|item| {
-                    item.kind == ItemKind::File
-                        && item.image_file.is_some()
-                        && item.digest == digest
-                })
-            {
+            if let Some(position) = history.items.iter().position(|item| {
+                item.kind == ItemKind::File && item.image_file.is_some() && item.digest == digest
+            }) {
                 let mut item = history.items.remove(position);
                 item.created_at = now;
                 item.mime = mime;
@@ -225,7 +219,7 @@ impl ClipboardStore {
 
     pub fn pin(&self, id: u64) -> Result<bool> {
         self.update(|history| {
-            let Some(position) = history.items.iter().position(|item| item.id == id) else {
+            let Some(position) = item_position(history, id) else {
                 return Ok(false);
             };
 
@@ -248,7 +242,7 @@ impl ClipboardStore {
     pub fn delete(&self, id: u64) -> Result<bool> {
         let mut image_to_delete = None;
         let deleted = self.update(|history| {
-            let Some(position) = history.items.iter().position(|item| item.id == id) else {
+            let Some(position) = item_position(history, id) else {
                 return Ok(false);
             };
             let item = history.items.remove(position);
@@ -272,7 +266,7 @@ impl ClipboardStore {
 
     pub fn edit_text(&self, id: u64, text: String) -> Result<bool> {
         self.update(|history| {
-            let Some(position) = history.items.iter().position(|item| item.id == id) else {
+            let Some(position) = item_position(history, id) else {
                 return Ok(false);
             };
             let kind = history.items[position].kind;
@@ -352,12 +346,7 @@ impl ClipboardStore {
             if !linked_local_file_is_missing(item) {
                 return true;
             }
-            if let Some(filename) = item
-                .image_file
-                .as_deref()
-                .and_then(safe_filename)
-                .map(str::to_owned)
-            {
+            if let Some(filename) = cached_image_filename(item) {
                 cached_images.push(filename);
             }
             false
@@ -374,17 +363,7 @@ impl ClipboardStore {
 
         // The history update is already committed. Cache cleanup is
         // best-effort so a filesystem error cannot restore a stale row.
-        for filename in cached_images {
-            let path = self.image_dir.join(filename);
-            if let Err(error) = fs::remove_file(&path)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                eprintln!(
-                    "rofi-clipboard: failed to delete cached image {}: {error}",
-                    path.display()
-                );
-            }
-        }
+        self.remove_cached_images(cached_images, "cached");
         Ok(removed)
     }
 
@@ -400,18 +379,22 @@ impl ClipboardStore {
         // The updated history is already safely stored. Image cleanup is
         // best-effort so a filesystem cleanup error cannot invalidate a new
         // history entry that was successfully committed.
-        for filename in removed_images {
+        self.remove_cached_images(removed_images, "pruned");
+        Ok(result)
+    }
+
+    fn remove_cached_images(&self, filenames: impl IntoIterator<Item = String>, kind: &str) {
+        for filename in filenames {
             let path = self.image_dir.join(filename);
             if let Err(error) = fs::remove_file(&path)
                 && error.kind() != std::io::ErrorKind::NotFound
             {
                 eprintln!(
-                    "rofi-clipboard: failed to delete pruned image {}: {error}",
+                    "rofi-clipboard: failed to delete {kind} image {}: {error}",
                     path.display()
                 );
             }
         }
-        Ok(result)
     }
 
     fn lock(&self, exclusive: bool) -> Result<File> {
@@ -419,6 +402,7 @@ impl ClipboardStore {
             .with_context(|| format!("create data directory {}", self.root.display()))?;
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .mode(0o600)
@@ -469,6 +453,10 @@ fn order_pinned_first(history: &mut History) {
     // section while repairing older histories that mixed pinned and normal
     // items together.
     history.items.sort_by_key(|item| !item.pinned);
+}
+
+fn item_position(history: &History, id: u64) -> Option<usize> {
+    history.items.iter().position(|item| item.id == id)
 }
 
 fn ensure_memo_draft(history: &mut History) -> u64 {
@@ -544,6 +532,13 @@ fn linked_local_file_is_missing(item: &ClipboardItem) -> bool {
     }
 }
 
+fn cached_image_filename(item: &ClipboardItem) -> Option<String> {
+    item.image_file
+        .as_deref()
+        .and_then(safe_filename)
+        .map(str::to_owned)
+}
+
 fn trim_history(history: &mut History) -> Vec<String> {
     let mut removed_images = Vec::new();
     let mut excess_images = history
@@ -564,12 +559,7 @@ fn trim_history(history: &mut History) -> Vec<String> {
         }
 
         let item = history.items.remove(index);
-        if let Some(filename) = item
-            .image_file
-            .as_deref()
-            .and_then(safe_filename)
-            .map(str::to_owned)
-        {
+        if let Some(filename) = cached_image_filename(&item) {
             removed_images.push(filename);
         }
         excess_images -= 1;
@@ -584,12 +574,7 @@ fn trim_history(history: &mut History) -> Vec<String> {
             .rposition(|item| !item.is_empty_memo())
             .unwrap_or(history.items.len() - 1);
         let item = history.items.remove(index);
-        if let Some(filename) = item
-            .image_file
-            .as_deref()
-            .and_then(safe_filename)
-            .map(str::to_owned)
-        {
+        if let Some(filename) = cached_image_filename(&item) {
             removed_images.push(filename);
         }
     }
@@ -727,10 +712,7 @@ mod tests {
     #[test]
     fn removes_oldest_image_above_image_limit() {
         let mut history = History::default();
-        history.items = (1..=101)
-            .rev()
-            .map(|id| item(id, ItemKind::File))
-            .collect();
+        history.items = (1..=101).rev().map(|id| item(id, ItemKind::File)).collect();
 
         let removed = trim_history(&mut history);
 
@@ -828,10 +810,7 @@ mod tests {
 
         let mut history = History::default();
         history.next_id = 101;
-        history.items = (1..=100)
-            .rev()
-            .map(|id| item(id, ItemKind::File))
-            .collect();
+        history.items = (1..=100).rev().map(|id| item(id, ItemKind::File)).collect();
         store.save_unlocked(&history)?;
 
         let oldest_path = store.image_dir.join("1.png");

@@ -1,7 +1,9 @@
 # Custom Scripts
 
-This repository contains two Rust utilities used by the desktop configuration:
+This repository contains four Rust utilities used by the desktop configuration:
 
+- `media-control` — a dynamic MPRIS controller for Rofi and Waybar
+- `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 

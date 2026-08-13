@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, Output, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -162,9 +162,7 @@ fn web_url_parts(url: &str) -> Option<(&str, &str, &str)> {
     let remainder = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
-    let authority_end = remainder
-        .find(|character| matches!(character, '/' | '?' | '#'))
-        .unwrap_or(remainder.len());
+    let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
     let authority = &remainder[..authority_end];
     let host = authority.rsplit('@').next()?.split(':').next()?;
     if host.is_empty() {
@@ -230,8 +228,7 @@ fn is_publishable_web_media_url(url: &str) -> bool {
             let room = path.trim_matches('/').split('/').next().unwrap_or_default();
             return !room.is_empty() && room.chars().all(|character| character.is_ascii_digit());
         }
-        return path_has_value(&path, "/video/")
-            || path_has_value(&path, "/bangumi/play/");
+        return path_has_value(&path, "/video/") || path_has_value(&path, "/bangumi/play/");
     }
 
     if path == "/" {
@@ -297,7 +294,7 @@ fn snapshot() -> Vec<Player> {
         }
         entry.was_playing = status.is_playing();
 
-        let title = player_property(&id, &["metadata", "--format", "{{title}}"]) 
+        let title = player_property(&id, &["metadata", "--format", "{{title}}"])
             .filter(|value| !value.is_empty())
             .or_else(|| {
                 if url.is_empty() {
@@ -309,8 +306,8 @@ fn snapshot() -> Vec<Player> {
             .map(|value| title_from_value(&value))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Untitled media".to_owned());
-        let artist = player_property(&id, &["metadata", "--format", "{{artist}}"]) 
-            .unwrap_or_default();
+        let artist =
+            player_property(&id, &["metadata", "--format", "{{artist}}"]).unwrap_or_default();
         let volume = player_property(&id, &["volume"])
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8);
@@ -497,6 +494,10 @@ fn volume_label(volume: Option<u8>) -> String {
 
 fn player_command(player: &str, command: &str) -> Result<(), String> {
     let output = playerctl(["-p", player, command]).map_err(|error| error.to_string())?;
+    command_result(output)
+}
+
+fn command_result(output: Output) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
@@ -505,8 +506,8 @@ fn player_command(player: &str, command: &str) -> Result<(), String> {
 }
 
 fn change_volume(player: &str, delta: f64) -> Result<(), String> {
-    let Some(current) = player_property(player, &["volume"])
-        .and_then(|value| value.parse::<f64>().ok())
+    let Some(current) =
+        player_property(player, &["volume"]).and_then(|value| value.parse::<f64>().ok())
     else {
         // Volume is optional in MPRIS. Browser-tab bridges such as mprisence
         // intentionally omit it, so volume shortcuts should be a safe no-op.
@@ -515,19 +516,17 @@ fn change_volume(player: &str, delta: f64) -> Result<(), String> {
     let target = (current + delta).clamp(0.0, 1.0);
     let value = format!("{target:.2}");
     let output = playerctl(["-p", player, "volume", &value]).map_err(|error| error.to_string())?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-    }
+    command_result(output)
 }
 
 fn toggle_pin(player: &str) {
     let mut state = read_state();
-    let entry = state.entry(player.to_owned()).or_insert_with(|| PlayerState {
-        activity: now_millis(),
-        ..PlayerState::default()
-    });
+    let entry = state
+        .entry(player.to_owned())
+        .or_insert_with(|| PlayerState {
+            activity: now_millis(),
+            ..PlayerState::default()
+        });
     entry.pinned = !entry.pinned;
     write_state(&state);
 }
@@ -600,7 +599,10 @@ fn waybar_json(player: Option<&Player>) -> String {
                 player.status.class()
             )
         }
-        None => "{\"text\":\"\",\"tooltip\":\"No active media\",\"class\":\"empty\",\"alt\":\"empty\"}".to_owned(),
+        None => {
+            "{\"text\":\"\",\"tooltip\":\"No active media\",\"class\":\"empty\",\"alt\":\"empty\"}"
+                .to_owned()
+        }
     }
 }
 
@@ -708,7 +710,9 @@ fn percent_decode(value: &str) -> String {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let (Some(high), Some(low)) = (hex_value(bytes[index + 1]), hex_value(bytes[index + 2])) {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
                 decoded.push((high << 4) | low);
                 index += 3;
                 continue;
@@ -744,7 +748,13 @@ fn truncate_display(value: &str, limit: usize) -> String {
 fn clean_text(value: &str) -> String {
     value
         .chars()
-        .map(|character| if character.is_control() { ' ' } else { character })
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -913,10 +923,7 @@ mod tests {
             rofi_row_state(&make(false, PlaybackStatus::Playing)),
             Some("active")
         );
-        assert_eq!(
-            rofi_row_state(&make(false, PlaybackStatus::Paused)),
-            None
-        );
+        assert_eq!(rofi_row_state(&make(false, PlaybackStatus::Paused)), None);
     }
 
     #[test]
@@ -958,10 +965,7 @@ mod tests {
     #[test]
     fn tauon_and_kid3_are_excluded_from_media_control() {
         assert!(is_excluded_player("tauon", "Tauon Music Box"));
-        assert!(is_excluded_player(
-            "org.mpris.MediaPlayer2.kid3",
-            "Kid3"
-        ));
+        assert!(is_excluded_player("org.mpris.MediaPlayer2.kid3", "Kid3"));
         assert!(!is_excluded_player(
             "mprisence_web.web.youtube.p123",
             "mprisence_web"

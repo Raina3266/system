@@ -13,7 +13,7 @@
     # Linked into $XDG_CONFIG_HOME/yazi/plugins/<name>.yazi. Taken from the
     # yaziPlugins bundle so versions always match the yazi package.
     # Anything used from main.lua, keymap.nix or settings.nix must be listed here.
-    plugins = (lib.getAttrs [
+    plugins = lib.getAttrs [
       # Previewers
       "mime-ext" # fast mime detection by extension
       "rich-preview" # markdown/csv/json/ipynb/rst
@@ -50,7 +50,7 @@
       "jump-to-char"
       "easyjump"
       "yafg" # ripgrep+fzf content search
-    ] pkgs.yaziPlugins);
+    ] pkgs.yaziPlugins;
 
     # Tools yazi shells out to for previews and file ops.
     extraPackages = with pkgs; [

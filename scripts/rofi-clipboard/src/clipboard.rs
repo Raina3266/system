@@ -92,9 +92,8 @@ pub fn capture_clipboard() -> Result<()> {
         .read_to_end(&mut watched_bytes)
         .context("read watched clipboard data")?;
 
-    match env::var("CLIPBOARD_STATE").as_deref() {
-        Ok("sensitive" | "nil") => return Ok(()),
-        _ => {}
+    if let Ok("sensitive" | "nil") = env::var("CLIPBOARD_STATE").as_deref() {
+        return Ok(());
     }
 
     let types_output = Command::new(wl_paste_binary())
@@ -119,8 +118,8 @@ pub fn capture_clipboard() -> Result<()> {
             }
             output.stdout
         };
-        let source = clipboard_image_source(&types)?
-            .or_else(|| screenshot_image_source(&types, &bytes));
+        let source =
+            clipboard_image_source(&types)?.or_else(|| screenshot_image_source(&types, &bytes));
         ClipboardStore::discover()?.add_image_named(&bytes, mime.to_owned(), source)?;
         return Ok(());
     }
@@ -135,11 +134,7 @@ pub fn capture_clipboard() -> Result<()> {
     if let Ok(text) = String::from_utf8(watched_bytes) {
         let mime = preferred_text_mime(types.lines()).unwrap_or("text/plain;charset=utf-8");
         let store = ClipboardStore::discover()?;
-        if let Some(name) = standalone_file_source(&text) {
-            store.add_file(text, mime.to_owned(), Some(name))?;
-        } else {
-            store.add_text(text, mime.to_owned())?;
-        }
+        store_text_or_file(&store, text, mime.to_owned())?;
     }
     Ok(())
 }
@@ -197,17 +192,10 @@ fn file_reference_payload(mime: &str, clipboard_text: &str, reference: &str) -> 
 }
 
 fn clipboard_image_source(types: &str) -> Result<Option<String>> {
-    for mime in types.lines().filter(|mime| {
-        mime.split(';').next() == Some("text/uri-list")
-            || *mime == "x-special/gnome-copied-files"
-    }) {
-        if let Some(text) = read_clipboard_text(mime)? {
-            for line in text.lines() {
-                if let Some(source) = source_from_value(line) {
-                    return Ok(Some(source));
-                }
-            }
-        }
+    if let Some(source) = clipboard_source_from_mimes(types.lines().filter(|mime| {
+        mime.split(';').next() == Some("text/uri-list") || *mime == "x-special/gnome-copied-files"
+    }))? {
+        return Ok(Some(source));
     }
 
     if let Some(mime) = types
@@ -224,14 +212,12 @@ fn clipboard_image_source(types: &str) -> Result<Option<String>> {
     // Firefox and compatible applications use one of the Mozilla URL flavors.
     // Prefer an <img src> above because Chromium's source URL can be the page
     // containing the image rather than the image itself.
-    for mime in types.lines().filter(|mime| is_browser_image_source_mime(mime)) {
-        if let Some(text) = read_clipboard_text(mime)? {
-            for line in text.lines() {
-                if let Some(source) = source_from_value(line) {
-                    return Ok(Some(source));
-                }
-            }
-        }
+    if let Some(source) = clipboard_source_from_mimes(
+        types
+            .lines()
+            .filter(|mime| is_browser_image_source_mime(mime)),
+    )? {
+        return Ok(Some(source));
     }
 
     if let Some(mime) = types
@@ -243,6 +229,19 @@ fn clipboard_image_source(types: &str) -> Result<Option<String>> {
         return Ok(Some(source));
     }
 
+    Ok(None)
+}
+
+fn clipboard_source_from_mimes<'a>(mimes: impl Iterator<Item = &'a str>) -> Result<Option<String>> {
+    for mime in mimes {
+        if let Some(text) = read_clipboard_text(mime)? {
+            for line in text.lines() {
+                if let Some(source) = source_from_value(line) {
+                    return Ok(Some(source));
+                }
+            }
+        }
+    }
     Ok(None)
 }
 
@@ -394,8 +393,8 @@ fn image_source_from_html(html: &str) -> Option<String> {
 
         while let Some(relative_src) = tag_lower[search_from..].find("src") {
             let src_start = search_from + relative_src;
-            let before_is_boundary = src_start == 0
-                || tag_lower.as_bytes()[src_start - 1].is_ascii_whitespace();
+            let before_is_boundary =
+                src_start == 0 || tag_lower.as_bytes()[src_start - 1].is_ascii_whitespace();
             let mut cursor = src_start + 3;
             while tag_lower
                 .as_bytes()
@@ -440,17 +439,13 @@ fn image_source_from_html(html: &str) -> Option<String> {
 
 fn preferred_uri_mime<'a>(types: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     types.into_iter().find(|mime| {
-        mime.split(';').next() == Some("text/uri-list")
-            || *mime == "x-special/gnome-copied-files"
+        mime.split(';').next() == Some("text/uri-list") || *mime == "x-special/gnome-copied-files"
     })
 }
 
 fn local_file_path(line: &str) -> Option<PathBuf> {
     let value = line.trim();
-    if value.is_empty()
-        || value.starts_with('#')
-        || matches!(value, "copy" | "cut")
-    {
+    if value.is_empty() || value.starts_with('#') || matches!(value, "copy" | "cut") {
         return None;
     }
 
@@ -521,11 +516,16 @@ pub fn store_stdin(mime: &str) -> Result<()> {
         store.add_image(&bytes, mime.to_owned())?;
     } else {
         let text = String::from_utf8(bytes).context("clipboard text is not UTF-8")?;
-        if let Some(name) = standalone_file_source(&text) {
-            store.add_file(text, mime.to_owned(), Some(name))?;
-        } else {
-            store.add_text(text, mime.to_owned())?;
-        }
+        store_text_or_file(&store, text, mime.to_owned())?;
+    }
+    Ok(())
+}
+
+fn store_text_or_file(store: &ClipboardStore, text: String, mime: String) -> Result<()> {
+    if let Some(name) = standalone_file_source(&text) {
+        store.add_file(text, mime, Some(name))?;
+    } else {
+        store.add_text(text, mime)?;
     }
     Ok(())
 }
@@ -540,12 +540,7 @@ fn preferred_image_mime<'a>(types: impl Iterator<Item = &'a str> + Clone) -> Opt
         "image/tiff",
         "image/svg+xml",
     ];
-    for preferred in PREFERENCE {
-        if let Some(found) = types.clone().find(|mime| *mime == *preferred) {
-            return Some(found);
-        }
-    }
-    types.filter(|mime| mime.starts_with("image/")).next()
+    preferred_mime(types, PREFERENCE, "image/")
 }
 
 fn preferred_text_mime<'a>(types: impl Iterator<Item = &'a str> + Clone) -> Option<&'a str> {
@@ -555,12 +550,20 @@ fn preferred_text_mime<'a>(types: impl Iterator<Item = &'a str> + Clone) -> Opti
         "UTF8_STRING",
         "text/plain",
     ];
-    for preferred in PREFERENCE {
+    preferred_mime(types, PREFERENCE, "text/")
+}
+
+fn preferred_mime<'a>(
+    mut types: impl Iterator<Item = &'a str> + Clone,
+    preference: &[&str],
+    fallback_prefix: &str,
+) -> Option<&'a str> {
+    for preferred in preference {
         if let Some(found) = types.clone().find(|mime| *mime == *preferred) {
             return Some(found);
         }
     }
-    types.filter(|mime| mime.starts_with("text/")).next()
+    types.find(|mime| mime.starts_with(fallback_prefix))
 }
 
 fn is_sensitive_mime(mime: &str) -> bool {
@@ -762,7 +765,8 @@ mod tests {
 
     #[test]
     fn extracts_image_source_from_html() {
-        let html = r#"<div><img alt="photo" src="https://example.com/image.png?a=1&amp;b=2"></div>"#;
+        let html =
+            r#"<div><img alt="photo" src="https://example.com/image.png?a=1&amp;b=2"></div>"#;
 
         assert_eq!(
             image_source_from_html(html).as_deref(),
