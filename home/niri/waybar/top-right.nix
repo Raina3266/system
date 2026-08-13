@@ -4,7 +4,6 @@ let
   previewPanel = pkgs.rustPlatform.buildRustPackage {
     pname = "preview-panel";
     version = "0.1.0";
-
     src = ../../../scripts/preview-panel;
     cargoLock.lockFile = ../../../scripts/preview-panel/Cargo.lock;
 
@@ -21,7 +20,6 @@ let
   rofiClipboard = pkgs.rustPlatform.buildRustPackage {
     pname = "rofi-clipboard";
     version = "0.1.0";
-
     src = ../../../scripts/rofi-clipboard;
     cargoLock.lockFile = ../../../scripts/rofi-clipboard/Cargo.lock;
 
@@ -42,7 +40,6 @@ let
     src = ../../../scripts/waybar-timer;
     cargoLock.lockFile = ../../../scripts/waybar-timer/Cargo.lock;
 
-    # Beep 3 times when the countdown ends.
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
       wrapProgram "$out/bin/waybar-timer" \
@@ -76,11 +73,6 @@ in
       previewPanel
       rofiClipboard
     ];
-
-    xdg.configFile."rofi/rofi-clipboard.rasi".source =
-      config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-clipboard.rasi";
-    xdg.configFile."preview-panel/config.toml".source =
-      config.lib.file.mkOutOfStoreSymlink "/home/raina/System/scripts/preview-panel/config.toml";
 
     systemd.user.services.rofi-clipboard = {
       Unit = {

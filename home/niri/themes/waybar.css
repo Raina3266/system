@@ -67,18 +67,13 @@ window#waybar.bottom {
 
 /* ── Borderless modules (media / workspaces) ── */
 
-#workspaces,
-#custom-media,
-#custom-lyrics {
-    padding-left: 10px;
-    padding-right: 10px;
-    border: none;
-    background-color: transparent;
-}
-
 #custom-media,
 #custom-lyrics {
     color: #7afcff;
+    padding-left: 50px;
+    padding-right: 50px;
+    border: none;
+    background-color: transparent;
 }
 
 #custom-media.paused,
@@ -95,6 +90,13 @@ window#waybar.bottom {
 }
 
 /* ── Bottom buttons ── */
+
+#workspaces {
+    padding-left: 10px;
+    padding-right: 10px;
+    border: none;
+    background-color: transparent;
+}
 
 #workspaces button {
     color: #5c6776;
@@ -151,7 +153,6 @@ window#waybar.bottom {
 #custom-wifi:hover,
 #custom-audio:hover,
 #custom-clipboard:hover,
-#custom-media:hover,
 #custom-files:hover,
 #custom-timer:hover,
 #custom-obsidian:hover,
@@ -176,8 +177,7 @@ tooltip {
     background-color: #3a3345;
     border: 1px solid rgba(255, 126, 219, 0.6);
     border-radius: 6px;
-    margin-top: 3px;
-    margin-bottom: 3px;
+    padding-bottom: 0px;
 }
 
 tooltip label {
@@ -218,11 +218,3 @@ tooltip label {
         text-shadow: none;
     }
 }
-
-/* ── Dynamic media state ── */
-
-#custom-media.empty {
-    margin: 0;
-    padding: 0;
-}
-

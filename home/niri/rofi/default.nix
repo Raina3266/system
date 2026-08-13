@@ -49,7 +49,11 @@ in
   xdg.configFile."rofi/config.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/config.rasi";
   xdg.configFile."rofi/rofi-finder.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/rofi-finder.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-finder.rasi";
   xdg.configFile."rofi/media-control.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/theme/media-control.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/media-control.rasi";
+  xdg.configFile."rofi/rofi-clipboard.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-clipboard.rasi";
+  xdg.configFile."preview-panel/config.toml".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/scripts/preview-panel/config.toml";
 }
