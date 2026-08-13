@@ -37,7 +37,6 @@ in
           ycal.waybarYcal
           jq
           playerctl
-          layout.mediaControl
         ];
 
         systemd.user.services.waybar = {

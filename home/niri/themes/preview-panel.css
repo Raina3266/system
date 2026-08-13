@@ -1,8 +1,7 @@
 /*
- * Preview panel geometry. Keep these seven settings inside this comment so
- * GTK can load the complete file as CSS while preview-panel reads the values.
- * Numeric values may be written with or without px.
+ * Do not delete the comments below
  */
+ 
 /* preview-panel-settings
 width: 400px;
 height: 616px;

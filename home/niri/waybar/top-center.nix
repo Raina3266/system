@@ -20,8 +20,6 @@ let
   };
 in
 {
-  inherit mediaControl;
-
   modules = {
     "custom/media" = {
       hide-empty-text = true;
