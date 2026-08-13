@@ -139,26 +139,96 @@ let
            textbox_text(state->tb_filtered_rows, r);
     '';
 
-  # A selected row index is only meaningful within its current mode. Reset the
-  # callback cache on real mode changes so the companion preview follows the
-  # newly selected entry even when it occupies the same row number.
-  selectionChangedModeSwitchPatch = final.writeText
-    "on-selection-changed-mode-switch.patch"
+  # Rofi honors a script's new-selection header after actions, but not when
+  # entering an already initialized mode. Apply that requested row after a real
+  # mode switch so pinned rows do not steal the default selection. Also reset
+  # the callback cache so the companion preview follows the new row.
+  modeSwitchSelectionPatch = final.writeText
+    "mode-switch-selection.patch"
     ''
+      diff --git a/include/modes/script.h b/include/modes/script.h
+      --- a/include/modes/script.h
+      +++ b/include/modes/script.h
+      @@ -66,9 +66,18 @@ void script_mode_cleanup(void);
+       void script_mode_cleanup(void);
+       /**
+        * @param is_term if printed to terminal
+        *
+        * List the user scripts found.
+        */
+       void script_user_list(gboolean is_term);
+      +
+      +/**
+      + * @param mode The mode to query.
+      + *
+      + * Get the row requested by a script mode when it is first displayed.
+      + *
+      + * @returns the requested row, or -1 when the mode did not request one.
+      + */
+      +gint64 script_mode_get_initial_selection(const Mode *mode);
+       /**@}*/
+       #endif // ROFI_MODE_SCRIPT_H
+      diff --git a/source/modes/script.c b/source/modes/script.c
+      --- a/source/modes/script.c
+      +++ b/source/modes/script.c
+      @@ -341,6 +341,19 @@ static unsigned int script_mode_get_num_entries(const Mode *sw) {
+             (const ScriptModePrivateData *)sw->private_data;
+         return rmpd->cmd_list_length;
+       }
+      +
+      +gint64 script_mode_get_initial_selection(const Mode *sw) {
+      +  if (sw == NULL || sw->_get_num_entries != script_mode_get_num_entries ||
+      +      sw->private_data == NULL) {
+      +    return -1;
+      +  }
+      +  const ScriptModePrivateData *pd = sw->private_data;
+      +  if (!pd->keep_selection || pd->new_selection < 0 ||
+      +      pd->new_selection >= (int64_t)pd->cmd_list_length) {
+      +    return -1;
+      +  }
+      +  return pd->new_selection;
+      +}
+      ${" "}
+       static void script_mode_reset_highlight(Mode *sw) {
+         ScriptModePrivateData *rmpd = (ScriptModePrivateData *)sw->private_data;
       diff --git a/source/view.c b/source/view.c
       --- a/source/view.c
       +++ b/source/view.c
-      @@ -2107,7 +2107,10 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
+      @@ -49,6 +49,7 @@
+       #include "helper-theme.h"
+       #include "helper.h"
+       #include "mode.h"
+      +#include "modes/script.h"
+      ${" "}
+       #include "view-internal.h"
+       #include "view.h"
+      @@ -2106,6 +2107,10 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
+       }
       ${" "}
        void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
-      +  if (state->sw != mode) {
+      +  const gboolean mode_changed = state->sw != mode;
+      +  if (mode_changed) {
       +    state->previous_line = UINT32_MAX;
       +  }
          state->sw = mode;
          // Update prompt;
          if (state->prompt) {
-           rofi_view_update_prompt(state);
-         }
+      @@ -2129,8 +2134,15 @@ void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
+         rofi_view_restart(state);
+         state->reload = TRUE;
+         state->refilter = TRUE;
+         rofi_view_refilter_force(state);
+      +  if (mode_changed) {
+      +    const gint64 initial_selection =
+      +        script_mode_get_initial_selection(state->sw);
+      +    if (initial_selection >= 0) {
+      +      rofi_view_set_selected_line(state, (unsigned int)initial_selection);
+      +    }
+      +  }
+         rofi_view_update(state, TRUE);
+       }
+      ${" "}
+       /** ------ */
     '';
 
   # Rofi normally takes exclusive layer-shell keyboard focus, which prevents
@@ -201,7 +271,7 @@ in
     patches = (oldAttrs.patches or [ ]) ++ [
       selectionChangedCompletionPatch
       preserveFilteredSelectionPatch
-      selectionChangedModeSwitchPatch
+      modeSwitchSelectionPatch
       onDemandKeyboardPatch
     ];
   });
