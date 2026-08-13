@@ -11,9 +11,6 @@ let
     nativeBuildInputs = [ pkgs.makeWrapper ];
 
     postInstall = ''
-      install -Dm644 ${../themes/media-control.rasi} \
-        "$out/share/rofi/themes/media-control.rasi"
-
       wrapProgram "$out/bin/media-control" \
         --set MEDIA_CONTROL_PLAYERCTL "${pkgs.lib.getExe pkgs.playerctl}" \
         --set MEDIA_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
