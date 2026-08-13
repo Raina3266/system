@@ -469,6 +469,14 @@ fn rofi_row_state(player: &Player) -> Option<&'static str> {
     }
 }
 
+fn media_label(player: &Player) -> String {
+    if player.artist.is_empty() {
+        player.title.clone()
+    } else {
+        format!("{} — {}", player.title, player.artist)
+    }
+}
+
 fn row_text(player: &Player) -> String {
     let pin = if player.pinned { "󰐃 " } else { "" };
     format!(
@@ -477,7 +485,7 @@ fn row_text(player: &Player) -> String {
         player.status.icon(),
         volume_label(player.volume),
         player.source,
-        truncate_display(&player.title, DISPLAY_WIDTH)
+        truncate_display(&media_label(player), DISPLAY_WIDTH)
     )
 }
 
@@ -581,15 +589,12 @@ fn waybar(arguments: &[String]) -> Result<(), String> {
 fn waybar_json(player: Option<&Player>) -> String {
     match player {
         Some(player) => {
-            let title = truncate_display(&player.title, DISPLAY_WIDTH);
-            let tooltip = if player.artist.is_empty() {
-                format!("{}\nPlayer: {}", player.title, player.source)
-            } else {
-                format!("{} — {}\nPlayer: {}", player.artist, player.title, player.source)
-            };
+            let label = media_label(player);
+            let text = truncate_display(&label, DISPLAY_WIDTH);
+            let tooltip = format!("{}\nPlayer: {}", label, player.source);
             format!(
                 "{{\"text\":\"{}\",\"tooltip\":\"{}\",\"class\":\"{}\",\"alt\":\"{}\"}}",
-                json_escape(&title),
+                json_escape(&text),
                 json_escape(&tooltip),
                 player.status.class(),
                 player.status.class()
@@ -828,6 +833,41 @@ mod tests {
     #[test]
     fn escapes_waybar_json() {
         assert_eq!(json_escape("a\"b\\c\n"), "a\\\"b\\\\c\\n");
+    }
+
+    #[test]
+    fn visible_media_labels_include_the_artist_when_available() {
+        let player = Player {
+            id: "youtube-music".to_owned(),
+            source: "Chrome".to_owned(),
+            title: "Delulu".to_owned(),
+            artist: "SZA".to_owned(),
+            status: PlaybackStatus::Playing,
+            volume: None,
+            pinned: false,
+            activity: 0,
+        };
+
+        assert_eq!(media_label(&player), "Delulu — SZA");
+        assert!(row_text(&player).ends_with("{Chrome} Delulu — SZA"));
+        assert!(waybar_json(Some(&player)).contains("\"text\":\"Delulu — SZA\""));
+    }
+
+    #[test]
+    fn visible_media_labels_fall_back_to_the_title_without_an_artist() {
+        let player = Player {
+            id: "browser-video".to_owned(),
+            source: "Chrome".to_owned(),
+            title: "Video title".to_owned(),
+            artist: String::new(),
+            status: PlaybackStatus::Paused,
+            volume: None,
+            pinned: false,
+            activity: 0,
+        };
+
+        assert_eq!(media_label(&player), "Video title");
+        assert!(waybar_json(Some(&player)).contains("\"text\":\"Video title\""));
     }
 
     #[test]
