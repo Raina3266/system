@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
+use crate::model::{ClipboardItem, ItemKind};
 use crate::store::ClipboardStore;
 
 const SCREENSHOT_DIRECTORY_ENV: &str = "ROFI_CLIPBOARD_SCREENSHOT_DIR";
@@ -24,9 +25,9 @@ pub fn copy_item(store: &ClipboardStore, id: u64) -> Result<()> {
         .iter()
         .find(|item| item.id == id)
         .context("selected clipboard item no longer exists")?;
-    let bytes = store.item_bytes(item)?;
+    let (mime, bytes) = copy_payload(store, item)?;
     let mut child = Command::new(wl_copy_binary())
-        .args(["--type", &item.mime])
+        .args(["--type", &mime])
         .stdin(Stdio::piped())
         .spawn()
         .context("launch wl-copy")?;
@@ -41,6 +42,47 @@ pub fn copy_item(store: &ClipboardStore, id: u64) -> Result<()> {
         bail!("wl-copy exited with {status}");
     }
     Ok(())
+}
+
+fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String, Vec<u8>)> {
+    if item.kind == ItemKind::File
+        && item.image_file.is_none()
+        && !is_file_reference_mime(&item.mime)
+        && let Some(path) = item
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(Path::new)
+            .filter(|path| path.is_absolute())
+    {
+        return Ok(("text/uri-list".to_owned(), local_file_uri_payload(path)));
+    }
+
+    Ok((item.mime.clone(), store.item_bytes(item)?))
+}
+
+fn is_file_reference_mime(mime: &str) -> bool {
+    mime.split(';').next() == Some("text/uri-list") || mime == "x-special/gnome-copied-files"
+}
+
+fn local_file_uri_payload(path: &Path) -> Vec<u8> {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mut payload = b"file://".to_vec();
+    for byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            payload.push(*byte);
+        } else {
+            payload.extend_from_slice(&[
+                b'%',
+                HEX[(*byte >> 4) as usize],
+                HEX[(*byte & 0x0f) as usize],
+            ]);
+        }
+    }
+    payload.push(b'\n');
+    payload
 }
 
 pub fn capture_clipboard() -> Result<()> {
@@ -627,6 +669,61 @@ mod tests {
             ),
             "cut\nfile:///tmp/report.pdf\n"
         );
+    }
+
+    #[test]
+    fn standalone_local_paths_copy_back_as_percent_encoded_file_uris() {
+        assert_eq!(
+            local_file_uri_payload(Path::new("/home/raina/My Report #1.pdf")),
+            b"file:///home/raina/My%20Report%20%231.pdf\n"
+        );
+    }
+
+    #[test]
+    fn local_path_text_is_upgraded_but_urls_and_uri_payloads_are_preserved() -> Result<()> {
+        let root = test_directory();
+        let store = ClipboardStore::at(root.0.join("data"));
+        let mut item = ClipboardItem {
+            id: 1,
+            kind: ItemKind::File,
+            text: Some("/home/raina/My Report.pdf".to_owned()),
+            image_file: None,
+            name: Some("/home/raina/My Report.pdf".to_owned()),
+            mime: "text/plain;charset=utf-8".to_owned(),
+            pinned: false,
+            created_at: 0,
+            digest: "digest".to_owned(),
+        };
+
+        assert_eq!(
+            copy_payload(&store, &item)?,
+            (
+                "text/uri-list".to_owned(),
+                b"file:///home/raina/My%20Report.pdf\n".to_vec()
+            )
+        );
+
+        item.text = Some("https://example.com/report.pdf".to_owned());
+        item.name = item.text.clone();
+        assert_eq!(
+            copy_payload(&store, &item)?,
+            (
+                "text/plain;charset=utf-8".to_owned(),
+                b"https://example.com/report.pdf".to_vec()
+            )
+        );
+
+        item.text = Some("file:///home/raina/My%20Report.pdf\n".to_owned());
+        item.name = Some("/home/raina/My Report.pdf".to_owned());
+        item.mime = "text/uri-list".to_owned();
+        assert_eq!(
+            copy_payload(&store, &item)?,
+            (
+                "text/uri-list".to_owned(),
+                b"file:///home/raina/My%20Report.pdf\n".to_vec()
+            )
+        );
+        Ok(())
     }
 
     #[test]

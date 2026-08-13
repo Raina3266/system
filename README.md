@@ -18,11 +18,12 @@ This repository contains two Rust utilities used by the desktop configuration:
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - The open panel follows Rofi selection changes and saves modified text before switching items
 - Keeps the highlighted clipboard item selected when search text is shortened or cleared
-- Restores the selected item with its original MIME type
+- Restores selected items with their original MIME type, while standalone local paths copy back as file references
 - Detects local files copied from a file manager and keeps them in File mode
 - Detects standalone web URLs and keeps them in File mode
+- Shortens paths inside the home directory from `/home/raina/...` to `~/...`
 - Shows the saved file path for Niri screenshots
-- Removes missing linked local images and their cached previews when Rofi next renders
+- Removes missing linked local files and any cached image previews when Rofi next renders
 - Deduplicates repeated clipboard entries
 - Ignores empty and sensitive clipboard values
 - Keeps up to 2,000 history entries

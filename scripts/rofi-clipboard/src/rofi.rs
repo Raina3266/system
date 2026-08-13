@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::clipboard::copy_item;
-use crate::model::{ClipboardItem, ItemKind};
+use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::preview;
 use crate::store::ClipboardStore;
 
@@ -159,6 +159,7 @@ pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
 
 fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
     let store = ClipboardStore::discover()?;
+    store.prune_missing_local_files()?;
     if mode == Mode::Memo {
         store.ensure_memo_draft()?;
     }
@@ -281,7 +282,7 @@ fn render_history(
     state: UiState,
     selected_id: Option<u64>,
 ) -> Result<()> {
-    store.prune_missing_local_images()?;
+    store.prune_missing_local_files()?;
     if mode == Mode::Memo {
         store.ensure_memo_draft()?;
     }
@@ -431,7 +432,7 @@ fn file_label(item: &ClipboardItem) -> String {
         .map(str::trim)
         .filter(|name| !name.is_empty())
     {
-        return name.to_owned();
+        return abbreviate_home_path(name);
     }
     if let Some(text) = item
         .text
@@ -439,7 +440,7 @@ fn file_label(item: &ClipboardItem) -> String {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        return text.to_owned();
+        return abbreviate_home_path(text);
     }
     if item.image_file.is_some() {
         format!("Image · {}", short_mime(&item.mime))

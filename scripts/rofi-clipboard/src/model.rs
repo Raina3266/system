@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,24 @@ pub struct ClipboardItem {
 impl ClipboardItem {
     pub fn is_empty_memo(&self) -> bool {
         self.kind == ItemKind::Memo && self.text.as_deref().unwrap_or_default().is_empty()
+    }
+}
+
+pub fn abbreviate_home_path(value: &str) -> String {
+    let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) else {
+        return value.to_owned();
+    };
+    abbreviate_home_path_with(value, Path::new(&home))
+}
+
+fn abbreviate_home_path_with(value: &str, home: &Path) -> String {
+    let Ok(relative) = Path::new(value).strip_prefix(home) else {
+        return value.to_owned();
+    };
+    if relative.as_os_str().is_empty() {
+        "~".to_owned()
+    } else {
+        format!("~/{}", relative.to_string_lossy())
     }
 }
 
@@ -49,6 +69,25 @@ mod tests {
             ItemKind::File
         );
         assert_eq!(serde_json::to_string(&ItemKind::File).unwrap(), "\"file\"");
+    }
+
+    #[test]
+    fn abbreviates_only_paths_inside_home() {
+        let home = Path::new("/home/raina");
+
+        assert_eq!(
+            abbreviate_home_path_with("/home/raina/Documents/report.pdf", home),
+            "~/Documents/report.pdf"
+        );
+        assert_eq!(abbreviate_home_path_with("/home/raina", home), "~");
+        assert_eq!(
+            abbreviate_home_path_with("/home/rainart/report.pdf", home),
+            "/home/rainart/report.pdf"
+        );
+        assert_eq!(
+            abbreviate_home_path_with("https://example.com/report.pdf", home),
+            "https://example.com/report.pdf"
+        );
     }
 }
 

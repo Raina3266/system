@@ -115,13 +115,17 @@ impl ClipboardStore {
             if let Some(position) = history.items.iter().position(|item| {
                 item.kind == ItemKind::File
                     && item.image_file.is_none()
-                    && item.digest == digest
+                    && (item.digest == digest
+                        || name
+                            .as_deref()
+                            .is_some_and(|name| item.name.as_deref() == Some(name)))
             }) {
                 let mut item = history.items.remove(position);
                 item.created_at = now;
                 item.mime = mime;
                 item.text = Some(text);
                 item.name = name.or(item.name);
+                item.digest = digest;
                 let id = item.id;
                 history.items.insert(0, item);
                 return Ok(Some(id));
@@ -338,14 +342,14 @@ impl ClipboardStore {
             .map(|filename| self.image_dir.join(filename))
     }
 
-    pub fn prune_missing_local_images(&self) -> Result<usize> {
+    pub fn prune_missing_local_files(&self) -> Result<usize> {
         let lock = self.lock(true)?;
         let mut history = self.load_unlocked()?;
         let original_len = history.items.len();
         let mut cached_images = Vec::new();
 
         history.items.retain(|item| {
-            if !linked_local_image_is_missing(item) {
+            if !linked_local_file_is_missing(item) {
                 return true;
             }
             if let Some(filename) = item
@@ -510,8 +514,8 @@ fn ensure_memo_draft(history: &mut History) -> u64 {
     id
 }
 
-fn linked_local_image_is_missing(item: &ClipboardItem) -> bool {
-    if item.kind != ItemKind::File || item.image_file.is_none() {
+fn linked_local_file_is_missing(item: &ClipboardItem) -> bool {
+    if item.kind != ItemKind::File {
         return false;
     }
     let Some(source) = item
@@ -528,11 +532,11 @@ fn linked_local_image_is_missing(item: &ClipboardItem) -> bool {
     }
 
     match fs::metadata(path) {
-        Ok(metadata) => !metadata.is_file(),
+        Ok(_) => false,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
         Err(error) => {
             eprintln!(
-                "rofi-clipboard: failed to check linked image {}: {error}",
+                "rofi-clipboard: failed to check linked file {}: {error}",
                 path.display()
             );
             false
@@ -667,6 +671,38 @@ mod tests {
             Some("/home/raina/Documents/report.pdf")
         );
         assert_eq!(store.item_bytes(item)?.as_slice(), payload.as_bytes());
+        Ok(())
+    }
+
+    #[test]
+    fn file_references_are_deduplicated_by_local_source_after_payload_conversion() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.clone());
+        let source = "/home/raina/Documents/My Report.pdf";
+        let id = store
+            .add_file(
+                source.to_owned(),
+                "text/plain;charset=utf-8".to_owned(),
+                Some(source.to_owned()),
+            )?
+            .unwrap();
+
+        let second_id = store
+            .add_file(
+                "file:///home/raina/Documents/My%20Report.pdf\n".to_owned(),
+                "text/uri-list".to_owned(),
+                Some(source.to_owned()),
+            )?
+            .unwrap();
+
+        assert_eq!(second_id, id);
+        let history = store.load()?;
+        assert_eq!(history.items.len(), 1);
+        assert_eq!(history.items[0].mime, "text/uri-list");
+        assert_eq!(
+            history.items[0].text.as_deref(),
+            Some("file:///home/raina/Documents/My%20Report.pdf\n")
+        );
         Ok(())
     }
 
@@ -1063,7 +1099,7 @@ mod tests {
         fs::remove_file(&deleted_source)?;
         fs::remove_file(&deleted_pinned_source)?;
 
-        assert_eq!(store.prune_missing_local_images()?, 2);
+        assert_eq!(store.prune_missing_local_files()?, 2);
 
         let history = store.load()?;
         let retained_ids: Vec<_> = history.items.iter().map(|item| item.id).collect();
@@ -1075,7 +1111,51 @@ mod tests {
         assert!(retained_ids.contains(&text_id));
         assert!(!deleted_cache.unwrap().exists());
         assert!(!deleted_pinned_cache.unwrap().exists());
-        assert_eq!(store.prune_missing_local_images()?, 0);
+        assert_eq!(store.prune_missing_local_files()?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn pruning_missing_local_file_references_keeps_existing_paths_and_urls() -> Result<()> {
+        let root = test_root();
+        let store = ClipboardStore::at(root.0.join("data"));
+        let existing_source = root.0.join("existing report.pdf");
+        let deleted_source = root.0.join("deleted report.pdf");
+        fs::create_dir_all(&root.0)?;
+        fs::write(&existing_source, b"existing")?;
+        fs::write(&deleted_source, b"deleted")?;
+
+        let existing_id = store
+            .add_file(
+                format!("file://{}\n", existing_source.to_string_lossy()),
+                "text/uri-list".to_owned(),
+                Some(existing_source.to_string_lossy().into_owned()),
+            )?
+            .unwrap();
+        let deleted_id = store
+            .add_file(
+                format!("file://{}\n", deleted_source.to_string_lossy()),
+                "text/uri-list".to_owned(),
+                Some(deleted_source.to_string_lossy().into_owned()),
+            )?
+            .unwrap();
+        assert!(store.pin(deleted_id)?);
+        let url_id = store
+            .add_file(
+                "https://example.com/report.pdf".to_owned(),
+                "text/plain".to_owned(),
+                Some("https://example.com/report.pdf".to_owned()),
+            )?
+            .unwrap();
+        fs::remove_file(&deleted_source)?;
+
+        assert_eq!(store.prune_missing_local_files()?, 1);
+
+        let retained_ids: Vec<_> = store.load()?.items.iter().map(|item| item.id).collect();
+        assert!(retained_ids.contains(&existing_id));
+        assert!(!retained_ids.contains(&deleted_id));
+        assert!(retained_ids.contains(&url_id));
+        assert_eq!(store.prune_missing_local_files()?, 0);
         Ok(())
     }
 }

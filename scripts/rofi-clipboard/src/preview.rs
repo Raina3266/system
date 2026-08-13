@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use crate::model::{ClipboardItem, ItemKind};
+use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::store::ClipboardStore;
 
 pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
@@ -333,7 +333,7 @@ fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<Pa
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
                 .or_else(|| item.text.as_deref())
-                .map(|text| PanelContent::ReadOnlyText(text.to_owned()))
+                .map(|text| PanelContent::ReadOnlyText(abbreviate_home_path(text)))
         }),
     }
 }
