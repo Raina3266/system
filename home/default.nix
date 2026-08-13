@@ -2,6 +2,20 @@
   pkgs,
   ...
 }:
+let
+  mprisenceNativeHost = pkgs.writeTextDir
+    "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
+    (builtins.toJSON {
+      name = "mprisence.web.bridge";
+      description = "Publish each browser media tab as an MPRIS player";
+      path = "${pkgs.mprisence}/bin/mprisence";
+      type = "stdio";
+      allowed_origins = [
+        "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
+        "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
+      ];
+    });
+in
 {
   imports = [
     ./cloud
@@ -26,9 +40,18 @@
   programs.zed-editor.enable = true;
   programs.vscode.enable = true;
 
+  programs.google-chrome = {
+    enable = true;
+    commandLineArgs = [
+      # mprisence publishes one MPRIS player per media tab. Disable Chrome's
+      # built-in aggregate player so the same media is not listed twice.
+      "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
+    ];
+    nativeMessagingHosts = [ mprisenceNativeHost ];
+  };
+
   home.packages = with pkgs; [
     # browsers
-    google-chrome
     firefox
 
     # handy
@@ -52,6 +75,7 @@
     stirling-pdf-desktop
 
     # media playback
+    mprisence
     vlc
     waylyrics
 

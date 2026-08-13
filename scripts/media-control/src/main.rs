@@ -45,7 +45,7 @@ struct Player {
     title: String,
     artist: String,
     status: PlaybackStatus,
-    volume: u8,
+    volume: Option<u8>,
     pinned: bool,
     activity: u128,
 }
@@ -172,8 +172,7 @@ fn snapshot() -> Vec<Player> {
             .unwrap_or_default();
         let volume = player_property(&id, &["volume"])
             .and_then(|value| value.parse::<f64>().ok())
-            .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8)
-            .unwrap_or(0);
+            .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8);
 
         players.push(Player {
             id,
@@ -324,13 +323,19 @@ fn render_rofi(players: &[Player]) -> io::Result<()> {
 fn row_text(player: &Player) -> String {
     let pin = if player.pinned { "󰐃 " } else { "" };
     format!(
-        "{}{} {:>3}% {{{}}} {}",
+        "{}{} {} {{{}}} {}",
         pin,
         player.status.icon(),
-        player.volume,
+        volume_label(player.volume),
         player.source,
         truncate_display(&player.title, DISPLAY_WIDTH)
     )
+}
+
+fn volume_label(volume: Option<u8>) -> String {
+    volume
+        .map(|value| format!("{value:>3}%"))
+        .unwrap_or_else(|| "  --".to_owned())
 }
 
 fn player_command(player: &str, command: &str) -> Result<(), String> {
@@ -343,9 +348,13 @@ fn player_command(player: &str, command: &str) -> Result<(), String> {
 }
 
 fn change_volume(player: &str, delta: f64) -> Result<(), String> {
-    let current = player_property(player, &["volume"])
+    let Some(current) = player_property(player, &["volume"])
         .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    else {
+        // Volume is optional in MPRIS. Browser-tab bridges such as mprisence
+        // intentionally omit it, so volume shortcuts should be a safe no-op.
+        return Ok(());
+    };
     let target = (current + delta).clamp(0.0, 1.0);
     let value = format!("{target:.2}");
     let output = playerctl(["-p", player, "volume", &value]).map_err(|error| error.to_string())?;
@@ -718,7 +727,7 @@ mod tests {
             title: String::new(),
             artist: String::new(),
             status,
-            volume: 0,
+            volume: None,
             pinned,
             activity,
         };
@@ -740,7 +749,7 @@ mod tests {
             title: String::new(),
             artist: String::new(),
             status: PlaybackStatus::Paused,
-            volume: 0,
+            volume: None,
             pinned: false,
             activity: 1,
         };
@@ -750,5 +759,12 @@ mod tests {
             Some(("paused-player", "play-pause"))
         );
         assert_eq!(waybar_toggle_action(&[]), None);
+    }
+
+    #[test]
+    fn unavailable_volume_has_an_explicit_placeholder() {
+        assert_eq!(volume_label(None), "  --");
+        assert_eq!(volume_label(Some(7)), "  7%");
+        assert_eq!(volume_label(Some(100)), "100%");
     }
 }
