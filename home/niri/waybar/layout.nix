@@ -34,8 +34,8 @@ let
       ];
     }
     // (import ./top-left.nix { inherit pkgs; })
-    // (import ./top-center.nix { inherit pkgs; })
-    // (import ./top-right.nix { inherit pkgs; })
+    // (import ./top-center.nix { inherit pkgs; }).modules
+    // topRight.modules
     // (import ./network.nix { inherit pkgs; });
 
   # ------------ BottomBar -------------
