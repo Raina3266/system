@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_INTERVAL_MS: u64 = 750;
-const DISPLAY_WIDTH: usize = 40;
+const DISPLAY_WIDTH: usize = 50;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PlaybackStatus {
