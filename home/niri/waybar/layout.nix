@@ -30,13 +30,12 @@ let
         "custom/audio"
         "custom/bt"
 
-        "custom/wifi"
+        "custom/network"
       ];
     }
     // (import ./top-left.nix { inherit pkgs ycal; })
     // (import ./top-center.nix { inherit pkgs; }).modules
-    // topRight.modules
-    // (import ./network.nix { inherit pkgs; });
+    // topRight.modules;
 
   # ------------ BottomBar -------------
 

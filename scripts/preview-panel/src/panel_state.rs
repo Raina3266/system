@@ -2,6 +2,7 @@
 pub enum ContentKind {
     Text,
     Image,
+    Network,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,6 +92,15 @@ mod tests {
             Some(CurrentItem {
                 id: 8,
                 kind: ContentKind::Image,
+            })
+        );
+
+        assert!(state.apply_update(2, 9, ContentKind::Network));
+        assert_eq!(
+            state.current,
+            Some(CurrentItem {
+                id: 9,
+                kind: ContentKind::Network,
             })
         );
     }

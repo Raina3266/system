@@ -34,6 +34,24 @@ let
     '';
   };
 
+  rofiNetworkManager = pkgs.rustPlatform.buildRustPackage {
+    pname = "rofi-network-manager";
+    version = "0.1.0";
+    src = ../../../scripts/rofi-network-manager;
+    cargoLock.lockFile = ../../../scripts/rofi-network-manager/Cargo.lock;
+
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+
+    postInstall = ''
+      wrapProgram "$out/bin/rofi-network-manager" \
+        --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
+        --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
+        --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
+        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
+        --set ROFI_NETWORK_ROFI_WIDTH "650"
+    '';
+  };
+
   waybarTimer = pkgs.rustPlatform.buildRustPackage {
     pname = "waybar-timer";
     version = "0.1.0";
@@ -72,6 +90,7 @@ in
       pkgs.wl-clipboard
       previewPanel
       rofiClipboard
+      rofiNetworkManager
     ];
 
     systemd.user.services.rofi-clipboard = {
@@ -93,6 +112,15 @@ in
   };
 
   modules = {
+    "custom/network" = {
+      exec = "${rofiNetworkManager}/bin/rofi-network-manager status";
+      interval = 5;
+      return-type = "json";
+      escape = false;
+      tooltip = true;
+      on-click = "${rofiNetworkManager}/bin/rofi-network-manager";
+    };
+
     "custom/timer" = {
       exec = "${waybarTimer}/bin/waybar-timer";
       format = "{}";

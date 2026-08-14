@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, CssProvider, EventControllerMotion, Picture, PolicyType,
-    ScrolledWindow, Stack, TextView, WrapMode, gdk, gio, glib,
+    Align, Application, ApplicationWindow, Box as GtkBox, CssProvider, EventControllerMotion,
+    Orientation, Picture, PolicyType, ScrolledWindow, Stack, TextView, WrapMode, gdk, gio, glib,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -126,11 +126,50 @@ fn build_window(
     picture.set_margin_bottom(12);
     picture.add_css_class("preview-image");
 
+    let network_text_view = TextView::new();
+    network_text_view.set_cursor_visible(false);
+    network_text_view.set_editable(false);
+    network_text_view.set_hexpand(true);
+    network_text_view.set_left_margin(14);
+    network_text_view.set_monospace(true);
+    network_text_view.set_pixels_above_lines(2);
+    network_text_view.set_pixels_below_lines(2);
+    network_text_view.set_right_margin(14);
+    network_text_view.set_top_margin(12);
+    network_text_view.set_bottom_margin(12);
+    network_text_view.set_vexpand(true);
+    network_text_view.set_wrap_mode(WrapMode::WordChar);
+    network_text_view.add_css_class("network-details");
+    connect_persistent_clipboard(&network_text_view);
+
+    let network_scrolled = ScrolledWindow::new();
+    network_scrolled.set_child(Some(&network_text_view));
+    network_scrolled.set_has_frame(true);
+    network_scrolled.set_hexpand(true);
+    network_scrolled.set_kinetic_scrolling(true);
+    network_scrolled.set_policy(PolicyType::Never, PolicyType::Automatic);
+    network_scrolled.set_vexpand(true);
+
+    let network_picture = Picture::new();
+    network_picture.set_can_shrink(true);
+    network_picture.set_halign(Align::Center);
+    network_picture.set_size_request(252, 252);
+    network_picture.set_vexpand(false);
+    network_picture.set_visible(false);
+    network_picture.add_css_class("network-qr");
+
+    let network_box = GtkBox::new(Orientation::Vertical, 10);
+    network_box.set_hexpand(true);
+    network_box.set_vexpand(true);
+    network_box.append(&network_scrolled);
+    network_box.append(&network_picture);
+
     let stack = Stack::new();
     stack.set_hexpand(true);
     stack.set_vexpand(true);
     stack.add_named(&scrolled_window, Some("text"));
     stack.add_named(&picture, Some("image"));
+    stack.add_named(&network_box, Some("network"));
     stack.set_visible_child_name("text");
 
     let (window_width, window_height) = if options.panel {
@@ -170,6 +209,8 @@ fn build_window(
             &stack,
             &text_view,
             &picture,
+            &network_text_view,
+            &network_picture,
             receiver,
         );
     }
@@ -442,6 +483,8 @@ fn connect_live_updates(
     stack: &Stack,
     text_view: &TextView,
     picture: &Picture,
+    network_text_view: &TextView,
+    network_picture: &Picture,
     receiver: Receiver<Message>,
 ) {
     let application = application.clone();
@@ -449,6 +492,8 @@ fn connect_live_updates(
     let stack = stack.clone();
     let text_view = text_view.clone();
     let picture = picture.clone();
+    let network_text_view = network_text_view.clone();
+    let network_picture = network_picture.clone();
     let mut state = LiveState::default();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(message) = receiver.try_recv() {
@@ -470,6 +515,40 @@ fn connect_live_updates(
                     }
                     picture.set_filename(Some(path.as_path()));
                     stack.set_visible_child_name("image");
+                }
+                Message::UpdateNetwork {
+                    serial,
+                    id,
+                    details,
+                    png,
+                } => {
+                    if !state.apply_update(serial, id, ContentKind::Network) {
+                        continue;
+                    }
+                    let buffer = network_text_view.buffer();
+                    buffer.set_text(&details);
+                    let mut start = buffer.start_iter();
+                    buffer.place_cursor(&start);
+                    network_text_view.scroll_to_iter(&mut start, 0.0, false, 0.0, 0.0);
+
+                    if png.is_empty() {
+                        network_picture.set_paintable(Option::<&gdk::Texture>::None);
+                        network_picture.set_visible(false);
+                    } else {
+                        let bytes = glib::Bytes::from_owned(png);
+                        match gdk::Texture::from_bytes(&bytes) {
+                            Ok(texture) => {
+                                network_picture.set_paintable(Some(&texture));
+                                network_picture.set_visible(true);
+                            }
+                            Err(error) => {
+                                eprintln!("preview-panel: decode network QR code: {error}");
+                                network_picture.set_paintable(Option::<&gdk::Texture>::None);
+                                network_picture.set_visible(false);
+                            }
+                        }
+                    }
+                    stack.set_visible_child_name("network");
                 }
                 Message::PrepareSwitch {
                     serial,
@@ -518,6 +597,10 @@ fn current_snapshot(state: &LiveState, text_view: &TextView) -> Option<ContentSn
             id,
             kind: ContentKind::Image,
         } => Some(ContentSnapshot::Image { id }),
+        CurrentItem {
+            kind: ContentKind::Network,
+            ..
+        } => None,
     }
 }
 

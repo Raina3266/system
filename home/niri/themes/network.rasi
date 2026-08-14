@@ -1,0 +1,240 @@
+/* Network manager: Wi-Fi/Ethernet tabs, status message, and six actions. */
+
+* {
+    font: "JetBrains Mono Nerd Font 13";
+    bg:       #0E0616F2;
+    bg-mod:   #141428F2;
+    fg:       #CBE3E7;
+    pink:     #FF7EDB;
+    cyan:     #7AFCFF;
+    amber:    #F29E74;
+    red:      #FF5C57;
+    dim:      #5C6776;
+
+    background-color: transparent;
+    text-color: @fg;
+}
+
+window {
+    width: 650px;
+    height: 615px;
+    background-color: @bg;
+    border: 1px;
+    border-color: rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    margin: 5px;
+    padding: 12px;
+}
+
+mainbox {
+    orientation: vertical;
+    spacing: 10px;
+    children: [ mode-switcher, inputbar, listview, status-panel, action-bar ];
+}
+
+mode-switcher {
+    orientation: horizontal;
+    spacing: 10px;
+    padding: 2px 0 2px 0;
+}
+
+button {
+    expand: true;
+    cursor: pointer;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+    horizontal-align: 0.5;
+}
+
+button selected {
+    border-color: @pink;
+    background-color: rgba(255, 126, 219, 0.16);
+    text-color: @pink;
+}
+
+inputbar {
+    spacing: 10px;
+    padding: 7px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(255, 126, 219, 0.25);
+    background-color: @bg-mod;
+    children: [ prompt, entry ];
+}
+
+prompt {
+    text-color: @pink;
+}
+
+entry {
+    cursor: text;
+    placeholder: "Filter networks";
+    placeholder-color: @dim;
+}
+
+listview {
+    lines: 10;
+    eh: 1;
+    padding: 4px 0;
+    dynamic: true;
+    fixed-height: false;
+    scrollbar: true;
+    spacing: 4px;
+}
+
+scrollbar {
+    width: 4px;
+    handle-width: 4px;
+    handle-color: rgba(255, 126, 219, 0.55);
+    border: 0;
+    margin: 0 0 0 5px;
+}
+
+element {
+    children: [ element-text ];
+    padding: 9px 11px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.10);
+}
+
+element selected.normal,
+element selected.active,
+element selected.urgent {
+    border-color: @pink;
+    background-color: rgba(255, 126, 219, 0.12);
+}
+
+/* Unsaved is dim, saved is foreground, connected/connecting is cyan. */
+element-text normal.normal,
+element-text alternate.normal,
+element-text selected.normal {
+    text-color: @dim;
+}
+
+element-text normal.active,
+element-text alternate.active,
+element-text selected.active {
+    text-color: @fg;
+}
+
+element-text normal.urgent,
+element-text alternate.urgent,
+element-text selected.urgent {
+    text-color: @cyan;
+}
+
+status-panel {
+    orientation: vertical;
+    spacing: 5px;
+    padding: 8px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(242, 158, 116, 0.45);
+    background-color: rgba(242, 158, 116, 0.07);
+    children: [ selection-box, message ];
+}
+
+selection-box {
+    orientation: horizontal;
+    spacing: 7px;
+    children: [ textbox-selected-label, textbox-current-entry ];
+}
+
+textbox-selected-label {
+    expand: false;
+    content: "Selected:";
+    text-color: @dim;
+}
+
+textbox-current-entry {
+    markup: false;
+    text-color: @fg;
+}
+
+message {
+    padding: 0;
+    border: 0;
+    background-color: transparent;
+}
+
+textbox {
+    markup: false;
+    text-color: @amber;
+}
+
+action-bar {
+    expand: false;
+    orientation: horizontal;
+    spacing: 7px;
+    children: [
+        button-scan,
+        button-connect,
+        button-forget,
+        button-info,
+        button-back,
+        button-confirm
+    ];
+}
+
+button-scan,
+button-connect,
+button-forget,
+button-info,
+button-back,
+button-confirm {
+    cursor: pointer;
+    expand: true;
+    horizontal-align: 0.5;
+    margin: 1px;
+    padding: 7px 5px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+}
+
+button-scan {
+    content: "󰑐 Scan";
+    action: "kb-custom-1";
+}
+
+button-connect {
+    content: "󰖩 Connect";
+    action: "kb-custom-2";
+}
+
+button-forget {
+    content: "󰆴 Forget";
+    action: "kb-custom-3";
+}
+
+button-info {
+    content: "󰋼 Info";
+    action: "kb-custom-4";
+}
+
+button-back {
+    content: "󰁍 Back";
+    action: "kb-custom-5";
+    enabled: true;
+}
+
+button-confirm {
+    content: "󰄬 Confirm";
+    action: "kb-custom-6";
+    enabled: false;
+}
+
+error-message {
+    padding: 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: @red;
+    background-color: @bg;
+    text-color: @fg;
+}

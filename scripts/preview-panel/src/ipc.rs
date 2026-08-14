@@ -15,8 +15,10 @@ const UPDATE_IMAGE: u8 = 3;
 const SAVE_AND_CLOSE: u8 = 4;
 const PANEL_STATE: u8 = 5;
 const PREPARE_SWITCH: u8 = 6;
+const UPDATE_NETWORK: u8 = 7;
 const HEADER_SIZE: usize = 17;
 const ITEM_ID_SIZE: usize = 8;
+const NETWORK_PREFIX_SIZE: usize = ITEM_ID_SIZE * 2;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const SAVE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -52,6 +54,12 @@ pub enum Message {
         id: u64,
         path: PathBuf,
     },
+    UpdateNetwork {
+        serial: u64,
+        id: u64,
+        details: String,
+        png: Vec<u8>,
+    },
     PrepareSwitch {
         serial: u64,
         target_id: u64,
@@ -67,6 +75,12 @@ pub enum Message {
 enum Request {
     UpdateText { serial: u64, id: u64, text: String },
     UpdateImage { serial: u64, id: u64, path: PathBuf },
+    UpdateNetwork {
+        serial: u64,
+        id: u64,
+        details: String,
+        png: Vec<u8>,
+    },
     PrepareSwitch { serial: u64, target_id: u64 },
     SaveAndClose,
     Close,
@@ -132,6 +146,23 @@ fn handle_connection(stream: &mut UnixStream, sender: &Sender<Message>) -> io::R
         }
         Request::UpdateImage { serial, id, path } => {
             send_to_ui(sender, Message::UpdateImage { serial, id, path })?;
+            Ok(false)
+        }
+        Request::UpdateNetwork {
+            serial,
+            id,
+            details,
+            png,
+        } => {
+            send_to_ui(
+                sender,
+                Message::UpdateNetwork {
+                    serial,
+                    id,
+                    details,
+                    png,
+                },
+            )?;
             Ok(false)
         }
         Request::PrepareSwitch { serial, target_id } => {
@@ -207,6 +238,15 @@ fn read_request(mut reader: impl Read) -> io::Result<Request> {
                 path: PathBuf::from(OsString::from_vec(bytes)),
             })
         }
+        UPDATE_NETWORK => {
+            let (id, details, png) = read_network_payload(&mut reader, length)?;
+            Ok(Request::UpdateNetwork {
+                serial,
+                id,
+                details,
+                png,
+            })
+        }
         PREPARE_SWITCH if length == ITEM_ID_SIZE => {
             let mut bytes = [0_u8; ITEM_ID_SIZE];
             reader.read_exact(&mut bytes)?;
@@ -248,6 +288,38 @@ fn read_item_payload(mut reader: impl Read, length: usize) -> io::Result<(u64, V
     let mut bytes = vec![0; length - ITEM_ID_SIZE];
     reader.read_exact(&mut bytes)?;
     Ok((u64::from_be_bytes(id), bytes))
+}
+
+fn read_network_payload(
+    mut reader: impl Read,
+    length: usize,
+) -> io::Result<(u64, String, Vec<u8>)> {
+    if length < NETWORK_PREFIX_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "network update is missing its item ID or details length",
+        ));
+    }
+    let mut id = [0_u8; ITEM_ID_SIZE];
+    reader.read_exact(&mut id)?;
+    let mut details_length = [0_u8; ITEM_ID_SIZE];
+    reader.read_exact(&mut details_length)?;
+    let details_length = usize::try_from(u64::from_be_bytes(details_length))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "network details are too large"))?;
+    let remaining = length - NETWORK_PREFIX_SIZE;
+    if details_length > remaining {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "network details length exceeds the message payload",
+        ));
+    }
+    let mut details = vec![0; details_length];
+    reader.read_exact(&mut details)?;
+    let details = String::from_utf8(details)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut png = vec![0; remaining - details_length];
+    reader.read_exact(&mut png)?;
+    Ok((u64::from_be_bytes(id), details, png))
 }
 
 fn write_panel_state(mut writer: impl Write, serial: u64, reply: &SwitchReply) -> io::Result<()> {
@@ -345,6 +417,35 @@ mod tests {
                 path: PathBuf::from(path),
             }
         );
+    }
+
+    #[test]
+    fn network_update_separates_details_from_png_bytes() {
+        let details = "SSID: Café\nIPv4: 192.0.2.10/24";
+        let png = b"\x89PNG\r\n\x1a\nmock";
+        let mut payload = 88_u64.to_be_bytes().to_vec();
+        payload.extend_from_slice(&(details.len() as u64).to_be_bytes());
+        payload.extend_from_slice(details.as_bytes());
+        payload.extend_from_slice(png);
+
+        assert_eq!(
+            read_request(Cursor::new(frame(UPDATE_NETWORK, 29, &payload))).unwrap(),
+            Request::UpdateNetwork {
+                serial: 29,
+                id: 88,
+                details: details.to_owned(),
+                png: png.to_vec(),
+            }
+        );
+    }
+
+    #[test]
+    fn network_update_rejects_an_out_of_bounds_details_length() {
+        let mut payload = 88_u64.to_be_bytes().to_vec();
+        payload.extend_from_slice(&99_u64.to_be_bytes());
+        payload.extend_from_slice(b"short");
+        let error = read_request(Cursor::new(frame(UPDATE_NETWORK, 29, &payload))).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

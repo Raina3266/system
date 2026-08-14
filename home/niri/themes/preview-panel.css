@@ -20,7 +20,9 @@ window.preview-panel {
 }
 
 textview.preview-text,
-textview.preview-text text {
+textview.preview-text text,
+textview.network-details,
+textview.network-details text {
     background: transparent;
     color: #cbe3e7;
     caret-color: #7afcff;
@@ -30,6 +32,13 @@ textview.preview-text text {
 
 picture.preview-image {
     background: transparent;
+}
+
+picture.network-qr {
+    background: #ffffff;
+    border-radius: 9px;
+    margin: 4px 64px 12px 64px;
+    padding: 8px;
 }
 
 scrollbar slider {

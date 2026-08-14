@@ -1,6 +1,6 @@
 # Waybar: top and bottom status bars with cyberpunk theme.
 # Bar layouts: layout.nix (top: clock/hardware/media/utilities; bottom: taskbar)
-# Local Rust packages: media in top-center.nix; clipboard and timer in top-right.nix
+# Local Rust packages: media in top-center.nix; clipboard, network, and timer in top-right.nix
 {
   pkgs,
   lib,

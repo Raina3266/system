@@ -21,14 +21,12 @@ in
     rofi
     rofi-rbw
     rofi-file-browser
-    rofi-network-manager
     rofi-bluetooth
     whitesur-icon-theme
 
     (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))
     fd
 
-    iwmenu
     # Thumbnailers rofi's icon fetcher shells out to. ffmpegthumbnailer and
     # gdk-pixbuf ship their own .thumbnailer files; PDFs get one below.
     thumbnailer
@@ -54,6 +52,8 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/media-control.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-clipboard.rasi";
+  xdg.configFile."rofi/network.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/network.rasi";
   xdg.configFile."preview-panel/preview-panel.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/preview-panel.css";
 }
