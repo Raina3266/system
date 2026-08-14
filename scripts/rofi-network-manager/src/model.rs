@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn stable_ids_are_process_independent() {
-        assert_eq!(stable_id("wifi:776c616e30:486f6d65"), 0xba2a_dda2_7877_ea54);
+        assert_eq!(stable_id("wifi:776c616e30:486f6d65"), 0x0ba2_adda_2787_7ea5);
     }
 
     #[test]
