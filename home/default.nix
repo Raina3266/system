@@ -53,6 +53,7 @@ in
   };
 
   home.packages = with pkgs; [
+    pcmanfm
     kdePackages.dolphin
     kdePackages.dolphin-plugins
     

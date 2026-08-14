@@ -116,8 +116,8 @@ in
       exec = "${rofiNetworkManager}/bin/rofi-network-manager status";
       interval = 5;
       return-type = "json";
-      escape = false;
       tooltip = true;
+      escape = false;
       on-click = "${rofiNetworkManager}/bin/rofi-network-manager";
     };
 
@@ -129,7 +129,6 @@ in
       escape = false;
       "restart-interval" = 1;
       "exec-on-event" = false;
-
       on-click = "${waybarTimer}/bin/waybar-timer add";
       on-click-middle = "${waybarTimer}/bin/waybar-timer toggle";
       on-click-right = "${waybarTimer}/bin/waybar-timer clear";
