@@ -129,30 +129,12 @@ element-text selected.urgent {
 
 status-panel {
     orientation: vertical;
-    spacing: 5px;
     padding: 8px 10px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);
     background-color: rgba(242, 158, 116, 0.07);
-    children: [ selection-box, message ];
-}
-
-selection-box {
-    orientation: horizontal;
-    spacing: 7px;
-    children: [ textbox-selected-label, textbox-current-entry ];
-}
-
-textbox-selected-label {
-    expand: false;
-    content: "Selected:";
-    text-color: @dim;
-}
-
-textbox-current-entry {
-    markup: false;
-    text-color: @fg;
+    children: [ message ];
 }
 
 message {
