@@ -43,7 +43,6 @@ picture.network-qr {
 
 scrollbar slider {
     min-width: 4px;
-    min-height: 4px;
     background: #ff7edb;
     border-radius: 4px;
 }

@@ -29,7 +29,6 @@ let
         "custom/clipboard"
         "custom/audio"
         "custom/bt"
-
         "custom/network"
       ];
     }

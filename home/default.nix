@@ -53,6 +53,9 @@ in
   };
 
   home.packages = with pkgs; [
+    kdePackages.dolphin
+    kdePackages.dolphin-plugins
+    
     # handy
     handy
     wtype
