@@ -17,7 +17,6 @@
     ffmpegthumbnailer
     gdk-pixbuf
     system-config-printer
-    nemo-with-extensions
     gnomeExtensions.simple-timer
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor

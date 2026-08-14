@@ -12,8 +12,8 @@
  *   9. CHROME .......... scrollbar, separator, pane divider, text selection
  *
  * Widget-specific bits live in the version files:
- *   gtk3.css - nemo, pavucontrol, nm-applet, meld, gimp  (right-click menus,
- *              file lists, nemo chrome)
+ *   gtk3.css - pavucontrol, nm-applet, meld, gimp  (right-click menus,
+ *              file lists, notebook tabs)
  *   gtk4.css - portal file chooser (Chrome/Zed/Discord/Obsidian), loupe,
  *              gnome-control-center  (popover menus, file chooser sidebar)
  *
@@ -244,7 +244,7 @@ window.csd separator {
     background-color: rgba(255, 126, 219, 0.5);
 }
 
-/* Draggable divider between sidebar and content (nemo, meld) */
+/* Draggable divider between sidebar and content (meld and similar apps) */
 window.csd paned > separator {
     background-color: #ff7edb;
     background-image: none;

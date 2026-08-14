@@ -1,20 +1,18 @@
-/* GTK3 — nemo, pavucontrol, nm-applet, meld, gimp
+/* GTK3 — pavucontrol, nm-applet, meld, gimp
  *
  * Colours, hover, selected, buttons, entries: all in gtk-base.css.
  * This file only holds things that exist in GTK3 but not GTK4:
- *   1. FILE LISTS ....... nemo list view + icon view (treeview / iconview)
+ *   1. FILE LISTS ....... treeview / iconview applications
  *   2. COLUMN HEADERS ... "Name / Size / Type / Modified" bar
  *   3. RIGHT-CLICK MENUS  (GTK3 draws menus in a separate window.popup)
- *   4. TABS ............. the tab strip above nemo / meld content
- *   5. NEMO CHROME ...... path bar, sidebar edge, status overlay
- *   6. SIDEBAR ROWS ..... padding + rounded pill highlight (Nemo only)
+ *   4. TABS ............. GtkNotebook tab strips
  */
 
 @import url("gtk-base.css");
 
 /* ── 1. FILE LISTS ────────────────────────────────────────────────────────
- * treeview.view = nemo's List view / gimp's layer lists
- * iconview      = nemo's Icon and Compact views
+ * treeview.view = list views and gimp's layer lists
+ * iconview      = icon-grid views
  * Cells and inner labels are transparent so the row highlight from
  * gtk-base.css sections 4 and 5 stays visible. */
 
@@ -36,7 +34,7 @@ window.csd iconview:selected * {
 }
 
 /* ── 2. COLUMN HEADERS ────────────────────────────────────────────────────
- * The clickable "Name / Size / Type / Modified" strip in nemo's List view.
+ * Clickable column-heading strips in GTK3 list views.
  * Adwaita fakes its borders with a grey box-shadow, so that is cleared and
  * replaced with real 1px lines. */
 
@@ -64,7 +62,7 @@ window.csd treeview.view header button:hover {
 }
 
 /* ── 3. RIGHT-CLICK MENUS ─────────────────────────────────────────────────
- * Also covers menubar dropdowns (nemo, gimp, meld). GTK3 puts these in their
+ * Also covers menubar dropdowns (gimp, meld). GTK3 puts these in their
  * own toplevel `window.popup`, which is outside window.csd — that is why
  * these selectors are unscoped, and why menuitem hover lives in
  * gtk-base.css section 4 rather than here. */
@@ -120,9 +118,8 @@ window.csd menubar > menuitem {
 }
 
 /* ── 4. TABS ──────────────────────────────────────────────────────────────
- * The tab strip: nemo's Ctrl+T tabs and meld's comparison tabs. GTK calls
- * the tabbed container a "notebook"; header = the strip, tab = one tab.
- * Delete this section if you never use tabs. */
+ * The tab strip in meld and other tabbed GTK3 apps. GTK calls the container a
+ * "notebook"; header = the strip, tab = one tab. */
 
 window.csd notebook,
 window.csd notebook > stack,
@@ -147,46 +144,4 @@ window.csd notebook > header > tabs > tab:checked {
     color: #ff7edb;
     border: 1px solid rgba(255, 126, 219, 0.5);
     box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
-}
-
-/* ── 5. NEMO CHROME ───────────────────────────────────────────────────────
- * Nemo-only parts that no other app has. */
-
-/* ---------- window / base ---------- */
-
-.nemo-window .sidebar .view,
-.nemo-window .view {
-    padding: 3px;
-    padding-right: 0px;
-    border: none;
-    font-size: 12pt;
-}
-
-.nemo-window .view:selected,
-.nemo-window .view:hover,
-.nemo-window .view:focus,
-.nemo-window .view:selected:focus,
-.nemo-window .view:selected:not(:focus) {
-    border: none;
-    outline: none;
-    box-shadow: none;
-}
-
-.nemo-window .view:hover,
-.nemo-window .sidebar .view:hover {
-    background-color: rgba(122, 252, 255, 0.2);
-    background-image: none;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
-}
-
-.nemo-window .view:selected {
-    background-color: rgba(255, 126, 219, 0.15);
-    background-image: none;
-    border: 1px solid rgba(255, 126, 219, 0.5);
-    color: #ff7edb;
-    box-shadow: 0 0 10px rgba(255, 126, 219, 0.2);
-}
-
-.nemo-window toolbar {
-    padding: 4px;
 }

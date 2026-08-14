@@ -22,6 +22,7 @@ in
     ./niri
     ./shell
     ./yazi
+    ./dolphin.nix
     ./desktop.nix
     ./thunderbird.nix
     ./ocr.nix
@@ -54,9 +55,7 @@ in
 
   home.packages = with pkgs; [
     pcmanfm
-    kdePackages.dolphin
-    kdePackages.dolphin-plugins
-    
+
     # handy
     handy
     wtype

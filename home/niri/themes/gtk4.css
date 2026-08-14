@@ -98,8 +98,7 @@ window.csd modelbutton > box {
 }
 
 /* ── 4. FILE CHOOSER SIDEBAR ──────────────────────────────────────────────
- * The Home / Downloads / Documents column. Unlike nemo it is not in a
- * GtkPaned, so it draws its own right-hand divider. */
+ * The Home / Downloads / Documents column draws its own right-hand divider. */
 
 window.csd placessidebar {
     border-right: 1px solid #ff7edb;

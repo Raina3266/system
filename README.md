@@ -20,7 +20,7 @@ This repository contains four Rust utilities used by the desktop configuration:
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
 - The open panel follows Rofi selection changes and saves modified text before switching items
 - Keeps the highlighted clipboard item selected when search text is shortened or cleared
-- Restores text, URL, and image MIME types; local files copy back using Nemo's native file-operation format
+- Restores text, URL, and image MIME types; local files copy back as standard URI lists that Dolphin can paste
 - Detects local files copied from a file manager and keeps them in File mode
 - Detects standalone web URLs and keeps them in File mode
 - Shortens paths inside the home directory from `/home/raina/...` to `~/...`

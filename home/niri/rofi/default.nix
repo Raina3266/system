@@ -35,8 +35,8 @@ in
   ];
 
   # Nothing in nixpkgs provides an application/pdf thumbnailer (only evince,
-  # which is excluded), so rofi and nemo both fall back to a generic mimetype
-  # icon for PDFs. This fills that gap for every XDG consumer at once.
+  # which is excluded), so rofi falls back to a generic mimetype icon for
+  # PDFs. This fills that gap for every XDG thumbnailer consumer at once.
   xdg.dataFile."thumbnailers/pdftoppm.thumbnailer".text = ''
     [Thumbnailer Entry]
     TryExec=${thumbnailer}/bin/thumbnailer
