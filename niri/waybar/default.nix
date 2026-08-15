@@ -80,7 +80,7 @@ in
 
         # Style is symlinked directly to the repo's waybar.css for live editing
         xdg.configFile."waybar/style.css".source =
-          config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/waybar.css";
+          config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/waybar.css";
       })
     ]
   );

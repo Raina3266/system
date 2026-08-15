@@ -19,7 +19,7 @@ in
 {
   imports = [
     ./cloud
-    ./niri
+    ../niri
     ./shell
     ./yazi
     ./desktop.nix

@@ -4,8 +4,8 @@ let
   previewPanel = pkgs.rustPlatform.buildRustPackage {
     pname = "preview-panel";
     version = "0.1.0";
-    src = ../../../scripts/preview-panel;
-    cargoLock.lockFile = ../../../scripts/preview-panel/Cargo.lock;
+    src = ../../scripts/preview-panel;
+    cargoLock.lockFile = ../../scripts/preview-panel/Cargo.lock;
 
     nativeBuildInputs = [
       pkgs.pkg-config
@@ -20,8 +20,8 @@ let
   rofiClipboard = pkgs.rustPlatform.buildRustPackage {
     pname = "rofi-clipboard";
     version = "0.1.0";
-    src = ../../../scripts/rofi-clipboard;
-    cargoLock.lockFile = ../../../scripts/rofi-clipboard/Cargo.lock;
+    src = ../../scripts/rofi-clipboard;
+    cargoLock.lockFile = ../../scripts/rofi-clipboard/Cargo.lock;
 
     nativeBuildInputs = [ pkgs.makeWrapper ];
 
@@ -37,8 +37,8 @@ let
   rofiNetworkManager = pkgs.rustPlatform.buildRustPackage {
     pname = "rofi-network-manager";
     version = "0.1.0";
-    src = ../../../scripts/rofi-network-manager;
-    cargoLock.lockFile = ../../../scripts/rofi-network-manager/Cargo.lock;
+    src = ../../scripts/rofi-network-manager;
+    cargoLock.lockFile = ../../scripts/rofi-network-manager/Cargo.lock;
 
     nativeBuildInputs = [ pkgs.makeWrapper ];
 
@@ -55,8 +55,8 @@ let
   waybarTimer = pkgs.rustPlatform.buildRustPackage {
     pname = "waybar-timer";
     version = "0.1.0";
-    src = ../../../scripts/waybar-timer;
-    cargoLock.lockFile = ../../../scripts/waybar-timer/Cargo.lock;
+    src = ../../scripts/waybar-timer;
+    cargoLock.lockFile = ../../scripts/waybar-timer/Cargo.lock;
 
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''

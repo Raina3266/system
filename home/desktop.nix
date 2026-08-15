@@ -17,7 +17,13 @@
     QT_QPA_PLATFORMTHEME = "kde6";
   };
 
-  home.file.".local/share/color-schemes/Bitpunk.colors".source = ./niri/themes/kde.colors;
+  # Live-editable: symlink directly to the repo file (out of the Nix store) so
+  # editing niri/themes/kde.colors takes effect immediately without a system
+  # rebuild. Restart Qt apps (or re-login) to pick up the new palette —
+  # ~/.config/kdeglobals already points ColorScheme at Bitpunk.
+  home.file.".local/share/color-schemes/Bitpunk.colors".source =
+    config.lib.file.mkOutOfStoreSymlink
+      "/home/raina/System/niri/themes/kde.colors";
 
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then

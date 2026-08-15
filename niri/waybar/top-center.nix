@@ -5,8 +5,8 @@ let
   mediaControl = pkgs.rustPlatform.buildRustPackage {
     pname = "media-control";
     version = "0.1.0";
-    src = ../../../scripts/media-control;
-    cargoLock.lockFile = ../../../scripts/media-control/Cargo.lock;
+    src = ../../scripts/media-control;
+    cargoLock.lockFile = ../../scripts/media-control/Cargo.lock;
 
     nativeBuildInputs = [ pkgs.makeWrapper ];
 

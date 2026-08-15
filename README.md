@@ -97,7 +97,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
 Panel placement, size, and GTK styling all come from
-`home/niri/themes/preview-panel.css`. Home Manager links that file to
+`niri/themes/preview-panel.css`. Home Manager links that file to
 `~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
 rebuilding. The `preview-panel-settings` comment at the top controls `width`,
 `height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal

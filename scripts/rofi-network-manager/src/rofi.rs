@@ -1,7 +1,7 @@
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use nmrs::NetworkManager;
 
@@ -17,6 +17,11 @@ const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
 struct UiState {
     initialized: bool,
     message: Option<String>,
+    /// The Wi-Fi key we are waiting for the user to type a password for.
+    /// When set, the filter input becomes a password entry box: the typed
+    /// text is submitted with Enter (Rofi custom-input, RETV=2) and consumed
+    /// by `submit_password` instead of opening a nested Rofi dialog.
+    password_for: Option<String>,
 }
 
 impl UiState {
@@ -30,17 +35,23 @@ impl UiState {
                 state.initialized = true;
             } else if let Some(message) = part.strip_prefix("msg=") {
                 state.message = hex_decode(message);
+            } else if let Some(awaiting) = part.strip_prefix("await=") {
+                state.password_for = hex_decode(awaiting);
             }
         }
         state
     }
 
     fn encode(&self) -> String {
-        format!(
-            "init={};msg={}",
-            u8::from(self.initialized),
-            self.message.as_deref().map(hex_encode).unwrap_or_default()
-        )
+        let mut parts = Vec::with_capacity(3);
+        parts.push(format!("init={}", u8::from(self.initialized)));
+        if let Some(message) = self.message.as_deref() {
+            parts.push(format!("msg={}", hex_encode(message)));
+        }
+        if let Some(awaiting) = self.password_for.as_deref() {
+            parts.push(format!("await={}", hex_encode(awaiting)));
+        }
+        parts.join(";")
     }
 
     fn set_message(&mut self, message: impl Into<String>) {
@@ -99,15 +110,47 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
 
     match retv {
         0 => {}
-        1 | 11 => {
-            connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await
+        // Rofi custom-input submit: the user typed text into the filter box
+        // (used as the password while a Wi-Fi is awaiting credentials) and
+        // pressed Enter without the text matching any row.
+        2 => {
+            if state.password_for.is_some() {
+                submit_password(manager, &before, &mut state).await
+            }
         }
-        10 => match network::scan(manager).await {
-            Ok(()) => state.set_message("Scan complete."),
-            Err(error) => state.set_message(format!("Cannot scan for networks: {error}")),
-        },
-        12 => forget_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await,
-        13 => show_info(manager, mode, &before, selected_key.as_deref(), &mut state).await,
+        1 | 11 => {
+            // If we are awaiting a password and the user pressed Enter on the
+            // awaiting row (or the Connect button while it was selected) the
+            // filter text holds the typed password; submit it. Otherwise drop
+            // any awaiting state and behave as a normal row/connect click.
+            let awaiting = state.password_for.clone();
+            if let Some(awaited) = awaiting.as_deref() {
+                if Some(awaited) == selected_key.as_deref() {
+                    submit_password(manager, &before, &mut state).await
+                } else {
+                    state.password_for = None;
+                    connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state)
+                        .await
+                }
+            } else {
+                connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await
+            }
+        }
+        10 => {
+            state.password_for = None;
+            match network::scan(manager).await {
+                Ok(()) => state.set_message("Scan complete."),
+                Err(error) => state.set_message(format!("Cannot scan for networks: {error}")),
+            }
+        }
+        12 => {
+            state.password_for = None;
+            forget_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await
+        }
+        13 => {
+            state.password_for = None;
+            show_info(manager, mode, &before, selected_key.as_deref(), &mut state).await
+        }
         15 => {}
         _ => {}
     }
@@ -129,27 +172,20 @@ async fn connect_selected(
                 return;
             };
             let was_connected = entry.connected || entry.connecting;
-            let password = if !entry.is_saved()
+            if !entry.is_saved()
                 && entry.security_kind() == SecurityKind::Personal
                 && !was_connected
             {
-                match prompt_password(entry.ssid()) {
-                    Ok(Some(password)) => Some(password),
-                    Ok(None) => {
-                        state
-                            .set_message(format!("Password entry cancelled for {}.", entry.ssid()));
-                        return;
-                    }
-                    Err(error) => {
-                        state.set_message(format!("Cannot open password prompt: {error}"));
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
+                // Defer the connection: switch the filter input into password
+                // mode and let the user type and submit with Enter. This keeps
+                // everything inside the same Rofi window so Wayland keyboard
+                // focus is never split across a nested process.
+                state.password_for = Some(entry.key.clone());
+                state.set_message(format!("Please type in password for {}.", entry.ssid()));
+                return;
+            }
 
-            match network::connect_wifi(manager, entry, password).await {
+            match network::connect_wifi(manager, entry, None).await {
                 Ok(()) if was_connected => {
                     state.set_message(format!("Disconnected from {}.", entry.ssid()));
                 }
@@ -181,6 +217,33 @@ async fn connect_selected(
                 )),
             }
         }
+    }
+}
+
+async fn submit_password(manager: &NetworkManager, snapshot: &Snapshot, state: &mut UiState) {
+    let Some(key) = state.password_for.clone() else {
+        return;
+    };
+    let Some(entry) = find_wifi(snapshot, &key) else {
+        state.password_for = None;
+        state.set_message("Selected network is no longer available.");
+        return;
+    };
+    // Rofi passes the typed filter text via ROFI_INPUT on custom-input submit
+    // (RETV=2) and on row/connection-button actions while in awaiting mode.
+    let password = env::var("ROFI_INPUT").unwrap_or_default();
+    if password.is_empty() {
+        // User pressed Enter without typing; stay in awaiting mode.
+        state.set_message(format!("Please type in password for {}.", entry.ssid()));
+        return;
+    }
+    state.password_for = None;
+    match network::connect_wifi(manager, entry, Some(password)).await {
+        Ok(()) => state.set_message(format!("Connected to {}.", entry.ssid())),
+        Err(error) => state.set_message(network::connection_error_message(
+            entry.ssid(),
+            error.as_ref(),
+        )),
     }
 }
 
@@ -326,7 +389,17 @@ fn write_headers(
     }
     write_header(output, "prompt", mode.prompt());
     write_header(output, "message", message);
-    write_header(output, "no-custom", "true");
+    // While awaiting a password the filter box is the password entry; allow
+    // custom input so Enter submits the typed text (Rofi custom-input, RETV=2).
+    write_header(
+        output,
+        "no-custom",
+        if state.password_for.is_some() {
+            "false"
+        } else {
+            "true"
+        },
+    );
     write_header(output, "use-hot-keys", "true");
     write_header(output, "keep-selection", "true");
     if let Some(selected_row) = selected_row {
@@ -436,47 +509,6 @@ fn find_ethernet<'a>(snapshot: &'a Snapshot, key: &str) -> Option<&'a EthernetEn
     snapshot.ethernet.iter().find(|entry| entry.key == key)
 }
 
-fn prompt_password(ssid: &str) -> AppResult<Option<String>> {
-    let message = format!("Enter the Wi-Fi password for {ssid}");
-    let mut command = Command::new(rofi_binary());
-    // The main picker uses on-demand keyboard focus so its companion preview
-    // can be focused. The modal password prompt must take normal exclusive
-    // focus while the parent Rofi process is waiting for this script callback.
-    command.env_remove(WAYLAND_KEYBOARD_MODE_ENV);
-    let output = command
-        .args([
-            "-dmenu",
-            "-password",
-            "-p",
-            "Password",
-            "-mesg",
-            &message,
-            "-theme",
-        ])
-        .arg(theme_path()?)
-        .args([
-            "-theme-str",
-            "mainbox { children: [ inputbar, message, action-bar ]; } action-bar { children: [ button-back, button-confirm ]; } button-back, button-confirm { enabled: true; }",
-        ])
-        .stdin(Stdio::null())
-        .output()?;
-    match output.status.code() {
-        Some(0 | 15) => {
-            let password = String::from_utf8(output.stdout)?;
-            let password = password
-                .trim_end_matches(|character| character == '\r' || character == '\n')
-                .to_owned();
-            if password.is_empty() {
-                Err(io::Error::other("the password cannot be empty").into())
-            } else {
-                Ok(Some(password))
-            }
-        }
-        Some(1 | 14) => Ok(None),
-        _ => Err(io::Error::other(format!("password prompt exited with {}", output.status)).into()),
-    }
-}
-
 fn rofi_binary() -> PathBuf {
     env::var_os("ROFI_NETWORK_ROFI")
         .map(PathBuf::from)
@@ -526,11 +558,26 @@ mod tests {
         let mut state = UiState {
             initialized: true,
             message: None,
+            password_for: None,
         };
         state.set_message("Incorrect password for Café 🛜");
         let decoded = UiState::parse(Some(state.encode()));
         assert!(decoded.initialized);
         assert_eq!(decoded.message, state.message);
+        assert_eq!(decoded.password_for, state.password_for);
+    }
+
+    #[test]
+    fn ui_state_round_trips_password_for_awaiting() {
+        let state = UiState {
+            initialized: true,
+            message: Some("Please type in password for Café.".to_string()),
+            password_for: Some("wifi:776c616e30:486f6d65".to_string()),
+        };
+        let decoded = UiState::parse(Some(state.encode()));
+        assert!(decoded.initialized);
+        assert_eq!(decoded.message, state.message);
+        assert_eq!(decoded.password_for, state.password_for);
     }
 
     #[test]

@@ -21,7 +21,7 @@
     nixpkgs.overlays = [
       inputs.nixGL.overlay
       # rofi with file-browser plugin + click-to-exit patch
-      (import ../home/niri/rofi/overlay.nix)
+      (import ../niri/rofi/overlay.nix)
     ];
 
     # Nix

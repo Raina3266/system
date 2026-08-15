@@ -45,17 +45,17 @@ in
   '';
 
   xdg.configFile."rofi/config.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/rofi/config.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/rofi/config.rasi";
   xdg.configFile."rofi/rofi-finder.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-finder.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-finder.rasi";
   xdg.configFile."rofi/media-control.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/media-control.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/media-control.rasi";
   xdg.configFile."rofi/rofi-audio.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-audio.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-audio.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-clipboard.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-clipboard.rasi";
   xdg.configFile."rofi/rofi-network.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-network.rasi";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-network.rasi";
   xdg.configFile."preview-panel/preview-panel.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/preview-panel.css";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/preview-panel.css";
 }

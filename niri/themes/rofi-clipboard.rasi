@@ -4,11 +4,11 @@
     font: "JetBrains Mono Nerd Font 13";
     bg:       #0E0616F2;
     bg-mod:   #141428F2;
-    fg:       #CBE3E7;
+    fg:       #bd93f9;
     pink:     #FF7EDB;
     cyan:     #7AFCFF;
     amber:    #F29E74;
-    red:      #800000;
+    red:      #FF0000;
     dim:      #5C6776;
 
     background-color: transparent;
@@ -125,8 +125,8 @@ element-text alternate.active {
     text-color: @cyan;
 }
 
-element-text selected {
-    text-color: @pink;
+element-text selected.active {
+    text-color: @cyan;
 }
 
 /* Custom widget names beginning with "button" are real rofi buttons. Their
