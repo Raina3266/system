@@ -65,21 +65,8 @@ let
     '';
   };
 
-  walker = "${pkgs.walker}/bin/walker";
-  inherit ((import ../walker/bluetooth.nix { inherit pkgs; })) btctl;
-
-  # Static launcher icons with walker integration
-  staticLauncher = name: icon: tooltip: walkerArgs: {
-    format = "<span size='large'>${icon}</span>";
-    return-type = "json";
-    exec = pkgs.writeShellScript "waybar-${name}-poll" ''
-      printf '{"text":"<span size='"'"'large'"'"'>${icon}</span>","tooltip":"${tooltip}"}'
-    '';
-    interval = 86400;
-    on-click = pkgs.writeShellScript "waybar-${name}" ''
-      ${walker} ${walkerArgs}
-    '';
-  };
+  rofiBluetooth = import ../rofi/bluetooth.nix { inherit pkgs; };
+  rofiAudio = (import ../rofi/audio.nix { inherit pkgs; }).rofiAudio;
 in
 {
   # Package installation, service, and runtime links stay beside the Waybar
@@ -140,8 +127,23 @@ in
       on-click = "${rofiClipboard}/bin/rofi-clipboard";
     };
 
-    # Audio: opens walker device picker (volume in pulseaudio module)
-    "custom/audio" = staticLauncher "audio" "󰕾" "Audio devices & volume" "-n -m menus:audio";
+    # Audio: rofi script-mode device picker (volume in pulseaudio module)
+    "custom/audio" = {
+      format = "<span size='large'>󰕾</span>";
+      tooltip-format = "Audio devices & volume";
+      on-click = pkgs.writeShellScript "waybar-audio" ''
+        exec "${pkgs.rofi}/bin/rofi" \
+          -show audio \
+          -modes "audio:${rofiAudio}/bin/rofi-audio" \
+          -no-custom \
+          -matching fuzzy \
+          -kb-custom-1 "Ctrl+Up" \
+          -kb-custom-2 "Ctrl+Down" \
+          -kb-custom-3 "Ctrl+m" \
+          -kb-custom-4 "Ctrl+t" \
+          -theme "$HOME/.config/rofi/rofi-audio.rasi"
+      '';
+    };
 
     "tray" = {
       icon-size = 18;
@@ -167,17 +169,17 @@ in
         fi
       '';
       interval = 5;
-      # Left: open walker bluetooth menu | Right: toggle power
-      # Uses btctl (D-Bus) to avoid bluetoothctl agent conflicts
+      # Left: rofi-bluetooth device menu | Right: toggle power
+      # Power uses btctl (D-Bus) to avoid bluetoothctl agent conflicts.
       on-click = pkgs.writeShellScript "waybar-bt" ''
-        ${walker} -n -m menus:bluetooth
+        exec "${pkgs.rofi-bluetooth}/bin/rofi-bluetooth"
       '';
       on-click-right = pkgs.writeShellScript "waybar-bt-toggle-power" ''
         powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
         if [ "$powered" = "yes" ]; then
-          ${btctl}/bin/btctl power off
+          ${rofiBluetooth.btctl}/bin/btctl power off
         else
-          ${btctl}/bin/btctl power on
+          ${rofiBluetooth.btctl}/bin/btctl power on
         fi
       '';
     };

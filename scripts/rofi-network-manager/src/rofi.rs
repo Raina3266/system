@@ -53,9 +53,7 @@ pub fn launch() -> AppResult<()> {
     let executable = executable.to_string_lossy();
     let socket = preview::session_socket_path()?;
     preview::cleanup(&socket)?;
-    let modes = format!(
-        "wifi:{executable} script wifi,ethernet:{executable} script ethernet"
-    );
+    let modes = format!("wifi:{executable} script wifi,ethernet:{executable} script ethernet");
     let selection_command = format!(
         "{} preview-selection {{completion}} {{selection-serial}}",
         shell_quote(&executable)
@@ -101,17 +99,15 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
 
     match retv {
         0 => {}
-        1 | 11 => connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await,
+        1 | 11 => {
+            connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await
+        }
         10 => match network::scan(manager).await {
             Ok(()) => state.set_message("Scan complete."),
             Err(error) => state.set_message(format!("Cannot scan for networks: {error}")),
         },
         12 => forget_selected(manager, mode, &before, selected_key.as_deref(), &mut state).await,
         13 => show_info(manager, mode, &before, selected_key.as_deref(), &mut state).await,
-        14 => {
-            preview::close();
-            state.set_message("Closed network information.");
-        }
         15 => {}
         _ => {}
     }
@@ -140,7 +136,8 @@ async fn connect_selected(
                 match prompt_password(entry.ssid()) {
                     Ok(Some(password)) => Some(password),
                     Ok(None) => {
-                        state.set_message(format!("Password entry cancelled for {}.", entry.ssid()));
+                        state
+                            .set_message(format!("Password entry cancelled for {}.", entry.ssid()));
                         return;
                     }
                     Err(error) => {
@@ -222,6 +219,13 @@ async fn show_info(
     selected_key: Option<&str>,
     state: &mut UiState,
 ) {
+    // The info button toggles the preview panel: pressing it while the panel
+    // is already open closes it instead of refreshing the same content.
+    if preview::is_open() {
+        preview::close();
+        state.set_message("Closed network information.");
+        return;
+    }
     let result = match mode {
         Mode::Wifi => match selected_key.and_then(|key| find_wifi(snapshot, key)) {
             Some(entry) => network::wifi_info(manager, entry).await,
@@ -264,11 +268,9 @@ async fn render(
     selected_key: Option<&str>,
 ) -> AppResult<()> {
     let snapshot = network::snapshot(manager).await?;
-    let selected_row = selected_row(&snapshot, mode, selected_key).or_else(|| {
-        match mode {
-            Mode::Wifi => (!snapshot.wifi.is_empty()).then_some(0),
-            Mode::Ethernet => (!snapshot.ethernet.is_empty()).then_some(0),
-        }
+    let selected_row = selected_row(&snapshot, mode, selected_key).or_else(|| match mode {
+        Mode::Wifi => (!snapshot.wifi.is_empty()).then_some(0),
+        Mode::Ethernet => (!snapshot.ethernet.is_empty()).then_some(0),
     });
     let selected_message = selected_row.and_then(|index| match mode {
         Mode::Wifi => snapshot.wifi.get(index).map(WifiEntry::message_label),
@@ -284,15 +286,11 @@ async fn render(
         .unwrap_or_else(|| "No network interfaces are available.".to_owned());
 
     let mut output = Vec::new();
-    write_headers(
-        &mut output,
-        mode,
-        &mut state,
-        &message,
-        selected_row,
-    );
+    write_headers(&mut output, mode, &mut state, &message, selected_row);
     match mode {
-        Mode::Wifi if snapshot.wifi.is_empty() => write_empty_row(&mut output, "No Wi-Fi networks found")?,
+        Mode::Wifi if snapshot.wifi.is_empty() => {
+            write_empty_row(&mut output, "No Wi-Fi networks found")?
+        }
         Mode::Wifi => {
             for entry in &snapshot.wifi {
                 write_wifi_row(&mut output, entry)?;
@@ -426,10 +424,7 @@ fn selected_row(snapshot: &Snapshot, mode: Mode, selected_key: Option<&str>) -> 
     let key = selected_key?;
     match mode {
         Mode::Wifi => snapshot.wifi.iter().position(|entry| entry.key == key),
-        Mode::Ethernet => snapshot
-            .ethernet
-            .iter()
-            .position(|entry| entry.key == key),
+        Mode::Ethernet => snapshot.ethernet.iter().position(|entry| entry.key == key),
     }
 }
 
@@ -496,7 +491,7 @@ fn theme_path() -> AppResult<PathBuf> {
         return Ok(PathBuf::from(config).join("rofi").join("network.rasi"));
     }
     let home = env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".config/rofi/network.rasi"))
+    Ok(PathBuf::from(home).join(".config/rofi/rofi-network.rasi"))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -549,6 +544,9 @@ mod tests {
 
     #[test]
     fn executable_paths_are_shell_quoted() {
-        assert_eq!(shell_quote("/tmp/Raina's tools/network"), "'/tmp/Raina'\\''s tools/network'");
+        assert_eq!(
+            shell_quote("/tmp/Raina's tools/network"),
+            "'/tmp/Raina'\\''s tools/network'"
+        );
     }
 }

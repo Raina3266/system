@@ -4,15 +4,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use nmrs::{
-    ConnectionError, DeviceState, NetworkManager, SettingsSummary, WifiSecurity,
-};
+use nmrs::{ConnectionError, DeviceState, NetworkManager, SettingsSummary, WifiSecurity};
 
-use crate::model::{
-    EthernetEntry, InfoContent, SavedWifi, SecurityKind, Snapshot, WifiEntry, hex_encode,
-    stable_id,
-};
 use crate::AppResult;
+use crate::model::{
+    EthernetEntry, InfoContent, SavedWifi, SecurityKind, Snapshot, WifiEntry, hex_encode, stable_id,
+};
 
 pub async fn snapshot(manager: &NetworkManager) -> AppResult<Snapshot> {
     let networks = manager.list_networks(None).await?;
@@ -33,9 +30,9 @@ pub async fn snapshot(manager: &NetworkManager) -> AppResult<Snapshot> {
     let mut saved_wifi = HashMap::<String, SavedWifi>::new();
     for profile in saved_connections {
         if let SettingsSummary::Wifi { ssid, .. } = profile.summary {
-            saved_wifi.entry(ssid).or_insert(SavedWifi {
-                uuid: profile.uuid,
-            });
+            saved_wifi
+                .entry(ssid)
+                .or_insert(SavedWifi { uuid: profile.uuid });
         }
     }
 
@@ -230,7 +227,7 @@ pub async fn wifi_info(manager: &NetworkManager, entry: &WifiEntry) -> AppResult
 
     let details = format!(
         "Network\n\n\
-         Name:       {}\n\
+         SSID:       {}\n\
          Interface:  {}\n\
          Status:     {state}\n\
          Profile:    {profile}\n\
@@ -280,8 +277,16 @@ pub fn ethernet_info(entry: &EthernetEntry) -> InfoContent {
     } else {
         "Disconnected"
     };
-    let ipv4 = entry.device.ip4_address.as_deref().unwrap_or("Not assigned");
-    let ipv6 = entry.device.ip6_address.as_deref().unwrap_or("Not assigned");
+    let ipv4 = entry
+        .device
+        .ip4_address
+        .as_deref()
+        .unwrap_or("Not assigned");
+    let ipv6 = entry
+        .device
+        .ip6_address
+        .as_deref()
+        .unwrap_or("Not assigned");
     let speed = entry
         .device
         .speed_mbps
@@ -332,7 +337,10 @@ pub async fn print_waybar_status(manager: &NetworkManager) {
                 let address = entry.device.ip4_address.as_deref().unwrap_or("No IPv4");
                 println!(
                     "{{\"text\":\"<span size='large'>󰈀</span>\",\"tooltip\":\"{}\",\"class\":\"ethernet\"}}",
-                    json_escape(&format!("Ethernet: {}\nIPv4: {address}", entry.device.interface))
+                    json_escape(&format!(
+                        "Ethernet: {}\nIPv4: {address}",
+                        entry.device.interface
+                    ))
                 );
             } else if let Some(entry) = snapshot.wifi.iter().find(|entry| entry.connected) {
                 let address = entry.network.ip4_address.as_deref().unwrap_or("No IPv4");
@@ -523,7 +531,10 @@ mod tests {
 
     #[test]
     fn waybar_json_escapes_markup_tooltips_safely() {
-        assert_eq!(json_escape("A \"network\"\nline"), "A \\\"network\\\"\\nline");
+        assert_eq!(
+            json_escape("A \"network\"\nline"),
+            "A \\\"network\\\"\\nline"
+        );
     }
 
     #[test]

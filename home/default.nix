@@ -22,7 +22,6 @@ in
     ./niri
     ./shell
     ./yazi
-    ./dolphin.nix
     ./desktop.nix
     ./thunderbird.nix
     ./ocr.nix
@@ -54,8 +53,6 @@ in
   };
 
   home.packages = with pkgs; [
-    pcmanfm
-
     # handy
     handy
     wtype
@@ -80,6 +77,7 @@ in
     mprisence
     vlc
     waylyrics
+    kdePackages.elisa
 
     # media creation / editing
     pavucontrol

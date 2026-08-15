@@ -1,5 +1,4 @@
 # Yazi theme — Cyberpunk palette.
-# Aligned with System/home/niri/themes/{fcitx5,walker,waybar}-cyberpunk.
 # Schema: https://yazi-rs.github.io/docs/configuration/theme (v26.5.6)
 let
   bg = "#0a0a14"; # dark blue-black

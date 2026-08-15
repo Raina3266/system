@@ -19,7 +19,7 @@
  *
  * SCOPING RULE: every selector here starts with `window.csd` (or
  * `window.popup` in gtk3.css). App windows and dialogs both carry the .csd
- * class; waybar/walker/ycal are layer-shell surfaces without it, so this
+ * class; waybar/ycal are layer-shell surfaces without it, so this
  * scoping keeps their own stylesheets from being overridden.
  */
 

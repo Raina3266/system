@@ -8,8 +8,8 @@
  *   3. POPOVER MENUS .... GTK4 draws menus as popovers, not separate windows
  *   4. FILE CHOOSER ..... sidebar (Home, Downloads, ...) spacing and divider
  *
- * walker and waybar are layer-shell surfaces with no .csd class, so nothing
- * here reaches them — they have their own walker.css / waybar.css.
+ * waybar is a layer-shell surface with no .csd class, so nothing here
+ * reaches it — it has its own waybar.css.
  */
 
 @import url("gtk-base.css");

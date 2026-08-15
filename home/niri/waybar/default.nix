@@ -27,7 +27,7 @@ in
     enable = lib.mkEnableOption "waybar";
   };
 
-  config = lib.mkIf (pkgs.stdenv.isLinux && cfg.enable) (
+  config = lib.mkIf (pkgs.stdenv.hostPlatform.isLinux && cfg.enable) (
     lib.mkMerge [
       topRight.homeConfig
 

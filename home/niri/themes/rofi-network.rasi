@@ -16,8 +16,8 @@
 }
 
 window {
-    width: 650px;
-    height: 615px;
+    width: 400px;
+    height: 600px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -29,7 +29,7 @@ window {
 mainbox {
     orientation: vertical;
     spacing: 10px;
-    children: [ mode-switcher, inputbar, listview, status-panel, action-bar ];
+    children: [ mode-switcher, inputbar, listview, message, action-bar ];
 }
 
 mode-switcher {
@@ -76,11 +76,10 @@ entry {
 }
 
 listview {
-    lines: 10;
+    lines: 6;
     eh: 1;
-    padding: 4px 0;
     dynamic: true;
-    fixed-height: false;
+    fixed-height: true;
     scrollbar: true;
     spacing: 4px;
 }
@@ -138,14 +137,9 @@ status-panel {
 }
 
 message {
-    padding: 0;
-    border: 0;
     background-color: transparent;
-}
-
-textbox {
-    markup: false;
-    text-color: @amber;
+    lines: 1;
+    wrap: false;
 }
 
 action-bar {
@@ -157,7 +151,6 @@ action-bar {
         button-connect,
         button-forget,
         button-info,
-        button-back,
         button-confirm
     ];
 }
@@ -172,7 +165,6 @@ button-confirm {
     expand: true;
     horizontal-align: 0.5;
     margin: 1px;
-    padding: 7px 5px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);
@@ -181,27 +173,27 @@ button-confirm {
 }
 
 button-scan {
-    content: "󰑐 Scan";
+    content: " 󰑐 ";
     action: "kb-custom-1";
 }
 
 button-connect {
-    content: "󰖩 Connect";
+    content: " 󰖩 ";
     action: "kb-custom-2";
 }
 
 button-forget {
-    content: "󰆴 Forget";
+    content: " 󰆴 ";
     action: "kb-custom-3";
 }
 
 button-info {
-    content: "󰋼 Info";
+    content: " 󰋼 ";
     action: "kb-custom-4";
 }
 
 button-back {
-    content: "󰁍 Back";
+    content: " 󰁍 ";
     action: "kb-custom-5";
     enabled: true;
 }

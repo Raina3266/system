@@ -21,10 +21,6 @@
     };
 
     zed.url = "github:zed-industries/zed/nightly";
-
-    # walker/elephant come from nixpkgs and are configured through
-    # home-manager's upstream services.walker / services.elephant
-    # modules, so no flake inputs are needed for them.
   };
 
   outputs =

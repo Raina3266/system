@@ -1,4 +1,4 @@
-# Rofi: application launcher / dmenu (replacing walker incrementally)
+# Rofi: application launcher / dmenu (replaced walker)
 #
 { pkgs, config, ... }:
 let
@@ -50,10 +50,12 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-finder.rasi";
   xdg.configFile."rofi/media-control.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/media-control.rasi";
+  xdg.configFile."rofi/rofi-audio.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-audio.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-clipboard.rasi";
-  xdg.configFile."rofi/network.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/network.rasi";
+  xdg.configFile."rofi/rofi-network.rasi".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/rofi-network.rasi";
   xdg.configFile."preview-panel/preview-panel.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/home/niri/themes/preview-panel.css";
 }

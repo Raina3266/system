@@ -1,0 +1,144 @@
+/* Audio device menu: WirePlumber sinks/sources with volume/mute/toggle actions.
+   Mirrors media-control.rasi: listview rows above, action-bar buttons below.
+   Each button maps to a ROFI_RETV the rofi-audio script-mode understands. */
+
+* {
+    font: "JetBrains Mono Nerd Font 13";
+    bg:       #0E0616F2;
+    bg-mod:   #141428F2;
+    fg:       #CBE3E7;
+    pink:     #FF7EDB;
+    cyan:     #7AFCFF;
+    red:      #FF5C57;
+    dim:      #5C6776;
+
+    background-color: transparent;
+    text-color: @fg;
+}
+
+window {
+    location: 3;
+    anchor: 3;
+    width: 620px;
+    background-color: @bg;
+    border: 1px;
+    border-color: rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    margin: 44px 5px 0 0;
+    padding: 12px;
+}
+
+mainbox {
+    orientation: vertical;
+    spacing: 10px;
+    children: [ message, listview, action-bar ];
+}
+
+message {
+    background-color: transparent;
+}
+
+textbox {
+    markup: false;
+    text-color: @dim;
+}
+
+listview {
+    lines: 8;
+    dynamic: true;
+    fixed-height: false;
+    spacing: 4px;
+    padding: 0;
+    scrollbar: true;
+}
+
+scrollbar {
+    width: 4px;
+    handle-width: 4px;
+    handle-color: rgba(255, 126, 219, 0.55);
+    border: 0;
+    margin: 0 0 0 5px;
+}
+
+element {
+    children: [ element-text ];
+    padding: 9px 11px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.10);
+}
+
+element selected.normal,
+element selected.active,
+element selected.urgent {
+    border-color: @pink;
+    background-color: rgba(255, 126, 219, 0.12);
+}
+
+element-text {
+    vertical-align: 0.5;
+    text-color: @dim;
+}
+
+element-text normal.active,
+element-text alternate.active,
+element-text selected.active {
+    text-color: @fg;
+}
+
+action-bar {
+    expand: false;
+    orientation: horizontal;
+    spacing: 7px;
+    children: [
+        button-vol-up,
+        button-vol-down,
+        button-mute,
+        button-toggle
+    ];
+}
+
+button-vol-up,
+button-vol-down,
+button-mute,
+button-toggle {
+    cursor: pointer;
+    expand: true;
+    horizontal-align: 0.5;
+    margin: 1px;
+    padding: 7px 5px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+}
+
+button-vol-up {
+    content: " 󰝝 ";
+    action: "kb-custom-1";
+}
+
+button-vol-down {
+    content: " 󰝞 ";
+    action: "kb-custom-2";
+}
+
+button-mute {
+    content: " 󰖁 ";
+    action: "kb-custom-3";
+}
+
+button-toggle {
+    content: " 󰁇 ";
+    action: "kb-custom-4";
+}
+
+error-message {
+    padding: 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: @red;
+    background-color: @bg;
+    text-color: @fg;
+}

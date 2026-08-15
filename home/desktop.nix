@@ -1,8 +1,40 @@
 {
   pkgs,
+  config,
   ...
 }:
 {
+  home.packages = with pkgs; [
+    kdePackages.dolphin
+    kdePackages.baloo-widgets
+    kdePackages.taglib
+    kdePackages.kio-fuse
+    kdePackages.kfilemetadata
+    kdePackages.plasma-integration
+  ];
+
+  home.sessionVariables = {
+    QT_QPA_PLATFORMTHEME = "kde6";
+  };
+
+  home.file.".local/share/color-schemes/Bitpunk.colors".source = ./niri/themes/kde.colors;
+
+  home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      if [ ! -e "$HOME/.config/kdeglobals" ]; then
+        $DRY_RUN_CMD cat > "$HOME/.config/kdeglobals" << 'EOF'
+    [General]
+    ColorScheme=Bitpunk
+    Name=Bitpunk
+    font=JetBrainsMono Nerd Font,13
+    menuFont=JetBrainsMono Nerd Font,11
+    toolBarFont=JetBrainsMono Nerd Font,11
+    EOF
+      fi
+  '';
+
+  xdg.configFile."menus/applications.menu".source =
+    "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";
+
   xdg.desktopEntries.rofi-theme-selector = {
     name = "Rofi Theme Selector";
     noDisplay = true;
@@ -16,7 +48,11 @@
     exec = "zeditor -n %U";
     icon = "zed";
     terminal = false;
-    categories = [ "Utility" "TextEditor" "Development" ];
+    categories = [
+      "Utility"
+      "TextEditor"
+      "Development"
+    ];
     mimeType = [
       "text/plain"
       "text/markdown"
