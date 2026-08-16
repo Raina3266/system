@@ -1,12 +1,11 @@
 /* rofi-audio: Bluetooth / Output / Input tabs, a status message, and six
    action buttons.
 
-   Rofi builds its widget tree once, so the action bar cannot swap buttons when
-   the tab changes. Instead all six are always present and rofi-audio recolours
-   them per tab with a `theme` script header — the three buttons the current
-   tab uses stay cyan, the other three go dim. The literal colours in
-   `action_bar_theme` (scripts/rofi-audio/src/rofi.rs) mirror @cyan and @dim
-   below, so the two must be changed together. */
+   Rofi builds its widget tree once and does not re-run a script mode when you
+   switch back to a tab it has already shown, so the action bar can neither
+   swap its buttons per tab nor keep per-tab colouring in sync. All six are
+   therefore always present and always live; the selected tab in the mode
+   switcher is what tells you which three are meaningful. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";

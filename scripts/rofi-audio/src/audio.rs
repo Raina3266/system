@@ -5,7 +5,7 @@ use pulsectl::controllers::types::DeviceInfo;
 use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 
 use crate::AppResult;
-use crate::model::{AudioEntry, AudioKind, hex_encode};
+use crate::model::{AudioEntry, AudioKind, hex_encode, short_device_name};
 
 /// Volume step, in percent, for one press of the volume buttons.
 pub const STEP: i16 = 5;
@@ -126,11 +126,16 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
         .clone()
         .filter(|description| !description.is_empty())
         .unwrap_or_else(|| name.clone());
+    let port = device
+        .active_port
+        .as_ref()
+        .and_then(|port| port.description.as_deref());
     Some(AudioEntry {
         key: format!("{}:{}", kind.key_prefix(), hex_encode(&name)),
         default: default_name == Some(name.as_str()),
         volume: percent(&device.volume),
         muted: device.mute,
+        label: short_device_name(&description, port),
         kind,
         name,
         description,

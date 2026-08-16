@@ -54,18 +54,31 @@ impl Backend {
     }
 
     pub async fn snapshot(&self) -> AppResult<Vec<BluetoothEntry>> {
-        let mut entries = Vec::new();
-        for address in self.adapter.device_addresses().await? {
-            let Ok(device) = self.adapter.device(address) else {
-                continue;
-            };
+        // Every property is its own D-Bus round trip, and a scan can leave
+        // fifty devices behind. Reading them serially is what made the menu
+        // stall after a scan; the connection multiplexes, so issuing all the
+        // reads at once turns hundreds of sequential trips into a few rounds.
+        let reads = self
+            .adapter
+            .device_addresses()
+            .await?
+            .into_iter()
+            .filter_map(|address| {
+                let device = self.adapter.device(address).ok()?;
+                Some(async move { read_entry(&device, address).await })
+            });
+        let mut entries: Vec<_> = futures_util::future::join_all(reads)
+            .await
+            .into_iter()
             // A device can disappear between the address listing and the
             // property reads; skip it rather than failing the whole render.
-            let Ok(entry) = read_entry(&device, address).await else {
-                continue;
-            };
-            entries.push(entry);
-        }
+            .flatten()
+            // Discovery turns up a long tail of devices that never resolve a
+            // name — beacons, cars, laptops in the next flat. Without a name
+            // there is nothing to pick out of the list, so they are only kept
+            // once they are paired.
+            .filter(|entry| entry.named || entry.paired || entry.connected)
+            .collect();
         entries.sort_by(|left, right| {
             left.rank()
                 .cmp(&right.rank())
@@ -127,7 +140,9 @@ impl Backend {
 
     pub async fn name_of(&self, address: &str) -> String {
         match self.device(address) {
-            Ok(device) => device_name(&device, address).await,
+            Ok(device) => device_name(&device, address)
+                .await
+                .unwrap_or_else(|| address.to_owned()),
             Err(_) => address.to_owned(),
         }
     }
@@ -136,49 +151,76 @@ impl Backend {
     /// Waybar tooltip.
     pub async fn status(&self) -> AppResult<(bool, Vec<String>)> {
         let powered = self.adapter.is_powered().await?;
-        let mut connected = Vec::new();
-        if powered {
-            for address in self.adapter.device_addresses().await? {
-                let Ok(device) = self.adapter.device(address) else {
-                    continue;
-                };
-                if device.is_connected().await.unwrap_or(false) {
-                    connected.push(device_name(&device, &address.to_string()).await);
-                }
-            }
-            connected.sort();
+        if !powered {
+            return Ok((false, Vec::new()));
         }
+        let checks = self
+            .adapter
+            .device_addresses()
+            .await?
+            .into_iter()
+            .filter_map(|address| {
+                let device = self.adapter.device(address).ok()?;
+                Some(async move {
+                    if device.is_connected().await.unwrap_or(false) {
+                        let address = address.to_string();
+                        Some(
+                            device_name(&device, &address)
+                                .await
+                                .unwrap_or_else(|| address.clone()),
+                        )
+                    } else {
+                        None
+                    }
+                })
+            });
+        let mut connected: Vec<_> = futures_util::future::join_all(checks)
+            .await
+            .into_iter()
+            .flatten()
+            .collect();
+        connected.sort();
         Ok((powered, connected))
     }
 }
 
 async fn read_entry(device: &Device, address: Address) -> AppResult<BluetoothEntry> {
     let address = address.to_string();
+    // Concurrent within one device too: six properties, one round trip's worth
+    // of latency instead of six.
+    let (name, icon, connected, paired, battery) = futures_util::join!(
+        device_name(device, &address),
+        device.icon(),
+        device.is_connected(),
+        device.is_paired(),
+        device.battery_percentage(),
+    );
     Ok(BluetoothEntry {
         key: format!("bt:{}", hex_encode(&address)),
-        name: device_name(device, &address).await,
-        icon: device.icon().await.ok().flatten(),
-        connected: device.is_connected().await?,
-        paired: device.is_paired().await?,
-        battery: device.battery_percentage().await.ok().flatten(),
+        named: name.is_some(),
+        name: name.unwrap_or_else(|| address.clone()),
+        icon: icon.ok().flatten(),
+        connected: connected?,
+        paired: paired?,
+        battery: battery.ok().flatten(),
         address,
     })
 }
 
 /// Alias first (it reflects the user-visible name and falls back to the remote
-/// name), then the remote name, then the bare address.
-async fn device_name(device: &Device, address: &str) -> String {
+/// name), then the remote name. `None` when BlueZ has resolved neither, which
+/// is how `snapshot` recognises a device worth hiding.
+async fn device_name(device: &Device, address: &str) -> Option<String> {
     if let Ok(alias) = device.alias().await
         && !alias.is_empty()
+        && alias != address
     {
-        return alias;
+        return Some(alias);
     }
-    if let Ok(Some(name)) = device.name().await
-        && !name.is_empty()
-    {
-        return name;
+    match device.name().await {
+        Ok(Some(name)) if !name.is_empty() && name != address => Some(name),
+        _ => None,
     }
-    address.to_owned()
 }
 
 pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> String {

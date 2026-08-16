@@ -149,10 +149,10 @@ in
       on-click = "${rofiClipboard}/bin/rofi-clipboard";
     };
 
-    # Bluetooth, outputs, and inputs in one module. The text carries the
-    # default output's volume glyph plus a Bluetooth glyph; everything else is
-    # in the tooltip. Left-click opens the three-tab rofi menu, right-click
-    # toggles the Bluetooth adapter.
+    # Bluetooth, outputs, and inputs in one module. The text is just the
+    # default output's volume glyph; the tooltip carries the rest, including
+    # Bluetooth. Left-click opens the three-tab rofi menu, right-click turns
+    # the Bluetooth adapter off.
     "custom/audio" = {
       exec = "${rofiAudio}/bin/rofi-audio status";
       interval = 5;
@@ -160,7 +160,7 @@ in
       tooltip = true;
       escape = false;
       on-click = "${rofiAudio}/bin/rofi-audio";
-      on-click-right = "${rofiAudio}/bin/rofi-audio bluetooth-power toggle";
+      on-click-right = "${rofiAudio}/bin/rofi-audio bluetooth-power off";
     };
 
     "tray" = {

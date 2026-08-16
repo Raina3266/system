@@ -21,11 +21,14 @@ impl Mode {
         }
     }
 
+    /// Icon only. The mode switcher above the input bar already names the tab,
+    /// so the prompt just marks which one the filter box belongs to. Rofi
+    /// mirrors this into the tab label too (`sw->display_name`).
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::Bluetooth => "󰂯 Bluetooth",
-            Self::Output => "󰕾 Output",
-            Self::Input => "󰍬 Input",
+            Self::Bluetooth => "󰂯",
+            Self::Output => "󰕾",
+            Self::Input => "󰍬",
         }
     }
 
@@ -122,6 +125,8 @@ pub struct BluetoothEntry {
     /// Colon-separated upper-case address, as BlueZ renders it.
     pub address: String,
     pub name: String,
+    /// False when BlueZ has resolved no name and `name` is just the address.
+    pub named: bool,
     /// BlueZ `Icon` property, used to pick the row glyph.
     pub icon: Option<String>,
     pub connected: bool,
@@ -134,7 +139,7 @@ impl BluetoothEntry {
         let mut label = format!(
             "{}  {}",
             device_icon(self.icon.as_deref()),
-            truncate(&self.name, 26)
+            truncate(&self.name, 24)
         );
         if let Some(battery) = self.battery {
             label.push_str(&format!("  {} {battery}%", battery_icon(battery)));
@@ -174,7 +179,11 @@ pub struct AudioEntry {
     /// PulseAudio node name. Stable across renders, unlike the numeric index,
     /// so it is what the row key and every follow-up action are built from.
     pub name: String,
+    /// Full PulseAudio description. Kept for the row's `meta`, so filtering
+    /// still matches the long name even though the row shows the short one.
     pub description: String,
+    /// What the row displays: `description` with the boilerplate stripped.
+    pub label: String,
     pub volume: u8,
     pub muted: bool,
     pub default: bool,
@@ -188,14 +197,14 @@ impl AudioEntry {
             "{} {:>3}%  {}",
             self.volume_icon(),
             self.volume,
-            truncate(&self.description, 30)
+            truncate(&self.label, 26)
         )
     }
 
     pub fn message_label(&self) -> String {
         let state = if self.default { "default" } else { "available" };
         let mute = if self.muted { " · muted" } else { "" };
-        format!("{} · {}%{mute} · {state}", self.description, self.volume)
+        format!("{} · {}%{mute} · {state}", self.label, self.volume)
     }
 
     pub fn volume_icon(&self) -> &'static str {
@@ -288,12 +297,95 @@ pub fn output_icon(volume: u8) -> &'static str {
     }
 }
 
-pub fn bluetooth_icon(powered: bool, connected: bool) -> &'static str {
-    match (powered, connected) {
-        (false, _) => "󰂲",
-        (true, false) => "󰂯",
-        (true, true) => "󰂱",
+/// Boilerplate that appears in almost every PulseAudio description and
+/// identifies nothing. Longest first, so "Analog Stereo" is removed as a
+/// phrase before "Stereo" could eat half of it.
+const DESCRIPTION_NOISE: &[&str] = &[
+    "High Definition Audio Controller",
+    "HD Audio Controller",
+    "Audio Controller",
+    "Analog Surround 7.1",
+    "Analog Surround 5.1",
+    "Analog Surround 4.0",
+    "Digital Surround 7.1",
+    "Digital Surround 5.1",
+    "Digital Stereo",
+    "Analog Stereo",
+    "Digital Mono",
+    "Analog Mono",
+    "Stereo Duplex",
+    "Mono Duplex",
+];
+
+/// Turns a PulseAudio description into something that fits a menu row.
+///
+/// "GA104 High Definition Audio Controller Digital Stereo (HDMI 2)" becomes
+/// "GA104 (HDMI 2)". When nothing identifying survives — which is what happens
+/// to the bare on-board controller, "Family 17h/19h/20h HD Audio Controller
+/// Analog Stereo" — the active port's name ("Speakers", "Headphones") is a far
+/// better label than the wreckage, so it wins instead.
+pub fn short_device_name(description: &str, port: Option<&str>) -> String {
+    let mut short = description.to_owned();
+    for noise in DESCRIPTION_NOISE {
+        while let Some(at) = short.find(noise) {
+            short.replace_range(at..at + noise.len(), " ");
+        }
     }
+    // PCI family designations such as "Family 17h/19h/20h" name a chipset
+    // generation, not a device. "Family" is only dropped when the code follows
+    // it, so a speaker actually called "Family Room" keeps its name.
+    let tokens: Vec<&str> = short.split_whitespace().collect();
+    let short = tokens
+        .iter()
+        .enumerate()
+        .filter(|(index, token)| {
+            let labels_a_family_code = **token == "Family"
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| is_pci_family(next));
+            !(is_pci_family(token) || labels_a_family_code)
+        })
+        .map(|(_, token)| *token)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let short = short.trim_matches(|character: char| {
+        character.is_whitespace() || matches!(character, '-' | ',' | ':')
+    });
+    match (short.is_empty(), port) {
+        (true, Some(port)) if !port.is_empty() => port.to_owned(),
+        (true, _) => description.to_owned(),
+        (false, _) => short.to_owned(),
+    }
+}
+
+/// A PCI family code: two or three hex digits followed by `h`, optionally
+/// slash-joined ("17h", "17h/19h/20h"). Deliberately narrow — requiring a
+/// leading digit and at most three of them keeps ordinary words that happen to
+/// end in `h` and spell out in hex, such as "Beach", out of the filter.
+fn is_pci_family(token: &str) -> bool {
+    !token.is_empty()
+        && token.split('/').all(|part| {
+            let Some(digits) = part.strip_suffix('h') else {
+                return false;
+            };
+            (2..=3).contains(&digits.len())
+                && digits.starts_with(|character: char| character.is_ascii_digit())
+                && digits
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit())
+        })
+}
+
+/// Collapses a message onto one line and clips it, so the single-line message
+/// widget never has more than it can draw.
+pub fn single_line(value: &str, maximum: usize) -> String {
+    let joined = value
+        .split(['\n', '\r'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    truncate(&joined, maximum)
 }
 
 pub fn hex_encode(value: &str) -> String {
@@ -382,7 +474,8 @@ mod tests {
             key: "sink:00".to_owned(),
             kind: AudioKind::Output,
             name: "alsa_output.pci".to_owned(),
-            description: "Built-in Audio".to_owned(),
+            description: "Built-in Audio Analog Stereo".to_owned(),
+            label: "Built-in Audio".to_owned(),
             volume: 45,
             muted: false,
             default: true,
@@ -397,6 +490,7 @@ mod tests {
             kind: AudioKind::Input,
             name: "alsa_input.pci".to_owned(),
             description: "Webcam Mic".to_owned(),
+            label: "Webcam Mic".to_owned(),
             volume: 80,
             muted: true,
             default: false,
@@ -410,6 +504,7 @@ mod tests {
             key: "bt:00".to_owned(),
             address: "AA:BB:CC:DD:EE:FF".to_owned(),
             name: "WH-1000XM4".to_owned(),
+            named: true,
             icon: Some("audio-headset".to_owned()),
             connected,
             paired,
@@ -418,6 +513,80 @@ mod tests {
         assert_eq!(entry(true, true).rank(), 0);
         assert_eq!(entry(false, true).rank(), 1);
         assert_eq!(entry(false, false).rank(), 2);
+    }
+
+    #[test]
+    fn pulseaudio_boilerplate_is_stripped_from_row_labels() {
+        assert_eq!(
+            short_device_name("Built-in Audio Analog Stereo", None),
+            "Built-in Audio"
+        );
+        assert_eq!(
+            short_device_name(
+                "GA104 High Definition Audio Controller Digital Stereo (HDMI 2)",
+                None
+            ),
+            "GA104 (HDMI 2)"
+        );
+        assert_eq!(
+            short_device_name("Jabra Evolve 65 Analog Stereo", Some("Headset")),
+            "Jabra Evolve 65"
+        );
+    }
+
+    #[test]
+    fn a_description_that_is_all_boilerplate_falls_back_to_the_port() {
+        // The on-board controller's description identifies the chipset and
+        // nothing else, so the port name is what the user actually recognises.
+        assert_eq!(
+            short_device_name(
+                "Family 17h/19h/20h HD Audio Controller Analog Stereo",
+                Some("Speakers")
+            ),
+            "Speakers"
+        );
+        // With no port to fall back on, the original is better than nothing.
+        assert_eq!(
+            short_device_name("Family 17h/19h/20h HD Audio Controller", None),
+            "Family 17h/19h/20h HD Audio Controller"
+        );
+    }
+
+    #[test]
+    fn names_without_boilerplate_are_left_alone() {
+        assert_eq!(short_device_name("WH-1000XM4", None), "WH-1000XM4");
+        assert_eq!(
+            short_device_name("Scarlett 2i2 USB", Some("Line In")),
+            "Scarlett 2i2 USB"
+        );
+    }
+
+    #[test]
+    fn ordinary_words_are_not_mistaken_for_pci_family_codes() {
+        // "Beac" is four valid hex digits, so a loose rule would eat this.
+        assert_eq!(
+            short_device_name("Beach House Speaker", None),
+            "Beach House Speaker"
+        );
+        // "Family" only goes when a family code follows it.
+        assert_eq!(
+            short_device_name("Family Room Sonos", None),
+            "Family Room Sonos"
+        );
+        assert!(is_pci_family("17h"));
+        assert!(is_pci_family("17h/19h/20h"));
+        assert!(!is_pci_family("Beach"));
+        assert!(!is_pci_family("Family"));
+    }
+
+    #[test]
+    fn messages_are_flattened_and_clipped_to_a_single_line() {
+        assert_eq!(
+            single_line("First line\nSecond line", 40),
+            "First line Second line"
+        );
+        assert_eq!(single_line("a".repeat(60).as_str(), 10), "aaaaaaaaa…");
+        assert_eq!(single_line("  spaced  ", 40), "spaced");
     }
 
     #[test]

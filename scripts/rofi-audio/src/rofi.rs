@@ -6,7 +6,9 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::bluetooth::Backend;
-use crate::model::{AudioEntry, BluetoothEntry, CodeKind, Devices, Mode, hex_decode, hex_encode};
+use crate::model::{
+    AudioEntry, BluetoothEntry, CodeKind, Devices, Mode, hex_decode, hex_encode, single_line,
+};
 use crate::{AppResult, audio, bluetooth};
 
 const RECORD_SEPARATOR: u8 = 0x1e;
@@ -18,6 +20,8 @@ const CONNECT_RESULT_FILENAME: &str = "rofi-audio-connect-result";
 /// menu never feels frozen.
 const CONNECT_POLL_ATTEMPTS: u32 = 60;
 const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Characters the single-line message panel can show at the window's width.
+const MESSAGE_WIDTH: usize = 46;
 
 /// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The six action-bar buttons
 /// are wired to these in rofi-audio.rasi.
@@ -170,16 +174,29 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
     let backend = match Backend::new().await {
         Ok(backend) => backend,
         Err(error) => {
-            state.set_message(format!("Cannot reach BlueZ: {error}"));
+            // The raw D-Bus error runs to several lines; the panel has one.
+            eprintln!("rofi-audio: cannot reach BlueZ: {error}");
+            state.set_message("Bluetooth service is unavailable.");
             return Devices::Bluetooth(Vec::new());
         }
     };
-    let before = match backend.snapshot().await {
-        Ok(entries) => Devices::Bluetooth(entries),
-        Err(error) => {
-            state.set_message(format!("Cannot list Bluetooth devices: {error}"));
-            return Devices::Bluetooth(Vec::new());
+    // Only the actions that operate on the highlighted row need to know the
+    // state before they run. Listing devices costs a D-Bus round trip per
+    // device, so scan and the plain redraws skip straight to the final list.
+    let acts_on_row = matches!(
+        retv,
+        RETV_ACTIVATE | RETV_CONNECT | RETV_CONFIRM | RETV_FORGET
+    );
+    let before = if acts_on_row {
+        match backend.snapshot().await {
+            Ok(entries) => Devices::Bluetooth(entries),
+            Err(error) => {
+                state.set_message(format!("Cannot list Bluetooth devices: {error}"));
+                return Devices::Bluetooth(Vec::new());
+            }
         }
+    } else {
+        Devices::Bluetooth(Vec::new())
     };
 
     match retv {
@@ -210,7 +227,10 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
 
     match backend.snapshot().await {
         Ok(entries) => Devices::Bluetooth(entries),
-        Err(_) => before,
+        Err(error) => {
+            state.set_message(format!("Cannot list Bluetooth devices: {error}"));
+            Devices::Bluetooth(Vec::new())
+        }
     }
 }
 
@@ -477,7 +497,8 @@ fn run_audio(
     let before = match audio::snapshot(kind) {
         Ok(entries) => Devices::Audio(entries),
         Err(error) => {
-            state.set_message(format!("Cannot reach PulseAudio: {error}"));
+            eprintln!("rofi-audio: cannot reach PulseAudio: {error}");
+            state.set_message("Audio service is unavailable.");
             return Devices::Audio(Vec::new());
         }
     };
@@ -505,16 +526,16 @@ fn set_default(before: &Devices, selected_key: Option<&str>, state: &mut UiState
         return;
     };
     if entry.default {
-        state.set_message(format!("{} is already the default.", entry.description));
+        state.set_message(format!("{} is already the default.", entry.label));
         return;
     }
     match audio::set_default(entry) {
         Ok(()) => state.set_message(format!(
             "{} is now the default {}.",
-            entry.description,
+            entry.label,
             entry.kind.noun()
         )),
-        Err(error) => state.set_message(format!("Cannot select {}: {error}", entry.description)),
+        Err(error) => state.set_message(format!("Cannot select {}: {error}", entry.label)),
     }
 }
 
@@ -528,7 +549,7 @@ fn nudge_volume(before: &Devices, selected_key: Option<&str>, state: &mut UiStat
     if let Err(error) = audio::nudge_volume(entry, delta) {
         state.set_message(format!(
             "Cannot change the volume of {}: {error}",
-            entry.description
+            entry.label
         ));
     }
 }
@@ -546,12 +567,23 @@ fn render(
     let selected_row = selected_key
         .and_then(|key| devices.position(key))
         .or_else(|| (!devices.is_empty()).then_some(0));
-    let selected_message = selected_row.and_then(|index| devices.message_label(index));
+    // Only Bluetooth falls back to describing the highlighted row: it carries
+    // the address and the pairing state, which the row itself has no space
+    // for. An Output or Input row already shows its volume and name, so
+    // repeating them below the list says nothing, and leaving the message
+    // empty lets Rofi drop the panel until an action has something to report.
+    let selected_message = match mode {
+        Mode::Bluetooth => selected_row.and_then(|index| devices.message_label(index)),
+        Mode::Output | Mode::Input => None,
+    };
     let message = state
         .message
         .clone()
         .or(selected_message)
-        .unwrap_or_else(|| empty_label(mode).to_owned());
+        .unwrap_or_default();
+    // The panel is one line high; anything longer is clipped rather than
+    // silently cut off mid-glyph by the widget.
+    let message = single_line(&message, MESSAGE_WIDTH);
 
     let mut output = Vec::new();
     write_headers(&mut output, mode, &mut state, &message, selected_row);
@@ -618,31 +650,7 @@ fn write_headers(
     if let Some(selected_row) = selected_row {
         write_header(output, "new-selection", &selected_row.to_string());
     }
-    write_header(output, "theme", &action_bar_theme(mode));
     write_header(output, "data", &state.encode());
-}
-
-/// Rofi builds its widget tree once, so the action bar cannot gain or lose
-/// buttons when the tab changes — but `text-color`, `background-color`, and
-/// `border-color` are re-read on every draw, which a `theme` header can
-/// update. Each tab therefore lights up the three buttons it uses and greys
-/// out the three it does not. The greyed buttons still map to a sensible
-/// action, so a stray Alt+2 in the Output tab selects the highlighted device
-/// rather than doing nothing.
-///
-/// Colours are literal rather than `@cyan`/`@dim` references because a snippet
-/// is parsed after the theme file; they mirror the palette at the top of
-/// rofi-audio.rasi.
-fn action_bar_theme(mode: Mode) -> String {
-    const BLUETOOTH: &str = "button-scan, button-connect, button-forget";
-    const AUDIO: &str = "button-volume-up, button-volume-down, button-confirm";
-    const LIT: &str = "text-color: #7AFCFF; border-color: rgba(122, 252, 255, 0.28); background-color: rgba(122, 252, 255, 0.06);";
-    const DIM: &str = "text-color: #5C6776; border-color: rgba(92, 103, 118, 0.22); background-color: rgba(92, 103, 118, 0.04);";
-    let (lit, dim) = match mode {
-        Mode::Bluetooth => (BLUETOOTH, AUDIO),
-        Mode::Output | Mode::Input => (AUDIO, BLUETOOTH),
-    };
-    format!("{lit} {{ {LIT} }} {dim} {{ {DIM} }}")
 }
 
 fn write_bluetooth_row(output: &mut Vec<u8>, entry: &BluetoothEntry) -> io::Result<()> {
@@ -807,23 +815,15 @@ mod tests {
     }
 
     #[test]
-    fn each_tab_lights_up_its_own_three_buttons() {
-        let bluetooth = action_bar_theme(Mode::Bluetooth);
-        assert!(
-            bluetooth
-                .starts_with("button-scan, button-connect, button-forget { text-color: #7AFCFF")
-        );
-        assert!(bluetooth.contains(
-            "button-volume-up, button-volume-down, button-confirm { text-color: #5C6776"
-        ));
-        let output = action_bar_theme(Mode::Output);
-        assert!(output.starts_with(
-            "button-volume-up, button-volume-down, button-confirm { text-color: #7AFCFF"
-        ));
-        assert!(
-            output.contains("button-scan, button-connect, button-forget { text-color: #5C6776")
-        );
-        assert_eq!(output, action_bar_theme(Mode::Input));
+    fn prompts_are_icons_so_the_input_bar_stays_narrow() {
+        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
+            let prompt = mode.prompt();
+            assert_eq!(
+                prompt.chars().count(),
+                1,
+                "{mode} prompt should be a single glyph, got {prompt:?}"
+            );
+        }
     }
 
     #[test]
@@ -832,6 +832,7 @@ mod tests {
             key: "bt:4141".to_owned(),
             address: "AA:BB:CC:DD:EE:FF".to_owned(),
             name: "WH-1000XM4".to_owned(),
+            named: true,
             icon: None,
             connected,
             paired,
@@ -854,7 +855,8 @@ mod tests {
             key: "sink:4141".to_owned(),
             kind: AudioKind::Output,
             name: "alsa_output.pci".to_owned(),
-            description: "Built-in Audio".to_owned(),
+            description: "Built-in Audio Analog Stereo".to_owned(),
+            label: "Built-in Audio".to_owned(),
             volume: 60,
             muted: false,
             default,

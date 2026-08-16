@@ -1,5 +1,5 @@
 use crate::bluetooth::Backend;
-use crate::model::{AudioEntry, bluetooth_icon, json_escape};
+use crate::model::{AudioEntry, json_escape};
 use crate::{AppResult, audio};
 
 /// Waybar JSON for the merged module: the default output's volume glyph and a
@@ -13,11 +13,10 @@ pub async fn print_status() {
     };
     let (powered, connected) = bluetooth.unwrap_or((false, Vec::new()));
 
+    // One glyph: the default output's volume state. Bluetooth lives in the
+    // tooltip rather than taking a second slot on the bar.
     let audio_glyph = output.as_ref().map(AudioEntry::volume_icon).unwrap_or("󰝟");
-    let text = format!(
-        "<span size='large'>{audio_glyph}</span>  <span size='large'>{}</span>",
-        bluetooth_icon(powered, !connected.is_empty())
-    );
+    let text = format!("<span size='large'>{audio_glyph}</span>");
 
     let mut tooltip = vec![device_line("Output", output.as_ref())];
     tooltip.push(device_line("Input", input.as_ref()));
@@ -42,9 +41,9 @@ pub async fn print_status() {
 fn device_line(label: &str, entry: Option<&AudioEntry>) -> String {
     match entry {
         Some(entry) if entry.muted => {
-            format!("{label}: {} ({}%, muted)", entry.description, entry.volume)
+            format!("{label}: {} ({}%, muted)", entry.label, entry.volume)
         }
-        Some(entry) => format!("{label}: {} ({}%)", entry.description, entry.volume),
+        Some(entry) => format!("{label}: {} ({}%)", entry.label, entry.volume),
         None => format!("{label}: none"),
     }
 }

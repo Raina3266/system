@@ -28,10 +28,12 @@ impl Mode {
         }
     }
 
+    /// Icon only. The mode switcher above the input bar already names the tab,
+    /// so the prompt just marks which one the filter box belongs to.
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::Wifi => "󰤨 Wi-Fi",
-            Self::Ethernet => "󰈀 Ethernet",
+            Self::Wifi => "󰤨",
+            Self::Ethernet => "󰈀",
         }
     }
 }

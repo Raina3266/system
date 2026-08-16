@@ -29,6 +29,18 @@ Rofi opens on **Bluetooth**; `Shift+Left`/`Shift+Right` move between tabs.
   per device, so an idle output can be adjusted without touching the one
   currently playing. Monitor sources are hidden from **Input**.
 
+Rows show a shortened device name: PulseAudio descriptions carry boilerplate
+that identifies nothing ("GA104 High Definition Audio Controller Digital Stereo
+(HDMI 2)" becomes "GA104 (HDMI 2)"), and when a name is boilerplate all the way
+through, the active port's name — "Speakers", "Headphones" — is used instead.
+Filtering still matches the full description, so typing any part of the long
+name finds the row.
+
+The message panel below the list is one line and is only used by **Bluetooth**,
+where it carries the highlighted device's address and pairing state. In
+**Output** and **Input** the row already shows the volume and name, so the
+panel stays empty until an action has something to report.
+
 ### Controls
 
 | Action | Bluetooth | Output / Input |
@@ -41,9 +53,13 @@ Rofi opens on **Bluetooth**; `Shift+Left`/`Shift+Right` move between tabs.
 | `Alt+5`, `Alt+Down` | — | Volume −5% |
 | `Alt+6` | Connect / disconnect | Confirm the highlighted device |
 
-The action bar carries all six buttons at once, because Rofi builds its widget
-tree once and cannot add or remove buttons mid-session. Each tab lights up the
-three it uses and dims the other three, via a `theme` script header.
+The action bar carries all six buttons at once and every one of them is live.
+Rofi builds its widget tree once and does not re-run a script mode when you
+return to a tab it has already drawn, so the bar can neither swap its buttons
+per tab nor keep per-tab colouring in sync with the tab you are on — a dimmed
+button would go stale the moment you switched back. The selected tab in the
+mode switcher is what says which three buttons are meaningful; the other three
+fall back to the nearest sensible action rather than doing nothing.
 
 ### Pairing
 
@@ -82,14 +98,15 @@ Bluetooth tab spawns the second.
     "return-type": "json",
     "escape": false,
     "on-click": "/path/to/rofi-audio",
-    "on-click-right": "/path/to/rofi-audio bluetooth-power toggle"
+    "on-click-right": "/path/to/rofi-audio bluetooth-power off"
   }
 }
 ```
 
-The text shows the default output's volume glyph and a Bluetooth glyph; the
-tooltip lists the default output, the default input, and any connected
-Bluetooth devices.
+The text is a single glyph, the default output's volume state. The tooltip
+carries the rest: the default output, the default input, and any connected
+Bluetooth devices. Right-click turns the Bluetooth adapter off; `bluetooth-power
+on` and `toggle` are available for a binding of your own.
 
 ### Environment variables
 
