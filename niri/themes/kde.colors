@@ -135,6 +135,7 @@ ColorScheme=Bitpunk
 Name=Bitpunk
 accentActiveTitlebar=true
 shadeSortColumn=true
+frameContrast=1.0
 
 [KDE]
 contrast=4

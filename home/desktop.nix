@@ -6,16 +6,12 @@
 {
   home.packages = with pkgs; [
     kdePackages.dolphin
+    kdePackages.breeze
     kdePackages.kio-fuse
     kdePackages.kfilemetadata
     kdePackages.kompare
     kdePackages.plasma-integration
   ];
-
-  home.sessionVariables = {
-    QT_QPA_PLATFORMTHEME = "kde6";
-    QT_SCALE_FACTOR = "1.25";
-  };
 
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then
@@ -23,6 +19,11 @@
     [General]
     ColorScheme=Bitpunk
     Name=Bitpunk
+    font=Noto Sans,12
+    menuFont=Noto Sans,11
+    toolBarFont=Noto Sans,11
+    smallestReadableFont=Noto Sans,11
+    fixed=JetBrainsMono Nerd Font,12
     EOF
       fi
   '';
