@@ -1,0 +1,26 @@
+[package]
+name = "rofi-audio"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "A Rofi Bluetooth, output, and input controller backed by bluer/BlueZ and pulsectl-rs/PulseAudio"
+license = "MIT"
+publish = false
+
+[dependencies]
+# BlueZ over D-Bus: device listing, scan, pair (with an authorization agent for
+# PIN/passkey prompts), connect, disconnect, and adapter power.
+bluer = { version = "=0.17.4", default-features = false, features = [
+  "bluetoothd",
+] }
+# PulseAudio (served by pipewire-pulse): sink/source listing, default device
+# selection, and per-device volume.
+pulsectl-rs = "=0.3.2"
+libpulse-binding = "=2.30.1"
+futures-util = { version = "=0.3.34", default-features = false }
+tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

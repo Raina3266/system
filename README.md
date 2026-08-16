@@ -1,11 +1,108 @@
 # Custom Scripts
 
-This repository contains four Rust utilities used by the desktop configuration:
+This repository contains five Rust utilities used by the desktop configuration:
 
 - `media-control` — a dynamic MPRIS controller for Rofi and Waybar
 - `preview-panel` — a reusable GTK4 text and image preview window
+- [`rofi-audio`](#rofi-audio) — a merged Bluetooth, output, and input controller with a Rofi interface
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
+
+## rofi-audio
+
+`scripts/rofi-audio` replaces the former `custom/audio` shell script and
+`custom/bt` Waybar module with one program and one Waybar entry. Bluetooth is
+driven by [`bluer`](https://crates.io/crates/bluer), the official BlueZ crate,
+and the audio tabs by [`pulsectl-rs`](https://crates.io/crates/pulsectl-rs) over
+PulseAudio, which `pipewire-pulse` serves. Neither backend is reimplemented by
+hand.
+
+### Modes
+
+Rofi opens on **Bluetooth**; `Shift+Left`/`Shift+Right` move between tabs.
+
+- **Bluetooth** — connected devices are cyan and sort to the top, paired
+  devices are white, everything discovery turned up is dimmed. Battery level is
+  appended when the device reports one.
+- **Output** and **Input** — every sink or source, each row showing its volume
+  before the name. The current default is cyan and stays in place. Volume is
+  per device, so an idle output can be adjusted without touching the one
+  currently playing. Monitor sources are hidden from **Input**.
+
+### Controls
+
+| Action | Bluetooth | Output / Input |
+| --- | --- | --- |
+| `Enter` | Connect, or disconnect if connected | Make the row the default device |
+| `Alt+1` | Scan for devices | — |
+| `Alt+2` | Connect / disconnect | Make the row the default device |
+| `Alt+3` | Forget the paired device | — |
+| `Alt+4`, `Alt+Up` | — | Volume +5% |
+| `Alt+5`, `Alt+Down` | — | Volume −5% |
+| `Alt+6` | Connect / disconnect | Confirm the highlighted device |
+
+The action bar carries all six buttons at once, because Rofi builds its widget
+tree once and cannot add or remove buttons mid-session. Each tab lights up the
+three it uses and dims the other three, via a `theme` script header.
+
+### Pairing
+
+Connecting to an unpaired device starts a detached `connect-bg` process that
+registers its own BlueZ authorization agent. BlueZ routes that pairing's
+prompts to the caller's agent, so when a device asks for a PIN or a passkey the
+filter box turns into a code entry — the same flow the Wi-Fi menu uses for
+passwords. Type the code and press `Enter`. When the device is the one that has
+to be typed on, the code is shown in the message line instead. The two halves
+talk through single-use files in `$XDG_RUNTIME_DIR`, so an abandoned pairing
+never leaves a stale prompt behind.
+
+Pairings started from the other side still go to the session-wide `bt-agent`
+service, which auto-confirms them.
+
+### Commands
+
+```text
+rofi-audio [launch]
+rofi-audio status
+rofi-audio bluetooth-power [on|off|toggle]
+rofi-audio script <bluetooth|output|input>
+rofi-audio connect-bg <row-key>
+```
+
+`script` and `connect-bg` are internal: Rofi invokes the first, and the
+Bluetooth tab spawns the second.
+
+### Waybar module
+
+```jsonc
+{
+  "custom/audio": {
+    "exec": "/path/to/rofi-audio status",
+    "interval": 5,
+    "return-type": "json",
+    "escape": false,
+    "on-click": "/path/to/rofi-audio",
+    "on-click-right": "/path/to/rofi-audio bluetooth-power toggle"
+  }
+}
+```
+
+The text shows the default output's volume glyph and a Bluetooth glyph; the
+tooltip lists the default output, the default input, and any connected
+Bluetooth devices.
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `ROFI_AUDIO_ROFI` | Override the `rofi` executable |
+| `ROFI_AUDIO_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/rofi-audio.rasi`) |
+| `ROFI_AUDIO_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `6`) |
+
+Styling lives in `niri/themes/rofi-audio.rasi`, symlinked to
+`~/.config/rofi/rofi-audio.rasi` so edits apply without a rebuild.
+
+---
 
 ## rofi-clipboard
 

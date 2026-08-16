@@ -61,8 +61,11 @@ in
     mediactl
   ];
 
-  # Bluetooth pairing agent: auto-confirms pairing requests so rofi-bluetooth
-  # pairing doesn't hang.
+  # Default Bluetooth pairing agent, used for pairings started from the *other*
+  # side (a phone or headset initiating the connection) so they never hang.
+  # Pairings started from rofi-audio use the agent rofi-audio registers on its
+  # own D-Bus connection instead: BlueZ prefers the caller's agent, which is
+  # what lets rofi-audio prompt for a PIN or passkey inside the menu.
   systemd.user.services.bt-agent = {
     Unit = {
       Description = "Persistent Bluetooth pairing agent";

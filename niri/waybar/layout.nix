@@ -28,7 +28,6 @@ let
         "custom/timer"
         "custom/clipboard"
         "custom/audio"
-        "custom/bt"
         "custom/network"
       ];
     }

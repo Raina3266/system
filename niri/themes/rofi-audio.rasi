@@ -1,6 +1,12 @@
-/* Audio device menu: WirePlumber sinks/sources with volume/mute/toggle actions.
-   Mirrors media-control.rasi: listview rows above, action-bar buttons below.
-   Each button maps to a ROFI_RETV the rofi-audio script-mode understands. */
+/* rofi-audio: Bluetooth / Output / Input tabs, a status message, and six
+   action buttons.
+
+   Rofi builds its widget tree once, so the action bar cannot swap buttons when
+   the tab changes. Instead all six are always present and rofi-audio recolours
+   them per tab with a `theme` script header — the three buttons the current
+   tab uses stay cyan, the other three go dim. The literal colours in
+   `action_bar_theme` (scripts/rofi-audio/src/rofi.rs) mirror @cyan and @dim
+   below, so the two must be changed together. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";
@@ -9,6 +15,7 @@
     fg:       #CBE3E7;
     pink:     #FF7EDB;
     cyan:     #7AFCFF;
+    amber:    #F29E74;
     red:      #FF5C57;
     dim:      #5C6776;
 
@@ -16,10 +23,12 @@
     text-color: @fg;
 }
 
+/* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
     location: 3;
     anchor: 3;
-    width: 620px;
+    width: 420px;
+    height: 520px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -31,25 +40,61 @@ window {
 mainbox {
     orientation: vertical;
     spacing: 10px;
-    children: [ message, listview, action-bar ];
+    children: [ mode-switcher, inputbar, listview, message, action-bar ];
 }
 
-message {
-    background-color: transparent;
+mode-switcher {
+    orientation: horizontal;
+    spacing: 10px;
+    padding: 2px 0 2px 0;
 }
 
-textbox {
-    markup: false;
-    text-color: @dim;
+button {
+    expand: true;
+    cursor: pointer;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
+    horizontal-align: 0.5;
+}
+
+button selected {
+    border-color: @pink;
+    background-color: rgba(255, 126, 219, 0.16);
+    text-color: @pink;
+}
+
+/* Doubles as the pairing-code box: rofi-audio allows custom input while a
+   device is waiting for a PIN or passkey, so the typed text is submitted with
+   Enter instead of opening a nested dialog. */
+inputbar {
+    spacing: 10px;
+    padding: 7px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(255, 126, 219, 0.25);
+    background-color: @bg-mod;
+    children: [ prompt, entry ];
+}
+
+prompt {
+    text-color: @pink;
+}
+
+entry {
+    cursor: text;
+    placeholder: "Filter devices";
+    placeholder-color: @dim;
 }
 
 listview {
-    lines: 8;
-    dynamic: true;
-    fixed-height: false;
-    spacing: 4px;
-    padding: 0;
+    lines: 6;
+    eh: 1;
+    dynamic: false;
     scrollbar: true;
+    spacing: 4px;
 }
 
 scrollbar {
@@ -75,8 +120,11 @@ element selected.urgent {
     background-color: rgba(255, 126, 219, 0.12);
 }
 
-element-text {
-    vertical-align: 0.5;
+/* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
+   Output/Input: every device is foreground, the default one is cyan. */
+element-text normal.normal,
+element-text alternate.normal,
+element-text selected.normal {
     text-color: @dim;
 }
 
@@ -86,27 +134,57 @@ element-text selected.active {
     text-color: @fg;
 }
 
+element-text normal.urgent,
+element-text alternate.urgent,
+element-text selected.urgent {
+    text-color: @cyan;
+}
+
+/* Status panel. rofi-audio keeps every message to a single line: either the
+   result of the last action, or the highlighted row's details. */
+message {
+    padding: 8px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(242, 158, 116, 0.45);
+    background-color: rgba(242, 158, 116, 0.07);
+}
+
+/* Only the message box's inner widget is named `textbox`; the prompt, entry,
+   rows, and buttons all carry their own names. */
+textbox {
+    background-color: transparent;
+    text-color: @fg;
+    markup: false;
+    lines: 1;
+    wrap: false;
+}
+
 action-bar {
     expand: false;
     orientation: horizontal;
     spacing: 7px;
     children: [
-        button-vol-up,
-        button-vol-down,
-        button-mute,
-        button-toggle
+        button-scan,
+        button-connect,
+        button-forget,
+        button-volume-up,
+        button-volume-down,
+        button-confirm
     ];
 }
 
-button-vol-up,
-button-vol-down,
-button-mute,
-button-toggle {
+button-scan,
+button-connect,
+button-forget,
+button-volume-up,
+button-volume-down,
+button-confirm {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
     margin: 1px;
-    padding: 7px 5px;
+    padding: 7px 4px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);
@@ -114,24 +192,37 @@ button-toggle {
     text-color: @cyan;
 }
 
-button-vol-up {
-    content: " 󰝝 ";
+/* Bluetooth tab: scan, connect/disconnect, forget. */
+button-scan {
+    content: " 󰑐 ";
     action: "kb-custom-1";
 }
 
-button-vol-down {
-    content: " 󰝞 ";
+button-connect {
+    content: " 󰂱 ";
     action: "kb-custom-2";
 }
 
-button-mute {
-    content: " 󰖁 ";
+button-forget {
+    content: " 󰆴 ";
     action: "kb-custom-3";
 }
 
-button-toggle {
-    content: " 󰁇 ";
+/* Output and Input tabs: volume up, volume down, confirm the selection.
+   Volume also answers to Alt+Up and Alt+Down. */
+button-volume-up {
+    content: " 󰝝 ";
     action: "kb-custom-4";
+}
+
+button-volume-down {
+    content: " 󰝞 ";
+    action: "kb-custom-5";
+}
+
+button-confirm {
+    content: " 󰄬 ";
+    action: "kb-custom-6";
 }
 
 error-message {

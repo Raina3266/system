@@ -21,7 +21,6 @@ in
     rofi
     rofi-rbw
     rofi-file-browser
-    rofi-bluetooth
     whitesur-icon-theme
 
     (writeShellScriptBin "rofi-filesearch" (builtins.readFile ./filesearch.sh))

@@ -52,6 +52,30 @@ let
     '';
   };
 
+  # Merged Bluetooth + audio controller. bluer talks to BlueZ over D-Bus and
+  # pulsectl-rs talks to PulseAudio, which pipewire-pulse serves, so the two
+  # halves need dbus and libpulseaudio to link against.
+  rofiAudio = pkgs.rustPlatform.buildRustPackage {
+    pname = "rofi-audio";
+    version = "0.1.0";
+    src = ../../scripts/rofi-audio;
+    cargoLock.lockFile = ../../scripts/rofi-audio/Cargo.lock;
+
+    nativeBuildInputs = [
+      pkgs.makeWrapper
+      pkgs.pkg-config
+    ];
+    buildInputs = [
+      pkgs.dbus
+      pkgs.libpulseaudio
+    ];
+
+    postInstall = ''
+      wrapProgram "$out/bin/rofi-audio" \
+        --set ROFI_AUDIO_ROFI "${pkgs.lib.getExe pkgs.rofi}"
+    '';
+  };
+
   waybarTimer = pkgs.rustPlatform.buildRustPackage {
     pname = "waybar-timer";
     version = "0.1.0";
@@ -64,9 +88,6 @@ let
         --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg}/bin/ffplay"
     '';
   };
-
-  rofiBluetooth = import ../rofi/bluetooth.nix { inherit pkgs; };
-  rofiAudio = (import ../rofi/audio.nix { inherit pkgs; }).rofiAudio;
 in
 {
   # Package installation, service, and runtime links stay beside the Waybar
@@ -78,6 +99,7 @@ in
       previewPanel
       rofiClipboard
       rofiNetworkManager
+      rofiAudio
     ];
 
     systemd.user.services.rofi-clipboard = {
@@ -127,61 +149,23 @@ in
       on-click = "${rofiClipboard}/bin/rofi-clipboard";
     };
 
-    # Audio: rofi script-mode device picker (volume in pulseaudio module)
+    # Bluetooth, outputs, and inputs in one module. The text carries the
+    # default output's volume glyph plus a Bluetooth glyph; everything else is
+    # in the tooltip. Left-click opens the three-tab rofi menu, right-click
+    # toggles the Bluetooth adapter.
     "custom/audio" = {
-      format = "<span size='large'>󰕾</span>";
-      tooltip-format = "Audio devices & volume";
-      on-click = pkgs.writeShellScript "waybar-audio" ''
-        exec "${pkgs.rofi}/bin/rofi" \
-          -show audio \
-          -modes "audio:${rofiAudio}/bin/rofi-audio" \
-          -no-custom \
-          -matching fuzzy \
-          -kb-custom-1 "Ctrl+Up" \
-          -kb-custom-2 "Ctrl+Down" \
-          -kb-custom-3 "Ctrl+m" \
-          -kb-custom-4 "Ctrl+t" \
-          -theme "$HOME/.config/rofi/rofi-audio.rasi"
-      '';
+      exec = "${rofiAudio}/bin/rofi-audio status";
+      interval = 5;
+      return-type = "json";
+      tooltip = true;
+      escape = false;
+      on-click = "${rofiAudio}/bin/rofi-audio";
+      on-click-right = "${rofiAudio}/bin/rofi-audio bluetooth-power toggle";
     };
 
     "tray" = {
       icon-size = 18;
       spacing = 10;
-    };
-
-    "custom/bt" = {
-      format = "{}";
-      return-type = "json";
-      exec = pkgs.writeShellScript "waybar-bt-poll" ''
-        on_icon="<span size='large'>󰂯</span>"
-        off_icon="<span size='large'>󰂱</span>"
-        powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
-        if [ "$powered" = "yes" ]; then
-          names=$(bluetoothctl devices Connected 2>/dev/null | sed 's/^Device [0-9A-Fa-f:]* //' | tr '\n' ',' | sed 's/,$//')
-          if [ -n "$names" ]; then
-            printf '{"text":"%s","tooltip":"Connected: %s"}' "$on_icon" "$names"
-          else
-            printf '{"text":"%s","tooltip":"Bluetooth: On (no devices connected)"}' "$on_icon"
-          fi
-        else
-          printf '{"text":"%s","tooltip":"Bluetooth: Off"}' "$off_icon"
-        fi
-      '';
-      interval = 5;
-      # Left: rofi-bluetooth device menu | Right: toggle power
-      # Power uses btctl (D-Bus) to avoid bluetoothctl agent conflicts.
-      on-click = pkgs.writeShellScript "waybar-bt" ''
-        exec "${pkgs.rofi-bluetooth}/bin/rofi-bluetooth"
-      '';
-      on-click-right = pkgs.writeShellScript "waybar-bt-toggle-power" ''
-        powered=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
-        if [ "$powered" = "yes" ]; then
-          ${rofiBluetooth.btctl}/bin/btctl power off
-        else
-          ${rofiBluetooth.btctl}/bin/btctl power on
-        fi
-      '';
     };
   };
 }
