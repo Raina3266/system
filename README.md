@@ -36,6 +36,12 @@ through, the active port's name — "Speakers", "Headphones" — is used instead
 Filtering still matches the full description, so typing any part of the long
 name finds the row.
 
+The input bar shows a filter glyph rather than a prompt. Rofi drives the prompt
+widget from the mode's display name, which is the same string the mode-switcher
+tab shows, so a prompt here could only repeat the tab beside it; the theme
+leaves the widget out of the input bar's children and puts a static glyph in
+its place.
+
 The message panel below the list is one line and is only used by **Bluetooth**,
 where it carries the highlighted device's address and pairing state. In
 **Output** and **Input** the row already shows the volume and name, so the
@@ -98,15 +104,15 @@ Bluetooth tab spawns the second.
     "return-type": "json",
     "escape": false,
     "on-click": "/path/to/rofi-audio",
-    "on-click-right": "/path/to/rofi-audio bluetooth-power off"
+    "on-click-right": "/path/to/rofi-audio bluetooth-power toggle"
   }
 }
 ```
 
 The text is a single glyph, the default output's volume state. The tooltip
 carries the rest: the default output, the default input, and any connected
-Bluetooth devices. Right-click turns the Bluetooth adapter off; `bluetooth-power
-on` and `toggle` are available for a binding of your own.
+Bluetooth devices. Right-click is the Bluetooth adapter's on/off switch;
+`bluetooth-power on` and `off` are available for bindings of your own.
 
 ### Environment variables
 

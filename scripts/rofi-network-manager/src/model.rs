@@ -28,12 +28,14 @@ impl Mode {
         }
     }
 
-    /// Icon only. The mode switcher above the input bar already names the tab,
-    /// so the prompt just marks which one the filter box belongs to.
+    /// The mode switcher's tab label. Rofi ties the input bar's prompt widget
+    /// to the same string, so the input bar drops the `prompt` widget entirely
+    /// and shows a static filter glyph instead — see the `inputbar` block in
+    /// rofi-network.rasi.
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::Wifi => "󰤨",
-            Self::Ethernet => "󰈀",
+            Self::Wifi => "󰤨 Wi-Fi",
+            Self::Ethernet => "󰈀 Ethernet",
         }
     }
 }

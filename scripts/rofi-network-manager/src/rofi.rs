@@ -95,10 +95,12 @@ pub fn launch() -> AppResult<()> {
             "wifi",
             "-modes",
             &modes,
+            // Same strings the script's `prompt` header sets, so a tab reads
+            // the same before and after its script has first run.
             "-display-wifi",
-            "󰤨 ",
+            "󰤨 Wi-Fi",
             "-display-ethernet",
-            "󰈀 ",
+            "󰈀 Ethernet",
             "-on-selection-changed",
             &selection_command,
             "-theme",

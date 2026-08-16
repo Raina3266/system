@@ -119,12 +119,14 @@ pub fn launch() -> AppResult<()> {
             "bluetooth",
             "-modes",
             &modes,
+            // Same strings the script's `prompt` header sets, so a tab reads
+            // the same before and after its script has first run.
             "-display-bluetooth",
-            "󰂯 ",
+            "󰂯 Bluetooth",
             "-display-output",
-            "󰕾 ",
+            "󰕾 Output",
             "-display-input",
-            "󰍬 ",
+            "󰍬 Input",
             // Alt+1..Alt+6 are Rofi's defaults for the action-bar buttons;
             // volume also answers to Alt+Up/Alt+Down, which nothing else uses.
             "-kb-custom-4",
@@ -503,9 +505,10 @@ fn run_audio(
         }
     };
 
+    let mut chosen_default = None;
     match retv {
         RETV_ACTIVATE | RETV_CONFIRM | RETV_CONNECT => {
-            set_default(&before, selected_key, state);
+            chosen_default = set_default(&before, selected_key, state);
         }
         RETV_VOLUME_UP => nudge_volume(&before, selected_key, state, audio::STEP),
         RETV_VOLUME_DOWN => nudge_volume(&before, selected_key, state, -audio::STEP),
@@ -514,28 +517,57 @@ fn run_audio(
         _ => {}
     }
 
-    match audio::snapshot(kind) {
-        Ok(entries) => Devices::Audio(entries),
-        Err(_) => before,
+    let mut after = match audio::snapshot(kind) {
+        Ok(entries) => entries,
+        Err(_) => return before,
+    };
+    if let Some(chosen) = chosen_default.as_deref() {
+        apply_chosen_default(&mut after, chosen);
+    }
+    Devices::Audio(after)
+}
+
+/// Moves the "default" mark onto the device the user just confirmed.
+///
+/// PulseAudio acknowledges `set_default_device` before the change is visible
+/// to a follow-up query: pipewire-pulse routes it through PipeWire's metadata
+/// and applies it asynchronously, so the snapshot taken microseconds later can
+/// still name the old default and the row would redraw in the wrong colour.
+/// The server accepted the change, so this render trusts that over the stale
+/// read; the next render reads the settled value anyway.
+fn apply_chosen_default(entries: &mut [AudioEntry], chosen: &str) {
+    for entry in entries {
+        entry.default = entry.name == chosen;
     }
 }
 
-fn set_default(before: &Devices, selected_key: Option<&str>, state: &mut UiState) {
+/// Returns the PulseAudio node name that is now the default, when it changed.
+fn set_default(
+    before: &Devices,
+    selected_key: Option<&str>,
+    state: &mut UiState,
+) -> Option<String> {
     let Some(entry) = selected_key.and_then(|key| before.audio(key)) else {
         state.set_message("Select a device first.");
-        return;
+        return None;
     };
     if entry.default {
         state.set_message(format!("{} is already the default.", entry.label));
-        return;
+        return None;
     }
     match audio::set_default(entry) {
-        Ok(()) => state.set_message(format!(
-            "{} is now the default {}.",
-            entry.label,
-            entry.kind.noun()
-        )),
-        Err(error) => state.set_message(format!("Cannot select {}: {error}", entry.label)),
+        Ok(()) => {
+            state.set_message(format!(
+                "{} is now the default {}.",
+                entry.label,
+                entry.kind.noun()
+            ));
+            Some(entry.name.clone())
+        }
+        Err(error) => {
+            state.set_message(format!("Cannot select {}: {error}", entry.label));
+            None
+        }
     }
 }
 
@@ -814,16 +846,14 @@ mod tests {
         assert_eq!(row.iter().filter(|byte| **byte == 0).count(), 1);
     }
 
+    /// The `prompt` header names the mode-switcher tab, so it has to carry the
+    /// tab's text. The input bar hides the prompt widget instead of shortening
+    /// this string — see the `inputbar` block in rofi-audio.rasi.
     #[test]
-    fn prompts_are_icons_so_the_input_bar_stays_narrow() {
-        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
-            let prompt = mode.prompt();
-            assert_eq!(
-                prompt.chars().count(),
-                1,
-                "{mode} prompt should be a single glyph, got {prompt:?}"
-            );
-        }
+    fn prompts_name_their_tab() {
+        assert_eq!(Mode::Bluetooth.prompt(), "󰂯 Bluetooth");
+        assert_eq!(Mode::Output.prompt(), "󰕾 Output");
+        assert_eq!(Mode::Input.prompt(), "󰍬 Input");
     }
 
     #[test]
@@ -847,6 +877,26 @@ mod tests {
         assert!(render(entry(false, true)).contains("active"));
         let discovered = render(entry(false, false));
         assert!(!discovered.contains("urgent") && !discovered.contains("active"));
+    }
+
+    #[test]
+    fn confirming_a_device_marks_it_default_even_if_the_server_lags() {
+        let entry = |name: &str, default| AudioEntry {
+            key: format!("sink:{}", hex_encode(name)),
+            kind: AudioKind::Output,
+            name: name.to_owned(),
+            description: name.to_owned(),
+            label: name.to_owned(),
+            volume: 50,
+            muted: false,
+            default,
+        };
+        // pipewire-pulse can still report the old default right after
+        // accepting the change, so both rows come back stale.
+        let mut entries = vec![entry("speakers", true), entry("headset", false)];
+        apply_chosen_default(&mut entries, "headset");
+        assert!(!entries[0].default);
+        assert!(entries[1].default);
     }
 
     #[test]

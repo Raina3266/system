@@ -67,7 +67,12 @@ button selected {
 
 /* Doubles as the pairing-code box: rofi-audio allows custom input while a
    device is waiting for a PIN or passkey, so the typed text is submitted with
-   Enter instead of opening a nested dialog. */
+   Enter instead of opening a nested dialog.
+
+   The `prompt` widget is deliberately left out of the children. Rofi drives it
+   from the mode's display name, which is the same string the mode-switcher tab
+   shows, so keeping it here would repeat "Bluetooth" / "Output" / "Input" next
+   to the tab that already says it. A static filter glyph goes in its place. */
 inputbar {
     spacing: 10px;
     padding: 7px 10px;
@@ -75,11 +80,14 @@ inputbar {
     border-radius: 7px;
     border-color: rgba(255, 126, 219, 0.25);
     background-color: @bg-mod;
-    children: [ prompt, entry ];
+    children: [ textbox-filter-icon, entry ];
 }
 
-prompt {
+textbox-filter-icon {
+    expand: false;
+    str: "󰍉";
     text-color: @pink;
+    vertical-align: 0.5;
 }
 
 entry {

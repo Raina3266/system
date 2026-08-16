@@ -21,14 +21,16 @@ impl Mode {
         }
     }
 
-    /// Icon only. The mode switcher above the input bar already names the tab,
-    /// so the prompt just marks which one the filter box belongs to. Rofi
-    /// mirrors this into the tab label too (`sw->display_name`).
+    /// The mode switcher's tab label. Rofi ties the input bar's prompt widget
+    /// to the same string (`script.c` assigns the `prompt` header to
+    /// `sw->display_name`, and `rofi_view_update_prompt` reads it back), so
+    /// the input bar drops the `prompt` widget entirely and shows a static
+    /// filter glyph instead — see the `inputbar` block in rofi-audio.rasi.
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::Bluetooth => "󰂯",
-            Self::Output => "󰕾",
-            Self::Input => "󰍬",
+            Self::Bluetooth => "󰂯 Bluetooth",
+            Self::Output => "󰕾 Output",
+            Self::Input => "󰍬 Input",
         }
     }
 

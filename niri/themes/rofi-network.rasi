@@ -67,6 +67,10 @@ button selected {
     text-color: @pink;
 }
 
+/* The `prompt` widget is deliberately left out of the children. Rofi drives it
+   from the mode's display name, which is the same string the mode-switcher tab
+   shows, so keeping it here would repeat "Wi-Fi" / "Ethernet" next to the tab
+   that already says it. A static filter glyph goes in its place. */
 inputbar {
     spacing: 10px;
     padding: 7px 10px;
@@ -74,11 +78,14 @@ inputbar {
     border-radius: 7px;
     border-color: rgba(255, 126, 219, 0.25);
     background-color: @bg-mod;
-    children: [ prompt, entry ];
+    children: [ textbox-filter-icon, entry ];
 }
 
-prompt {
+textbox-filter-icon {
+    expand: false;
+    str: "󰍉";
     text-color: @pink;
+    vertical-align: 0.5;
 }
 
 entry {
