@@ -11,13 +11,16 @@ use futures_util::StreamExt;
 use crate::AppResult;
 use crate::model::{BluetoothEntry, CodeKind, hex_decode, hex_encode};
 
-const DEFAULT_SCAN_SECONDS: u64 = 6;
+/// Discovery runs detached, so this window is about how long newly powered-on
+/// devices have to show up rather than about how long the menu blocks.
+const DEFAULT_SCAN_SECONDS: u64 = 10;
 /// How long the detached `connect-bg` agent waits for the user to type a
 /// pairing code before giving up and letting BlueZ cancel the attempt.
 const CODE_TIMEOUT: Duration = Duration::from_secs(120);
 const CODE_POLL: Duration = Duration::from_millis(100);
 const REQUEST_FILENAME: &str = "rofi-audio-pair-request";
 const RESPONSE_FILENAME: &str = "rofi-audio-pair-response";
+const SCANNING_FILENAME: &str = "rofi-audio-scanning";
 
 pub struct Backend {
     session: Session,
@@ -90,17 +93,28 @@ impl Backend {
 
     /// Runs a bounded discovery window. BlueZ discovers for as long as the
     /// event stream is alive, so the timeout is what stops the scan.
+    ///
+    /// This blocks for the whole window, which is why only the detached
+    /// `scan-bg` process calls it — the menu itself never waits on discovery.
+    /// While it runs, a marker file lets the short-lived script invocations
+    /// tell that a scan is in flight.
     pub async fn scan(&self) -> AppResult<()> {
-        let events = self.adapter.discover_devices().await?;
         let seconds = env::var("ROFI_AUDIO_SCAN_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(DEFAULT_SCAN_SECONDS);
-        let _ = tokio::time::timeout(Duration::from_secs(seconds), async move {
+        let events = self.adapter.discover_devices().await?;
+        mark_scanning(Duration::from_secs(seconds));
+        let outcome = tokio::time::timeout(Duration::from_secs(seconds), async move {
             let mut events = std::pin::pin!(events);
             while events.next().await.is_some() {}
         })
         .await;
+        // Expire rather than clear: a second scanner started after this one
+        // owns a later deadline, and wiping it would report "not scanning"
+        // while its discovery is still running.
+        expire_scanning();
+        let _ = outcome;
         Ok(())
     }
 
@@ -436,13 +450,78 @@ fn take_response() -> Option<Option<String>> {
     decode_response(&contents)
 }
 
-/// Drops any prompt or answer left behind by an abandoned pairing, so the next
-/// launch never renders a stale password box.
+/// Drops any prompt, answer, or scan marker left behind by an abandoned
+/// pairing or a killed scanner, so the next launch starts clean.
 pub fn cleanup() {
     clear_request();
+    clear_scanning();
     if let Some(path) = response_path() {
         let _ = fs::remove_file(path);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scan marker
+//
+// Discovery lives in a detached `scan-bg` process so opening the menu never
+// waits on it. The marker records when that window ends, which is how a script
+// invocation — a separate process that shares no memory with the scanner —
+// knows to report "Scanning…" and to leave a running scan alone. Storing the
+// deadline rather than a plain flag means a scanner that is killed mid-window
+// expires on its own instead of leaving the menu scanning forever.
+// ---------------------------------------------------------------------------
+
+fn scanning_path() -> Option<PathBuf> {
+    runtime_path(SCANNING_FILENAME)
+}
+
+fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0)
+}
+
+fn mark_scanning(window: Duration) {
+    if let Some(path) = scanning_path() {
+        let _ = write_atomic(&path, &format!("{}\n", now_seconds() + window.as_secs()));
+    }
+}
+
+pub fn clear_scanning() {
+    if let Some(path) = scanning_path() {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn window_is_open(contents: &str, now: u64) -> bool {
+    contents
+        .trim()
+        .parse::<u64>()
+        .is_ok_and(|deadline| deadline > now)
+}
+
+/// True while a `scan-bg` window is still open. Self-cleaning: a marker whose
+/// deadline has passed, or that a killed scanner left unreadable, is removed
+/// here so a dead scanner never reports as running.
+pub fn is_scanning() -> bool {
+    let Some(path) = scanning_path() else {
+        return false;
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return false;
+    };
+    if window_is_open(&contents, now_seconds()) {
+        return true;
+    }
+    let _ = fs::remove_file(&path);
+    false
+}
+
+/// Drops the marker only if its window has closed, leaving a later scanner's
+/// marker in place.
+pub fn expire_scanning() {
+    let _ = is_scanning();
 }
 
 #[cfg(test)]
@@ -503,6 +582,22 @@ mod tests {
         );
         assert_eq!(decode_response(&encode_response(None)), Some(None));
         assert_eq!(decode_response(""), None);
+    }
+
+    #[test]
+    fn a_scan_window_is_open_until_its_deadline_passes() {
+        assert!(window_is_open("1200\n", 1190));
+        assert!(!window_is_open("1200\n", 1200));
+        assert!(!window_is_open("1200\n", 1300));
+    }
+
+    #[test]
+    fn an_unreadable_scan_marker_never_reports_as_scanning() {
+        // A scanner killed mid-write, or a truncated file, must not leave the
+        // menu claiming a scan is running forever.
+        assert!(!window_is_open("", 100));
+        assert!(!window_is_open("not-a-deadline", 100));
+        assert!(!window_is_open("-5", 100));
     }
 
     #[test]

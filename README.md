@@ -19,7 +19,16 @@ hand.
 
 ### Modes
 
-Rofi opens on **Bluetooth**; `Shift+Left`/`Shift+Right` move between tabs.
+Rofi opens on **Bluetooth** and starts scanning; `Shift+Left`/`Shift+Right`
+move between tabs.
+
+Discovery runs in a detached `scan-bg` process, so the menu appears at once
+with the devices BlueZ already knows about rather than waiting out the scan
+window. Rofi cannot redraw a script mode on its own, so devices found while the
+window is open show up the next time the list is drawn — pressing **Scan**
+again is the cheap way to do that, and it no longer blocks. An adapter you
+turned off stays off: only the Scan button powers it on, never the automatic
+scan at launch.
 
 - **Bluetooth** — connected devices are cyan and sort to the top, paired
   devices are white, everything discovery turned up is dimmed. Battery level is
@@ -52,7 +61,7 @@ panel stays empty until an action has something to report.
 | Action | Bluetooth | Output / Input |
 | --- | --- | --- |
 | `Enter` | Connect, or disconnect if connected | Make the row the default device |
-| `Alt+1` | Scan for devices | — |
+| `Alt+1` | Refresh the list, and scan if the window has closed | — |
 | `Alt+2` | Connect / disconnect | Make the row the default device |
 | `Alt+3` | Forget the paired device | — |
 | `Alt+4`, `Alt+Up` | — | Volume +5% |
@@ -89,10 +98,11 @@ rofi-audio status
 rofi-audio bluetooth-power [on|off|toggle]
 rofi-audio script <bluetooth|output|input>
 rofi-audio connect-bg <row-key>
+rofi-audio scan-bg
 ```
 
-`script` and `connect-bg` are internal: Rofi invokes the first, and the
-Bluetooth tab spawns the second.
+`script`, `connect-bg`, and `scan-bg` are internal: Rofi invokes the first,
+and the Bluetooth tab spawns the other two.
 
 ### Waybar module
 
@@ -133,7 +143,7 @@ switch; `bluetooth-power on` and `off` are available for bindings of your own.
 | --- | --- |
 | `ROFI_AUDIO_ROFI` | Override the `rofi` executable |
 | `ROFI_AUDIO_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/rofi-audio.rasi`) |
-| `ROFI_AUDIO_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `6`) |
+| `ROFI_AUDIO_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `10`) |
 
 Styling lives in `niri/themes/rofi-audio.rasi`, symlinked to
 `~/.config/rofi/rofi-audio.rasi` so edits apply without a rebuild.

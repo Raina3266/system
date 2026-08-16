@@ -105,6 +105,10 @@ pub fn launch() -> AppResult<()> {
     // it so this launch never opens straight into a stale code box.
     bluetooth::cleanup();
     clear_connect_result();
+    // Opening the menu starts discovery. Detached, so the window appears at
+    // once with the devices BlueZ already knows about while anything newly
+    // switched on has a chance to turn up.
+    spawn_scan_background();
     let executable = env::current_exe()?;
     let executable = executable.to_string_lossy();
     let modes = format!(
@@ -227,13 +231,21 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
         _ => {}
     }
 
-    match backend.snapshot().await {
+    let devices = match backend.snapshot().await {
         Ok(entries) => Devices::Bluetooth(entries),
         Err(error) => {
             state.set_message(format!("Cannot list Bluetooth devices: {error}"));
             Devices::Bluetooth(Vec::new())
         }
+    };
+    // Say so while discovery is running, unless the action had something more
+    // specific to report. Rofi cannot redraw a script mode on its own, so this
+    // is also the hint that pressing Scan again will pick up whatever has
+    // turned up since.
+    if state.message.is_none() && bluetooth::is_scanning() {
+        state.set_message("Scanning for devices…");
     }
+    devices
 }
 
 async fn activate_bluetooth(
@@ -271,15 +283,51 @@ async fn activate_bluetooth(
     wait_for_connect(state);
 }
 
+/// The Scan button. Discovery already runs detached, so this returns at once:
+/// the render that follows picks up everything found so far, and a new window
+/// is opened only when the previous one has closed. Pressing it repeatedly is
+/// therefore a refresh, not a series of stalls.
 async fn scan(backend: &Backend, state: &mut UiState) {
+    // Powering on here is explicit user intent, unlike the automatic scan at
+    // launch, which leaves a deliberately switched-off adapter alone.
     if let Err(error) = backend.power_on().await {
         state.set_message(format!("Cannot power on the Bluetooth adapter: {error}"));
         return;
     }
-    match backend.scan().await {
-        Ok(()) => state.set_message("Scan complete."),
-        Err(error) => state.set_message(format!("Cannot scan for devices: {error}")),
+    if !bluetooth::is_scanning() {
+        spawn_scan_background();
     }
+    state.set_message("Scanning for devices…");
+}
+
+/// Fire-and-forget `scan-bg` subprocess, dropped so this process can exit.
+fn spawn_scan_background() {
+    if bluetooth::is_scanning() {
+        return;
+    }
+    let Ok(executable) = env::current_exe() else {
+        return;
+    };
+    let _ = Command::new(executable)
+        .arg("scan-bg")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// Detached discovery handler. Leaves a powered-off adapter alone: opening the
+/// menu should not undo a deliberate right-click switch-off.
+pub async fn run_scan_bg() -> AppResult<()> {
+    let backend = Backend::new().await?;
+    if !backend.is_powered().await? {
+        return Ok(());
+    }
+    let outcome = backend.scan().await;
+    // Never leave a lapsed marker behind on a failure; the menu would keep
+    // reporting a scan that is not running.
+    bluetooth::expire_scanning();
+    outcome
 }
 
 async fn forget(

@@ -40,6 +40,11 @@ async fn run() -> AppResult<()> {
                 .ok_or_else(|| io::Error::other("connect-bg key is missing"))?;
             rofi::run_connect_bg(&key).await
         }
+        Some("scan-bg") => {
+            // Detached Bluetooth discovery; spawned when the menu opens and by
+            // the Scan button, so neither ever waits on the discovery window.
+            rofi::run_scan_bg().await
+        }
         Some("status") => {
             waybar::print_status().await;
             Ok(())
