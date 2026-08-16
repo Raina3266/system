@@ -109,10 +109,23 @@ Bluetooth tab spawns the second.
 }
 ```
 
-The text is a single glyph, the default output's volume state. The tooltip
-carries the rest: the default output, the default input, and any connected
-Bluetooth devices. Right-click is the Bluetooth adapter's on/off switch;
-`bluetooth-power on` and `off` are available for bindings of your own.
+The text is a single glyph:
+
+| Bluetooth | Glyph |
+| --- | --- |
+| Off | 󰕿 󰖀 󰕾 by the default output's level, 󰝟 when it is muted |
+| On, nothing connected | 󰂯 |
+| On, device connected | 󰂱 |
+
+Giving the slot to Bluetooth while the adapter is on costs nothing, because the
+separate `pulseaudio` module in the top-left group already shows the volume and
+its own mute glyph. The module also sets a `class` — `bluetooth-connected`,
+`bluetooth-on`, `muted`, `active`, or `unavailable` — so the glyph can be
+recoloured per state from `waybar.css`.
+
+The tooltip carries the rest: the default output, the default input, and any
+connected Bluetooth devices. Right-click is the Bluetooth adapter's on/off
+switch; `bluetooth-power on` and `off` are available for bindings of your own.
 
 ### Environment variables
 
