@@ -293,14 +293,7 @@ fn render_history(
     let new_selection = preferred_selection(&items, selected_id);
 
     let mut output = Vec::new();
-    write_common_headers(
-        &mut output,
-        mode.prompt(),
-        state,
-        true,
-        true,
-        new_selection,
-    );
+    write_common_headers(&mut output, mode.prompt(), state, true, true, new_selection);
 
     if items.is_empty() {
         write!(&mut output, "Nothing here yet")?;
@@ -319,12 +312,7 @@ fn render_history(
             "display",
             &row_preview(item),
         );
-        write_row_option(
-            &mut output,
-            &mut first_option,
-            "info",
-            &item.id.to_string(),
-        );
+        write_row_option(&mut output, &mut first_option, "info", &item.id.to_string());
         write_row_option(&mut output, &mut first_option, "meta", &row_value(item));
         if item.is_empty_memo() {
             // Keep the creation row available even while Rofi is filtering.
@@ -558,16 +546,16 @@ mod tests {
     }
 
     #[test]
-    fn file_mode_contains_urls_and_excludes_them_from_text_mode() {
+    fn text_mode_contains_urls_and_excludes_them_from_file_mode() {
         let url = textual_item(
             5,
-            ItemKind::File,
+            ItemKind::Text,
             "https://example.com/download.tar.zst",
             false,
         );
 
-        assert!(Mode::Files.includes(&url));
-        assert!(!Mode::Text.includes(&url));
+        assert!(Mode::Text.includes(&url));
+        assert!(!Mode::Files.includes(&url));
         assert_eq!(row_value(&url), "https://example.com/download.tar.zst");
     }
 
@@ -628,10 +616,7 @@ mod tests {
             .find(|(name, _)| *name == std::ffi::OsStr::new(PRESERVE_FILTER_SELECTION_ENV))
             .and_then(|(_, value)| value)
             .and_then(std::ffi::OsStr::to_str);
-        assert_eq!(
-            preserve_selection,
-            Some(PRESERVE_FILTER_SELECTION_ENABLED)
-        );
+        assert_eq!(preserve_selection, Some(PRESERVE_FILTER_SELECTION_ENABLED));
     }
 
     #[test]
@@ -682,7 +667,10 @@ mod tests {
 
         assert_eq!(preferred_selection(&items, None), Some(2));
         assert_eq!(preferred_selection(&items, Some(first_pin.id)), Some(0));
-        assert_eq!(preferred_selection(&[&first_pin, &second_pin], None), Some(0));
+        assert_eq!(
+            preferred_selection(&[&first_pin, &second_pin], None),
+            Some(0)
+        );
         assert_eq!(preferred_selection(&[], None), None);
     }
 }

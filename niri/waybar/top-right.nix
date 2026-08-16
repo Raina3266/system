@@ -48,7 +48,7 @@ let
         --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
         --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
-        --set ROFI_NETWORK_ROFI_WIDTH "650"
+        --set ROFI_NETWORK_ROFI_WIDTH "350"
     '';
   };
 

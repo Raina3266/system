@@ -43,6 +43,16 @@ fn abbreviate_home_path_with(value: &str, home: &Path) -> String {
     }
 }
 
+/// A bare `http(s)` reference with no embedded whitespace, after trimming and
+/// unescaping `&amp;`. Copied URLs are routed into the Text clipboard mode
+/// using this rule rather than the file mode.
+pub fn url_value(value: &str) -> Option<String> {
+    let value = value.trim().replace("&amp;", "&");
+    (value.starts_with("http://") || value.starts_with("https://"))
+        .then_some(value)
+        .filter(|value| !value.chars().any(char::is_whitespace))
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {
@@ -89,6 +99,36 @@ mod tests {
             "https://example.com/report.pdf"
         );
     }
+
+    #[test]
+    fn url_value_recognizes_standalone_http_and_https_references() {
+        assert_eq!(
+            url_value("https://example.com/docs/report.pdf?a=1&b=2").as_deref(),
+            Some("https://example.com/docs/report.pdf?a=1&b=2")
+        );
+        assert_eq!(
+            url_value("http://example.com/image.png").as_deref(),
+            Some("http://example.com/image.png")
+        );
+        assert_eq!(
+            url_value("  https://example.com/page  ").as_deref(),
+            Some("https://example.com/page")
+        );
+        assert_eq!(
+            url_value("https://example.com/x?a=1&amp;b=2").as_deref(),
+            Some("https://example.com/x?a=1&b=2")
+        );
+    }
+
+    #[test]
+    fn url_value_rejects_non_urls_and_urls_with_whitespace() {
+        assert!(url_value("").is_none());
+        assert!(url_value("/home/raina/report.pdf").is_none());
+        assert!(url_value("file:///home/raina/report.pdf").is_none());
+        assert!(url_value("See https://example.com for details").is_none());
+        assert!(url_value("https://example.com\npage").is_none());
+        assert!(url_value("ftp://example.com/resource").is_none());
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -110,8 +150,7 @@ impl Default for History {
 
 impl History {
     pub fn to_json(&self) -> Result<String> {
-        let mut json =
-            serde_json::to_string_pretty(self).context("serialize clipboard history")?;
+        let mut json = serde_json::to_string_pretty(self).context("serialize clipboard history")?;
         json.push('\n');
         Ok(json)
     }

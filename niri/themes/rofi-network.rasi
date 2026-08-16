@@ -16,8 +16,8 @@
 }
 
 window {
-    width: 400px;
-    height: 600px;
+    width: 375px;
+    height: 500px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -76,10 +76,9 @@ entry {
 }
 
 listview {
-    lines: 6;
+    lines: 5;
     eh: 1;
-    dynamic: true;
-    fixed-height: true;
+    dynamic: false;
     scrollbar: true;
     spacing: 4px;
 }
@@ -150,17 +149,14 @@ action-bar {
         button-scan,
         button-connect,
         button-forget,
-        button-info,
-        button-confirm
+        button-info
     ];
 }
 
 button-scan,
 button-connect,
 button-forget,
-button-info,
-button-back,
-button-confirm {
+button-info {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
@@ -190,18 +186,6 @@ button-forget {
 button-info {
     content: " 󰋼 ";
     action: "kb-custom-4";
-}
-
-button-back {
-    content: " 󰁍 ";
-    action: "kb-custom-5";
-    enabled: true;
-}
-
-button-confirm {
-    content: "󰄬 Confirm";
-    action: "kb-custom-6";
-    enabled: false;
 }
 
 error-message {

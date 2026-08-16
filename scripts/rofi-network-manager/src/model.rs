@@ -89,11 +89,9 @@ impl WifiEntry {
 
     pub fn row_label(&self) -> String {
         format!(
-            "{}  {:<30} {:>3}%  {}",
+            "{}  {}",
             signal_icon(self.strength()),
-            truncate(&self.network.ssid, 30),
-            self.strength(),
-            self.security_label()
+            truncate(&self.network.ssid, 30)
         )
     }
 
@@ -107,7 +105,9 @@ impl WifiEntry {
         } else {
             "available"
         };
-        format!("{} · {} · {state}", self.ssid(), self.security_label())
+        // Single-line status row matched by the `lines: 1` message widget
+        // in rofi-network.rasi.
+        format!("{} · {} · {}", self.ssid(), self.security_label(), state)
     }
 }
 
@@ -127,7 +127,11 @@ impl EthernetEntry {
     }
 
     pub fn row_label(&self) -> String {
-        let address = self.device.ip4_address.as_deref().unwrap_or("No local IPv4");
+        let address = self
+            .device
+            .ip4_address
+            .as_deref()
+            .unwrap_or("No local IPv4");
         let state = if self.connected() {
             "Connected"
         } else if self.connecting() {
@@ -143,8 +147,16 @@ impl EthernetEntry {
     }
 
     pub fn message_label(&self) -> String {
-        let address = self.device.ip4_address.as_deref().unwrap_or("no local IPv4");
-        format!("{} · {address}", self.device.interface)
+        let address = self.device.ip4_address.as_deref().unwrap_or("no IPv4");
+        let state = if self.connected() {
+            "connected"
+        } else if self.connecting() {
+            "connecting"
+        } else {
+            "disconnected"
+        };
+        // Single-line, see WifiEntry::message_label.
+        format!("{} · {} · {}", self.device.interface, address, state)
     }
 }
 
@@ -212,9 +224,12 @@ pub fn signal_icon(strength: u8) -> &'static str {
 
 pub fn stable_id(value: &str) -> u64 {
     // FNV-1a is stable across processes, unlike a randomized map hasher.
-    value.as_bytes().iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
+    value
+        .as_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
 }
 
 pub fn hex_encode(value: &str) -> String {
@@ -273,6 +288,9 @@ mod tests {
 
     #[test]
     fn keys_can_contain_any_utf8_ssid_without_shell_metacharacters() {
-        assert_eq!(hex_encode("Home; Wi-Fi 🛜"), "486f6d653b2057692d466920f09f9b9c");
+        assert_eq!(
+            hex_encode("Home; Wi-Fi 🛜"),
+            "486f6d653b2057692d466920f09f9b9c"
+        );
     }
 }

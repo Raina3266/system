@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
-use crate::model::{ClipboardItem, ItemKind};
+use crate::model::{ClipboardItem, ItemKind, url_value};
 use crate::store::ClipboardStore;
 
 const SCREENSHOT_DIRECTORY_ENV: &str = "ROFI_CLIPBOARD_SCREENSHOT_DIR";
@@ -57,10 +57,7 @@ fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String,
             .map(Path::new)
             .filter(|path| path.is_absolute())
     {
-        return Ok((
-            TEXT_URI_LIST_MIME.to_owned(),
-            local_file_copy_payload(path),
-        ));
+        return Ok((TEXT_URI_LIST_MIME.to_owned(), local_file_copy_payload(path)));
     }
 
     Ok((item.mime.clone(), store.item_bytes(item)?))
@@ -157,6 +154,15 @@ fn store_file_references(types: &str, watched_bytes: &[u8]) -> Result<bool> {
     let store = ClipboardStore::discover()?;
     let mut stored = false;
     for line in uri_list.lines() {
+        if let Some(url) = url_value(line) {
+            // Remote URLs belong in the text history so they appear under Text
+            // mode; local file references below stay in the file mode.
+            let mime = preferred_text_mime(types.lines())
+                .unwrap_or("text/plain;charset=utf-8")
+                .to_owned();
+            stored |= store.add_text(url, mime)?.is_some();
+            continue;
+        }
         let Some(name) = source_from_value(line) else {
             continue;
         };
@@ -365,12 +371,10 @@ fn decode_utf16(bytes: &[u8], from_bytes: fn([u8; 2]) -> u16) -> String {
 }
 
 fn source_from_value(value: &str) -> Option<String> {
-    let value = value.trim().replace("&amp;", "&");
-    if (value.starts_with("https://") || value.starts_with("http://"))
-        && !value.chars().any(char::is_whitespace)
-    {
-        return Some(value);
+    if let Some(url) = url_value(value) {
+        return Some(url);
     }
+    let value = value.trim().replace("&amp;", "&");
     local_file_path(&value).map(|path| path.to_string_lossy().into_owned())
 }
 
@@ -523,8 +527,12 @@ pub fn store_stdin(mime: &str) -> Result<()> {
 }
 
 fn store_text_or_file(store: &ClipboardStore, text: String, mime: String) -> Result<()> {
-    if let Some(name) = standalone_file_source(&text) {
-        store.add_file(text, mime, Some(name))?;
+    if let Some(source) = standalone_file_source(&text) {
+        if let Some(url) = url_value(&source) {
+            store.add_text(url, mime)?;
+        } else {
+            store.add_file(text, mime, Some(source))?;
+        }
     } else {
         store.add_text(text, mime)?;
     }
@@ -654,6 +662,73 @@ mod tests {
     fn ordinary_text_that_mentions_a_url_stays_text() {
         assert!(standalone_file_source("See https://example.com for details").is_none());
         assert!(standalone_file_source("https://example.com\npage title").is_none());
+    }
+
+    #[test]
+    fn standalone_url_text_is_stored_in_text_mode() -> Result<()> {
+        let root = test_directory();
+        let store = ClipboardStore::at(root.0.join("data"));
+
+        store_text_or_file(
+            &store,
+            "https://example.com/report.pdf".to_owned(),
+            "text/plain;charset=utf-8".to_owned(),
+        )?;
+
+        let history = store.load()?;
+        assert_eq!(history.items.len(), 1);
+        let item = &history.items[0];
+        assert_eq!(item.kind, ItemKind::Text);
+        assert_eq!(item.text.as_deref(), Some("https://example.com/report.pdf"));
+        assert!(item.name.is_none());
+        assert_eq!(item.mime, "text/plain;charset=utf-8");
+        Ok(())
+    }
+
+    #[test]
+    fn standalone_url_text_trims_surrounding_whitespace_into_text_mode() -> Result<()> {
+        let root = test_directory();
+        let store = ClipboardStore::at(root.0.join("data"));
+
+        store_text_or_file(
+            &store,
+            "  https://example.com/page  ".to_owned(),
+            "text/plain;charset=utf-8".to_owned(),
+        )?;
+
+        let item = &store.load()?.items[0];
+        assert_eq!(item.kind, ItemKind::Text);
+        assert_eq!(item.text.as_deref(), Some("https://example.com/page"));
+        Ok(())
+    }
+
+    #[test]
+    fn standalone_local_path_text_stays_in_file_mode() -> Result<()> {
+        let root = test_directory();
+        let store = ClipboardStore::at(root.0.join("data"));
+        let path = root.0.join("share.png").to_string_lossy().into_owned();
+
+        store_text_or_file(&store, path.clone(), "text/plain;charset=utf-8".to_owned())?;
+
+        let item = &store.load()?.items[0];
+        assert_eq!(item.kind, ItemKind::File);
+        assert_eq!(item.name.as_deref(), Some(path.as_str()));
+        Ok(())
+    }
+
+    #[test]
+    fn text_that_only_mentions_a_url_is_stored_verbatim_as_text() -> Result<()> {
+        let root = test_directory();
+        let store = ClipboardStore::at(root.0.join("data"));
+        let text = "See https://example.com for details".to_owned();
+
+        store_text_or_file(&store, text.clone(), "text/plain;charset=utf-8".to_owned())?;
+
+        let item = &store.load()?.items[0];
+        assert_eq!(item.kind, ItemKind::Text);
+        assert_eq!(item.text.as_deref(), Some(text.as_str()));
+        assert!(item.name.is_none());
+        Ok(())
     }
 
     #[test]

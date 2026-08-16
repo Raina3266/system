@@ -180,13 +180,6 @@ pub async fn wifi_info(manager: &NetworkManager, entry: &WifiEntry) -> AppResult
         .as_ref()
         .and_then(|profile| saved_wifi_password(&profile.uuid).ok().flatten());
     let dns = device_dns(entry.interface()).unwrap_or_default();
-    let state = if entry.connected {
-        "Connected"
-    } else if entry.connecting {
-        "Connecting"
-    } else {
-        "Disconnected"
-    };
     let frequency = info
         .freq
         .map(|frequency| format!("{frequency} MHz ({})", frequency_band(frequency)))
@@ -226,29 +219,27 @@ pub async fn wifi_info(manager: &NetworkManager, entry: &WifiEntry) -> AppResult
     };
 
     let details = format!(
-        "Network\n\n\
-         SSID:       {}\n\
-         Interface:  {}\n\
-         Status:     {state}\n\
+        "Network (SSID: {})\n\n\
+         Signal:     {}% ({})\n\
          Profile:    {profile}\n\
          Security:   {}\n\
+         Interface:  {}\n\
          Password:   {password_line}\n\n\
+         Addresses\n\n\
+         IPv4:       {ipv4}\n\
+         IPv6:       {ipv6}\n\
+         DNS:        {dns}\n\n\
          Radio\n\n\
-         Signal:     {}% ({})\n\
          BSSID:      {}\n\
          Frequency:  {frequency}\n\
          Channel:    {channel}\n\
          Mode:       {}\n\
-         Link rate:  {rate}\n\n\
-         Addresses\n\n\
-         IPv4:       {ipv4}\n\
-         IPv6:       {ipv6}\n\
-         DNS:        {dns}",
+         Link rate:  {rate}",
         info.ssid,
-        entry.interface(),
-        entry.security_label(),
         info.strength,
         info.bars,
+        entry.security_label(),
+        entry.interface(),
         info.bssid,
         info.mode,
     );
@@ -270,13 +261,6 @@ pub async fn wifi_info(manager: &NetworkManager, entry: &WifiEntry) -> AppResult
 }
 
 pub fn ethernet_info(entry: &EthernetEntry) -> InfoContent {
-    let state = if entry.connected() {
-        "Connected"
-    } else if entry.connecting() {
-        "Connecting"
-    } else {
-        "Disconnected"
-    };
     let ipv4 = entry
         .device
         .ip4_address
@@ -305,7 +289,6 @@ pub fn ethernet_info(entry: &EthernetEntry) -> InfoContent {
     let details = format!(
         "Ethernet\n\n\
          Interface:  {}\n\
-         Status:     {state}\n\
          Profile:    {profile}\n\
          MAC:        {}\n\
          Permanent:  {}\n\

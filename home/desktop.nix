@@ -6,24 +6,16 @@
 {
   home.packages = with pkgs; [
     kdePackages.dolphin
-    kdePackages.baloo-widgets
-    kdePackages.taglib
     kdePackages.kio-fuse
     kdePackages.kfilemetadata
+    kdePackages.kompare
     kdePackages.plasma-integration
   ];
 
   home.sessionVariables = {
     QT_QPA_PLATFORMTHEME = "kde6";
+    QT_SCALE_FACTOR = "1.25";
   };
-
-  # Live-editable: symlink directly to the repo file (out of the Nix store) so
-  # editing niri/themes/kde.colors takes effect immediately without a system
-  # rebuild. Restart Qt apps (or re-login) to pick up the new palette —
-  # ~/.config/kdeglobals already points ColorScheme at Bitpunk.
-  home.file.".local/share/color-schemes/Bitpunk.colors".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/kde.colors";
 
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then
@@ -31,9 +23,6 @@
     [General]
     ColorScheme=Bitpunk
     Name=Bitpunk
-    font=JetBrainsMono Nerd Font,13
-    menuFont=JetBrainsMono Nerd Font,11
-    toolBarFont=JetBrainsMono Nerd Font,11
     EOF
       fi
   '';

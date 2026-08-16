@@ -46,6 +46,18 @@ async fn run() -> AppResult<()> {
             let manager = NetworkManager::new().await?;
             rofi::update_preview_selection(&manager, &key, serial).await
         }
+        Some("connect-bg") => {
+            // Detached background connect; spawned by `submit_password` so the
+            // rofi script can render "Connecting…" immediately. Writes the
+            // outcome to $XDG_RUNTIME_DIR/rofi-network-connect-result.
+            let hex_key = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("connect-bg key is missing"))?;
+            let hex_password = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("connect-bg password is missing"))?;
+            rofi::run_connect_bg(&hex_key, &hex_password).await
+        }
         Some("status") => {
             match NetworkManager::new().await {
                 Ok(manager) => network::print_waybar_status(&manager).await,

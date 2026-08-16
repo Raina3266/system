@@ -122,8 +122,7 @@ in
 
   # fcitx5 theme: cyberpunk color palette matching waybar/rofi
   xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/fcitx5.conf";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/fcitx5.conf";
 
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False
@@ -153,17 +152,15 @@ in
   #   gtk4.css     - GTK4 apps (portal file chooser, image viewer)
   # gtk-base.css symlinked to both dirs for @import resolution.
   xdg.configFile."gtk-3.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/gtk3.css";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk3.css";
   xdg.configFile."gtk-3.0/gtk-base.css".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/gtk-base.css";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
   xdg.configFile."gtk-4.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/gtk4.css";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk4.css";
   xdg.configFile."gtk-4.0/gtk-base.css".source =
-    config.lib.file.mkOutOfStoreSymlink
-      "/home/raina/System/niri/themes/gtk-base.css";
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
+  home.file.".local/share/color-schemes/Bitpunk.colors".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/kde.colors";
 
   home.pointerCursor = {
     enable = true;

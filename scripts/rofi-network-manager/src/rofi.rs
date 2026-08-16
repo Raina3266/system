@@ -1,7 +1,8 @@
 use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use nmrs::NetworkManager;
 
@@ -12,11 +13,17 @@ const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
 const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
 const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
+const CONNECT_RESULT_FILENAME: &str = "rofi-network-connect-result";
 
 #[derive(Clone, Debug, Default)]
 struct UiState {
     initialized: bool,
     message: Option<String>,
+    /// The Wi-Fi key whose connection is being performed by a detached
+    /// `connect-bg` subprocess. While set, `message` holds "Connecting to
+    /// {ssid}…". The subprocess writes the outcome to a result file that the
+    /// next script invocation consumes (see `consume_connect_result`).
+    pending_connect: Option<String>,
     /// The Wi-Fi key we are waiting for the user to type a password for.
     /// When set, the filter input becomes a password entry box: the typed
     /// text is submitted with Enter (Rofi custom-input, RETV=2) and consumed
@@ -35,6 +42,8 @@ impl UiState {
                 state.initialized = true;
             } else if let Some(message) = part.strip_prefix("msg=") {
                 state.message = hex_decode(message);
+            } else if let Some(pending) = part.strip_prefix("pending=") {
+                state.pending_connect = hex_decode(pending);
             } else if let Some(awaiting) = part.strip_prefix("await=") {
                 state.password_for = hex_decode(awaiting);
             }
@@ -43,10 +52,13 @@ impl UiState {
     }
 
     fn encode(&self) -> String {
-        let mut parts = Vec::with_capacity(3);
+        let mut parts = Vec::with_capacity(4);
         parts.push(format!("init={}", u8::from(self.initialized)));
         if let Some(message) = self.message.as_deref() {
             parts.push(format!("msg={}", hex_encode(message)));
+        }
+        if let Some(pending) = self.pending_connect.as_deref() {
+            parts.push(format!("pending={}", hex_encode(pending)));
         }
         if let Some(awaiting) = self.password_for.as_deref() {
             parts.push(format!("await={}", hex_encode(awaiting)));
@@ -80,9 +92,9 @@ pub fn launch() -> AppResult<()> {
             "-modes",
             &modes,
             "-display-wifi",
-            "󰤨 Wi-Fi",
+            "󰤨 ",
             "-display-ethernet",
-            "󰈀 Ethernet",
+            "󰈀 ",
             "-on-selection-changed",
             &selection_command,
             "-theme",
@@ -106,6 +118,10 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
         .unwrap_or(0);
     let selected_key = env::var("ROFI_INFO").ok();
     let mut state = UiState::parse(env::var("ROFI_DATA").ok());
+    // Pull any finished connect-bg outcome into the message before doing
+    // anything else, so the user sees "Connected." / the error as soon as
+    // they next touch the UI (move selection, type, etc.).
+    consume_connect_result(&mut state);
     let before = network::snapshot(manager).await?;
 
     match retv {
@@ -115,7 +131,7 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
         // pressed Enter without the text matching any row.
         2 => {
             if state.password_for.is_some() {
-                submit_password(manager, &before, &mut state).await
+                submit_password(&before, &mut state).await
             }
         }
         1 | 11 => {
@@ -126,7 +142,7 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
             let awaiting = state.password_for.clone();
             if let Some(awaited) = awaiting.as_deref() {
                 if Some(awaited) == selected_key.as_deref() {
-                    submit_password(manager, &before, &mut state).await
+                    submit_password(&before, &mut state).await
                 } else {
                     state.password_for = None;
                     connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state)
@@ -220,7 +236,7 @@ async fn connect_selected(
     }
 }
 
-async fn submit_password(manager: &NetworkManager, snapshot: &Snapshot, state: &mut UiState) {
+async fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
     let Some(key) = state.password_for.clone() else {
         return;
     };
@@ -238,12 +254,110 @@ async fn submit_password(manager: &NetworkManager, snapshot: &Snapshot, state: &
         return;
     }
     state.password_for = None;
-    match network::connect_wifi(manager, entry, Some(password)).await {
-        Ok(()) => state.set_message(format!("Connected to {}.", entry.ssid())),
-        Err(error) => state.set_message(network::connection_error_message(
-            entry.ssid(),
-            error.as_ref(),
-        )),
+    // Detached background connect so the network activates in parallel with
+    // our polling loop below (see `spawn_connect_background` / `run_connect_bg`).
+    spawn_connect_background(&entry.key, &password);
+    state.pending_connect = Some(entry.key.clone());
+    state.set_message(format!("Connecting to {}…", entry.ssid()));
+    // Rofi script mode has no auto-refresh directive, so we can only show one
+    // frame per script invocation. Polling here for a few seconds lets fast
+    // connects surface the result immediately (wi-fi association + DHCP
+    // typically resolves in 1-4 seconds). Slower connects fall through with
+    // `pending_connect` still set; the next user-triggered refresh picks the
+    // result up via `consume_connect_result`.
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        consume_connect_result(state);
+        if state.pending_connect.is_none() {
+            break;
+        }
+    }
+}
+
+/// Fire-and-forget `connect-bg` subprocess. Detached (we drop the handle) so
+/// this script can exit and let rofi render the "Connecting…" frame right
+/// away while the connection proceeds in the background.
+fn spawn_connect_background(key: &str, password: &str) {
+    let Some(executable) = env::current_exe().ok() else {
+        return;
+    };
+    let _ = Command::new(executable)
+        .args(["connect-bg", &hex_encode(key), &hex_encode(password)])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// Detached connect handler: performs the actual `connect_wifi` call and
+/// writes the outcome (ok/err + message) to the result file so the next
+/// rofi script invocation can surface it in the message widget.
+pub async fn run_connect_bg(hex_key: &str, hex_password: &str) -> AppResult<()> {
+    let key = hex_decode(hex_key).ok_or_else(|| io::Error::other("invalid hex key"))?;
+    let password =
+        hex_decode(hex_password).ok_or_else(|| io::Error::other("invalid hex password"))?;
+    let manager = NetworkManager::new().await?;
+    let snapshot = network::snapshot(&manager).await?;
+    let entry = find_wifi(&snapshot, &key)
+        .ok_or_else(|| io::Error::other("selected network is no longer available"))?;
+    let outcome = network::connect_wifi(&manager, entry, Some(password)).await;
+    let message = match &outcome {
+        Ok(()) => format!("Connected to {}.", entry.ssid()),
+        Err(error) => network::connection_error_message(entry.ssid(), error.as_ref()),
+    };
+    write_connect_result(&key, outcome.is_ok(), &message)?;
+    Ok(())
+}
+
+fn result_file_path() -> Option<PathBuf> {
+    let runtime = env::var_os("XDG_RUNTIME_DIR")?;
+    Some(PathBuf::from(runtime).join(CONNECT_RESULT_FILENAME))
+}
+
+/// Atomically write the connect outcome so a concurrent reader never sees a
+/// partial file: temp file + rename.
+fn write_connect_result(key: &str, ok: bool, message: &str) -> io::Result<()> {
+    let path = result_file_path().ok_or_else(|| io::Error::other("XDG_RUNTIME_DIR is not set"))?;
+    let content = format!(
+        "{}\n{}\n{}\n",
+        hex_encode(key),
+        if ok { "ok" } else { "err" },
+        hex_encode(message),
+    );
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, &content)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// If the `connect-bg` subprocess has finished, pull its outcome into the
+/// message widget and clear `pending_connect`. Stale results (different key,
+/// or no pending connection) are discarded so they never clobber the UI.
+fn consume_connect_result(state: &mut UiState) {
+    let Some(path) = result_file_path() else {
+        return;
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return;
+    };
+    // Always remove once read; the outcome is single-use.
+    let _ = fs::remove_file(&path);
+    let mut lines = contents.lines();
+    let (Some(hex_key), Some(status), Some(hex_message)) =
+        (lines.next(), lines.next(), lines.next())
+    else {
+        return;
+    };
+    let Some(key) = hex_decode(hex_key) else {
+        return;
+    };
+    if state.pending_connect.as_deref() == Some(key.as_str()) {
+        state.pending_connect = None;
+        if status == "ok" || status == "err" {
+            if let Some(message) = hex_decode(hex_message) {
+                state.set_message(message);
+            }
+        }
     }
 }
 
@@ -558,6 +672,7 @@ mod tests {
         let mut state = UiState {
             initialized: true,
             message: None,
+            pending_connect: None,
             password_for: None,
         };
         state.set_message("Incorrect password for Café 🛜");
@@ -572,12 +687,34 @@ mod tests {
         let state = UiState {
             initialized: true,
             message: Some("Please type in password for Café.".to_string()),
+            pending_connect: None,
             password_for: Some("wifi:776c616e30:486f6d65".to_string()),
         };
         let decoded = UiState::parse(Some(state.encode()));
         assert!(decoded.initialized);
         assert_eq!(decoded.message, state.message);
         assert_eq!(decoded.password_for, state.password_for);
+    }
+
+    #[test]
+    fn ui_state_round_trips_pending_connect() {
+        let mut state = UiState {
+            initialized: true,
+            message: Some("Connecting to Café…\nWPA2 · connecting".to_string()),
+            pending_connect: Some("wifi:776c616e30:486f6d65".to_string()),
+            password_for: None,
+        };
+        let encoded = state.encode();
+        // The message survives across invocations because it is stored in
+        // `data` via `msg=`, so the "Connecting…" status persists until the
+        // detached connect-bg subprocess writes its result.
+        let decoded = UiState::parse(Some(encoded));
+        assert_eq!(decoded.pending_connect, state.pending_connect);
+        assert_eq!(decoded.message, state.message);
+        // Once the result arrives the foreground script clears `pending_connect`;
+        // re-encoding then drops the `pending=` part entirely.
+        state.pending_connect = None;
+        assert!(!state.encode().contains("pending="));
     }
 
     #[test]

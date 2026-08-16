@@ -126,7 +126,7 @@ binds {
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
     Mod+Y hotkey-overlay-title="Open Yazi" { spawn "ghostty" "--class=yazi" "-e" "yazi"; }
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
-    Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn "niri msg pick-color | wl-copy"; }
+    Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }

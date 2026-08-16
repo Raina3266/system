@@ -4,12 +4,12 @@
  
 /* preview-panel-settings
 width: 400px;
-height: 616px;
+height: 610px;
 companion_width: 400px;
 side: left;
 gap: 5px;
 x: 770px;
-y: -850px;
+y: -450px;
 */
 
 window.preview-panel {
@@ -35,10 +35,10 @@ picture.preview-image {
 }
 
 picture.network-qr {
+    height: 200px;
     background: #ffffff;
     border-radius: 9px;
-    margin: 4px 64px 12px 64px;
-    padding: 8px;
+    margin: 0px 66px;
 }
 
 scrollbar slider {
