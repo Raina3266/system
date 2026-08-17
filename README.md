@@ -60,21 +60,23 @@ panel stays empty until an action has something to report.
 
 | Action | Bluetooth | Output / Input |
 | --- | --- | --- |
-| `Enter` | Connect, or disconnect if connected | Make the row the default device |
+| `Enter`, double-click | Connect, or disconnect if connected | Make the row the default device |
 | `Alt+1` | Refresh the list, and scan if the window has closed | — |
-| `Alt+2` | Connect / disconnect | Make the row the default device |
-| `Alt+3` | Forget the paired device | — |
-| `Alt+4`, `Alt+Up` | — | Volume +5% |
-| `Alt+5`, `Alt+Down` | — | Volume −5% |
-| `Alt+6` | Connect / disconnect | Confirm the highlighted device |
+| `Alt+2` | Forget the paired device | — |
+| `Alt+3`, `Alt+Up` | — | Volume +5% |
+| `Alt+4`, `Alt+Down` | — | Volume −5% |
 
-The action bar carries all six buttons at once and every one of them is live.
-Rofi builds its widget tree once and does not re-run a script mode when you
-return to a tab it has already drawn, so the bar can neither swap its buttons
-per tab nor keep per-tab colouring in sync with the tab you are on — a dimmed
-button would go stale the moment you switched back. The selected tab in the
-mode switcher is what says which three buttons are meaningful; the other three
-fall back to the nearest sensible action rather than doing nothing.
+Connecting, disconnecting and confirming a device have no button of their own:
+double-clicking a row does all three, so the action bar is left to the things a
+row cannot say for itself. Single-click still just highlights a row.
+
+The bar carries all four buttons at once and every one of them is live. Rofi
+builds its widget tree once and does not re-run a script mode when you return
+to a tab it has already drawn, so the bar can neither swap its buttons per tab
+nor keep per-tab colouring in sync with the tab you are on — a dimmed button
+would go stale the moment you switched back. The selected tab in the mode
+switcher is what says which two buttons are meaningful; the other two fall back
+to the nearest sensible action rather than doing nothing.
 
 ### Pairing
 

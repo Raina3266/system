@@ -23,25 +23,27 @@ const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Characters the single-line message panel can show at the window's width.
 const MESSAGE_WIDTH: usize = 50;
 
-/// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The six action-bar buttons
+/// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The four action-bar buttons
 /// are wired to these in rofi-audio.rasi.
+///
+/// Connect/disconnect and confirm have no button and no hotkey of their own:
+/// both are `RETV_ACTIVATE`, which Rofi raises on Enter and on a double-click
+/// (its default `me-accept-entry` binding is `MouseDPrimary`).
 const RETV_ACTIVATE: u8 = 1;
 const RETV_CUSTOM_INPUT: u8 = 2;
 const RETV_SCAN: u8 = 10;
-const RETV_CONNECT: u8 = 11;
-const RETV_FORGET: u8 = 12;
-const RETV_VOLUME_UP: u8 = 13;
-const RETV_VOLUME_DOWN: u8 = 14;
-const RETV_CONFIRM: u8 = 15;
+const RETV_FORGET: u8 = 11;
+const RETV_VOLUME_UP: u8 = 12;
+const RETV_VOLUME_DOWN: u8 = 13;
 /// Refresh tick: Rofi's idle `timeout` action re-runs the script so every tab
 /// picks up devices that appeared after it was first shown (a Bluetooth
 /// headset's PulseAudio sink lands a second or two after BlueZ finishes
 /// connecting, discovery keeps turning up devices after the Bluetooth tab has
 /// rendered, and Rofi never re-runs a script mode it has already shown), and so
 /// a Bluetooth connect that outlasts `wait_for_connect`'s 6-second poll still
-/// surfaces its result. `kb-custom-7` is RETV 16.
-const RETV_REFRESH: u8 = 16;
-const REFRESH_ACTION: &str = "kb-custom-7";
+/// surfaces its result. `kb-custom-5` is RETV 14.
+const RETV_REFRESH: u8 = 14;
+const REFRESH_ACTION: &str = "kb-custom-5";
 /// Idle seconds between refresh ticks. Must never be 0 on any tab — see
 /// `write_refresh_theme`.
 const REFRESH_DELAY: u8 = 2;
@@ -145,12 +147,12 @@ pub fn launch() -> AppResult<()> {
             "󰕾 Output",
             "-display-input",
             "󰍬 Input",
-            // Alt+1..Alt+6 are Rofi's defaults for the action-bar buttons;
+            // Alt+1..Alt+4 are Rofi's defaults for the action-bar buttons;
             // volume also answers to Alt+Up/Alt+Down, which nothing else uses.
+            "-kb-custom-3",
+            "Alt+3,Alt+Up",
             "-kb-custom-4",
-            "Alt+4,Alt+Up",
-            "-kb-custom-5",
-            "Alt+5,Alt+Down",
+            "Alt+4,Alt+Down",
             "-theme",
         ])
         .arg(theme_path()?)
@@ -206,10 +208,7 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
     // Only the actions that operate on the highlighted row need to know the
     // state before they run. Listing devices costs a D-Bus round trip per
     // device, so scan and the plain redraws skip straight to the final list.
-    let acts_on_row = matches!(
-        retv,
-        RETV_ACTIVATE | RETV_CONNECT | RETV_CONFIRM | RETV_FORGET
-    );
+    let acts_on_row = matches!(retv, RETV_ACTIVATE | RETV_FORGET);
     let before = if acts_on_row {
         match backend.snapshot().await {
             Ok(entries) => Devices::Bluetooth(entries),
@@ -224,7 +223,7 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
 
     match retv {
         RETV_CUSTOM_INPUT if state.code_for.is_some() => submit_code(state),
-        RETV_ACTIVATE | RETV_CONNECT | RETV_CONFIRM => {
+        RETV_ACTIVATE => {
             // Enter on the row we are waiting on means "submit the code I just
             // typed"; anything else drops the prompt and acts on the new row.
             if state.code_for.is_some() && state.code_for.as_deref() == selected_key {
@@ -572,7 +571,7 @@ fn run_audio(
 
     let mut chosen_default = None;
     match retv {
-        RETV_ACTIVATE | RETV_CONFIRM | RETV_CONNECT => {
+        RETV_ACTIVATE => {
             chosen_default = set_default(&before, selected_key, state);
         }
         RETV_VOLUME_UP => nudge_volume(&before, selected_key, state, audio::STEP),
@@ -592,7 +591,7 @@ fn run_audio(
     Devices::Audio(after)
 }
 
-/// Moves the "default" mark onto the device the user just confirmed.
+/// Moves the "default" mark onto the device the user just activated.
 ///
 /// PulseAudio acknowledges `set_default_device` before the change is visible
 /// to a follow-up query: pipewire-pulse routes it through PipeWire's metadata
@@ -998,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn confirming_a_device_marks_it_default_even_if_the_server_lags() {
+    fn activating_a_device_marks_it_default_even_if_the_server_lags() {
         let entry = |name: &str, default| AudioEntry {
             key: format!("sink:{}", hex_encode(name)),
             kind: AudioKind::Output,
