@@ -521,23 +521,22 @@ fn write_headers(
     }
     write_header(output, "prompt", mode.prompt());
     write_header(output, "message", message);
-    // While awaiting a password the filter box is the password entry; allow
-    // custom input so Enter submits the typed text (Rofi custom-input, RETV=2).
-    write_header(
-        output,
-        "no-custom",
-        if state.password_for.is_some() {
-            "false"
-        } else {
-            "true"
-        },
-    );
+    // Never "true". Rofi only runs a script mode for a hot key when a row is
+    // selected, and falls back to this flag when the filter matches nothing --
+    // "true" makes it answer RELOAD_DIALOG and skip us entirely. That is a dead
+    // window: the submitted password stays in the filter box for one frame (see
+    // `keep-filter`), matches no network, and then neither the refresh tick nor
+    // any of the four buttons can reach us again. It also lets Enter submit the
+    // typed password as custom input while the password box is open (RETV=2).
+    write_header(output, "no-custom", "false");
     write_header(output, "use-hot-keys", "true");
     write_header(output, "keep-selection", "true");
     // Rofi reads this one action late, so it covers a refresh tick landing while
-    // the user is still typing: without it the tick would wipe the half-typed
-    // password. Off otherwise, so the submitted password does not stay sitting
-    // in the filter box.
+    // the user is still typing -- editing keys re-arm that tick, and without
+    // this it would wipe the half-typed password. The cost is that the submitted
+    // password survives into the "Connecting…" frame and filters the list down
+    // to nothing until the first tick clears it, which is what `no-custom` above
+    // has to stay false for.
     write_header(
         output,
         "keep-filter",
@@ -764,6 +763,21 @@ mod tests {
         // re-encoding then drops the `pending=` part entirely.
         state.pending_connect = None;
         assert!(!state.encode().contains("pending="));
+    }
+
+    #[test]
+    fn hot_keys_survive_a_filter_that_matches_no_row() {
+        // The password is still in the filter box on this frame, so Rofi has no
+        // selected row to hand back; "no-custom: true" would make it drop every
+        // hot key, refresh tick included, and strand the window on "Connecting…".
+        let mut state = UiState {
+            pending_connect: Some("wifi:776c616e30:486f6d65".to_string()),
+            ..UiState::default()
+        };
+        let mut headers = Vec::new();
+        write_headers(&mut headers, Mode::Wifi, &mut state, "Connecting…", None);
+        let headers = String::from_utf8_lossy(&headers).into_owned();
+        assert!(headers.contains("no-custom\u{1f}false"), "{headers}");
     }
 
     #[test]
