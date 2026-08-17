@@ -11,14 +11,19 @@
     kdePackages.kfilemetadata
     kdePackages.kompare
     kdePackages.plasma-integration
+    # Colour scheme is managed from the GUI: systemsettings kcm_colors.
+    # The kcm_colors module itself ships in plasma-workspace, which has to be
+    # in the profile for the plugin path in niri/default.nix to find it.
+    kdePackages.systemsettings
+    kdePackages.plasma-workspace
   ];
 
+  # Seeds fonts only. The colour scheme is chosen in System Settings, which
+  # writes the [Colors:*] groups into this same file.
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then
         $DRY_RUN_CMD cat > "$HOME/.config/kdeglobals" << 'EOF'
     [General]
-    ColorScheme=Bitpunk
-    Name=Bitpunk
     font=Noto Sans,12
     menuFont=Noto Sans,11
     toolBarFont=Noto Sans,11

@@ -157,8 +157,8 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk4.css";
   xdg.configFile."gtk-4.0/gtk-base.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
-  home.file.".local/share/color-schemes/Bitpunk.colors".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/kde.colors";
+  # Qt/KDE colours are not themed from this repo; they live in kdeglobals and
+  # are managed with System Settings -> Colours.
 
   home.pointerCursor = {
     enable = true;
