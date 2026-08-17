@@ -161,6 +161,7 @@ element-text selected.urgent {
 
 message {
     padding: 8px 10px;
+    line: 1;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);
