@@ -8,7 +8,8 @@ use nmrs::{ConnectionError, DeviceState, NetworkManager, SettingsSummary, WifiSe
 
 use crate::AppResult;
 use crate::model::{
-    EthernetEntry, InfoContent, SavedWifi, SecurityKind, Snapshot, WifiEntry, hex_encode, stable_id,
+    EthernetEntry, InfoContent, SavedWifi, SecurityKind, Snapshot, WifiEntry, hex_encode,
+    signal_bars, stable_id,
 };
 
 pub async fn snapshot(manager: &NetworkManager) -> AppResult<Snapshot> {
@@ -65,7 +66,7 @@ pub async fn snapshot(manager: &NetworkManager) -> AppResult<Snapshot> {
     wifi.sort_by(|left, right| {
         wifi_rank(left)
             .cmp(&wifi_rank(right))
-            .then_with(|| right.strength().cmp(&left.strength()))
+            .then_with(|| signal_bars(right.strength()).cmp(&signal_bars(left.strength())))
             .then_with(|| left.ssid().to_lowercase().cmp(&right.ssid().to_lowercase()))
     });
 

@@ -229,13 +229,28 @@ pub fn security_label(features: &SecurityFeatures) -> &'static str {
     }
 }
 
-pub fn signal_icon(strength: u8) -> &'static str {
+/// Bars drawn for `strength`, 0 (none) through 4 (full).
+///
+/// The list sorts on this rather than the raw percentage: the view redraws on a
+/// timer, and a percentage drifting a point either way would keep reshuffling
+/// rows for a difference nobody can see.
+pub fn signal_bars(strength: u8) -> u8 {
     match strength {
-        76..=u8::MAX => "󰤨",
-        51..=75 => "󰤥",
-        26..=50 => "󰤢",
-        1..=25 => "󰤟",
-        0 => "󰤯",
+        76..=u8::MAX => 4,
+        51..=75 => 3,
+        26..=50 => 2,
+        1..=25 => 1,
+        0 => 0,
+    }
+}
+
+pub fn signal_icon(strength: u8) -> &'static str {
+    match signal_bars(strength) {
+        4 => "󰤨",
+        3 => "󰤥",
+        2 => "󰤢",
+        1 => "󰤟",
+        _ => "󰤯",
     }
 }
 
@@ -318,6 +333,16 @@ mod tests {
         let clamped = message_line("Network information is open in the preview panel.");
         assert_eq!(clamped.chars().count(), MESSAGE_COLUMNS);
         assert!(clamped.ends_with('…'));
+    }
+
+    #[test]
+    fn signal_ordering_ignores_drift_inside_one_bar() {
+        // Two readings that draw the same icon have to compare equal, or the
+        // timed refresh would keep swapping their rows.
+        assert_eq!(signal_bars(77), signal_bars(94));
+        assert_eq!(signal_icon(77), signal_icon(94));
+        assert!(signal_bars(51) > signal_bars(50));
+        assert_eq!(signal_bars(0), 0);
     }
 
     #[test]
