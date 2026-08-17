@@ -135,10 +135,15 @@ status-panel {
     children: [ message ];
 }
 
+/* `message` is a container holding a textbox that Rofi hardcodes as
+   TB_AUTOHEIGHT | TB_WRAP, so its height is however many lines Pango wraps the
+   text into. Neither `lines` (listview-only) nor `wrap` (no such property)
+   applies here, and no other property caps it, so the single line is enforced
+   by the script instead -- see MESSAGE_COLUMNS in
+   scripts/rofi-network-manager/src/model.rs, which assumes this window width
+   and font. */
 message {
     background-color: transparent;
-    lines: 1;
-    wrap: false;
 }
 
 action-bar {

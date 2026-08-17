@@ -5,6 +5,15 @@ use nmrs::{DeviceState, Network, SecurityFeatures, WiredDevice};
 
 use crate::{AppError, AppResult};
 
+/// Characters that fit on one line of the Rofi message widget.
+///
+/// Rofi sizes that widget from the wrapped Pango line count, and no theme
+/// property caps it, so anything longer silently turns the status row into two
+/// lines and shrinks the list below it. 375px window minus 2x(5px margin + 1px
+/// border + 12px padding) leaves 339px, which holds 32 cells of JetBrains Mono
+/// at 13pt/96dpi. Keep in sync with niri/themes/rofi-network.rasi.
+pub const MESSAGE_COLUMNS: usize = 32;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Wifi,
@@ -105,9 +114,11 @@ impl WifiEntry {
         } else {
             "available"
         };
-        // Single-line status row matched by the `lines: 1` message widget
-        // in rofi-network.rasi.
-        format!("{} · {} · {}", self.ssid(), self.security_label(), state)
+        // Spend the leftover columns on the SSID so the security and state stay
+        // visible when `message_line` clamps the row.
+        let suffix = format!(" · {} · {}", self.security_label(), state);
+        let room = MESSAGE_COLUMNS.saturating_sub(suffix.chars().count());
+        format!("{}{suffix}", truncate(self.ssid(), room))
     }
 }
 
@@ -155,8 +166,10 @@ impl EthernetEntry {
         } else {
             "disconnected"
         };
-        // Single-line, see WifiEntry::message_label.
-        format!("{} · {} · {}", self.device.interface, address, state)
+        // Column budget, see WifiEntry::message_label.
+        let suffix = format!(" · {address} · {state}");
+        let room = MESSAGE_COLUMNS.saturating_sub(suffix.chars().count());
+        format!("{}{suffix}", truncate(&self.device.interface, room))
     }
 }
 
@@ -222,6 +235,16 @@ pub fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
+/// Fold `text` onto the one line the Rofi message widget can render.
+///
+/// Rofi hands the message straight to Pango, which both honours embedded
+/// newlines and word-wraps overlong text, and every extra line it produces is
+/// taken out of the list above it.
+pub fn message_line(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate(&collapsed, MESSAGE_COLUMNS)
+}
+
 pub fn stable_id(value: &str) -> u64 {
     // FNV-1a is stable across processes, unlike a randomized map hasher.
     value
@@ -279,6 +302,18 @@ mod tests {
         enterprise.eap_suite_b_192 = true;
         enterprise.ccmp = true;
         assert_eq!(security_label(&enterprise), "WPA3 Enterprise");
+    }
+
+    #[test]
+    fn messages_are_folded_onto_a_single_line() {
+        assert_eq!(
+            message_line("Cannot scan:\n  no Wi-Fi device"),
+            "Cannot scan: no Wi-Fi device"
+        );
+
+        let clamped = message_line("Network information is open in the preview panel.");
+        assert_eq!(clamped.chars().count(), MESSAGE_COLUMNS);
+        assert!(clamped.ends_with('…'));
     }
 
     #[test]

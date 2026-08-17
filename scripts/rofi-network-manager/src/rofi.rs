@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use nmrs::NetworkManager;
 
-use crate::model::{EthernetEntry, Mode, SecurityKind, Snapshot, WifiEntry};
+use crate::model::{EthernetEntry, Mode, SecurityKind, Snapshot, WifiEntry, message_line};
 use crate::{AppResult, network, preview};
 
 const RECORD_SEPARATOR: u8 = 0x1e;
@@ -156,7 +156,7 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
             state.password_for = None;
             match network::scan(manager).await {
                 Ok(()) => state.set_message("Scan complete."),
-                Err(error) => state.set_message(format!("Cannot scan for networks: {error}")),
+                Err(error) => state.set_message(format!("Cannot scan: {error}")),
             }
         }
         12 => {
@@ -197,7 +197,7 @@ async fn connect_selected(
                 // everything inside the same Rofi window so Wayland keyboard
                 // focus is never split across a nested process.
                 state.password_for = Some(entry.key.clone());
-                state.set_message(format!("Please type in password for {}.", entry.ssid()));
+                state.set_message(format!("Password for {}:", entry.ssid()));
                 return;
             }
 
@@ -214,23 +214,18 @@ async fn connect_selected(
         }
         Mode::Ethernet => {
             let Some(entry) = selected_key.and_then(|key| find_ethernet(snapshot, key)) else {
-                state.set_message("Select an Ethernet interface first.");
+                state.set_message("Select an Ethernet interface.");
                 return;
             };
             let was_connected = entry.connected() || entry.connecting();
             match network::connect_ethernet(entry) {
-                Ok(()) if was_connected => state.set_message(format!(
-                    "Disconnected Ethernet interface {}.",
-                    entry.device.interface
-                )),
-                Ok(()) => state.set_message(format!(
-                    "Connected Ethernet interface {}.",
-                    entry.device.interface
-                )),
-                Err(error) => state.set_message(format!(
-                    "Cannot change Ethernet interface {}: {error}",
-                    entry.device.interface
-                )),
+                Ok(()) if was_connected => {
+                    state.set_message(format!("Disconnected {}.", entry.device.interface));
+                }
+                Ok(()) => state.set_message(format!("Connected {}.", entry.device.interface)),
+                Err(error) => {
+                    state.set_message(format!("Cannot change {}: {error}", entry.device.interface))
+                }
             }
         }
     }
@@ -242,7 +237,7 @@ async fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
     };
     let Some(entry) = find_wifi(snapshot, &key) else {
         state.password_for = None;
-        state.set_message("Selected network is no longer available.");
+        state.set_message("Network is no longer available.");
         return;
     };
     // Rofi passes the typed filter text via ROFI_INPUT on custom-input submit
@@ -250,7 +245,7 @@ async fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
     let password = env::var("ROFI_INPUT").unwrap_or_default();
     if password.is_empty() {
         // User pressed Enter without typing; stay in awaiting mode.
-        state.set_message(format!("Please type in password for {}.", entry.ssid()));
+        state.set_message(format!("Password for {}:", entry.ssid()));
         return;
     }
     state.password_for = None;
@@ -369,7 +364,7 @@ async fn forget_selected(
     state: &mut UiState,
 ) {
     if mode == Mode::Ethernet {
-        state.set_message("Forget applies to saved Wi-Fi networks.");
+        state.set_message("Forget needs a saved network.");
         return;
     }
     let Some(entry) = selected_key.and_then(|key| find_wifi(snapshot, key)) else {
@@ -381,10 +376,7 @@ async fn forget_selected(
         return;
     }
     match network::forget_wifi(manager, entry).await {
-        Ok(()) => state.set_message(format!(
-            "Forgot {}. It is now listed as an unsaved network.",
-            entry.ssid()
-        )),
+        Ok(()) => state.set_message(format!("Forgot {}.", entry.ssid())),
         Err(error) => state.set_message(format!("Cannot forget {}: {error}", entry.ssid())),
     }
 }
@@ -414,8 +406,8 @@ async fn show_info(
         },
     };
     match result.and_then(|content| preview::show(&content, 0)) {
-        Ok(()) => state.set_message("Network information is open in the preview panel."),
-        Err(error) => state.set_message(format!("Cannot show network information: {error}")),
+        Ok(()) => state.set_message("Details open in preview panel."),
+        Err(error) => state.set_message(format!("Cannot show details: {error}")),
     }
 }
 
@@ -456,11 +448,15 @@ async fn render(
             .get(index)
             .map(EthernetEntry::message_label),
     });
-    let message = state
-        .message
-        .clone()
-        .or(selected_message)
-        .unwrap_or_else(|| "No network interfaces are available.".to_owned());
+    // Single choke point for everything the message widget shows, including
+    // error text we do not control, so nothing can wrap it to a second line.
+    let message = message_line(
+        &state
+            .message
+            .clone()
+            .or(selected_message)
+            .unwrap_or_else(|| "No network interfaces available.".to_owned()),
+    );
 
     let mut output = Vec::new();
     write_headers(&mut output, mode, &mut state, &message, selected_row);

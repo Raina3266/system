@@ -362,13 +362,11 @@ pub fn connection_error_message(ssid: &str, error: &(dyn std::error::Error + 'st
             ConnectionError::AuthFailed
             | ConnectionError::SupplicantConfigFailed
             | ConnectionError::SupplicantTimeout => {
-                format!("Incorrect password or authentication was rejected for {ssid}.")
+                format!("Wrong password for {ssid}.")
             }
             ConnectionError::NotFound => format!("{ssid} is no longer available."),
-            ConnectionError::DhcpFailed => {
-                format!("Connected to {ssid}, but no IP address could be assigned.")
-            }
-            ConnectionError::Timeout => format!("Connection to {ssid} timed out."),
+            ConnectionError::DhcpFailed => format!("No IP address for {ssid}."),
+            ConnectionError::Timeout => format!("{ssid} timed out."),
             ConnectionError::MissingPassword => format!("{ssid} requires a password."),
             _ => format!("Cannot connect to {ssid}: {error}"),
         };
