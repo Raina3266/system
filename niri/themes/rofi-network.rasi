@@ -1,5 +1,17 @@
 /* Network manager: Wi-Fi/Ethernet tabs, status message, and six actions. */
 
+/* Rofi triggers this binding once the UI has been idle for `delay` seconds and
+   re-arms the timer on every action, which is the only way a script mode can
+   redraw itself without user input. Disarmed here; the script raises `delay`
+   through its `theme` header while a background connect is in flight, so
+   "Connecting…" can turn into "Connected to …" on its own. */
+configuration {
+    timeout {
+        delay: 0;
+        action: "kb-custom-5";
+    }
+}
+
 * {
     font: "JetBrains Mono Nerd Font 13";
     bg:       #0E0616F2;

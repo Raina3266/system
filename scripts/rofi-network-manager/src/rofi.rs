@@ -14,6 +14,10 @@ const UNIT_SEPARATOR: u8 = 0x1f;
 const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
 const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
 const CONNECT_RESULT_FILENAME: &str = "rofi-network-connect-result";
+/// Keybinding Rofi triggers from the idle `timeout` action to refresh the view
+/// while a background connect runs. Rofi reports custom bindings as `10 + N-1`.
+const REFRESH_ACTION: &str = "kb-custom-5";
+const REFRESH_RETV: u8 = 14;
 
 #[derive(Clone, Debug, Default)]
 struct UiState {
@@ -167,6 +171,9 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
             state.password_for = None;
             show_info(manager, mode, &before, selected_key.as_deref(), &mut state).await
         }
+        // Refresh tick while a connect runs: `consume_connect_result` above has
+        // already folded in the outcome, so there is nothing to do but re-render.
+        REFRESH_RETV => {}
         15 => {}
         _ => {}
     }
@@ -249,39 +256,36 @@ async fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
         return;
     }
     state.password_for = None;
-    // Detached background connect so the network activates in parallel with
-    // our polling loop below (see `spawn_connect_background` / `run_connect_bg`).
-    spawn_connect_background(&entry.key, &password);
+    // Hand the connect to a detached subprocess and return immediately. Rofi
+    // blocks on this script's stdout, so waiting for the connect here would
+    // freeze the whole window instead of showing "Connecting…" -- the frame we
+    // render below. `write_refresh_theme` arms Rofi's idle timeout so the
+    // outcome replaces this message on its own a second later.
+    if !spawn_connect_background(&entry.key, &password) {
+        state.set_message(format!("Cannot connect to {}.", entry.ssid()));
+        return;
+    }
     state.pending_connect = Some(entry.key.clone());
     state.set_message(format!("Connecting to {}…", entry.ssid()));
-    // Rofi script mode has no auto-refresh directive, so we can only show one
-    // frame per script invocation. Polling here for a few seconds lets fast
-    // connects surface the result immediately (wi-fi association + DHCP
-    // typically resolves in 1-4 seconds). Slower connects fall through with
-    // `pending_connect` still set; the next user-triggered refresh picks the
-    // result up via `consume_connect_result`.
-    for _ in 0..50 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        consume_connect_result(state);
-        if state.pending_connect.is_none() {
-            break;
-        }
-    }
 }
 
 /// Fire-and-forget `connect-bg` subprocess. Detached (we drop the handle) so
 /// this script can exit and let rofi render the "Connecting…" frame right
 /// away while the connection proceeds in the background.
-fn spawn_connect_background(key: &str, password: &str) {
-    let Some(executable) = env::current_exe().ok() else {
-        return;
+///
+/// Returns whether it started: a connect that never runs would leave the UI
+/// waiting on a result file nobody writes.
+fn spawn_connect_background(key: &str, password: &str) -> bool {
+    let Ok(executable) = env::current_exe() else {
+        return false;
     };
-    let _ = Command::new(executable)
+    Command::new(executable)
         .args(["connect-bg", &hex_encode(key), &hex_encode(password)])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()
+        .is_ok()
 }
 
 /// Detached connect handler: performs the actual `connect_wifi` call and
@@ -291,17 +295,35 @@ pub async fn run_connect_bg(hex_key: &str, hex_password: &str) -> AppResult<()> 
     let key = hex_decode(hex_key).ok_or_else(|| io::Error::other("invalid hex key"))?;
     let password =
         hex_decode(hex_password).ok_or_else(|| io::Error::other("invalid hex password"))?;
-    let manager = NetworkManager::new().await?;
-    let snapshot = network::snapshot(&manager).await?;
-    let entry = find_wifi(&snapshot, &key)
-        .ok_or_else(|| io::Error::other("selected network is no longer available"))?;
-    let outcome = network::connect_wifi(&manager, entry, Some(password)).await;
+    // Every path has to leave a result behind, including the ones that fail
+    // before reaching NetworkManager: the UI clears "Connecting…" only when it
+    // reads this file, so bailing out early would strand that message on screen.
+    let outcome = connect_in_background(&key, password).await;
     let message = match &outcome {
-        Ok(()) => format!("Connected to {}.", entry.ssid()),
-        Err(error) => network::connection_error_message(entry.ssid(), error.as_ref()),
+        Ok(message) | Err(message) => message.as_str(),
     };
-    write_connect_result(&key, outcome.is_ok(), &message)?;
+    write_connect_result(&key, outcome.is_ok(), message)?;
     Ok(())
+}
+
+/// The connect itself, with both arms reduced to the sentence to show.
+async fn connect_in_background(key: &str, password: String) -> Result<String, String> {
+    let manager = NetworkManager::new()
+        .await
+        .map_err(|error| format!("NetworkManager unavailable: {error}"))?;
+    let snapshot = network::snapshot(&manager)
+        .await
+        .map_err(|error| format!("Cannot list networks: {error}"))?;
+    let Some(entry) = find_wifi(&snapshot, key) else {
+        return Err("Network is no longer available.".to_owned());
+    };
+    match network::connect_wifi(&manager, entry, Some(password)).await {
+        Ok(()) => Ok(format!("Connected to {}.", entry.ssid())),
+        Err(error) => Err(network::connection_error_message(
+            entry.ssid(),
+            error.as_ref(),
+        )),
+    }
 }
 
 fn result_file_path() -> Option<PathBuf> {
@@ -512,10 +534,41 @@ fn write_headers(
     );
     write_header(output, "use-hot-keys", "true");
     write_header(output, "keep-selection", "true");
+    // Rofi reads this one action late, so it covers a refresh tick landing while
+    // the user is still typing: without it the tick would wipe the half-typed
+    // password. Off otherwise, so the submitted password does not stay sitting
+    // in the filter box.
+    write_header(
+        output,
+        "keep-filter",
+        if state.password_for.is_some() {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    write_refresh_theme(output, state);
     if let Some(selected_row) = selected_row {
         write_header(output, "new-selection", &selected_row.to_string());
     }
     write_header(output, "data", &state.encode());
+}
+
+/// Arm or disarm Rofi's idle `timeout` action, which is the only hook a script
+/// mode has to refresh itself without user input: Rofi re-arms the timer on
+/// every action, so once it is ticking each tick re-runs this script and
+/// `consume_connect_result` can surface a finished background connect.
+///
+/// Rofi arms the timer from the theme as it stood *before* the script ran, so
+/// arming has to start one frame early -- at the password box, whose next action
+/// is the Enter that kicks off the connect.
+fn write_refresh_theme(output: &mut Vec<u8>, state: &UiState) {
+    let delay = u8::from(state.pending_connect.is_some() || state.password_for.is_some());
+    write_header(
+        output,
+        "theme",
+        &format!("configuration {{ timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }}"),
+    );
 }
 
 fn write_wifi_row(output: &mut Vec<u8>, entry: &WifiEntry) -> io::Result<()> {
@@ -711,6 +764,23 @@ mod tests {
         // re-encoding then drops the `pending=` part entirely.
         state.pending_connect = None;
         assert!(!state.encode().contains("pending="));
+    }
+
+    #[test]
+    fn refresh_ticks_only_while_a_connect_is_pending() {
+        let mut idle = Vec::new();
+        write_refresh_theme(&mut idle, &UiState::default());
+        assert!(String::from_utf8_lossy(&idle).contains("delay: 0;"));
+
+        let connecting = UiState {
+            pending_connect: Some("wifi:776c616e30:486f6d65".to_string()),
+            ..UiState::default()
+        };
+        let mut armed = Vec::new();
+        write_refresh_theme(&mut armed, &connecting);
+        let armed = String::from_utf8_lossy(&armed).into_owned();
+        assert!(armed.contains("delay: 1;"), "{armed}");
+        assert!(armed.contains(REFRESH_ACTION), "{armed}");
     }
 
     #[test]
