@@ -281,12 +281,20 @@ pub fn device_icon(icon: Option<&str>) -> &'static str {
 }
 
 pub fn battery_icon(percentage: u8) -> &'static str {
+    // 10% buckets so the glyph tracks the number beside it; the old 20% buckets
+    // drew, e.g., the fully-solid `mdi-battery` for all of 90..=100 and
+    // `mdi-battery-70` for 70..=89, so 90% looked full and 89% looked 70%.
     match percentage {
-        90..=u8::MAX => "󰁹",
-        70..=89 => "󰂀",
-        50..=69 => "󰁾",
-        30..=49 => "󰁼",
-        10..=29 => "󰁺",
+        100 => "󰁹",
+        90..=99 => "󰂂",
+        80..=89 => "󰂁",
+        70..=79 => "󰂀",
+        60..=69 => "󰁿",
+        50..=59 => "󰁾",
+        40..=49 => "󰁽",
+        30..=39 => "󰁼",
+        20..=29 => "󰁻",
+        10..=19 => "󰁺",
         _ => "󰂎",
     }
 }

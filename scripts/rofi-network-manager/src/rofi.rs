@@ -461,6 +461,21 @@ async fn render(
     selected_key: Option<&str>,
 ) -> AppResult<()> {
     let snapshot = network::snapshot(manager).await?;
+    // While a background connect is in flight the snapshot reflects the real
+    // device state sooner than the connect-bg subprocess: nmrs' connect() only
+    // returns once the active connection's StateChanged signal fires, which can
+    // trail the device reaching Activated by a second or two. Fold that earlier
+    // signal into the message so "Connecting…" turns into "Connected to …" the
+    // moment NetworkManager brings the link up, not whenever the subprocess
+    // finishes. consume_connect_result still owns the failure path — if the
+    // subprocess later reports an error it replaces this message.
+    if let Some(pending) = state.pending_connect.clone()
+        && mode == Mode::Wifi
+        && let Some(entry) = find_wifi(&snapshot, &pending)
+        && entry.connected
+    {
+        state.set_message(format!("Connected to {}.", entry.ssid()));
+    }
     let selected_row = selected_row(&snapshot, mode, selected_key).or_else(|| match mode {
         Mode::Wifi => (!snapshot.wifi.is_empty()).then_some(0),
         Mode::Ethernet => (!snapshot.ethernet.is_empty()).then_some(0),

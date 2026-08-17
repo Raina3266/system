@@ -5,6 +5,7 @@
 }:
 {
   home.packages = with pkgs; [
+    mediainfo
     kdePackages.dolphin
     kdePackages.breeze
     kdePackages.kio-fuse

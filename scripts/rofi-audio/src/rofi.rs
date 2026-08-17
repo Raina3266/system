@@ -33,6 +33,14 @@ const RETV_FORGET: u8 = 12;
 const RETV_VOLUME_UP: u8 = 13;
 const RETV_VOLUME_DOWN: u8 = 14;
 const RETV_CONFIRM: u8 = 15;
+/// Refresh tick: Rofi's idle `timeout` action re-runs the script so the Output
+/// and Input tabs pick up devices that appeared after they were first shown
+/// (a Bluetooth headset's PulseAudio sink lands a second or two after BlueZ
+/// finishes connecting, and Rofi never re-runs a script mode it has already
+/// shown), and so a Bluetooth connect that outlasts `wait_for_connect`'s
+/// 6-second poll still surfaces its result. `kb-custom-7` is RETV 16.
+const RETV_REFRESH: u8 = 16;
+const REFRESH_ACTION: &str = "kb-custom-7";
 
 #[derive(Clone, Debug, Default)]
 struct UiState {
@@ -156,8 +164,11 @@ pub async fn run_script(mode: Mode) -> AppResult<()> {
     let mut state = UiState::parse(env::var("ROFI_DATA").ok());
     // Feedback belongs to the action that produced it. Rofi only re-runs the
     // script on an action, so clearing here keeps a stale "Connected to …"
-    // from outliving the keypress that caused it.
-    if retv != 0 {
+    // from outliving the keypress that caused it. The refresh tick is not a
+    // user action, though, so it must leave the message alone — otherwise a
+    // pending "Connecting…" would be wiped on every idle tick and fall back to
+    // the selected row's status.
+    if retv != 0 && retv != RETV_REFRESH {
         state.message = None;
     }
     // Pull anything the detached connect left behind before acting, so a
@@ -647,23 +658,20 @@ fn render(
     let selected_row = selected_key
         .and_then(|key| devices.position(key))
         .or_else(|| (!devices.is_empty()).then_some(0));
-    // Only Bluetooth falls back to describing the highlighted row: it carries
-    // the address and the pairing state, which the row itself has no space
-    // for. An Output or Input row already shows its volume and name, so
-    // repeating them below the list says nothing, and leaving the message
-    // empty lets Rofi drop the panel until an action has something to report.
-    let selected_message = match mode {
-        Mode::Bluetooth => selected_row.and_then(|index| devices.message_label(index)),
-        Mode::Output | Mode::Input => None,
+    let message = match mode {
+        Mode::Bluetooth => {
+            let selected_message = selected_row.and_then(|index| devices.message_label(index));
+            let raw = state
+                .message
+                .clone()
+                .or(selected_message)
+                .unwrap_or_default();
+            // One line high; anything longer is clipped rather than silently
+            // cut off mid-glyph by the widget.
+            single_line(&raw, MESSAGE_WIDTH)
+        }
+        Mode::Output | Mode::Input => String::new(),
     };
-    let message = state
-        .message
-        .clone()
-        .or(selected_message)
-        .unwrap_or_default();
-    // The panel is one line high; anything longer is clipped rather than
-    // silently cut off mid-glyph by the widget.
-    let message = single_line(&message, MESSAGE_WIDTH);
 
     let mut output = Vec::new();
     write_headers(&mut output, mode, &mut state, &message, selected_row);
@@ -727,10 +735,35 @@ fn write_headers(
     );
     write_header(output, "use-hot-keys", "true");
     write_header(output, "keep-selection", "true");
+    write_refresh_theme(output, mode, state);
     if let Some(selected_row) = selected_row {
         write_header(output, "new-selection", &selected_row.to_string());
     }
     write_header(output, "data", &state.encode());
+}
+
+/// Arm Rofi's idle `timeout` action, the only hook a script mode has to refresh
+/// itself without user input. Rofi arms the timer from the theme as it stood
+/// *before* the script ran, so whatever delay this writes applies to the next
+/// idle period.
+///
+/// Output and Input always tick: their device lists go stale the moment a
+/// Bluetooth headset finishes connecting (the PulseAudio sink appears 1–3s
+/// after BlueZ), and Rofi never re-runs a script mode it has already shown, so
+/// without this the new device is invisible until the menu is reopened.
+/// Bluetooth ticks only while a connect is pending, as a backstop past
+/// `wait_for_connect`'s 6-second poll.
+fn write_refresh_theme(output: &mut Vec<u8>, mode: Mode, state: &UiState) {
+    let delay = match mode {
+        Mode::Output | Mode::Input => 2,
+        Mode::Bluetooth if state.pending_connect.is_some() => 1,
+        _ => 0,
+    };
+    write_header(
+        output,
+        "theme",
+        &format!("configuration {{ timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }}"),
+    );
 }
 
 fn write_bluetooth_row(output: &mut Vec<u8>, entry: &BluetoothEntry) -> io::Result<()> {
