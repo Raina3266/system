@@ -3,6 +3,7 @@ mod model;
 mod preview;
 mod rofi;
 mod store;
+mod waybar;
 
 use std::env;
 
@@ -28,6 +29,8 @@ pub fn run() -> Result<()> {
             run_script(mode, args.next())
         }
         Some("capture") => capture_clipboard(),
+        Some("status") => waybar::run_status(),
+        Some("clear") => waybar::clear_selection(),
         Some("preview-selection") => {
             let id = args
                 .next()

@@ -201,12 +201,14 @@ mode preview behavior.
 
 ```text
 rofi-clipboard [run]
+rofi-clipboard status
+rofi-clipboard clear
 rofi-clipboard capture
 rofi-clipboard store --mime MIME
 rofi-clipboard script <memo|text|files>
 ```
 
-`capture` is designed to receive clipboard data from `wl-paste --watch`. The `store` command reads an item from standard input and stores it with the supplied MIME type.
+`status` is the Waybar `custom/clipboard` backend: a long-running process that keeps a `wl-paste --watch rofi-clipboard capture` child for event-driven capture and emits a JSON status line whenever the history changes. `clear` clears the current Wayland selection (stored history is untouched). `capture` receives clipboard data from `wl-paste --watch` and is what `status` drives internally. The `store` command reads an item from standard input and stores it with the supplied MIME type.
 
 ### Data storage
 

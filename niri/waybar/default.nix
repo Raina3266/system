@@ -1,6 +1,6 @@
 # Waybar: top and bottom status bars with cyberpunk theme.
 # Bar layouts: layout.nix (top: clock/hardware/media/utilities; bottom: taskbar)
-# Local Rust packages: media in top-center.nix; clipboard, network, and timer in top-right.nix
+# Local Rust packages: media, clipboard, network, and timer in top.nix
 {
   pkgs,
   lib,
@@ -11,8 +11,8 @@
 let
   cfg = config.programs'.waybar;
   ycal = import ./calender.nix { inherit pkgs; };
-  topRight = import ./top-right.nix { inherit pkgs; };
-  layout = import ./layout.nix { inherit pkgs topRight ycal; };
+  top = import ./top.nix { inherit pkgs ycal; };
+  layout = import ./layout.nix { inherit pkgs top; };
 
   # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
   barOutputs = lib.optionalAttrs ((osConfig.services'.desktop.displays or [ ]) != [ ]) {
@@ -29,7 +29,7 @@ in
 
   config = lib.mkIf (pkgs.stdenv.hostPlatform.isLinux && cfg.enable) (
     lib.mkMerge [
-      topRight.homeConfig
+      top.homeConfig
 
       {
         home.packages = with pkgs; [

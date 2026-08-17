@@ -148,6 +148,28 @@ impl Default for History {
     }
 }
 
+/// Escape a string for embedding inside a Waybar JSON string field. Waybar
+/// parses each `exec` line as JSON, so the text/tooltip we emit must not
+/// contain unescaped quotes, backslashes, or control characters.
+pub fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", u32::from(character));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 impl History {
     pub fn to_json(&self) -> Result<String> {
         let mut json = serde_json::to_string_pretty(self).context("serialize clipboard history")?;

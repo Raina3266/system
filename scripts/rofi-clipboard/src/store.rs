@@ -58,6 +58,12 @@ impl ClipboardStore {
         history
     }
 
+    /// Path to the JSON history file, exposed so the Waybar status producer
+    /// can watch its mtime and refresh the bar only when something changed.
+    pub fn history_file(&self) -> &Path {
+        &self.history_path
+    }
+
     pub fn add_text(&self, text: String, mime: String) -> Result<Option<u64>> {
         if text.is_empty() {
             return Ok(None);

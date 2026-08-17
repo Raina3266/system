@@ -29,7 +29,7 @@ configuration {
 
 window {
     width: 375px;
-    height: 500px;
+    height: 490px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -154,15 +154,12 @@ status-panel {
     children: [ message ];
 }
 
-/* `message` is a container holding a textbox that Rofi hardcodes as
-   TB_AUTOHEIGHT | TB_WRAP, so its height is however many lines Pango wraps the
-   text into. Neither `lines` (listview-only) nor `wrap` (no such property)
-   applies here, and no other property caps it, so the single line is enforced
-   by the script instead -- see MESSAGE_COLUMNS in
-   scripts/rofi-network-manager/src/model.rs, which assumes this window width
-   and font. */
 message {
-    background-color: transparent;
+    padding: 8px 10px;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(242, 158, 116, 0.45);
+    background-color: rgba(242, 158, 116, 0.07);
 }
 
 action-bar {

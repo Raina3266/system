@@ -1,5 +1,5 @@
 # Waybar layouts
-{ pkgs, topRight, ycal }:
+{ pkgs, top }:
 let
   common = {
     layer = "top";
@@ -31,9 +31,7 @@ let
         "custom/network"
       ];
     }
-    // (import ./top-left.nix { inherit pkgs ycal; })
-    // (import ./top-center.nix { inherit pkgs; }).modules
-    // topRight.modules;
+    // top.modules;
 
   # ------------ BottomBar -------------
 

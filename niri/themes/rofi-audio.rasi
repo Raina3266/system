@@ -27,7 +27,7 @@ window {
     location: 3;
     anchor: 3;
     width: 420px;
-    height: 520px;
+    height: 477px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -97,7 +97,7 @@ entry {
 }
 
 listview {
-    lines: 6;
+    lines: 5;
     eh: 1;
     dynamic: false;
     scrollbar: true;
@@ -147,24 +147,12 @@ element-text selected.urgent {
     text-color: @cyan;
 }
 
-/* Status panel. rofi-audio keeps every message to a single line: either the
-   result of the last action, or the highlighted row's details. */
 message {
     padding: 8px 10px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);
     background-color: rgba(242, 158, 116, 0.07);
-}
-
-/* Only the message box's inner widget is named `textbox`; the prompt, entry,
-   rows, and buttons all carry their own names. */
-textbox {
-    background-color: transparent;
-    text-color: @fg;
-    markup: false;
-    lines: 1;
-    wrap: false;
 }
 
 action-bar {
@@ -191,7 +179,6 @@ button-confirm {
     expand: true;
     horizontal-align: 0.5;
     margin: 1px;
-    padding: 7px 4px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);

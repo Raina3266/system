@@ -597,11 +597,11 @@ fn bytes_match_mime(bytes: &[u8], mime: &str) -> bool {
     }
 }
 
-fn wl_copy_binary() -> PathBuf {
+pub fn wl_copy_binary() -> PathBuf {
     env_binary("ROFI_CLIPBOARD_WL_COPY", "wl-copy")
 }
 
-fn wl_paste_binary() -> PathBuf {
+pub fn wl_paste_binary() -> PathBuf {
     env_binary("ROFI_CLIPBOARD_WL_PASTE", "wl-paste")
 }
 
