@@ -11,20 +11,11 @@
     kdePackages.kfilemetadata
     kdePackages.kompare
     kdePackages.plasma-integration
-    # Colour scheme is managed from the GUI: systemsettings kcm_colors.
-    # The kcm_colors module itself ships in plasma-workspace, which has to be
-    # in the profile for the plugin path in niri/default.nix to find it.
     kdePackages.systemsettings
     kdePackages.plasma-workspace
-    # kcm_colors imports org.kde.newstuff for its "Get New Colour Schemes"
-    # button. systemsettings is wrapped with the QML paths for its own UI only,
-    # so a QML module a loaded KCM needs and it does not has to come from the
-    # profile's QML import path instead.
     kdePackages.knewstuff
   ];
 
-  # Seeds fonts only. The colour scheme is chosen in System Settings, which
-  # writes the [Colors:*] groups into this same file.
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then
         $DRY_RUN_CMD cat > "$HOME/.config/kdeglobals" << 'EOF'

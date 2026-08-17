@@ -3,18 +3,20 @@
   ...
 }:
 let
-  mprisenceNativeHost = pkgs.writeTextDir
-    "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
-    (builtins.toJSON {
-      name = "mprisence.web.bridge";
-      description = "Publish each browser media tab as an MPRIS player";
-      path = "${pkgs.mprisence}/bin/mprisence";
-      type = "stdio";
-      allowed_origins = [
-        "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
-        "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
-      ];
-    });
+  mprisenceNativeHost =
+    pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
+      (
+        builtins.toJSON {
+          name = "mprisence.web.bridge";
+          description = "Publish each browser media tab as an MPRIS player";
+          path = "${pkgs.mprisence}/bin/mprisence";
+          type = "stdio";
+          allowed_origins = [
+            "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
+            "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
+          ];
+        }
+      );
 in
 {
   imports = [
@@ -75,6 +77,7 @@ in
 
     # media playback
     mprisence
+    lrcget
     vlc
     waylyrics
     kdePackages.elisa
