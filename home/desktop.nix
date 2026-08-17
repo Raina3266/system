@@ -5,11 +5,9 @@
 }:
 {
   home.packages = with pkgs; [
-    mediainfo
     kdePackages.dolphin
     kdePackages.breeze
     kdePackages.kio-fuse
-    kdePackages.kfilemetadata
     kdePackages.kompare
     kdePackages.plasma-integration
     kdePackages.systemsettings

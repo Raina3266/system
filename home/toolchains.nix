@@ -1,7 +1,6 @@
 { inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
-    rustc
     rustup
     diesel-cli
     cargo-machete
@@ -14,7 +13,6 @@
     nil
     nixd
     uv
-
   ];
 
   targets.genericLinux.nixGL.packages = inputs.nixGL.packages;
