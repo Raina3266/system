@@ -1,111 +1,31 @@
 {
   pkgs,
   config,
-  lib,
   ...
 }:
-let
-  themeDir = "${config.home.homeDirectory}/System/niri/themes";
-  schemeName = "Bitpunk";
-  schemeFile = "${config.home.homeDirectory}/.local/share/color-schemes/${schemeName}.colors";
-
-  # The non-colour half of kdeglobals, so that a single activation step owns
-  # the whole file rather than seeding it once and drifting afterwards.
-  kdeglobalsExtra = pkgs.writeText "kdeglobals-extra" (
-    lib.generators.toINI { } {
-      General = {
-        font = "Noto Sans,12";
-        menuFont = "Noto Sans,11";
-        toolBarFont = "Noto Sans,11";
-        smallestReadableFont = "Noto Sans,11";
-        fixed = "JetBrainsMono Nerd Font,12";
-      };
-    }
-  );
-
-  # A plain Qt6/KF6 dialog with no Plasma session dependency, so it works
-  # under niri.  plasma-workspace is already in the closure for the menu file
-  # below; link out this one binary instead of putting all of it on PATH.
-  kcolorschemeeditor = pkgs.runCommand "kcolorschemeeditor" { } ''
-    mkdir -p "$out/bin"
-    test -e ${pkgs.kdePackages.plasma-workspace}/bin/kcolorschemeeditor
-    ln -s ${pkgs.kdePackages.plasma-workspace}/bin/kcolorschemeeditor "$out/bin/"
-  '';
-
-  applyColors = pkgs.writeShellApplication {
-    name = "kde-colors-apply";
-    runtimeInputs = with pkgs; [
-      coreutils
-      python3
-      dbus
-    ];
-    text = ''
-      # A real file rather than a link: kcolorschemeeditor saves atomically and
-      # would replace a symlink here with a regular file.
-      install -Dm644 "${themeDir}/kde.colors" "${schemeFile}"
-
-      python3 ${./merge-kdeglobals.py} "$HOME/.config/kdeglobals" \
-        "${themeDir}/kde.colors" "${kdeglobalsExtra}"
-
-      # KHintsSettings listens for this signal rather than watching the file,
-      # so running Dolphin and Kid3 repaint without a restart.
-      # PaletteChanged = 0.
-      dbus-send --session --type=signal /KGlobalSettings \
-        org.kde.KGlobalSettings.notifyChange int32:0 int32:0 || true
-    '';
-  };
-
-  editColors = pkgs.writeShellApplication {
-    name = "kde-colors-edit";
-    runtimeInputs = [
-      applyColors
-      kcolorschemeeditor
-      pkgs.coreutils
-      pkgs.diffutils
-    ];
-    text = ''
-      # kcolorschemeeditor can only ever save into ~/.local/share/color-schemes,
-      # so drive it from the committed palette and fold the result back into
-      # the repo afterwards.
-      kde-colors-apply
-      kcolorschemeeditor --overwrite ${schemeName} || true
-
-      if cmp -s "${schemeFile}" "${themeDir}/kde.colors"; then
-        echo "kde.colors unchanged"
-      else
-        cp "${schemeFile}" "${themeDir}/kde.colors"
-        echo "updated ${themeDir}/kde.colors"
-        kde-colors-apply
-      fi
-    '';
-  };
-in
 {
-  home.packages =
-    (with pkgs; [
-      kdePackages.dolphin
-      kdePackages.breeze
-      kdePackages.kio-fuse
-      kdePackages.kfilemetadata
-      kdePackages.kompare
-      kdePackages.plasma-integration
-    ])
-    ++ [
-      kcolorschemeeditor
-      applyColors
-      editColors
-    ];
+  home.packages = with pkgs; [
+    kdePackages.dolphin
+    kdePackages.breeze
+    kdePackages.kio-fuse
+    kdePackages.kfilemetadata
+    kdePackages.kompare
+    kdePackages.plasma-integration
+  ];
 
-  # KColorScheme builds the palette from kdeglobals itself; a .colors file in
-  # share/color-schemes is only consulted when kdeglobals has no [Colors:View]
-  # group (KHintsSettings::loadPalettes).  Folding the palette in on every
-  # activation is what makes editing niri/themes/kde.colors actually reach
-  # Dolphin and Kid3, and it is also the only way [KDE] contrast and
-  # frameContrast take effect, since Breeze reads those from kdeglobals.
-  #
-  # After linkGeneration so it is not undone by the file-link pass.
-  home.activation.kdeColors = config.lib.dag.entryAfter [ "linkGeneration" ] ''
-    $DRY_RUN_CMD ${applyColors}/bin/kde-colors-apply
+  home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      if [ ! -e "$HOME/.config/kdeglobals" ]; then
+        $DRY_RUN_CMD cat > "$HOME/.config/kdeglobals" << 'EOF'
+    [General]
+    ColorScheme=Bitpunk
+    Name=Bitpunk
+    font=Noto Sans,12
+    menuFont=Noto Sans,11
+    toolBarFont=Noto Sans,11
+    smallestReadableFont=Noto Sans,11
+    fixed=JetBrainsMono Nerd Font,12
+    EOF
+      fi
   '';
 
   xdg.configFile."menus/applications.menu".source =

@@ -157,9 +157,8 @@ in
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk4.css";
   xdg.configFile."gtk-4.0/gtk-base.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
-  # kde.colors is installed to ~/.local/share/color-schemes and folded into
-  # kdeglobals by home/desktop.nix, which has to write a real file there rather
-  # than a link so that kcolorschemeeditor can save over it.
+  home.file.".local/share/color-schemes/Bitpunk.colors".source =
+    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/kde.colors";
 
   home.pointerCursor = {
     enable = true;
