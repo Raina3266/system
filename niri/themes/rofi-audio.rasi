@@ -43,7 +43,7 @@ configuration {
 
 /* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    width: 420px;
+    width: 400px;
     height: 444px;
     background-color: @bg;
     border: 1px;
