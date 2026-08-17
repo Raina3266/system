@@ -7,15 +7,16 @@
    therefore always present and always live; the selected tab in the mode
    switcher is what tells you which three are meaningful. */
 
-/* Rofi triggers this binding once the UI has been idle for `delay` seconds and
-   re-arms the timer on every action, which is the only way a script mode can
-   redraw itself without user input. Disarmed here; the script raises `delay`
-   through its `theme` header — to 2 on the Output/Input tabs (whose device
-   lists go stale when a Bluetooth headset connects) and to 1 on the Bluetooth
-   tab while a connect is pending — so those views refresh on their own. */
+/* Rofi triggers this binding once the UI has been idle for `delay` seconds,
+   which is the only way a script mode can redraw itself without user input.
+   Each script render re-writes this block through its `theme` header, but the
+   timer is armed from whatever value was already in place — so this file's
+   value is what arms the very first tick, and it must be non-zero or nothing
+   ticks until the user presses something. See `write_refresh_theme` in
+   scripts/rofi-audio/src/rofi.rs. */
 configuration {
     timeout {
-        delay: 0;
+        delay: 2;
         action: "kb-custom-7";
     }
 }

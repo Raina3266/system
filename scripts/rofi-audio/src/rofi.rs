@@ -33,14 +33,20 @@ const RETV_FORGET: u8 = 12;
 const RETV_VOLUME_UP: u8 = 13;
 const RETV_VOLUME_DOWN: u8 = 14;
 const RETV_CONFIRM: u8 = 15;
-/// Refresh tick: Rofi's idle `timeout` action re-runs the script so the Output
-/// and Input tabs pick up devices that appeared after they were first shown
-/// (a Bluetooth headset's PulseAudio sink lands a second or two after BlueZ
-/// finishes connecting, and Rofi never re-runs a script mode it has already
-/// shown), and so a Bluetooth connect that outlasts `wait_for_connect`'s
-/// 6-second poll still surfaces its result. `kb-custom-7` is RETV 16.
+/// Refresh tick: Rofi's idle `timeout` action re-runs the script so every tab
+/// picks up devices that appeared after it was first shown (a Bluetooth
+/// headset's PulseAudio sink lands a second or two after BlueZ finishes
+/// connecting, discovery keeps turning up devices after the Bluetooth tab has
+/// rendered, and Rofi never re-runs a script mode it has already shown), and so
+/// a Bluetooth connect that outlasts `wait_for_connect`'s 6-second poll still
+/// surfaces its result. `kb-custom-7` is RETV 16.
 const RETV_REFRESH: u8 = 16;
 const REFRESH_ACTION: &str = "kb-custom-7";
+/// Idle seconds between refresh ticks. Must never be 0 on any tab — see
+/// `write_refresh_theme`.
+const REFRESH_DELAY: u8 = 2;
+/// A pending connect wants its result sooner than the steady-state tick.
+const PENDING_REFRESH_DELAY: u8 = 1;
 
 #[derive(Clone, Debug, Default)]
 struct UiState {
@@ -250,9 +256,9 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
         }
     };
     // Say so while discovery is running, unless the action had something more
-    // specific to report. Rofi cannot redraw a script mode on its own, so this
-    // is also the hint that pressing Scan again will pick up whatever has
-    // turned up since.
+    // specific to report. The refresh tick keeps redrawing the list underneath
+    // it, so this reads as "more may still appear" rather than as a prompt to
+    // press Scan again.
     if state.message.is_none() && bluetooth::is_scanning() {
         state.set_message("Scanning for devices…");
     }
@@ -743,21 +749,27 @@ fn write_headers(
 }
 
 /// Arm Rofi's idle `timeout` action, the only hook a script mode has to refresh
-/// itself without user input. Rofi arms the timer from the theme as it stood
-/// *before* the script ran, so whatever delay this writes applies to the next
-/// idle period.
+/// itself without user input. Device lists go stale the moment a Bluetooth
+/// headset finishes connecting (its PulseAudio sink appears 1–3s after BlueZ)
+/// and Rofi never re-runs a script mode on its own, so without this tick a
+/// newly connected device stays invisible until the menu is reopened.
 ///
-/// Output and Input always tick: their device lists go stale the moment a
-/// Bluetooth headset finishes connecting (the PulseAudio sink appears 1–3s
-/// after BlueZ), and Rofi never re-runs a script mode it has already shown, so
-/// without this the new device is invisible until the menu is reopened.
-/// Bluetooth ticks only while a connect is pending, as a backstop past
-/// `wait_for_connect`'s 6-second poll.
+/// Every tab must render a *non-zero* delay, including the ones with nothing of
+/// their own to refresh. Rofi reads this delay in `rofi_view_set_user_timeout`,
+/// which runs in exactly two places (view.c): once in `rofi_view_create`, and
+/// at the *top* of `rofi_view_trigger_action`, before the action is dispatched
+/// — so the value that arms the timer is the one the previous render left
+/// behind, and it only arms at all when that value is greater than zero.
+///
+/// A tab rendering 0 therefore does not merely skip its own tick: it disarms
+/// the timer for whichever tab the user opens next. That is what kept a device
+/// added on the Bluetooth tab from appearing after a switch to Output or Input
+/// — the switch armed from Bluetooth's 0, and the delay Output then wrote was
+/// never read again, because nothing re-reads it until the next user action.
 fn write_refresh_theme(output: &mut Vec<u8>, mode: Mode, state: &UiState) {
     let delay = match mode {
-        Mode::Output | Mode::Input => 2,
-        Mode::Bluetooth if state.pending_connect.is_some() => 1,
-        _ => 0,
+        Mode::Bluetooth if state.pending_connect.is_some() => PENDING_REFRESH_DELAY,
+        _ => REFRESH_DELAY,
     };
     write_header(
         output,
@@ -909,6 +921,31 @@ mod tests {
         assert!(!encoded.contains("pending="));
         assert!(!encoded.contains("await="));
         assert!(!encoded.contains("kind="));
+    }
+
+    /// Rofi arms the idle timer from the delay left by the *previous* render
+    /// (view.c calls `rofi_view_set_user_timeout` at the top of
+    /// `rofi_view_trigger_action`, before dispatching), and only when that
+    /// delay is greater than zero. So a tab that renders 0 disarms the tick for
+    /// the tab the user switches to next — which is how a device added on the
+    /// Bluetooth tab stayed missing from Output and Input.
+    #[test]
+    fn every_tab_leaves_the_next_one_a_running_refresh_tick() {
+        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
+            for pending in [None, Some("bt:4141".to_owned())] {
+                let state = UiState {
+                    pending_connect: pending,
+                    ..Default::default()
+                };
+                let mut output = Vec::new();
+                write_refresh_theme(&mut output, mode, &state);
+                let rendered = String::from_utf8_lossy(&output).into_owned();
+                assert!(
+                    !rendered.contains("delay: 0;"),
+                    "{mode} renders a disarmed tick: {rendered}"
+                );
+            }
+        }
     }
 
     #[test]
