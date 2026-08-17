@@ -80,25 +80,6 @@ in
     };
   };
 
-  # NetworkManager applet: provides graphical Wi-Fi password prompts.
-  # Uses --indicator flag to avoid system tray icon.
-  systemd.user.services.nm-applet = {
-    Unit = {
-      Description = "NetworkManager applet / secret agent";
-      ConditionEnvironment = [ "WAYLAND_DISPLAY" ];
-      PartOf = [ "graphical-session.target" ];
-      After = [ "graphical-session.target" ];
-    };
-    Service = {
-      ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet --indicator";
-      Restart = "on-failure";
-      RestartSec = 3;
-    };
-    Install = {
-      WantedBy = [ "graphical-session.target" ];
-    };
-  };
-
   # fcitx5 input methods: English (GB keyboard) and Chinese (Pinyin)
   xdg.configFile."fcitx5/profile".text = ''
     [Groups/0]
@@ -131,7 +112,7 @@ in
     MenuFont="Sans 14"
   '';
 
-  # GTK theme: cyberpunk palette for all GTK apps (nm-applet, file dialogs, etc.)
+  # GTK theme: cyberpunk palette for all GTK apps (file dialogs, etc.)
   # Matches waybar/rofi/fcitx5 themes in ./themes/
   gtk = {
     enable = true;
@@ -146,7 +127,7 @@ in
 
   # GTK stylesheets:
   #   gtk-base.css - shared colors/widgets (imported by both versions)
-  #   gtk3.css     - GTK3 apps (file managers, pavucontrol, nm-applet)
+  #   gtk3.css     - GTK3 apps (file managers, pavucontrol)
   #   gtk4.css     - GTK4 apps (portal file chooser, image viewer)
   # gtk-base.css symlinked to both dirs for @import resolution.
   xdg.configFile."gtk-3.0/gtk.css".source =
