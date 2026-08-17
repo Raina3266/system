@@ -331,11 +331,6 @@ in
       return-type = "json";
       tooltip = true;
       escape = false;
-      # `status` is long-running (it keeps a `wl-paste --watch` child for
-      # event-driven capture and emits a JSON line per change), so we use the
-      # long-running exec pattern from `custom/timer` rather than `interval`:
-      # `restart-interval` only respawns on crash, and `exec-on-event` stops
-      # clicks from spawning a second watcher.
       "restart-interval" = 1;
       "exec-on-event" = false;
       on-click = "${rofiClipboard}/bin/rofi-clipboard";

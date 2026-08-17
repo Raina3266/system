@@ -21,7 +21,7 @@ const CONNECT_RESULT_FILENAME: &str = "rofi-audio-connect-result";
 const CONNECT_POLL_ATTEMPTS: u32 = 60;
 const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Characters the single-line message panel can show at the window's width.
-const MESSAGE_WIDTH: usize = 46;
+const MESSAGE_WIDTH: usize = 50;
 
 /// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The six action-bar buttons
 /// are wired to these in rofi-audio.rasi.

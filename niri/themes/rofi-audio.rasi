@@ -38,15 +38,13 @@ configuration {
 
 /* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    location: 3;
-    anchor: 3;
     width: 420px;
-    height: 477px;
+    height: 444px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
     border-radius: 15px;
-    margin: 44px 5px 0 0;
+    margin: 5px;
     padding: 12px;
 }
 
