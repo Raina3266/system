@@ -2,10 +2,6 @@
 name = "preview-panel"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
-description = "A reusable GTK4 text preview and editing window"
-license = "MIT"
-publish = false
 
 [dependencies]
 gtk = { package = "gtk4", version = "=0.11.4", features = ["v4_6"] }

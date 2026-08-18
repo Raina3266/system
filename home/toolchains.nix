@@ -1,7 +1,11 @@
 { inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
-    rustup
+    cargo
+    rustc
+    rustfmt
+    clippy
+    rust-analyzer
     diesel-cli
     cargo-machete
     cargo-audit

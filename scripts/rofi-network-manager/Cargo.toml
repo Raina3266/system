@@ -2,10 +2,6 @@
 name = "rofi-network-manager"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
-description = "A Rofi network controller backed by nmrs and NetworkManager"
-license = "MIT"
-publish = false
 
 [dependencies]
 nmrs = "=3.4.2"

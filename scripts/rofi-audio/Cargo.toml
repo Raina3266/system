@@ -2,10 +2,6 @@
 name = "rofi-audio"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
-description = "A Rofi Bluetooth, output, and input controller backed by bluer/BlueZ and pulsectl-rs/PulseAudio"
-license = "MIT"
-publish = false
 
 [dependencies]
 # BlueZ over D-Bus: device listing, scan, pair (with an authorization agent for
