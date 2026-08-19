@@ -1,0 +1,53 @@
+diff --git a/yt_dlp/extractor/youtube/_base.py b/yt_dlp/extractor/youtube/_base.py
+index 0a123f0..0cf2725 100644
+--- a/yt_dlp/extractor/youtube/_base.py
++++ b/yt_dlp/extractor/youtube/_base.py
+@@ -270,6 +270,22 @@ class SubsPoTokenPolicy(BasePoTokenPolicy):
+         'PLAYER_PO_TOKEN_POLICY': PlayerPoTokenPolicy(required=False, recommended=True),
+         'REQUIRE_JS_PLAYER': False,
+     },
++    # "Made for kids" videos aren't available with this client
++    'visionos': {
++        'INNERTUBE_CONTEXT': {
++            'client': {
++                'clientName': 'VISIONOS',
++                'clientVersion': '1.02',
++                'deviceMake': 'Apple',
++                'deviceModel': 'RealityDevice17,1',
++                'userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
++                'osName': 'visionOS',
++                'osVersion': '26.5.23O471',
++            },
++        },
++        'INNERTUBE_CONTEXT_CLIENT_NAME': 101,
++        'REQUIRE_JS_PLAYER': False,
++    },
+     # mweb has 'ultralow' formats
+     # See: https://github.com/yt-dlp/yt-dlp/pull/557
+     'mweb': {
+diff --git a/yt_dlp/extractor/youtube/_video.py b/yt_dlp/extractor/youtube/_video.py
+index fdb2c73..3eaaff6 100644
+--- a/yt_dlp/extractor/youtube/_video.py
++++ b/yt_dlp/extractor/youtube/_video.py
+@@ -139,8 +139,8 @@ class YoutubeIE(YoutubeBaseInfoExtractor):
+     _RETURN_TYPE = 'video'  # XXX: How to handle multifeed?
+ 
+     _SUBTITLE_FORMATS = ('json3', 'srv1', 'srv2', 'srv3', 'ttml', 'srt', 'vtt')
+-    _DEFAULT_CLIENTS = ('android_vr', 'web_safari')
+-    _DEFAULT_JSLESS_CLIENTS = ('android_vr',)
++    _DEFAULT_CLIENTS = ('visionos', 'web_safari')
++    _DEFAULT_JSLESS_CLIENTS = ('visionos',)
+     _DEFAULT_AUTHED_CLIENTS = ('tv_downgraded', 'web_safari')
+     # Premium does not require POT (except for subtitles)
+     _DEFAULT_PREMIUM_CLIENTS = ('tv_downgraded', 'web_creator')
+@@ -3132,8 +3132,8 @@ def append_client(*client_names):
+                     prs.append(pr)
+ 
+             if (
+-                # Is this a "made for kids" video that can't be downloaded with android_vr?
+-                client == 'android_vr' and self._is_unplayable(pr)
++                # Is this a "made for kids" video that can't be downloaded with android_vr/visionos?
++                client in {'android_vr', 'visionos'} and self._is_unplayable(pr)
+                 and webpage and 'made for kids' in webpage
+                 # ...and is a JS runtime is available?
+                 and any(p.is_available() for p in self._jsc_director.providers.values())
