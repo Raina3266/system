@@ -12,6 +12,7 @@
     ./thunderbird.nix
     ./ocr.nix
     ./office.nix
+    ./spotdl.nix
     ./toolchains.nix
 
   ];
@@ -65,8 +66,7 @@
     gimp
     shotcut
     kid3
-    spotdl
-    yt-dlp
+    yt-dlp # spotdl's own copy is patched+wrapped in ./spotdl.nix
 
     # downloads / torrent
     qbittorrent
