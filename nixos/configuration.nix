@@ -22,6 +22,8 @@
       inputs.nixGL.overlay
       # rofi with file-browser plugin + click-to-exit patch
       (import ../niri/rofi/overlay.nix)
+      # yt-dlp: drop the android_vr YouTube client, which 403s since 2026-08-17
+      (import ../home/yt-dlp-overlay.nix)
     ];
 
     # Nix

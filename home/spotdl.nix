@@ -25,24 +25,21 @@ let
   #
   # 2. `AudioProviderError: YT-DLP download error`
   #
-  #    Since yt-dlp 2025.11.12 an external JavaScript runtime is required for
-  #    full YouTube support; without one, the player challenge can't be solved
-  #    and yt-dlp fails to produce a stream. spotdl swallows the real yt-dlp
-  #    exception into `AudioProviderError` (it is only logged at debug level),
-  #    which is why the error looks so generic.
+  #    This one is not spotdl's fault at all: yt-dlp's `android_vr` YouTube
+  #    client started returning HTTP 403 for every format, and spotdl reports
+  #    any yt-dlp exception under this one opaque message (the real error is
+  #    only logged at debug level, hence `--log-level DEBUG` to see it). The
+  #    actual fix lives in ./yt-dlp-overlay.nix.
   #
-  #    spotdl's own answer is `spotdl --download-deno`, which fetches an
-  #    upstream Deno binary into ~/.spotdl. That is useless here: a foreign
-  #    dynamically linked binary won't run on NixOS. Instead we put nixpkgs'
-  #    Deno on spotdl's PATH, so yt-dlp discovers it the normal way.
+  #    What is left here is the Deno wrapper. spotdl checks for a Deno binary
+  #    on PATH and nags about `spotdl --download-deno` whenever a download
+  #    fails — advice that cannot work on NixOS, since that command fetches a
+  #    foreign dynamically linked binary into ~/.spotdl. Putting nixpkgs' Deno
+  #    on spotdl's PATH silences the red herring. yt-dlp's own JS runtime is
+  #    already handled: nixpkgs hardcodes a Deno store path into the library.
   #
-  #    (Recent nixpkgs also hardcodes a Deno path into the yt-dlp *library*
-  #    itself, which covers library users like spotdl. This wrapper is the
-  #    belt-and-braces version: it keeps working if that patch is absent, and
-  #    costs nothing if it isn't.)
-  #
-  # Both hunks use --replace-fail, so if a future spotdl bump upstreams either
-  # fix the build fails loudly and this file can be deleted rather than
+  # The substitutions use --replace-fail, so if a future spotdl bump upstreams
+  # these fixes the build fails loudly and this file can be deleted rather than
   # silently patching nothing.
   spotdl' = pkgs.spotdl.overrideAttrs (old: {
     postPatch = (old.postPatch or "") + ''
