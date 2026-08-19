@@ -2,22 +2,6 @@
   pkgs,
   ...
 }:
-let
-  mprisenceNativeHost =
-    pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
-      (
-        builtins.toJSON {
-          name = "mprisence.web.bridge";
-          description = "Publish each browser media tab as an MPRIS player";
-          path = "${pkgs.mprisence}/bin/mprisence";
-          type = "stdio";
-          allowed_origins = [
-            "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
-            "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
-          ];
-        }
-      );
-in
 {
   imports = [
     ./cloud
@@ -42,15 +26,7 @@ in
     home-manager.enable = true;
     zed-editor.enable = true;
     vscode.enable = true;
-
-    google-chrome = {
-      enable = true;
-      commandLineArgs = [
-        "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
-      ];
-      nativeMessagingHosts = [ mprisenceNativeHost ];
-    };
-
+    google-chrome.enable = true;
     firefox.enable = true;
   };
 
@@ -67,6 +43,7 @@ in
     qq
     wemeet
     whatsie
+    telegram-desktop
 
     # productivity / office
     obsidian
@@ -76,7 +53,6 @@ in
     stirling-pdf-desktop
 
     # media playback
-    mprisence
     lrcget
     vlc
     waylyrics

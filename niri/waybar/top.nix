@@ -111,6 +111,22 @@ let
         --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg}/bin/ffplay"
     '';
   };
+
+  # Treat each media tab as an MPRIS player.
+  mprisenceNativeHost =
+    pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
+      (
+        builtins.toJSON {
+          name = "mprisence.web.bridge";
+          description = "Publish each browser media tab as an MPRIS player";
+          path = "${pkgs.mprisence}/bin/mprisence";
+          type = "stdio";
+          allowed_origins = [
+            "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
+            "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
+          ];
+        }
+      );
 in
 {
   homeConfig = {
@@ -120,7 +136,14 @@ in
       rofiClipboard
       rofiNetworkManager
       rofiAudio
+      pkgs.mprisence
     ];
+    programs.google-chrome = {
+      commandLineArgs = [
+        "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
+      ];
+      nativeMessagingHosts = [ mprisenceNativeHost ];
+    };
   };
 
   modules = {
