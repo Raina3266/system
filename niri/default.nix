@@ -1,6 +1,7 @@
 {
   pkgs,
   config,
+  lib,
   ...
 }:
 let
@@ -22,6 +23,21 @@ let
     [ -z "$target" ] && target=$(echo "$players" | head -n1)
     exec ${pkgs.playerctl}/bin/playerctl -p "$target" "$cmd"
   '';
+
+  # Shared by niri's environment block and environment.d below, so Qt apps
+  # are themed however they get started.
+  qtEnvironment =
+    let
+      inherit (config.home) profileDirectory;
+      qtPluginPath = qt: "${profileDirectory}/${qt.qtbase.qtPluginPrefix}";
+      qtQmlPath = qt: "${profileDirectory}/${qt.qtbase.qtQmlPrefix}";
+    in
+    {
+      QT_QPA_PLATFORMTHEME = "kde";
+      QT_STYLE_OVERRIDE = "breeze";
+      QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
+      QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
+    };
 in
 {
   imports = [
@@ -29,22 +45,21 @@ in
     ./rofi
   ];
 
-  xdg.configFile."niri/config.kdl".text =
-    let
-      inherit (config.home) profileDirectory;
-      qtPluginPath = qt: "${profileDirectory}/${qt.qtbase.qtPluginPrefix}";
-      qtQmlPath = qt: "${profileDirectory}/${qt.qtbase.qtQmlPrefix}";
-    in
-    ''
-      environment {
-        QT_QPA_PLATFORMTHEME "kde"
-        QT_STYLE_OVERRIDE "breeze"
-        QT_PLUGIN_PATH "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}"
-        QML2_IMPORT_PATH "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}"
-      }
+  xdg.configFile."niri/config.kdl".text = ''
+    environment {
+    ${lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (name: value: "  ${name} \"${value}\"") qtEnvironment
+    )}
+    }
 
-      ${builtins.readFile ./config.kdl}
-    '';
+    ${builtins.readFile ./config.kdl}
+  '';
+
+  # The block above only reaches niri's own children: niri imports just
+  # WAYLAND_DISPLAY, DISPLAY, XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE and
+  # NIRI_SOCKET into systemd and D-Bus. "Open folder" in Chrome or Zed D-Bus
+  # activates Dolphin, which would otherwise start without the KDE theme.
+  systemd.user.sessionVariables = qtEnvironment;
 
   programs'.waybar.enable = true;
 
