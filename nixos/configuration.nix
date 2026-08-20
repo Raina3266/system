@@ -61,8 +61,10 @@
     };
 
     # Boot
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.efi.canTouchEfiVariables = true;
+    boot.loader = {
+      systemd-boot.enable = true;
+      efi.canTouchEfiVariables = true;
+    };
     boot.kernelPackages = pkgs.linuxPackages_latest;
     boot.kernel.sysctl = {
       "fs.inotify.max_user_watches" = 524288;
@@ -85,10 +87,12 @@
 
     # Networking
     networking.hostName = "raina";
-    networking.networkmanager.enable = true;
-    networking.networkmanager.dns = "none";
+    networking.networkmanager = {
+      enable = true;
+      dns = "none";
+      wifi.backend = "iwd";
+    };
     networking.wireless.iwd.enable = true;
-    networking.networkmanager.wifi.backend = "iwd";
     networking.nameservers = [
       "8.8.8.8"
       "100.100.100.100"

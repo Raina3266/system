@@ -23,10 +23,12 @@
   ];
 
   # ── Desktop environment ───────────────────────────────────────────────
-  services.xserver.enable = true;
-  services.xserver.xkb = {
-    layout = "gb";
-    variant = "";
+  services.xserver = {
+    enable = true;
+    xkb = {
+      layout = "gb";
+      variant = "";
+    };
   };
   services.libinput.enable = true;
 
@@ -179,19 +181,21 @@
   # ── Database ──────────────────────────────────────────────────────────
   # Local Unix-socket access for the owner, loopback TCP for apps that
   # connect via 127.0.0.1. No access from other hosts.
-  services.postgresql.enable = true;
-  services.postgresql.authentication = pkgs.lib.mkForce ''
-    local all all                      peer
-    host  all all 127.0.0.1/32         scram-sha-256
-    host  all all ::1/128              scram-sha-256
-  '';
-  services.postgresql.ensureDatabases = [ "raina" ];
-  services.postgresql.ensureUsers = [
-    {
-      name = "raina";
-      ensureDBOwnership = true;
-    }
-  ];
+  services.postgresql = {
+    enable = true;
+    authentication = pkgs.lib.mkForce ''
+      local all all                      peer
+      host  all all 127.0.0.1/32         scram-sha-256
+      host  all all ::1/128              scram-sha-256
+    '';
+    ensureDatabases = [ "raina" ];
+    ensureUsers = [
+      {
+        name = "raina";
+        ensureDBOwnership = true;
+      }
+    ];
+  };
 
   # ── Misc ──────────────────────────────────────────────────────────────
   programs.nix-ld.enable = true;
