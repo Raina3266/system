@@ -144,18 +144,12 @@ in
   };
 
   # GTK stylesheets:
-  #   gtk-base.css - shared colors/widgets (imported by both versions)
-  #   gtk3.css     - GTK3 apps (file managers, pavucontrol)
-  #   gtk4.css     - GTK4 apps (portal file chooser, image viewer)
-  # gtk-base.css symlinked to both dirs for @import resolution.
+  #   gtk3.css - GTK3 apps (file managers, pavucontrol)
+  #   gtk4.css - GTK4 apps (portal file chooser, image viewer)
   xdg.configFile."gtk-3.0/gtk.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk3.css";
-  xdg.configFile."gtk-3.0/gtk-base.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
   xdg.configFile."gtk-4.0/gtk.css".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk4.css";
-  xdg.configFile."gtk-4.0/gtk-base.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk-base.css";
   # Qt/KDE colours are not themed from this repo; they live in kdeglobals and
   # are managed with System Settings -> Colours.
 
