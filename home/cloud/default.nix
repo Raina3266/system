@@ -167,8 +167,6 @@ let
         };
         Install.WantedBy = [ "default.target" ];
       };
-        Install.WantedBy = [ "timers.target" ];
-      };
     };
 
   syncs = map mkBisync (import ./bisync.nix { inherit config; });
