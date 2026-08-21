@@ -273,9 +273,18 @@ in
       default = 1;
       description = "How often (seconds) to check whether an app is using the camera.";
     };
+
+    supervisor = mkOption {
+      type = types.package;
+      internal = true;
+      readOnly = true;
+      description = "Generated cropped-webcam supervisor script.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    services'.croppedWebcam.supervisor = startScript;
+
     # v4l2loopback provides the virtual /dev/video<videoNr> sink. exclusive_caps
     # is required so WebRTC apps (Chrome) accept it once a producer is attached.
     boot.extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
@@ -297,25 +306,6 @@ in
       # Friendly alias for the cropped virtual camera.
       SUBSYSTEM=="video4linux", ATTR{name}=="${cfg.cardLabel}", SYMLINK+="cam-cropped"
     '';
-
-    systemd.services.cropped-webcam = {
-      description = "Cropped virtual webcam supervisor (${cfg.source} -> ${outputNode})";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "systemd-udev-settle.service" ];
-
-      serviceConfig = {
-        ExecStart = startScript;
-        Restart = "always";
-        RestartSec = 2;
-
-        # Runs as root: detecting which app holds the loopback open requires
-        # reading other users' /proc/<pid>/fd entries.
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        NoNewPrivileges = true;
-      };
-    };
 
     # Handy for inspecting/tuning the cameras (v4l2-ctl --list-devices, etc.).
     environment.systemPackages = [ pkgs.v4l-utils ];

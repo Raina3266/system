@@ -6,7 +6,10 @@
 {
   home.packages = with pkgs; [
     kdePackages.dolphin
+    kdePackages.baloo
+    kdePackages.baloo-widgets
     kdePackages.breeze
+    kdePackages.kfilemetadata
     kdePackages.kio-fuse
     kdePackages.kompare
     kdePackages.plasma-integration

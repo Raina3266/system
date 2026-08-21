@@ -55,12 +55,6 @@ in
     ${builtins.readFile ./config.kdl}
   '';
 
-  # The block above only reaches niri's own children: niri imports just
-  # WAYLAND_DISPLAY, DISPLAY, XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE and
-  # NIRI_SOCKET into systemd and D-Bus. "Open folder" in Chrome or Zed D-Bus
-  # activates Dolphin, which would otherwise start without the KDE theme.
-  systemd.user.sessionVariables = qtEnvironment;
-
   programs'.waybar.enable = true;
 
   # Tools for niri binds and X11 app support
@@ -75,28 +69,6 @@ in
     snixembed # System tray bridge for Qt5-xcb apps
     mediactl
   ];
-
-  # Default Bluetooth pairing agent, used for pairings started from the *other*
-  # side (a phone or headset initiating the connection) so they never hang.
-  # Pairings started from rofi-audio use the agent rofi-audio registers on its
-  # own D-Bus connection instead: BlueZ prefers the caller's agent, which is
-  # what lets rofi-audio prompt for a PIN or passkey inside the menu.
-  systemd.user.services.bt-agent = {
-    Unit = {
-      Description = "Persistent Bluetooth pairing agent";
-      PartOf = [ "graphical-session.target" ];
-      After = [ "graphical-session.target" ];
-    };
-    Service = {
-      # DisplayYesNo capability required for SSP passkey devices (keyboards,
-      # earbuds, phones). Auto-answers "yes" to pairing requests.
-      ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=DisplayYesNo";
-      Restart = "on-failure";
-    };
-    Install = {
-      WantedBy = [ "graphical-session.target" ];
-    };
-  };
 
   # fcitx5 input methods: English (GB keyboard) and Chinese (Pinyin)
   xdg.configFile."fcitx5/profile".text = ''

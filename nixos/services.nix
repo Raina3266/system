@@ -4,7 +4,6 @@
 # media services, database, and odds-and-ends. Core system identity
 # (boot, networking, locale, hardware) lives in ./configuration.nix.
 {
-  lib,
   pkgs,
   ...
 }:
@@ -133,40 +132,6 @@
   services.immich = {
     enable = true;
     openFirewall = true;
-  };
-
-  # immich-server keeps Requires=postgresql.target, so Postgres is
-  # pulled in automatically when Immich starts.
-  #
-  # Grouped under a custom target so they can be started/stopped together:
-  #   sudo systemctl start media-stack.target
-  #   sudo systemctl stop media-stack.target
-  #   systemctl list-dependencies media-stack.target
-  systemd.targets.media-stack = {
-    description = "On-demand media services (Immich + Jellyfin)";
-    unitConfig.StopWhenUnneeded = true;
-  };
-
-  systemd.services.jellyfin = {
-    wantedBy = lib.mkForce [ ];
-    partOf = [ "media-stack.target" ];
-  };
-  systemd.services.immich-server = {
-    wantedBy = lib.mkForce [ ];
-    partOf = [ "media-stack.target" ];
-  };
-  systemd.services.immich-machine-learning = {
-    wantedBy = lib.mkForce [ ];
-    partOf = [ "media-stack.target" ];
-  };
-  systemd.services.redis-immich = {
-    wantedBy = lib.mkForce [ ];
-    partOf = [ "media-stack.target" ];
-  };
-  systemd.services.ensure-printers = {
-    wantedBy = lib.mkForce [ ];
-    restartIfChanged = false;
-    stopIfChanged = false;
   };
 
   services.sunshine = {

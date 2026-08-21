@@ -14,6 +14,7 @@
   imports = [
     inputs.home-manager.nixosModules.home-manager
     ./services.nix
+    ./systemd.nix
   ];
 
   config = {

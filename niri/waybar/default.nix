@@ -38,40 +38,11 @@ in
           jq
           playerctl
         ];
-
-        systemd.user.services.waybar = {
-          Unit = {
-            # Only run under niri (GNOME/Mutter lacks layer-shell support)
-            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
-          };
-          Service = {
-            Restart = lib.mkForce "on-failure";
-            RestartSec = 3;
-          };
-        };
-
-        systemd.user.services.waybar-ycal = {
-          Unit = {
-            Description = "waybar-ycal: Google Calendar and Tasks popup";
-            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
-            PartOf = [ "graphical-session.target" ];
-            After = [ "graphical-session.target" ];
-          };
-          Service = {
-            ExecStart = "${ycal.waybarYcal}/bin/waybar-ycal-popup";
-            Restart = lib.mkForce "on-failure";
-            RestartSec = 3;
-          };
-          Install = {
-            WantedBy = [ "graphical-session.target" ];
-          };
-        };
       }
 
       (lib.mkIf (osConfig != null) {
         programs.waybar = {
           enable = true;
-          systemd.enable = true;
 
           settings = {
             inherit topBar bottomBar;
