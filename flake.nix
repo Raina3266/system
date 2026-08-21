@@ -41,7 +41,6 @@
         modules = [
           ./nixos/configuration.nix
           ./nixos/hardware.nix
-          ./nixos/webcam-crop.nix
         ];
       };
 

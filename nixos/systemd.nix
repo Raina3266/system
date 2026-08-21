@@ -1,13 +1,12 @@
 # Central systemd configuration for both NixOS and Home Manager.
 {
   config,
+  croppedWebcam,
   lib,
   pkgs,
   ...
 }:
 let
-  webcam = config.services'.croppedWebcam;
-
   userSystemdModule =
     {
       config,
@@ -301,13 +300,12 @@ in
       restartIfChanged = false;
       stopIfChanged = false;
     };
-
-    cropped-webcam = lib.mkIf webcam.enable {
-      description = "Cropped virtual webcam supervisor (${webcam.source} -> /dev/video${toString webcam.videoNr})";
+    cropped-webcam = {
+      description = "Cropped virtual webcam supervisor (${croppedWebcam.source} -> /dev/video${toString croppedWebcam.videoNr})";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-udev-settle.service" ];
       serviceConfig = {
-        ExecStart = webcam.supervisor;
+        ExecStart = "${croppedWebcam.package}/bin/webcam-crop --source ${croppedWebcam.source} --output /dev/video${toString croppedWebcam.videoNr}";
         Restart = "always";
         RestartSec = 2;
         ProtectSystem = "strict";
