@@ -1,9 +1,9 @@
 # ~/GoogleDrive <-> the whole Drive, minus Obsidian + Music + Video + Trash
 # ~/Music <-> GoogleDrive:Music
 #
-# Newer wins on conflicts; the loser is kept with a .conflict suffix. Files that
-# lose a sync are soft-deleted into a local trash, purged after 30 days.
-# Remote-side overwrites fall back to Drive's own trash.
+# Newer wins on conflicts; the loser is kept with a .conflict suffix. Routine
+# overwrites and deletes do not create timestamped backup copies. Google Drive
+# deletions use Drive's native Trash.
 #
 # status:       systemctl --user status rclone-bisync-drive.service
 # force resync: rm -rf ~/.local/state/rclone-bisync-drive

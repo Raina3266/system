@@ -1,7 +1,6 @@
 # mkBisync generates every systemd unit needed to keep a local directory and an
-# rclone remote in sync: the bisync service and its 30-minute timer, a watcher
-# that pushes local edits within `debounce` seconds, and a trash-cleanup
-# service with its daily timer.
+# rclone remote in sync: the bisync service and its 30-minute timer, plus a
+# watcher that pushes local edits within `debounce` seconds.
 {
   config,
   pkgs,
@@ -23,16 +22,11 @@ let
       unit = "rclone-bisync-${name}";
       stateDir = "${config.xdg.stateHome}/${unit}";
 
-      # rclone requires each backup dir to be a non-overlapping path on the
-      # same remote as the side it backs up: --backup-dir1 mirrors Path1 (local).
-      # Remote-side overwrites fall back to Drive's own trash.
-      trashLocal = "${config.xdg.dataHome}/${unit}/trash";
-
       rclone = "${pkgs.rclone}/bin/rclone";
       mkdir = "${pkgs.coreutils}/bin/mkdir -p";
 
       flags = [
-        "--backup-dir1 '${trashLocal}'"
+        "--drive-use-trash"
       ]
       ++ map (p: "--exclude '${p}'") excludes;
 
@@ -69,8 +63,6 @@ let
         exec ${rclone} bisync '${localDir}' '${remote}' \
           --workdir '${stateDir}' \
           ${lib.concatStringsSep " \\\n  " flags} \
-          --suffix "-$(${pkgs.coreutils}/bin/date +%Y-%m-%dT%H%M%S)" \
-          --suffix-keep-extension \
           --conflict-resolve newer \
           --conflict-suffix conflict \
           --create-empty-src-dirs \
@@ -102,12 +94,6 @@ let
             while read -r -t ${toString debounce} _more; do :; done
             ${pkgs.systemd}/bin/systemctl --user start --no-block '${unit}.service'
           done
-      '';
-
-      cleanupScript = pkgs.writeShellScript "${unit}-cleanup.sh" ''
-        set -euo pipefail
-        ${pkgs.findutils}/bin/find '${trashLocal}' -mindepth 1 \( -type f -o -type l \) -mtime +30 -delete
-        ${pkgs.findutils}/bin/find '${trashLocal}' -mindepth 1 -type d -empty -delete
       '';
 
       # Nice/IOScheduling* are kept for the CPU side and for hosts using BFQ,
@@ -144,7 +130,6 @@ let
           ExecStartPre = [
             "${mkdir} '${localDir}'"
             "${mkdir} '${stateDir}'"
-            "${mkdir} '${trashLocal}'"
           ];
           ExecStart = "${syncScript}";
         };
@@ -181,25 +166,6 @@ let
           RestartSec = "30s";
         };
         Install.WantedBy = [ "default.target" ];
-      };
-
-      services."${unit}-cleanup" = {
-        Unit.Description = "Purge ${name} bisync local trash older than 30 days";
-        Service = baseService // {
-          TimeoutStartSec = "30m";
-          ExecStartPre = "${mkdir} '${trashLocal}'";
-          ExecStart = "${cleanupScript}";
-        };
-      };
-
-      timers."${unit}-cleanup" = {
-        Unit.Description = "Daily purge of ${name} bisync trash";
-        Timer = {
-          OnBootSec = "10min";
-          OnUnitActiveSec = "1d";
-          Persistent = true;
-        };
-        Install.WantedBy = [ "timers.target" ];
       };
     };
 
