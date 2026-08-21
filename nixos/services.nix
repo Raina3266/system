@@ -32,6 +32,14 @@ let
   };
 in
 {
+  # Make the packaged supervisor and device settings available to the
+  # centralized systemd module without rebuilding the package there.
+  _module.args.croppedWebcam = {
+    package = webcamCrop;
+    source = webcamSource;
+    videoNr = webcamVideoNr;
+  };
+
   # ── System packages ───────────────────────────────────────────────────
   environment.systemPackages = with pkgs; [
     vim
@@ -189,21 +197,6 @@ in
     # Friendly alias for the cropped virtual camera.
     SUBSYSTEM=="video4linux", ATTR{name}=="${webcamCardLabel}", SYMLINK+="cam-cropped"
   '';
-
-  systemd.services.cropped-webcam = {
-    description = "Cropped virtual webcam supervisor (${webcamSource} -> /dev/video${toString webcamVideoNr})";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "systemd-udev-settle.service" ];
-    serviceConfig = {
-      ExecStart = "${webcamCrop}/bin/webcam-crop --source ${webcamSource} --output /dev/video${toString webcamVideoNr}";
-      Restart = "always";
-      RestartSec = 2;
-      ProtectSystem = "strict";
-      ProtectHome = true;
-      PrivateTmp = true;
-      NoNewPrivileges = true;
-    };
-  };
 
   # ── Database ──────────────────────────────────────────────────────────
   # Local Unix-socket access for the owner, loopback TCP for apps that
