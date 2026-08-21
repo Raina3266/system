@@ -6,8 +6,6 @@
   ...
 }:
 let
-  webcam = config.services'.croppedWebcam;
-
   userSystemdModule =
     {
       config,
@@ -300,21 +298,6 @@ in
       wantedBy = lib.mkForce [ ];
       restartIfChanged = false;
       stopIfChanged = false;
-    };
-
-    cropped-webcam = lib.mkIf webcam.enable {
-      description = "Cropped virtual webcam supervisor (${webcam.source} -> /dev/video${toString webcam.videoNr})";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "systemd-udev-settle.service" ];
-      serviceConfig = {
-        ExecStart = webcam.supervisor;
-        Restart = "always";
-        RestartSec = 2;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        NoNewPrivileges = true;
-      };
     };
   };
 }

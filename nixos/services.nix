@@ -4,9 +4,33 @@
 # media services, database, and odds-and-ends. Core system identity
 # (boot, networking, locale, hardware) lives in ./configuration.nix.
 {
+  config,
   pkgs,
   ...
 }:
+let
+  webcamSource = "/dev/cam-raw";
+  webcamVideoNr = 10;
+  webcamCardLabel = "Cropped Webcam";
+
+  webcamCrop = pkgs.rustPlatform.buildRustPackage {
+    pname = "webcam-crop";
+    version = "0.1.0";
+    src = ../scripts/webcam-crop;
+    cargoLock.lockFile = ../scripts/webcam-crop/Cargo.lock;
+
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+
+    postInstall = ''
+      wrapProgram "$out/bin/webcam-crop" \
+        --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg}/bin/ffmpeg" \
+        --set WEBCAM_CROP_FUSER "${pkgs.psmisc}/bin/fuser" \
+        --set WEBCAM_CROP_INOTIFYWAIT "${pkgs.inotify-tools}/bin/inotifywait" \
+        --set WEBCAM_CROP_V4L2_CTL "${pkgs.v4l-utils}/bin/v4l2-ctl" \
+        --set WEBCAM_CROP_V4L2LOOPBACK_CTL "${config.boot.kernelPackages.v4l2loopback.bin}/bin/v4l2loopback-ctl"
+    '';
+  };
+in
 {
   # ── System packages ───────────────────────────────────────────────────
   environment.systemPackages = with pkgs; [
@@ -16,6 +40,8 @@
     ffmpegthumbnailer
     gdk-pixbuf
     system-config-printer
+    v4l-utils
+    webcamCrop
     gnomeExtensions.simple-timer
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
@@ -141,6 +167,44 @@
     capSysAdmin = true;
   };
 
+  # The real camera has no zoom control, so expose only a centre-cropped
+  # v4l2loopback camera to desktop applications. The Rust supervisor keeps a
+  # placeholder producer attached while idle and powers on the real camera
+  # only while an application is consuming the virtual device.
+  boot.extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
+  boot.kernelModules = [ "v4l2loopback" ];
+  boot.extraModprobeConfig = ''
+    options v4l2loopback devices=1 video_nr=${toString webcamVideoNr} card_label="${webcamCardLabel}" exclusive_caps=1 max_buffers=2
+  '';
+
+  services.udev.extraRules = ''
+    # Stable path to the real RGB sensor for the cropper service.
+    SUBSYSTEM=="video4linux", ATTR{name}=="Integrated Camera: Integrated C", ATTR{index}=="0", SYMLINK+="cam-raw"
+
+    # Keep the physical RGB, IR, and metadata nodes away from user apps. The
+    # service runs as root; raina is not in the video group.
+    SUBSYSTEM=="video4linux", ATTR{name}=="Integrated Camera: Integrated C", TAG-="uaccess"
+    SUBSYSTEM=="video4linux", ATTR{name}=="Integrated Camera: Integrated I", TAG-="uaccess"
+
+    # Friendly alias for the cropped virtual camera.
+    SUBSYSTEM=="video4linux", ATTR{name}=="${webcamCardLabel}", SYMLINK+="cam-cropped"
+  '';
+
+  systemd.services.cropped-webcam = {
+    description = "Cropped virtual webcam supervisor (${webcamSource} -> /dev/video${toString webcamVideoNr})";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-udev-settle.service" ];
+    serviceConfig = {
+      ExecStart = "${webcamCrop}/bin/webcam-crop --source ${webcamSource} --output /dev/video${toString webcamVideoNr}";
+      Restart = "always";
+      RestartSec = 2;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      NoNewPrivileges = true;
+    };
+  };
+
   # ── Database ──────────────────────────────────────────────────────────
   # Local Unix-socket access for the owner, loopback TCP for apps that
   # connect via 127.0.0.1. No access from other hosts.
@@ -160,7 +224,4 @@
 
   # ── Misc ──────────────────────────────────────────────────────────────
   programs.nix-ld.enable = true;
-
-  # Cropped virtual webcam (see ./webcam-crop.nix).
-  services'.croppedWebcam.enable = true;
 }
