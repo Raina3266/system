@@ -39,8 +39,7 @@
           inherit inputs;
         };
         modules = [
-          ./nixos/configuration.nix
-          ./nixos/hardware.nix
+          ./nixos
         ];
       };
 

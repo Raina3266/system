@@ -13,6 +13,7 @@
 {
   imports = [
     inputs.home-manager.nixosModules.home-manager
+    ./hardware.nix
     ./services.nix
     ./systemd.nix
   ];

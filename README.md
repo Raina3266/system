@@ -1,12 +1,14 @@
 # Custom Scripts
 
-This repository contains five Rust utilities used by the desktop configuration:
+This repository contains seven Rust utilities used by the desktop configuration:
 
 - `media-control` — a dynamic MPRIS controller for Rofi and Waybar
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a merged Bluetooth, output, and input controller with a Rofi interface
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
+- `rofi-network-manager` — Wi-Fi and Ethernet controls with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
+- `webcam-crop` — an on-demand virtual webcam cropper and supervisor
 
 ## rofi-audio
 
@@ -147,7 +149,7 @@ switch; `bluetooth-power on` and `off` are available for bindings of your own.
 | `ROFI_AUDIO_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/rofi-audio.rasi`) |
 | `ROFI_AUDIO_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `10`) |
 
-Styling lives in `niri/themes/rofi-audio.rasi`, symlinked to
+Styling lives in `themes/rofi-audio.rasi`, symlinked to
 `~/.config/rofi/rofi-audio.rasi` so edits apply without a rebuild.
 
 ---
@@ -244,7 +246,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
 Panel placement, size, and GTK styling all come from
-`niri/themes/preview-panel.css`. Home Manager links that file to
+`themes/preview-panel.css`. Home Manager links that file to
 `~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
 rebuilding. The `preview-panel-settings` comment at the top controls `width`,
 `height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal

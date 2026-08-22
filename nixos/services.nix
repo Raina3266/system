@@ -2,7 +2,7 @@
 #
 # Grouped by concern: desktop, sound, desktop daemons, network services,
 # media services, database, and odds-and-ends. Core system identity
-# (boot, networking, locale, hardware) lives in ./configuration.nix.
+# (boot, networking, locale, hardware) lives in ./default.nix.
 {
   config,
   pkgs,
@@ -12,24 +12,11 @@ let
   webcamSource = "/dev/cam-raw";
   webcamVideoNr = 10;
   webcamCardLabel = "Cropped Webcam";
-
-  webcamCrop = pkgs.rustPlatform.buildRustPackage {
-    pname = "webcam-crop";
-    version = "0.1.0";
-    src = ../scripts/webcam-crop;
-    cargoLock.lockFile = ../scripts/webcam-crop/Cargo.lock;
-
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-
-    postInstall = ''
-      wrapProgram "$out/bin/webcam-crop" \
-        --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg}/bin/ffmpeg" \
-        --set WEBCAM_CROP_FUSER "${pkgs.psmisc}/bin/fuser" \
-        --set WEBCAM_CROP_INOTIFYWAIT "${pkgs.inotify-tools}/bin/inotifywait" \
-        --set WEBCAM_CROP_V4L2_CTL "${pkgs.v4l-utils}/bin/v4l2-ctl" \
-        --set WEBCAM_CROP_V4L2LOOPBACK_CTL "${config.boot.kernelPackages.v4l2loopback.bin}/bin/v4l2loopback-ctl"
-    '';
+  packages = import ../packages.nix {
+    inherit pkgs;
+    kernelPackages = config.boot.kernelPackages;
   };
+  webcamCrop = packages.webcamCrop;
 in
 {
   # Make the packaged supervisor and device settings available to the

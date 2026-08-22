@@ -1,13 +1,8 @@
 [package]
 name = "preview-panel"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 gtk = { package = "gtk4", version = "=0.11.4", features = ["v4_6"] }
 gtk4-layer-shell = "=0.8.0"
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true

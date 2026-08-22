@@ -5,6 +5,8 @@
   ...
 }:
 let
+  themeRoot = "${config.home.homeDirectory}/System/themes";
+
   # Smart playerctl wrapper: targets the currently playing MPRIS player,
   # or falls back to the most recently active. Used by media key binds.
   mediactl = pkgs.writeShellScriptBin "mediactl" ''
@@ -91,7 +93,7 @@ in
 
   # fcitx5 theme: cyberpunk color palette matching waybar/rofi
   xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/fcitx5.conf";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/fcitx5.conf";
 
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False
@@ -103,7 +105,7 @@ in
   '';
 
   # GTK theme: cyberpunk palette for all GTK apps (file dialogs, etc.)
-  # Matches waybar/rofi/fcitx5 themes in ./themes/
+  # Matches the waybar/rofi/fcitx5 themes in the repository's themes/ folder.
   gtk = {
     enable = true;
 
@@ -119,9 +121,9 @@ in
   #   gtk3.css - GTK3 apps (file managers, pavucontrol)
   #   gtk4.css - GTK4 apps (portal file chooser, image viewer)
   xdg.configFile."gtk-3.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk3.css";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/gtk3.css";
   xdg.configFile."gtk-4.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/gtk4.css";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/gtk4.css";
   # Qt/KDE colours are not themed from this repo; they live in kdeglobals and
   # are managed with System Settings -> Colours.
 
@@ -133,4 +135,6 @@ in
     gtk.enable = true;
     x11.enable = true;
   };
+
+  systemd.user.sessionVariables = qtEnvironment;
 }

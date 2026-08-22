@@ -2,45 +2,10 @@
 # https://github.com/adelmonte/niri_window_buttons
 # Taskbar (current workspace only): click=focus, middle=close, right=menu
 # Drag to reorder, shift-click for multi-select
-{ pkgs }:
-let
-  niri-window-buttons = pkgs.rustPlatform.buildRustPackage rec {
-    pname = "niri_window_buttons";
-    version = "0.4.3";
-
-    src = pkgs.fetchFromGitHub {
-      owner = "adelmonte";
-      repo = "niri_window_buttons";
-      tag = "v${version}";
-      hash = "sha256-CUeeDe5DY7IRf6pCl9g7q5rHNs4ca4mAg0eKgZ0ErlY=";
-    };
-
-    cargoHash = "sha256-STrFRNLgytpLilx0o/StCAnaO1dyWDUQDoTzb7PA2hc=";
-
-    nativeBuildInputs = [ pkgs.pkg-config ];
-    buildInputs = with pkgs; [
-      glib
-      gtk3
-      cairo
-      pango
-      gdk-pixbuf
-      atk
-      libpulseaudio
-    ];
-
-    doCheck = false;
-
-    meta = {
-      description = "Waybar CFFI module for traditional window buttons in the niri compositor";
-      homepage = "https://github.com/adelmonte/niri_window_buttons";
-      license = pkgs.lib.licenses.gpl3Plus;
-      platforms = pkgs.lib.platforms.linux;
-    };
-  };
-in
+{ packages }:
 {
   "cffi/niri_window_buttons" = {
-    module_path = "${niri-window-buttons}/lib/libniri_window_buttons.so";
+    module_path = "${packages.niriWindowButtons}/lib/libniri_window_buttons.so";
 
     only_current_workspace = true;
     show_window_titles = true;

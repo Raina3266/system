@@ -1,5 +1,9 @@
-# Waybar layouts
-{ pkgs, top }:
+# Waybar layouts.
+{
+  pkgs,
+  modules,
+  taskbar,
+}:
 let
   common = {
     layer = "top";
@@ -31,7 +35,7 @@ let
         "custom/network"
       ];
     }
-    // top.modules;
+    // modules;
 
   # ------------ BottomBar -------------
 
@@ -76,7 +80,7 @@ let
       "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
       "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
     }
-    // (import ./bottom.nix { inherit pkgs; });
+    // taskbar;
 in
 {
   inherit topBar bottomBar;

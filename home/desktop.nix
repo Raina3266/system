@@ -168,4 +168,32 @@
       "audio/x-wavpack" = [ "vlc.desktop" ];
     };
   };
+
+  systemd.user.services = {
+    bt-agent = {
+      Unit = {
+        Description = "Persistent Bluetooth pairing agent";
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=DisplayYesNo";
+        Restart = "on-failure";
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+
+    kde-baloo = {
+      Unit = {
+        Description = "Baloo File Indexer";
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${pkgs.kdePackages.baloo}/libexec/kf6/baloo_file";
+        Restart = "on-failure";
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+  };
 }

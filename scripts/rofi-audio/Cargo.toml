@@ -1,7 +1,7 @@
 [package]
 name = "rofi-audio"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 # BlueZ over D-Bus: device listing, scan, pair (with an authorization agent for
@@ -15,8 +15,3 @@ pulsectl-rs = "=0.3.2"
 libpulse-binding = "=2.30.1"
 futures-util = { version = "=0.3.34", default-features = false }
 tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true

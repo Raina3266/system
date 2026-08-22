@@ -1,13 +1,8 @@
 [package]
 name = "rofi-network-manager"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 nmrs = "=3.4.2"
 tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread"] }
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true

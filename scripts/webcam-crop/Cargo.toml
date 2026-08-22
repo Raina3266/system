@@ -1,12 +1,8 @@
 [package]
 name = "webcam-crop"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [[bin]]
 name = "webcam-crop"
 path = "src/main.rs"
-
-[profile.release]
-lto = "thin"
-strip = true

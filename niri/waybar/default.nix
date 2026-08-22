@@ -1,40 +1,46 @@
 # Waybar: top and bottom status bars with cyberpunk theme.
-# Bar layouts: layout.nix (top: clock/hardware/media/utilities; bottom: taskbar)
-# Local Rust packages: media, clipboard, network, and timer in top.nix
 {
-  pkgs,
-  lib,
   config,
+  lib,
   osConfig,
+  pkgs,
   ...
 }:
 let
   cfg = config.programs'.waybar;
-  ycal = import ./calender.nix { inherit pkgs; };
-  top = import ./top.nix { inherit pkgs ycal; };
-  layout = import ./layout.nix { inherit pkgs top; };
+  packages = import ../../packages.nix { inherit pkgs; };
 
-  # Bar outputs: non-auxiliary displays from osConfig.services'.desktop.displays
-  barOutputs = lib.optionalAttrs ((osConfig.services'.desktop.displays or [ ]) != [ ]) {
-    output = map (d: d.name) (lib.filter (d: !d.auxiliary) osConfig.services'.desktop.displays);
+  systemModules = import ./system.nix { inherit pkgs; };
+  media = import ./media.nix { inherit pkgs packages; };
+  utilities = import ./utilities.nix { inherit pkgs packages; };
+  calendar = import ./calendar.nix { inherit lib packages; };
+  taskbar = import ./taskbar.nix { inherit packages; };
+
+  modules = systemModules // media.modules // utilities.modules // calendar.modules;
+  layout = import ./layout.nix {
+    inherit pkgs modules taskbar;
   };
 
+  displays = if osConfig == null then [ ] else osConfig.services'.desktop.displays or [ ];
+  barOutputs = lib.optionalAttrs (displays != [ ]) {
+    output = map (display: display.name) (lib.filter (display: !display.auxiliary) displays);
+  };
   topBar = layout.topBar // barOutputs;
   bottomBar = layout.bottomBar // barOutputs;
+  themeRoot = "${config.home.homeDirectory}/System/themes";
 in
 {
-  options.programs'.waybar = {
-    enable = lib.mkEnableOption "waybar";
-  };
+  options.programs'.waybar.enable = lib.mkEnableOption "waybar";
 
   config = lib.mkIf (pkgs.stdenv.hostPlatform.isLinux && cfg.enable) (
     lib.mkMerge [
-      top.homeConfig
+      media.homeConfig
+      utilities.homeConfig
+      calendar.homeConfig
 
       {
         home.packages = with pkgs; [
           waybar-lyric
-          ycal.waybarYcal
           jq
           playerctl
         ];
@@ -43,15 +49,22 @@ in
       (lib.mkIf (osConfig != null) {
         programs.waybar = {
           enable = true;
-
+          systemd.enable = true;
           settings = {
             inherit topBar bottomBar;
           };
         };
 
-        # Style is symlinked directly to the repo's waybar.css for live editing
+        systemd.user.services.waybar = {
+          Unit.ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+          Service = {
+            Restart = lib.mkForce "on-failure";
+            RestartSec = 3;
+          };
+        };
+
         xdg.configFile."waybar/style.css".source =
-          config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/waybar.css";
+          config.lib.file.mkOutOfStoreSymlink "${themeRoot}/waybar.css";
       })
     ]
   );

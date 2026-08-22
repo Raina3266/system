@@ -1,18 +1,22 @@
 # Yazi file manager.
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 {
   programs.yazi = {
     enable = true;
     enableFishIntegration = true;
 
-    initLua = ./main.lua;
+    initLua = ./init.lua;
     settings = import ./settings.nix;
-    theme = import ./theme.nix;
     keymap = import ./keymap.nix;
 
     # Linked into $XDG_CONFIG_HOME/yazi/plugins/<name>.yazi. Taken from the
     # yaziPlugins bundle so versions always match the yazi package.
-    # Anything used from main.lua, keymap.nix or settings.nix must be listed here.
+    # Anything used from init.lua, keymap.nix or settings.nix must be listed here.
     plugins = lib.getAttrs [
       # Previewers
       "mime-ext" # fast mime detection by extension
@@ -83,4 +87,10 @@
       udisks # mount plugin (udisksctl)
     ];
   };
+
+  # Keep the native Yazi theme outside the Nix store. Changes to the checked
+  # out file are picked up by the next Yazi process without rebuilding Home
+  # Manager.
+  xdg.configFile."yazi/theme.toml".source =
+    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/System/themes/yazi.toml";
 }

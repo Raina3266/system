@@ -9,11 +9,8 @@
     ./shell
     ./yazi
     ./desktop.nix
-    ./thunderbird.nix
     ./ocr.nix
     ./office.nix
-    ./toolchains.nix
-
   ];
 
   home = {

@@ -11,7 +11,7 @@ use crate::{AppError, AppResult};
 /// property caps it, so anything longer silently turns the status row into two
 /// lines and shrinks the list below it. 375px window minus 2x(5px margin + 1px
 /// border + 12px padding) leaves 339px, which holds 32 cells of JetBrains Mono
-/// at 13pt/96dpi. Keep in sync with niri/themes/rofi-network.rasi.
+/// at 13pt/96dpi. Keep in sync with themes/rofi-network.rasi.
 pub const MESSAGE_COLUMNS: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

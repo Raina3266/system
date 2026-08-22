@@ -2,6 +2,8 @@
 #
 { pkgs, config, ... }:
 let
+  themeRoot = "${config.home.homeDirectory}/System/themes";
+
   # Wrapped so the .thumbnailer's Exec line is a single absolute path, with
   # pdftoppm resolved from the closure rather than looked up on the consumer's
   # PATH (tumblerd and rofi's fetcher do not inherit the user's environment).
@@ -46,15 +48,15 @@ in
   xdg.configFile."rofi/config.rasi".source =
     config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/rofi/config.rasi";
   xdg.configFile."rofi/rofi-finder.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-finder.rasi";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/rofi-finder.rasi";
   xdg.configFile."rofi/media-control.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/media-control.rasi";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/media-control.rasi";
   xdg.configFile."rofi/rofi-audio.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-audio.rasi";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/rofi-audio.rasi";
   xdg.configFile."rofi/rofi-clipboard.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-clipboard.rasi";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/rofi-clipboard.rasi";
   xdg.configFile."rofi/rofi-network.rasi".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/rofi-network.rasi";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/rofi-network.rasi";
   xdg.configFile."preview-panel/preview-panel.css".source =
-    config.lib.file.mkOutOfStoreSymlink "/home/raina/System/niri/themes/preview-panel.css";
+    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/preview-panel.css";
 }
