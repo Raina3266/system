@@ -15,7 +15,7 @@ let
           "--package"
           pname
         ];
-        cargoCheckFlags = [
+        cargoTestFlags = [
           "--package"
           pname
         ];
