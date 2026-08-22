@@ -94,6 +94,9 @@ in
     extraPortals = with pkgs; [ xdg-desktop-portal-gtk ];
   };
 
+  # ── Network services ──────────────────────────────────────────────────
+  services.openssh.enable = true;
+
   # ── Sound (PipeWire) ──────────────────────────────────────────────────
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
@@ -114,7 +117,6 @@ in
   services.udev.enable = true;
 
   # ── Printing services ──────────────────────────────────────────────────
-
   services.printing = {
     enable = true;
     drivers = with pkgs; [
@@ -132,14 +134,6 @@ in
     sane-airscan
   ];
   services.ipp-usb.enable = true;
-
-  # ── Network services ──────────────────────────────────────────────────
-  services.openssh.enable = true;
-
-  programs.kdeconnect = {
-    enable = true;
-    package = pkgs.gnomeExtensions.gsconnect;
-  };
 
   # ── Media services ────────────────────────────────────────────────────
   # Installed and configured but NOT started at boot

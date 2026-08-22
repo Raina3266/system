@@ -129,6 +129,9 @@
       LC_TIME = "en_GB.UTF-8";
     };
 
+    # Initrd/recovery console keymap (used for the LUKS passphrase prompt).
+    console.keyMap = "uk";
+
     # Input method (CJK): Chinese (pinyin), Japanese (mozc), Korean (hangul).
     i18n.inputMethod = {
       enable = true;

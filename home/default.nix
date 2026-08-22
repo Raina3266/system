@@ -4,10 +4,10 @@
 }:
 {
   imports = [
-    ./cloud.nix
     ../niri
     ./shell
     ./yazi
+    ./cloud.nix
     ./desktop.nix
     ./ocr.nix
     ./office.nix
