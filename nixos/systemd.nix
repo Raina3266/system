@@ -1,9 +1,7 @@
 # Central systemd configuration for both NixOS and Home Manager.
 {
-  config,
   croppedWebcam,
   lib,
-  pkgs,
   ...
 }:
 let

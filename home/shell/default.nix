@@ -16,6 +16,9 @@
     programs.starship.enable = true;
     programs.bash.enable = true;
 
+    programs.zoxide.enable = true;
+    programs.zoxide.enableFishIntegration = true;
+
     programs.direnv = {
       enable = true;
       enableBashIntegration = true;
