@@ -1,4 +1,5 @@
-# User rclone synchronization and mounts.
+# Cloud sync and mounts: rclone bisync for GoogleDrive / Music / Onedrive
+# plus an on-demand rclone mount of GoogleDrive:Video at ~/Videos.
 {
   config,
   lib,
@@ -169,6 +170,11 @@ let
   fusermount = "/run/wrappers/bin/fusermount3";
 in
 {
+  home.packages = with pkgs; [
+    fuse3
+    rclone
+  ];
+
   systemd.user = {
     services = lib.mkMerge (
       [

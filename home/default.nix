@@ -4,7 +4,7 @@
 }:
 {
   imports = [
-    ./cloud
+    ./cloud.nix
     ../niri
     ./shell
     ./yazi

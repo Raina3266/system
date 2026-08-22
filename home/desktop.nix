@@ -6,6 +6,7 @@
 {
   home.packages = with pkgs; [
     kdePackages.dolphin
+    kdePackages.ark
     kdePackages.baloo
     kdePackages.baloo-widgets
     kdePackages.breeze
