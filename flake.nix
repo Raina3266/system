@@ -1,13 +1,4 @@
 {
-  nixConfig = {
-    extra-substituters = [
-      "https://zed.cachix.org"
-    ];
-    extra-trusted-public-keys = [
-      "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
-    ];
-  };
-
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixGL.url = "github:nix-community/nixGL";
@@ -19,8 +10,6 @@
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    zed.url = "github:zed-industries/zed/nightly";
   };
 
   outputs =
