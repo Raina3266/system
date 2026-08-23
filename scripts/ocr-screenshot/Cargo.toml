@@ -1,0 +1,8 @@
+[package]
+name = "ocr-screenshot"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "ocr-screenshot"
+path = "src/main.rs"

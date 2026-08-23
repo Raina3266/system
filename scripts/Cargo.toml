@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "media-control",
+  "ocr-screenshot",
   "preview-panel",
   "rofi-audio",
   "rofi-clipboard",

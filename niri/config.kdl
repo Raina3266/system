@@ -280,7 +280,7 @@ binds {
     Print       { screenshot; }
     Ctrl+Print  { screenshot-screen; }
     Alt+Print   { screenshot-window; }
-    Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot.sh"; }
+    Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot"; }
 
     // Clipboard history via rofi
     Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn-sh "rofi-clipboard"; }
