@@ -10,15 +10,25 @@
   inputs,
   ...
 }:
+let
+  kernelPackages = pkgs.linuxPackages_latest;
+
+  # Built once here and handed to the NixOS modules (_module.args) and to the
+  # Home Manager modules (extraSpecialArgs), so the derivations in
+  # ../packages.nix are instantiated a single time instead of once per
+  # importing module.
+  repoPackages = import ../packages.nix { inherit pkgs kernelPackages; };
+in
 {
   imports = [
     inputs.home-manager.nixosModules.home-manager
     ./hardware.nix
     ./services.nix
-    ./systemd.nix
   ];
 
   config = {
+    _module.args.repoPackages = repoPackages;
+
     nixpkgs.config.allowUnfree = true;
     nixpkgs.overlays = [
       inputs.nixGL.overlay
@@ -56,14 +66,14 @@
       useGlobalPkgs = true;
       users.raina = import ../home;
       extraSpecialArgs = {
-        inherit inputs;
+        inherit inputs repoPackages;
       };
     };
 
     # Boot
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = true;
-    boot.kernelPackages = pkgs.linuxPackages_latest;
+    boot.kernelPackages = kernelPackages;
     boot.kernel.sysctl = {
       "fs.inotify.max_user_watches" = 524288;
       "fs.inotify.max_user_instances" = 512;

@@ -4,16 +4,25 @@
   lib,
   osConfig,
   pkgs,
+  repoPackages,
   ...
 }:
 let
   cfg = config.programs'.waybar;
-  packages = import ../../packages.nix { inherit pkgs; };
 
-  system = import ./system.nix { inherit pkgs packages; };
-  utilities = import ./utilities.nix { inherit pkgs packages; };
-  calendar = import ./calendar.nix { inherit lib packages; };
-  taskbar = import ./taskbar.nix { inherit packages; };
+  system = import ./system.nix {
+    inherit pkgs;
+    packages = repoPackages;
+  };
+  utilities = import ./utilities.nix {
+    inherit pkgs;
+    packages = repoPackages;
+  };
+  calendar = import ./calendar.nix {
+    inherit lib;
+    packages = repoPackages;
+  };
+  taskbar = import ./taskbar.nix { packages = repoPackages; };
 
   modules = system.modules // utilities.modules // calendar.modules;
   layout = import ./layout.nix {
@@ -26,7 +35,6 @@ let
   };
   topBar = layout.topBar // barOutputs;
   bottomBar = layout.bottomBar // barOutputs;
-  themeRoot = "${config.home.homeDirectory}/System/themes";
 in
 {
   options.programs'.waybar.enable = lib.mkEnableOption "waybar";
@@ -61,9 +69,6 @@ in
             RestartSec = 3;
           };
         };
-
-        xdg.configFile."waybar/style.css".source =
-          config.lib.file.mkOutOfStoreSymlink "${themeRoot}/waybar.css";
       })
     ]
   );

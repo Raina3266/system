@@ -11,6 +11,7 @@
     ./desktop.nix
     ./ocr.nix
     ./office.nix
+    ./theming.nix
   ];
 
   home = {

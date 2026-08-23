@@ -1,32 +1,24 @@
-# Desktop environment, system packages, and services.
+# Desktop environment, system packages, services, and the system units that
+# belong to them.
 #
 # Grouped by concern: desktop, sound, desktop daemons, network services,
-# media services, database, and odds-and-ends. Core system identity
+# media services, webcam, database, and odds-and-ends. Core system identity
 # (boot, networking, locale, hardware) lives in ./default.nix.
 {
   config,
+  lib,
   pkgs,
+  repoPackages,
   ...
 }:
 let
   webcamSource = "/dev/cam-raw";
   webcamVideoNr = 10;
   webcamCardLabel = "Cropped Webcam";
-  packages = import ../packages.nix {
-    inherit pkgs;
-    kernelPackages = config.boot.kernelPackages;
-  };
-  inherit (packages) webcamCrop;
+  webcamDevice = "/dev/video${toString webcamVideoNr}";
+  inherit (repoPackages) webcamCrop;
 in
 {
-  # Make the packaged supervisor and device settings available to the
-  # centralized systemd module without rebuilding the package there.
-  _module.args.croppedWebcam = {
-    package = webcamCrop;
-    source = webcamSource;
-    videoNr = webcamVideoNr;
-  };
-
   # ── System packages ───────────────────────────────────────────────────
   environment.systemPackages = with pkgs; [
     vim
@@ -156,6 +148,53 @@ in
     capSysAdmin = true;
   };
 
+  # Immich and Jellyfin are installed, but start together only on demand.
+  systemd.targets.media-stack = {
+    description = "On-demand media services (Immich + Jellyfin)";
+    unitConfig.StopWhenUnneeded = true;
+  };
+
+  # Unit overrides for the services configured above, plus the webcam
+  # supervisor whose device settings are defined in this file.
+  systemd.services = {
+    jellyfin = {
+      wantedBy = lib.mkForce [ ];
+      partOf = [ "media-stack.target" ];
+    };
+    immich-server = {
+      wantedBy = lib.mkForce [ ];
+      partOf = [ "media-stack.target" ];
+    };
+    immich-machine-learning = {
+      wantedBy = lib.mkForce [ ];
+      partOf = [ "media-stack.target" ];
+    };
+    redis-immich = {
+      wantedBy = lib.mkForce [ ];
+      partOf = [ "media-stack.target" ];
+    };
+    ensure-printers = {
+      wantedBy = lib.mkForce [ ];
+      restartIfChanged = false;
+      stopIfChanged = false;
+    };
+
+    cropped-webcam = {
+      description = "Cropped virtual webcam supervisor (${webcamSource} -> ${webcamDevice})";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "systemd-udev-settle.service" ];
+      serviceConfig = {
+        ExecStart = "${webcamCrop}/bin/webcam-crop --source ${webcamSource} --output ${webcamDevice}";
+        Restart = "always";
+        RestartSec = 2;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
+    };
+  };
+
   # The real camera has no zoom control, so expose only a centre-cropped
   # v4l2loopback camera to desktop applications. The Rust supervisor keeps a
   # placeholder producer attached while idle and powers on the real camera
@@ -183,7 +222,7 @@ in
   # Local Unix-socket access for the owner, loopback TCP for apps that
   # connect via 127.0.0.1. No access from other hosts.
   services.postgresql.enable = true;
-  services.postgresql.authentication = pkgs.lib.mkForce ''
+  services.postgresql.authentication = lib.mkForce ''
     local all all                      peer
     host  all all 127.0.0.1/32         scram-sha-256
     host  all all ::1/128              scram-sha-256

@@ -5,8 +5,6 @@
   ...
 }:
 let
-  themeRoot = "${config.home.homeDirectory}/System/themes";
-
   # Smart playerctl wrapper: targets the currently playing MPRIS player,
   # or falls back to the most recently active. Used by media key binds.
   mediactl = pkgs.writeShellScriptBin "mediactl" ''
@@ -91,10 +89,8 @@ in
     0="Default"
   '';
 
-  # fcitx5 theme: cyberpunk color palette matching waybar/rofi
-  xdg.dataFile."fcitx5/themes/cyberpunk/theme.conf".source =
-    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/fcitx5.conf";
-
+  # fcitx5 theme: cyberpunk color palette matching waybar/rofi.
+  # The theme file itself is linked from ../home/theming.nix.
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False
     PerScreenDPI=True
@@ -117,13 +113,7 @@ in
     };
   };
 
-  # GTK stylesheets:
-  #   gtk3.css - GTK3 apps (file managers, pavucontrol)
-  #   gtk4.css - GTK4 apps (portal file chooser, image viewer)
-  xdg.configFile."gtk-3.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/gtk3.css";
-  xdg.configFile."gtk-4.0/gtk.css".source =
-    config.lib.file.mkOutOfStoreSymlink "${themeRoot}/gtk4.css";
+  # The GTK3/GTK4 stylesheets are linked from ../home/theming.nix.
   # Qt/KDE colours are not themed from this repo; they live in kdeglobals and
   # are managed with System Settings -> Colours.
 

@@ -1,10 +1,9 @@
 {
-  pkgs,
+  repoPackages,
   ...
 }:
 let
-  packages = import ../packages.nix { inherit pkgs; };
-  inherit (packages) ocrScreenshot;
+  inherit (repoPackages) ocrScreenshot;
 in
 {
   home.packages = [ ocrScreenshot ];

@@ -1,4 +1,34 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
+let
+  # Languages mergiraf has a tree-sitter grammar for; each gets a merge driver
+  # entry in ~/.gitattributes.
+  mergirafExtensions = [
+    "c"
+    "cc"
+    "cpp"
+    "cs"
+    "dart"
+    "go"
+    "h"
+    "hpp"
+    "htm"
+    "html"
+    "java"
+    "js"
+    "json"
+    "jsx"
+    "py"
+    "rs"
+    "sbt"
+    "scala"
+    "toml"
+    "ts"
+    "xhtml"
+    "xml"
+    "yaml"
+    "yml"
+  ];
+in
 {
   programs = {
     git = {
@@ -33,30 +63,7 @@
     mergiraf
   ];
 
-  home.file.".gitattributes".text = ''
-    *.java merge=mergiraf
-    *.rs merge=mergiraf
-    *.go merge=mergiraf
-    *.js merge=mergiraf
-    *.jsx merge=mergiraf
-    *.json merge=mergiraf
-    *.yml merge=mergiraf
-    *.yaml merge=mergiraf
-    *.toml merge=mergiraf
-    *.html merge=mergiraf
-    *.htm merge=mergiraf
-    *.xhtml merge=mergiraf
-    *.xml merge=mergiraf
-    *.c merge=mergiraf
-    *.cc merge=mergiraf
-    *.h merge=mergiraf
-    *.cpp merge=mergiraf
-    *.hpp merge=mergiraf
-    *.cs merge=mergiraf
-    *.dart merge=mergiraf
-    *.scala merge=mergiraf
-    *.sbt merge=mergiraf
-    *.ts merge=mergiraf
-    *.py merge=mergiraf
-  '';
+  home.file.".gitattributes".text = lib.concatMapStrings (
+    extension: "*.${extension} merge=mergiraf\n"
+  ) mergirafExtensions;
 }

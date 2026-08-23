@@ -1,6 +1,5 @@
 # Yazi file manager.
 {
-  config,
   lib,
   pkgs,
   ...
@@ -87,10 +86,4 @@
       udisks # mount plugin (udisksctl)
     ];
   };
-
-  # Keep the native Yazi theme outside the Nix store. Changes to the checked
-  # out file are picked up by the next Yazi process without rebuilding Home
-  # Manager.
-  xdg.configFile."yazi/theme.toml".source =
-    config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/System/themes/yazi.toml";
 }

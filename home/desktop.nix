@@ -1,8 +1,85 @@
 {
   pkgs,
   config,
+  lib,
   ...
 }:
+let
+  # Listed once and used twice: as the Zed desktop entry's MimeType= line and
+  # as the set of types that entry is the default handler for.
+  codeMimeTypes = [
+    "application/javascript"
+    "application/json"
+    "application/toml"
+    "application/x-yaml"
+    "application/xml"
+    "text/css"
+    "text/csv"
+    "text/javascript"
+    "text/markdown"
+    "text/plain"
+    "text/x-c++hdr"
+    "text/x-c++src"
+    "text/x-chdr"
+    "text/x-csrc"
+    "text/x-go"
+    "text/x-log"
+    "text/x-python"
+    "text/x-rust"
+    "text/x-shellscript"
+    "text/x-yaml"
+    "text/xml"
+  ];
+
+  webMimeTypes = [
+    "application/pdf"
+    "text/html"
+    "x-scheme-handler/about"
+    "x-scheme-handler/http"
+    "x-scheme-handler/https"
+    "x-scheme-handler/unknown"
+  ];
+
+  mediaMimeTypes = [
+    "audio/aac"
+    "audio/ac3"
+    "audio/eac3"
+    "audio/flac"
+    "audio/mp4"
+    "audio/mpeg"
+    "audio/ogg"
+    "audio/opus"
+    "audio/vorbis"
+    "audio/wav"
+    "audio/webm"
+    "audio/x-aac"
+    "audio/x-ape"
+    "audio/x-flac"
+    "audio/x-m4a"
+    "audio/x-matroska"
+    "audio/x-musepack"
+    "audio/x-ms-wma"
+    "audio/x-vorbis+ogg"
+    "audio/x-wav"
+    "audio/x-wavpack"
+    "video/3gpp"
+    "video/3gpp2"
+    "video/divx"
+    "video/mp2t"
+    "video/mp4"
+    "video/mpeg"
+    "video/ogg"
+    "video/quicktime"
+    "video/webm"
+    "video/x-flv"
+    "video/x-matroska"
+    "video/x-ms-asf"
+    "video/x-ms-wmv"
+    "video/x-msvideo"
+  ];
+
+  handledBy = desktopEntry: types: lib.genAttrs types (_type: [ desktopEntry ]);
+in
 {
   home.packages = with pkgs; [
     kdePackages.dolphin
@@ -53,29 +130,7 @@
       "TextEditor"
       "Development"
     ];
-    mimeType = [
-      "text/plain"
-      "text/markdown"
-      "text/x-python"
-      "text/x-csrc"
-      "text/x-chdr"
-      "text/x-c++src"
-      "text/x-c++hdr"
-      "text/x-shellscript"
-      "application/json"
-      "application/x-yaml"
-      "text/x-yaml"
-      "application/toml"
-      "text/x-rust"
-      "text/x-go"
-      "application/xml"
-      "text/xml"
-      "text/css"
-      "application/javascript"
-      "text/javascript"
-      "text/x-log"
-      "text/csv"
-    ];
+    mimeType = codeMimeTypes;
   };
 
   xdg.portal = {
@@ -98,76 +153,11 @@
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
-      # Terminal
       "x-scheme-handler/terminal" = [ "com.mitchellh.ghostty.desktop" ];
-      # Web
-      "text/html" = "google-chrome.desktop";
-      "x-scheme-handler/http" = "google-chrome.desktop";
-      "x-scheme-handler/https" = "google-chrome.desktop";
-      "x-scheme-handler/about" = "google-chrome.desktop";
-      "x-scheme-handler/unknown" = "google-chrome.desktop";
-      # PDF
-      "application/pdf" = [ "google-chrome.desktop" ];
-      # Text / code
-      "text/plain" = [ "zed-new-window.desktop" ];
-      "text/markdown" = [ "zed-new-window.desktop" ];
-      "text/x-python" = [ "zed-new-window.desktop" ];
-      "text/x-csrc" = [ "zed-new-window.desktop" ];
-      "text/x-chdr" = [ "zed-new-window.desktop" ];
-      "text/x-c++src" = [ "zed-new-window.desktop" ];
-      "text/x-c++hdr" = [ "zed-new-window.desktop" ];
-      "text/x-shellscript" = [ "zed-new-window.desktop" ];
-      "application/json" = [ "zed-new-window.desktop" ];
-      "application/x-yaml" = [ "zed-new-window.desktop" ];
-      "text/x-yaml" = [ "zed-new-window.desktop" ];
-      "application/toml" = [ "zed-new-window.desktop" ];
-      "text/x-rust" = [ "zed-new-window.desktop" ];
-      "text/x-go" = [ "zed-new-window.desktop" ];
-      "application/xml" = [ "zed-new-window.desktop" ];
-      "text/xml" = [ "zed-new-window.desktop" ];
-      "text/css" = [ "zed-new-window.desktop" ];
-      "application/javascript" = [ "zed-new-window.desktop" ];
-      "text/javascript" = [ "zed-new-window.desktop" ];
-      "text/x-log" = [ "zed-new-window.desktop" ];
-      "text/csv" = [ "zed-new-window.desktop" ];
-      # Video
-      "video/mp4" = [ "vlc.desktop" ];
-      "video/x-matroska" = [ "vlc.desktop" ];
-      "video/webm" = [ "vlc.desktop" ];
-      "video/quicktime" = [ "vlc.desktop" ];
-      "video/x-msvideo" = [ "vlc.desktop" ];
-      "video/mpeg" = [ "vlc.desktop" ];
-      "video/ogg" = [ "vlc.desktop" ];
-      "video/3gpp" = [ "vlc.desktop" ];
-      "video/3gpp2" = [ "vlc.desktop" ];
-      "video/x-flv" = [ "vlc.desktop" ];
-      "video/x-ms-wmv" = [ "vlc.desktop" ];
-      "video/x-ms-asf" = [ "vlc.desktop" ];
-      "video/divx" = [ "vlc.desktop" ];
-      "video/mp2t" = [ "vlc.desktop" ];
-      # Audio
-      "audio/mpeg" = [ "vlc.desktop" ];
-      "audio/mp4" = [ "vlc.desktop" ];
-      "audio/x-m4a" = [ "vlc.desktop" ];
-      "audio/ogg" = [ "vlc.desktop" ];
-      "audio/flac" = [ "vlc.desktop" ];
-      "audio/x-flac" = [ "vlc.desktop" ];
-      "audio/wav" = [ "vlc.desktop" ];
-      "audio/x-wav" = [ "vlc.desktop" ];
-      "audio/webm" = [ "vlc.desktop" ];
-      "audio/aac" = [ "vlc.desktop" ];
-      "audio/x-aac" = [ "vlc.desktop" ];
-      "audio/opus" = [ "vlc.desktop" ];
-      "audio/x-matroska" = [ "vlc.desktop" ];
-      "audio/x-ms-wma" = [ "vlc.desktop" ];
-      "audio/vorbis" = [ "vlc.desktop" ];
-      "audio/x-vorbis+ogg" = [ "vlc.desktop" ];
-      "audio/ac3" = [ "vlc.desktop" ];
-      "audio/eac3" = [ "vlc.desktop" ];
-      "audio/x-ape" = [ "vlc.desktop" ];
-      "audio/x-musepack" = [ "vlc.desktop" ];
-      "audio/x-wavpack" = [ "vlc.desktop" ];
-    };
+    }
+    // handledBy "google-chrome.desktop" webMimeTypes
+    // handledBy "zed-new-window.desktop" codeMimeTypes
+    // handledBy "vlc.desktop" mediaMimeTypes;
   };
 
   systemd.user.services = {
