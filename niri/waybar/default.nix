@@ -29,12 +29,6 @@ let
     inherit modules taskbar;
   };
 
-  displays = if osConfig == null then [ ] else osConfig.services'.desktop.displays or [ ];
-  barOutputs = lib.optionalAttrs (displays != [ ]) {
-    output = map (display: display.name) (lib.filter (display: !display.auxiliary) displays);
-  };
-  topBar = layout.topBar // barOutputs;
-  bottomBar = layout.bottomBar // barOutputs;
 in
 {
   options.programs'.waybar.enable = lib.mkEnableOption "waybar";
@@ -58,7 +52,7 @@ in
           enable = true;
           systemd.enable = true;
           settings = {
-            inherit topBar bottomBar;
+            inherit (layout) topBar bottomBar;
           };
         };
 

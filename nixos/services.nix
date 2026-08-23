@@ -23,7 +23,6 @@ in
   environment.systemPackages = with pkgs; [
     vim
     ripgrep
-    sushi
     ffmpegthumbnailer
     gdk-pixbuf
     system-config-printer
@@ -106,7 +105,6 @@ in
   services.gvfs.enable = true;
   services.fprintd.enable = true;
   services.fwupd.enable = true;
-  services.udev.enable = true;
 
   # ── Printing services ──────────────────────────────────────────────────
   services.printing = {
