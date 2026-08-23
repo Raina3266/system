@@ -5,7 +5,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use crate::model::{Player, media_label, row_text};
+use crate::model::{media_label, row_text, Player};
 use crate::mpris::{change_volume, executable, player_command, snapshot, toggle_pin};
 use crate::text::{clean_field, json_escape, truncate_display};
 

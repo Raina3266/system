@@ -10,13 +10,12 @@ let
   cfg = config.programs'.waybar;
   packages = import ../../packages.nix { inherit pkgs; };
 
-  systemModules = import ./system.nix { inherit pkgs; };
-  media = import ./media.nix { inherit pkgs packages; };
+  system = import ./system.nix { inherit pkgs packages; };
   utilities = import ./utilities.nix { inherit pkgs packages; };
   calendar = import ./calendar.nix { inherit lib packages; };
   taskbar = import ./taskbar.nix { inherit packages; };
 
-  modules = systemModules // media.modules // utilities.modules // calendar.modules;
+  modules = system.modules // utilities.modules // calendar.modules;
   layout = import ./layout.nix {
     inherit pkgs modules taskbar;
   };
@@ -34,7 +33,7 @@ in
 
   config = lib.mkIf (pkgs.stdenv.hostPlatform.isLinux && cfg.enable) (
     lib.mkMerge [
-      media.homeConfig
+      system.homeConfig
       utilities.homeConfig
       calendar.homeConfig
 

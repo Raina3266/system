@@ -17,9 +17,9 @@
     min_button_width = 120;
     max_button_width = 200;
     # Default to eDP-1 width (overridden per-output below)
-    max_taskbar_width = 1300;
-    scroll_arrow_left = " ◀ ";
-    scroll_arrow_right = " ▶ ";
+    max_taskbar_width = 1400;
+    scroll_arrow_left = "◀";
+    scroll_arrow_right = "▶";
 
     # Per-monitor logical widths (mode width / scale, see niri/config.kdl)
     max_taskbar_width_per_output = {

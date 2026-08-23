@@ -67,7 +67,7 @@ let
 
       # Workspace switcher: click to focus, middle-click to move up, right-click to move down
       "niri/workspaces" = {
-        format = " {index} ";
+        format = "{index}";
         tooltip-format = "Middle-click: move up  |  Right-click: move down";
         on-click-middle = "niri msg action focus-workspace {index} && niri msg action move-workspace-up";
         on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";

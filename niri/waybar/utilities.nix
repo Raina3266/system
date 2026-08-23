@@ -20,7 +20,7 @@
     };
 
     "custom/timer" = {
-      exec = "${packages.waybarTimer}/bin/waybar-timer";
+      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.waybarTimer}/bin/waybar-timer";
       format = "{}";
       return-type = "json";
       tooltip = true;
@@ -33,7 +33,7 @@
     };
 
     "custom/clipboard" = {
-      exec = "${packages.rofiClipboard}/bin/rofi-clipboard status";
+      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.rofiClipboard}/bin/rofi-clipboard status";
       return-type = "json";
       tooltip = true;
       escape = false;

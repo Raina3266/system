@@ -22,8 +22,34 @@ let
       }
       // extra
     );
+
+  withParentDeath = pkgs.runCommandCC "with-parent-death" {
+    src = pkgs.writeText "with-parent-death.c" ''
+      #include <sys/prctl.h>
+      #include <unistd.h>
+      #include <signal.h>
+      #include <stdlib.h>
+      #include <stdio.h>
+
+      int main(int argc, char *argv[]) {
+        if (argc < 2) {
+          fprintf(stderr, "usage: with-parent-death PROGRAM [ARGS...]\n");
+          return 2;
+        }
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() == 1) _exit(0);
+        execvp(argv[1], &argv[1]);
+        perror("with-parent-death: execvp");
+        return 127;
+      }
+    '';
+  } ''
+    install -d $out/bin
+    cc -O2 -s -o $out/bin/with-parent-death $src
+  '';
 in
 rec {
+  inherit withParentDeath;
   mediaControl = mkWorkspacePackage "media-control" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''

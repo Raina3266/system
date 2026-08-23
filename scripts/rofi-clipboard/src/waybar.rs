@@ -38,53 +38,26 @@ const SIGTERM: i32 = 15;
 const SIGINT: i32 = 2;
 const SIGHUP: i32 = 1;
 
-// Linux parent-death signal: arrange for this process to be killed when the
-// parent thread that spawned it exits. Closes the leak window when Waybar is
-// SIGKILL'd (SIGKILL does not cascade to exec'd children), so a SIGKILL'd
-// Waybar can no longer leave the status process — and its `wl-paste --watch`
-// child — running behind a restarted Waybar. Linux-only; the whole crate is
-// Wayland/niri-specific anyway.
 const PR_SET_PDEATHSIG: i32 = 1;
 const SIGKILL: i32 = 9;
 
 unsafe extern "C" {
-    // glibc prototype is `int prctl(int, ...)`; declare variadic and pass the
-    // remaining four args as zero, matching the kernel ABI.
     fn prctl(option: i32, ...) -> i32;
     fn getppid() -> i32;
     fn _exit(status: i32) -> !;
 }
 
-/// Best-effort: arrange to receive `SIGKILL` when the parent thread exits.
-/// Returns normally if the parent is still alive; calls `_exit(0)` if the
-/// parent already died and we were reparented to PID 1, since in that case
-/// `PR_SET_PDEATHSIG` would otherwise arm against PID 1 (i.e. never fire) and
-/// we'd run orphaned from the start. Async-signal-safe, so it is also safe to
-/// call from `CommandExt::pre_exec`.
 fn request_parent_death_signal() {
-    // SAFETY: `prctl(PR_SET_PDEATHSIG, sig, 0, 0, 0)` only reads its integer
-    // arguments and has no memory-safety implications.
     let rc = unsafe { prctl(PR_SET_PDEATHSIG, SIGKILL as usize, 0, 0, 0) };
     if rc != 0 {
         return;
     }
-    // Guard against the fork→prctl race documented in prctl(2): if the parent
-    // died in that window we are now reparented to PID 1, so the signal we
-    // just armed would fire on PID 1's death. Exit now instead of leaking.
-    // SAFETY: `getppid` takes no arguments and returns the caller's pid.
     if unsafe { getppid() } == 1 {
-        // SAFETY: `_exit` bypasses atexit handlers and is async-signal-safe;
-        // we have no buffered state to flush here.
         unsafe { _exit(0) };
     }
 }
 
-/// Long-running Waybar status producer. Replaces both the old systemd
-/// `rofi-clipboard` collector unit and the static `custom/clipboard` icon.
 pub fn run_status() -> Result<()> {
-    // Arm first, before any other work: this minimizes the fork→prctl race
-    // window and ensures a SIGKILL'd Waybar takes us down even if we later
-    // block in `print_status` or `ClipboardStore::discover`.
     request_parent_death_signal();
     install_exit_handlers();
 
@@ -189,13 +162,6 @@ fn spawn_watcher(self_exe: &Path) -> Option<Child> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
-    // Arm the watcher with its own parent-death signal so it dies when this
-    // status process dies — including the SIGKILL case above, where our own
-    // graceful `kill`/`wait` cleanup in `run_status` never runs.
-    // SAFETY: `pre_exec` runs the closure in the child after fork, before
-    // execve; `request_parent_death_signal` only calls async-signal-safe
-    // functions (`prctl`, `getppid`, `_exit`). The closure captures nothing,
-    // so it is `Send + Sync + 'static`.
     unsafe {
         command.pre_exec(|| {
             request_parent_death_signal();
@@ -216,8 +182,6 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
 }
 
 fn install_exit_handlers() {
-    // SAFETY: `signal` installs a handler that only writes to an atomic, which
-    // is async-signal-safe. We ignore the returned previous handler.
     unsafe {
         signal(SIGTERM, handle_signal);
         signal(SIGINT, handle_signal);
