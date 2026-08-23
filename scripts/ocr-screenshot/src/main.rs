@@ -171,7 +171,7 @@ fn clipboard_payload(text: &str) -> String {
 }
 
 fn trimmed_ocr_text(text: &str) -> &str {
-    text.trim_end_matches(|character| matches!(character, '\r' | '\n'))
+    text.trim_end_matches(['\r', '\n'])
 }
 
 fn notify(program: &OsStr, text: &str) -> Result<(), String> {

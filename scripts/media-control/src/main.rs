@@ -16,7 +16,7 @@ fn main() -> ExitCode {
         Some("toggle") => ui::toggle(),
         Some("pause-all") => mpris::pause_all(),
         Some("list") => mpris::print_list(),
-        Some("help") | Some("--help") | Some("-h") | None => {
+        Some("help" | "--help" | "-h") | None => {
             print_help();
             Ok(())
         }

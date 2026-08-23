@@ -16,7 +16,7 @@ let
     inherit pkgs;
     kernelPackages = config.boot.kernelPackages;
   };
-  webcamCrop = packages.webcamCrop;
+  inherit (packages) webcamCrop;
 in
 {
   # Make the packaged supervisor and device settings available to the

@@ -391,9 +391,7 @@ fn saved_wifi_password(uuid: &str) -> AppResult<Option<String>> {
         return Ok(None);
     }
     let password = String::from_utf8(output.stdout)?;
-    let password = password
-        .trim_end_matches(|character| character == '\r' || character == '\n')
-        .to_owned();
+    let password = password.trim_end_matches(['\r', '\n']).to_owned();
     Ok((!password.is_empty()).then_some(password))
 }
 

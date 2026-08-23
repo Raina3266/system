@@ -363,7 +363,9 @@ fn decode_clipboard_text(bytes: &[u8]) -> String {
 
 fn decode_utf16(bytes: &[u8], from_bytes: fn([u8; 2]) -> u16) -> String {
     let words: Vec<_> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| from_bytes([pair[0], pair[1]]))
         .take_while(|word| *word != 0)
         .collect();

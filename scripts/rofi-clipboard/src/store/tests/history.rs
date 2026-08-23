@@ -146,20 +146,22 @@ fn clearing_a_memo_reuses_it_as_the_only_draft() -> Result<()> {
 fn new_items_stay_below_pins_and_existing_history_is_repaired() -> Result<()> {
     let root = test_root();
     let store = ClipboardStore::at(root.0.clone());
-    let mut history = History::default();
-    history.next_id = 5;
-    history.items = vec![
-        item(1, ItemKind::Text),
-        ClipboardItem {
-            pinned: true,
-            ..item(2, ItemKind::File)
-        },
-        item(3, ItemKind::File),
-        ClipboardItem {
-            pinned: true,
-            ..item(4, ItemKind::Text)
-        },
-    ];
+    let history = History {
+        next_id: 5,
+        items: vec![
+            item(1, ItemKind::Text),
+            ClipboardItem {
+                pinned: true,
+                ..item(2, ItemKind::File)
+            },
+            item(3, ItemKind::File),
+            ClipboardItem {
+                pinned: true,
+                ..item(4, ItemKind::Text)
+            },
+        ],
+        ..History::default()
+    };
     store.save_unlocked(&history)?;
 
     let new_id = store

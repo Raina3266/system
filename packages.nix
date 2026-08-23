@@ -176,7 +176,7 @@ rec {
 
   ycal =
     let
-      lib = pkgs.lib;
+      inherit (pkgs) lib;
       src = pkgs.fetchzip {
         url = "https://github.com/yagybaba/waybar-ycal/archive/refs/tags/v1.1.0.tar.gz";
         sha256 = "0483nv1dspa7a90s8hxkb3kmva9r6c8qb61hilaks483n92lwf7a";

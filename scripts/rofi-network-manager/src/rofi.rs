@@ -140,7 +140,7 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
         // pressed Enter without the text matching any row.
         2 => {
             if state.password_for.is_some() {
-                submit_password(&before, &mut state).await
+                submit_password(&before, &mut state)
             }
         }
         1 | 11 => {
@@ -151,7 +151,7 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
             let awaiting = state.password_for.clone();
             if let Some(awaited) = awaiting.as_deref() {
                 if Some(awaited) == selected_key.as_deref() {
-                    submit_password(&before, &mut state).await
+                    submit_password(&before, &mut state)
                 } else {
                     state.password_for = None;
                     connect_selected(manager, mode, &before, selected_key.as_deref(), &mut state)
@@ -179,7 +179,6 @@ pub async fn run_script(manager: &NetworkManager, mode: Mode) -> AppResult<()> {
         // Refresh tick while a connect runs: `consume_connect_result` above has
         // already folded in the outcome, so there is nothing to do but re-render.
         REFRESH_RETV => {}
-        15 => {}
         _ => {}
     }
 
@@ -245,7 +244,7 @@ async fn connect_selected(
     }
 }
 
-async fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
+fn submit_password(snapshot: &Snapshot, state: &mut UiState) {
     let Some(key) = state.password_for.clone() else {
         return;
     };
@@ -387,10 +386,10 @@ fn consume_connect_result(state: &mut UiState) {
     };
     if state.pending_connect.as_deref() == Some(key.as_str()) {
         state.pending_connect = None;
-        if status == "ok" || status == "err" {
-            if let Some(message) = hex_decode(hex_message) {
-                state.set_message(message);
-            }
+        if matches!(status, "ok" | "err")
+            && let Some(message) = hex_decode(hex_message)
+        {
+            state.set_message(message);
         }
     }
 }
@@ -743,7 +742,9 @@ fn hex_decode(value: &str) -> Option<String> {
     }
     let bytes = value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let pair = std::str::from_utf8(pair).ok()?;
             u8::from_str_radix(pair, 16).ok()

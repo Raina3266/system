@@ -4,7 +4,7 @@
 }:
 let
   packages = import ../packages.nix { inherit pkgs; };
-  ocrScreenshot = packages.ocrScreenshot;
+  inherit (packages) ocrScreenshot;
 in
 {
   home.packages = [ ocrScreenshot ];

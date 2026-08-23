@@ -213,10 +213,10 @@ fn class(latest: Option<&ClipboardItem>) -> &'static str {
 
 fn tooltip(count: usize, latest: Option<&ClipboardItem>) -> String {
     let mut lines = vec![format!("Clipboard: {count} item{}", plural_s(count))];
-    if let Some(item) = latest {
-        if let Some(preview) = preview_line(item) {
-            lines.push(format!("Last: {preview}"));
-        }
+    if let Some(item) = latest
+        && let Some(preview) = preview_line(item)
+    {
+        lines.push(format!("Last: {preview}"));
     }
     lines.join("\n")
 }

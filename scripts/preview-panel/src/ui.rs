@@ -33,6 +33,16 @@ struct PanelGeometry {
     monitor: Option<gdk::Monitor>,
 }
 
+struct LiveWidgets {
+    application: Application,
+    window: ApplicationWindow,
+    stack: Stack,
+    text_view: TextView,
+    picture: Picture,
+    network_text_view: TextView,
+    network_picture: Picture,
+}
+
 impl PanelKeyboardState {
     fn mode(self) -> KeyboardMode {
         match self {
@@ -204,13 +214,15 @@ fn build_window(
     );
     if let Some(receiver) = receiver {
         connect_live_updates(
-            application,
-            &window,
-            &stack,
-            &text_view,
-            &picture,
-            &network_text_view,
-            &network_picture,
+            LiveWidgets {
+                application: application.clone(),
+                window: window.clone(),
+                stack: stack.clone(),
+                text_view: text_view.clone(),
+                picture: picture.clone(),
+                network_text_view: network_text_view.clone(),
+                network_picture: network_picture.clone(),
+            },
             receiver,
         );
     }
@@ -227,9 +239,7 @@ fn connect_persistent_clipboard(text_view: &TextView) {
     // owner and keeps serving the selection after this panel exits.
     text_view.connect_local("copy-clipboard", true, move |_| {
         let buffer = text_view_for_copy.buffer();
-        let Some((start, end)) = buffer.selection_bounds() else {
-            return None;
-        };
+        let (start, end) = buffer.selection_bounds()?;
         let text = buffer.text(&start, &end, true);
         if let Err(error) = copy_text_to_wayland(&text) {
             eprintln!("preview-panel: copy selection to Wayland clipboard: {error}");
@@ -477,23 +487,16 @@ fn clamp_margin(margin: i32, monitor_size: i32, panel_size: i32) -> i32 {
     margin.clamp(0, (monitor_size - panel_size).max(0))
 }
 
-fn connect_live_updates(
-    application: &Application,
-    window: &ApplicationWindow,
-    stack: &Stack,
-    text_view: &TextView,
-    picture: &Picture,
-    network_text_view: &TextView,
-    network_picture: &Picture,
-    receiver: Receiver<Message>,
-) {
-    let application = application.clone();
-    let window = window.clone();
-    let stack = stack.clone();
-    let text_view = text_view.clone();
-    let picture = picture.clone();
-    let network_text_view = network_text_view.clone();
-    let network_picture = network_picture.clone();
+fn connect_live_updates(widgets: LiveWidgets, receiver: Receiver<Message>) {
+    let LiveWidgets {
+        application,
+        window,
+        stack,
+        text_view,
+        picture,
+        network_text_view,
+        network_picture,
+    } = widgets;
     let mut state = LiveState::default();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(message) = receiver.try_recv() {

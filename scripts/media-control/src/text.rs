@@ -115,11 +115,11 @@ pub(crate) fn hex_encode(value: &str) -> String {
 }
 
 pub(crate) fn hex_decode(value: &str) -> Option<String> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
     let mut bytes = Vec::with_capacity(value.len() / 2);
-    for pair in value.as_bytes().chunks_exact(2) {
+    for pair in value.as_bytes().as_chunks::<2>().0 {
         bytes.push((hex_value(pair[0])? << 4) | hex_value(pair[1])?);
     }
     String::from_utf8(bytes).ok()

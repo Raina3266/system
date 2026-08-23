@@ -64,8 +64,8 @@ pub(crate) fn is_excluded_player(player: &str, source: &str) -> bool {
     [player, source].iter().any(|value| {
         let normalized = value
             .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(|character| character.to_lowercase())
+            .filter(char::is_ascii_alphanumeric)
+            .flat_map(char::to_lowercase)
             .collect::<String>();
         normalized.contains("tauon") || normalized.contains("kid3")
     })
@@ -98,22 +98,19 @@ fn host_matches(host: &str, domain: &str) -> bool {
     host == domain
         || host
             .strip_suffix(domain)
-            .map(|prefix| prefix.ends_with('.'))
-            .unwrap_or(false)
+            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 fn path_has_value(path: &str, prefix: &str) -> bool {
     path.strip_prefix(prefix)
-        .map(|value| !value.is_empty() && value != "/")
-        .unwrap_or(false)
+        .is_some_and(|value| !value.is_empty() && value != "/")
 }
 
 fn query_has_value(query: &str, key: &str) -> bool {
     query.split('&').any(|field| {
         field
             .split_once('=')
-            .map(|(name, value)| name.eq_ignore_ascii_case(key) && !value.is_empty())
-            .unwrap_or(false)
+            .is_some_and(|(name, value)| name.eq_ignore_ascii_case(key) && !value.is_empty())
     })
 }
 

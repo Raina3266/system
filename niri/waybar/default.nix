@@ -17,7 +17,7 @@ let
 
   modules = system.modules // utilities.modules // calendar.modules;
   layout = import ./layout.nix {
-    inherit pkgs modules taskbar;
+    inherit modules taskbar;
   };
 
   displays = if osConfig == null then [ ] else osConfig.services'.desktop.displays or [ ];

@@ -67,7 +67,7 @@ pub fn close_at(path: &Path) {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    let _ = cleanup(&path);
+    let _ = cleanup(path);
 }
 
 fn launch_panel(path: &Path) -> AppResult<()> {

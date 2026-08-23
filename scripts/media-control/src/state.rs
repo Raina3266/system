@@ -54,7 +54,7 @@ pub(crate) fn write_state(state: &HashMap<String, PlayerState>) {
     }
 
     let mut entries: Vec<_> = state.iter().collect();
-    entries.sort_by(|left, right| right.1.activity.cmp(&left.1.activity));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.1.activity));
     entries.truncate(128);
 
     let mut contents = String::new();

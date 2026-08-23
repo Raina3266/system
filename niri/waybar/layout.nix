@@ -1,6 +1,5 @@
 # Waybar layouts.
 {
-  pkgs,
   modules,
   taskbar,
 }:

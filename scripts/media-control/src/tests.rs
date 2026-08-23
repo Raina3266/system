@@ -80,7 +80,7 @@ fn pinned_players_sort_first() {
         pinned,
         activity,
     };
-    let mut values = vec![
+    let mut values = [
         make("new", false, PlaybackStatus::Playing, 3),
         make("pin", true, PlaybackStatus::Paused, 1),
         make("old", false, PlaybackStatus::Paused, 2),

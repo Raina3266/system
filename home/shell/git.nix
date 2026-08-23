@@ -1,30 +1,32 @@
 { pkgs, ... }:
 {
-  programs.git = {
-    enable = true;
-    signing.format = "openpgp";
-    settings = {
-      user.name = "raina";
-      user.email = "cgl0326@outlook.com";
-      init.defaultBranch = "master";
-      pull.rebase = true;
-      push = {
-        default = "current";
-        autoSetupRemote = true;
-      };
-      merge."mergiraf" = {
-        name = "mergiraf";
-        driver = "mergiraf merge --git %O %A %B -s %S -x %X -y %Y -p %P";
+  programs = {
+    git = {
+      enable = true;
+      signing.format = "openpgp";
+      settings = {
+        user.name = "raina";
+        user.email = "cgl0326@outlook.com";
+        init.defaultBranch = "master";
+        pull.rebase = true;
+        push = {
+          default = "current";
+          autoSetupRemote = true;
+        };
+        merge."mergiraf" = {
+          name = "mergiraf";
+          driver = "mergiraf merge --git %O %A %B -s %S -x %X -y %Y -p %P";
+        };
       };
     };
-  };
 
-  programs.gh.enable = true;
-  programs.gh-dash.enable = true;
+    gh.enable = true;
+    gh-dash.enable = true;
 
-  programs.difftastic = {
-    enable = true;
-    options = "inline";
+    difftastic = {
+      enable = true;
+      options = "inline";
+    };
   };
 
   home.packages = with pkgs; [

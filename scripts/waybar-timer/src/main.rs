@@ -292,8 +292,8 @@ fn main() {
         None => run_server(),
         Some("add") => send_command("add"),
         Some("toggle") => send_command("toggle"),
-        Some("clear") | Some("stop") => send_command("clear"),
-        Some("-h") | Some("--help") | Some("help") => {
+        Some("clear" | "stop") => send_command("clear"),
+        Some("-h" | "--help" | "help") => {
             print_help(&program);
             return;
         }

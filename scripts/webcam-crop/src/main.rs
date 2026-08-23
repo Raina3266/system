@@ -246,7 +246,7 @@ impl Supervisor {
     }
 
     fn configure_loopback(&self) {
-        self.run_best_effort(
+        Self::run_best_effort(
             &self.tools.v4l2_ctl,
             &[
                 "-d".to_owned(),
@@ -258,7 +258,7 @@ impl Supervisor {
             true,
         );
 
-        self.run_best_effort(
+        Self::run_best_effort(
             &self.tools.v4l2loopback_ctl,
             &[
                 "set-caps".to_owned(),
@@ -274,7 +274,7 @@ impl Supervisor {
         );
 
         for control in ["sustain_framerate=1", "keep_format=1"] {
-            self.run_best_effort(
+            Self::run_best_effort(
                 &self.tools.v4l2_ctl,
                 &[
                     "-d".to_owned(),
@@ -288,13 +288,7 @@ impl Supervisor {
         }
     }
 
-    fn run_best_effort(
-        &self,
-        program: &OsStr,
-        arguments: &[String],
-        description: &str,
-        quiet: bool,
-    ) {
+    fn run_best_effort(program: &OsStr, arguments: &[String], description: &str, quiet: bool) {
         let mut command = Command::new(program);
         command.args(arguments).stdin(Stdio::null());
         if quiet {
