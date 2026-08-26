@@ -48,6 +48,24 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
+  # Local accent overrides on top of the upstream theme: plain text in white,
+  # and #FF7EDB for the outline, the text and a dimmed background on hovered,
+  # focused, selected and pressed widgets. Kvantum paints its frames from an
+  # SVG, so the states are recoloured there as well as in its config and in
+  # the KDE colour scheme; lib/daemon-accent.py explains which is which.
+  daemonAccented =
+    pkgs.runCommandLocal "daemon-2.0-accented" { nativeBuildInputs = [ pkgs.python3 ]; }
+      ''
+        python3 ${./lib/daemon-accent.py} \
+          --source ${daemonTheme} \
+          --out "$out" \
+          --text "#FFFFFF" \
+          --accent "#FF7EDB" \
+          --accent-dim "#522741" \
+          --accent-dim-strong "#683454" \
+          --replaces "#5DF4FE"
+      '';
+
   # Upstream ships the VS Code theme as a plain extension directory rather
   # than a marketplace package, so repackage it into the layout Home Manager
   # expects (share/vscode/extensions/<unique id>). Upstream's package.json has
@@ -141,7 +159,7 @@ in
   # Kvantum theme active.
   xdg.configFile = (builtins.mapAttrs (_name: link) configLinks) // {
     "Kvantum/daemon-2.0" = {
-      source = "${daemonTheme}/Kvantum/daemon-2.0";
+      source = "${daemonAccented}/Kvantum/daemon-2.0";
     };
     "Kvantum/kvantum.kvconfig".text = ''
       [General]
@@ -156,7 +174,7 @@ in
     "aurorae/themes/daemon-2.0" = {
       source = "${daemonTheme}/Window Decorations/daemon-2.0";
     };
-    "color-schemes/Daemon2.colors".source = "${daemonTheme}/Color Scheme/Daemon2.colors";
+    "color-schemes/Daemon2.colors".source = "${daemonAccented}/color-schemes/Daemon2.colors";
     "icons/Daemon-Icons" = {
       source = "${daemonTheme}/Icon Theme/Daemon-Icons";
     };
