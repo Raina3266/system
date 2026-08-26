@@ -4,7 +4,9 @@
 # place with mkOutOfStoreSymlink, so they stay outside the Nix store and an
 # edit is picked up the next time the program starts without a Home Manager
 # rebuild. The Daemon KDE MK2 theme comes from a pinned upstream checkout and
-# is copied in from the store, plus the activation step that selects it.
+# is copied in from the store, plus the activation step that selects it. Its
+# VS Code extension is repackaged from that same checkout and handed to the
+# programs.vscode module.
 {
   config,
   pkgs,
@@ -46,6 +48,31 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
+  # Upstream ships the VS Code theme as a plain extension directory rather than
+  # a marketplace package, so repackage it into the layout Home Manager expects
+  # (share/vscode/extensions/<unique id>). Upstream's package.json has no
+  # publisher field, which would leave VS Code calling the extension
+  # "undefined_publisher.daemon-2-0"; add one so the identifier matches the
+  # directory name.
+  daemonVscodeThemeId = "MathisP75.daemon-2-0";
+
+  daemonVscodeTheme =
+    pkgs.runCommandLocal "vscode-extension-daemon-2-0"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        # Home Manager reads this instead of listing the built extension
+        # directory, which would mean an import-from-derivation on every
+        # evaluation.
+        passthru.vscodeExtUniqueId = daemonVscodeThemeId;
+      }
+      ''
+        dir="$out/share/vscode/extensions/${daemonVscodeThemeId}"
+        mkdir -p "$dir/themes"
+        jq '. + { publisher: "MathisP75" }' \
+          ${daemonTheme}/VSCode/daemon-2-0/package.json > "$dir/package.json"
+        cp ${daemonTheme}/VSCode/daemon-2-0/themes/*.json "$dir/themes/"
+      '';
+
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
   kdeConfigHome = config.xdg.configHome;
 
@@ -65,7 +92,20 @@ in
   home.packages = with pkgs; [
     (withoutColorSchemes libsForQt5.qtstyleplugin-kvantum)
     (withoutColorSchemes qt6Packages.qtstyleplugin-kvantum)
+
+    # Daemon-Icons declares Inherits=breeze-dark,gnome,hicolor, so the Breeze
+    # set has to be reachable or GTK applications fall back to no icon at all
+    # for everything Daemon does not draw itself.
+    kdePackages.breeze-icons
   ];
+
+  # The VS Code colour theme ships with the same upstream checkout as the KDE
+  # assets; selecting it here keeps the editor in step with the rest of the
+  # desktop. programs.vscode.enable itself lives in ../home/default.nix.
+  programs.vscode.profiles.default = {
+    extensions = [ daemonVscodeTheme ];
+    userSettings."workbench.colorTheme" = "Daemon-2.0";
+  };
 
   # Kvantum is the application style used by Daemon. The theme directory and
   # its selection file are both managed so System Settings cannot leave an old
