@@ -47,17 +47,18 @@ let
     url = "https://github.com/MathisP75/daemon-kde-mk2.git";
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
-  daemonRed = "#FF5048";
-  daemonPink = "#FF7EDB";
-  daemonDimPink = "#6F355A";
+  daemonRed = "#D52C35";
+  daemonPink = "#E82A9D";
+  daemonDimPink = "#5E234A";
   daemonBackground = "#180A10";
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
 
   # Reuse the same local palette across KDE and VS Code: relevant icons use
-  # Daemon red, interactive backgrounds use dimmed pink, and normal surfaces
-  # use darker variants of Daemon's burgundy palette. The deepest background,
-  # text and unrelated icon categories stay intact.
+  # vivid dark red, interactive outlines use cyberpunk pink, their backgrounds
+  # use dimmed pink, and normal surfaces use darker variants of Daemon's
+  # burgundy palette. The deepest background, text and unrelated icon
+  # categories stay intact.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
@@ -129,6 +130,7 @@ let
           --out "$dir/$daemon_theme" \
           --name "Daemon-2.0" \
           --icon-colour "${daemonRed}" \
+          --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \

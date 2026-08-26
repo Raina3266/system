@@ -531,10 +531,33 @@ VSCODE_ICON_FOREGROUND_KEYS = {
     "radio.activeForeground",
 }
 
+VSCODE_STATE_OUTLINE_KEYS = {
+    "activityBar.activeBorder",
+    "activityBarTop.activeBorder",
+    "button.border",
+    "checkbox.border",
+    "commandCenter.activeBorder",
+    "contrastActiveBorder",
+    "focusBorder",
+    "inputOption.activeBorder",
+    "list.focusAndSelectionOutline",
+    "list.focusOutline",
+    "list.inactiveFocusOutline",
+    "menu.selectionBorder",
+    "menubar.selectionBorder",
+    "panelTitle.activeBorder",
+    "radio.activeBorder",
+    "sash.hoverBorder",
+    "settings.focusedRowBorder",
+    "statusBarItem.focusBorder",
+    "tab.activeBorder",
+    "tab.activeBorderTop",
+}
+
 
 def patch_vscode_workbench(
-    colours: dict[str, str], icon_colour: str, dim_pink: str
-) -> tuple[int, int]:
+    colours: dict[str, str], icon_colour: str, pink: str, dim_pink: str
+) -> tuple[int, int, int]:
     """Apply Daemon's local interaction and icon accents to VS Code."""
     background_changes = 0
     for key in VSCODE_STATE_BACKGROUND_KEYS:
@@ -548,7 +571,13 @@ def patch_vscode_workbench(
             colours[key] = icon_colour
             icon_changes += 1
 
-    return background_changes, icon_changes
+    outline_changes = 0
+    for key in VSCODE_STATE_OUTLINE_KEYS:
+        if colours.get(key, "").lower() != pink.lower():
+            colours[key] = pink
+            outline_changes += 1
+
+    return background_changes, icon_changes, outline_changes
 
 
 def patch_vscode_backgrounds(
@@ -584,8 +613,12 @@ def patch_vscode(args: argparse.Namespace) -> None:
     normal_background_changes = patch_vscode_backgrounds(
         daemon["colors"], background_palette(args)
     )
-    state_background_changes, icon_changes = patch_vscode_workbench(
-        daemon["colors"], args.icon_colour, args.dim_pink
+    (
+        state_background_changes,
+        icon_changes,
+        outline_changes,
+    ) = patch_vscode_workbench(
+        daemon["colors"], args.icon_colour, args.pink, args.dim_pink
     )
 
     for key in SYNTAX_KEYS:
@@ -602,7 +635,8 @@ def patch_vscode(args: argparse.Namespace) -> None:
     print(
         f"darkened {normal_background_changes} normal VS Code backgrounds and "
         f"patched {state_background_changes} state backgrounds plus "
-        f"{icon_changes} icon colours; kept Daemon's remaining workbench colours "
+        f"{outline_changes} outlines and {icon_changes} icon colours; "
+        f"kept Daemon's remaining workbench colours "
         f"and imported "
         f"{len(dracula['tokenColors'])} Dracula syntax rules"
     )
@@ -629,6 +663,7 @@ def parser() -> argparse.ArgumentParser:
     vscode.add_argument("--out", required=True)
     vscode.add_argument("--name", default="Daemon-2.0")
     vscode.add_argument("--icon-colour", required=True)
+    vscode.add_argument("--pink", required=True)
     vscode.add_argument("--dim-pink", required=True)
     vscode.add_argument("--main-background", required=True)
     vscode.add_argument("--secondary-background", required=True)
