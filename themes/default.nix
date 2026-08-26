@@ -59,10 +59,21 @@ let
   daemonVscodePublisher = "MathisP75";
   daemonVscodeId = "${daemonVscodePublisher}.${daemonVscodeManifest.name}";
 
+  # A second theme contributed next to upstream's, carrying its syntax
+  # highlighting but none of its 120 workbench colours. VS Code falls back to
+  # its own dark defaults for anything a theme leaves out, so this recolours
+  # the code and leaves the editor's chrome alone. ../home/vscode.nix chooses
+  # which of the two is selected.
+  daemonVscodeSyntaxLabel = "Daemon-2.0 Syntax";
+  daemonVscodeSyntaxPath = "./themes/Daemon-2.0-syntax-color-theme.json";
+
   daemonVscodeTheme =
     pkgs.runCommandLocal "vscode-extension-${daemonVscodeManifest.name}"
       {
-        nativeBuildInputs = [ pkgs.jq ];
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.python3
+        ];
         # Home Manager takes the extension's identity from these rather than
         # listing the built directory, which would be an import-from-derivation
         # on every evaluation. It writes all of them into extensions.json, so
@@ -77,9 +88,19 @@ let
       ''
         dir="$out/share/vscode/extensions/${daemonVscodeId}"
         mkdir -p "$dir/themes"
-        jq '. + { publisher: "${daemonVscodePublisher}" }' \
+
+        jq --arg publisher "${daemonVscodePublisher}" \
+           --arg label "${daemonVscodeSyntaxLabel}" \
+           --arg path "${daemonVscodeSyntaxPath}" \
+          '. + { publisher: $publisher }
+           | .contributes.themes += [ { label: $label, uiTheme: "vs-dark", path: $path } ]' \
           ${daemonVscodeSrc}/package.json > "$dir/package.json"
+
         cp ${daemonVscodeSrc}/themes/*.json "$dir/themes/"
+
+        upstream="$(jq -r '.contributes.themes[0].path' "$dir/package.json")"
+        python3 ${./lib/vscode-syntax-only.py} \
+          "$dir/$upstream" "$dir/${daemonVscodeSyntaxPath}" "${daemonVscodeSyntaxLabel}"
       '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";

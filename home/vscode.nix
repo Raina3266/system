@@ -20,8 +20,11 @@ let
   settingsPath = "${config.xdg.configHome}/Code/User/settings.json";
 
   settings = {
-    # The theme itself is installed by ../themes/default.nix; this selects it.
-    "workbench.colorTheme" = "Daemon-2.0";
+    # ../themes/default.nix installs two themes: "Daemon-2.0", which recolours
+    # the whole editor, and "Daemon-2.0 Syntax", which carries the same syntax
+    # highlighting but leaves VS Code's own chrome in place. Either name works
+    # here.
+    "workbench.colorTheme" = "Daemon-2.0 Syntax";
 
     # VS Code ships Copilot chat and inline suggestions as built-in features.
     # chat.disableAIFeatures is the switch for all of it — it hides chat and
