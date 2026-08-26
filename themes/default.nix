@@ -48,29 +48,38 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
-  # Upstream ships the VS Code theme as a plain extension directory rather than
-  # a marketplace package, so repackage it into the layout Home Manager expects
-  # (share/vscode/extensions/<unique id>). Upstream's package.json has no
-  # publisher field, which would leave VS Code calling the extension
+  # Upstream ships the VS Code theme as a plain extension directory rather
+  # than a marketplace package, so repackage it into the layout Home Manager
+  # expects (share/vscode/extensions/<unique id>). Upstream's package.json has
+  # no publisher field, which would leave VS Code calling the extension
   # "undefined_publisher.daemon-2-0"; add one so the identifier matches the
   # directory name.
-  daemonVscodeThemeId = "MathisP75.daemon-2-0";
+  daemonVscodeSrc = "${daemonTheme}/VSCode/daemon-2-0";
+  daemonVscodeManifest = builtins.fromJSON (builtins.readFile "${daemonVscodeSrc}/package.json");
+  daemonVscodePublisher = "MathisP75";
+  daemonVscodeId = "${daemonVscodePublisher}.${daemonVscodeManifest.name}";
 
   daemonVscodeTheme =
-    pkgs.runCommandLocal "vscode-extension-daemon-2-0"
+    pkgs.runCommandLocal "vscode-extension-${daemonVscodeManifest.name}"
       {
         nativeBuildInputs = [ pkgs.jq ];
-        # Home Manager reads this instead of listing the built extension
-        # directory, which would mean an import-from-derivation on every
-        # evaluation.
-        passthru.vscodeExtUniqueId = daemonVscodeThemeId;
+        # Home Manager takes the extension's identity from these rather than
+        # listing the built directory, which would be an import-from-derivation
+        # on every evaluation. It writes all of them into extensions.json, so
+        # leaving any out is an evaluation error rather than a silent default.
+        passthru = {
+          inherit (daemonVscodeManifest) version;
+          vscodeExtPublisher = daemonVscodePublisher;
+          vscodeExtName = daemonVscodeManifest.name;
+          vscodeExtUniqueId = daemonVscodeId;
+        };
       }
       ''
-        dir="$out/share/vscode/extensions/${daemonVscodeThemeId}"
+        dir="$out/share/vscode/extensions/${daemonVscodeId}"
         mkdir -p "$dir/themes"
-        jq '. + { publisher: "MathisP75" }' \
-          ${daemonTheme}/VSCode/daemon-2-0/package.json > "$dir/package.json"
-        cp ${daemonTheme}/VSCode/daemon-2-0/themes/*.json "$dir/themes/"
+        jq '. + { publisher: "${daemonVscodePublisher}" }' \
+          ${daemonVscodeSrc}/package.json > "$dir/package.json"
+        cp ${daemonVscodeSrc}/themes/*.json "$dir/themes/"
       '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
