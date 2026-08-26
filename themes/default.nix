@@ -48,10 +48,10 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
-  # Keep Daemon intact except for two local choices: action/button icons use
-  # the theme's own bright red, and the interior background of hovered,
-  # focused and selected widgets uses dimmed pink. Frame edges, text, normal
-  # states and every non-action icon remain exactly as upstream ships them.
+  # Keep Daemon intact except for two local choices: Dolphin's action, place
+  # and file-type icons use the theme's own bright red, and the interior
+  # background of hovered, focused and selected widgets uses dimmed pink.
+  # Text, normal states and every other icon category remain as upstream.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''

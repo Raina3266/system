@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the two small local variants of the Daemon 2.0 theme.
 
-``desktop`` changes only action icons and interactive-state backgrounds.
+``desktop`` changes Dolphin-facing icons and interactive-state backgrounds.
 ``vscode`` keeps Daemon's workbench colours and imports Dracula's syntax rules.
 """
 
@@ -43,11 +43,18 @@ def replace_colours(text: str, mapping: dict[str, str]) -> str:
     )
 
 
-def patch_action_icons(directory: pathlib.Path, icon_colour: str) -> int:
-    """Recolour only icons used for actions/buttons; leave every other icon alone."""
+def patch_dolphin_icons(directory: pathlib.Path, icon_colour: str) -> int:
+    """Recolour Dolphin action, place/sidebar and MIME/file icons."""
     changed = 0
     mapping = {colour: icon_colour for colour in CYAN_ICON_COLOURS}
-    for relative in ("scalable/actions", "symbolic/actions"):
+    for relative in (
+        "scalable/actions",
+        "symbolic/actions",
+        "scalable/places",
+        "symbolic/places",
+        "scalable/mimes",
+        "symbolic/mimes",
+    ):
         for path in sorted((directory / relative).rglob("*.svg")):
             if path.is_symlink():
                 continue
@@ -58,7 +65,9 @@ def patch_action_icons(directory: pathlib.Path, icon_colour: str) -> int:
                 path.write_text(replaced)
                 changed += 1
     if changed == 0:
-        raise RuntimeError("no Daemon action icons contained the expected cyan colours")
+        raise RuntimeError(
+            "no Daemon action/place/MIME icons contained the expected cyan colours"
+        )
     return changed
 
 
@@ -288,7 +297,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
     colours = schemes / "Daemon2.colors"
     shutil.copy2(source / "Color Scheme" / "Daemon2.colors", colours)
 
-    icon_files = patch_action_icons(icons, args.icon_colour.lower())
+    icon_files = patch_dolphin_icons(icons, args.icon_colour.lower())
     states, svg_changes, outline_changes, indicator_changes = patch_state_backgrounds(
         kvantum / "daemon-2.0.svg",
         args.pink.lower(),
@@ -315,7 +324,8 @@ def patch_desktop(args: argparse.Namespace) -> None:
     )
 
     print(
-        f"patched {icon_files} action icons and {indicator_changes} control indicators; "
+        f"patched {icon_files} Dolphin action/place/MIME icons and "
+        f"{indicator_changes} control indicators; "
         f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
         f"across {states} interactive state elements; "
         f"{kvconfig_changes + colour_changes} selection keys"
