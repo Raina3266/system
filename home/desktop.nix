@@ -1,6 +1,5 @@
 {
   pkgs,
-  config,
   lib,
   repoPackages,
   ...
@@ -89,7 +88,6 @@ in
       kdePackages.ark
       kdePackages.baloo
       kdePackages.baloo-widgets
-      kdePackages.breeze
       kdePackages.kfilemetadata
       kdePackages.kio-fuse
       kdePackages.kompare
@@ -100,19 +98,6 @@ in
       kdePackages.knewstuff
     ]
     ++ [ repoPackages.ocrScreenshot ];
-
-  home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-      if [ ! -e "$HOME/.config/kdeglobals" ]; then
-        $DRY_RUN_CMD cat > "$HOME/.config/kdeglobals" << 'EOF'
-    [General]
-    font=Noto Sans,12
-    menuFont=Noto Sans,11
-    toolBarFont=Noto Sans,11
-    smallestReadableFont=Noto Sans,11
-    fixed=JetBrainsMono Nerd Font,12
-    EOF
-      fi
-  '';
 
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";

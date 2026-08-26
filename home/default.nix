@@ -33,6 +33,7 @@ in
     ./yazi
     ./cloud.nix
     ./desktop.nix
+    ./kde-theme.nix
     ./office.nix
   ];
 

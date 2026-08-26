@@ -34,7 +34,7 @@ let
     in
     {
       QT_QPA_PLATFORMTHEME = "kde";
-      QT_STYLE_OVERRIDE = "breeze";
+      QT_STYLE_OVERRIDE = "kvantum";
       QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
       QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
     };
@@ -113,9 +113,8 @@ in
     };
   };
 
-  # The GTK3/GTK4 stylesheets are linked from ../home/theming.nix.
-  # Qt/KDE colours are not themed from this repo; they live in kdeglobals and
-  # are managed with System Settings -> Colours.
+  # The GTK3/GTK4 stylesheets are linked from ../home/theming.nix. Qt/KDE
+  # appearance is managed independently by ../home/kde-theme.nix.
 
   home.pointerCursor = {
     enable = true;
