@@ -98,13 +98,16 @@ def recolour_icons(directory, mapping):
     return files
 
 
-# Keys naming text in a hovered, pressed or selected widget.
-STATE_TEXT = re.compile(r"^(text\.(focus|press|toggle)|highlight\.text)\.color$")
+# The key naming text in a hovered or keyboard-focused widget. Kvantum calls
+# both of those "focus", and they are the states this theme reads as hover.
+HOVER_TEXT = re.compile(r"^text\.focus\.color$")
+# Keys naming text in a pressed or selected widget.
+STATE_TEXT = re.compile(r"^(text\.(press|toggle)|highlight\.text)\.color$")
 # Keys naming the background a selection is painted with.
 STATE_BACKGROUND = re.compile(r"^(inactive\.)?highlight\.color$")
 
 
-def rewrite_kvconfig(path, accent, accent_dim, replaced_text):
+def rewrite_kvconfig(path, accent, accent_dim, hover_text, replaced_text):
     """Rewrite Kvantum's colour keys for the hovered, pressed and selected
     states. Only values that are currently the theme's own cyan are touched, so
     the deliberate exceptions it makes — white progress bar text, the dimmed
@@ -120,8 +123,11 @@ def rewrite_kvconfig(path, accent, accent_dim, replaced_text):
             new = None
             if STATE_BACKGROUND.match(key):
                 new = accent_dim
-            elif value.lower() == replaced_text.lower() and STATE_TEXT.match(key):
-                new = accent
+            elif value.lower() == replaced_text.lower():
+                if HOVER_TEXT.match(key):
+                    new = hover_text
+                elif STATE_TEXT.match(key):
+                    new = accent
             if new is not None and new != value:
                 line = f"{key}={new}"
                 changed += 1
@@ -174,6 +180,7 @@ def main():
     parser.add_argument("--out", required=True, help="directory to write into")
     parser.add_argument("--accent", required=True, help="hover, focus and selection colour")
     parser.add_argument("--accent-dim", required=True, help="background behind those states")
+    parser.add_argument("--hover-text", required=True, help="text in a hovered widget")
     parser.add_argument("--accent-dim-strong", required=True, help="background for pressed states")
     parser.add_argument("--replaces", required=True, help="the theme colour being replaced")
     parser.add_argument(
@@ -224,7 +231,11 @@ def main():
         },
     )
     keys = rewrite_kvconfig(
-        kvantum / "daemon-2.0.kvconfig", args.accent, args.accent_dim, args.replaces
+        kvantum / "daemon-2.0.kvconfig",
+        args.accent,
+        args.accent_dim,
+        args.hover_text,
+        args.replaces,
     )
     scheme_keys = rewrite_colours(colours, args.accent, args.accent_dim, args.replaces)
 

@@ -50,7 +50,8 @@ let
 
   # Local accent overrides on top of the upstream theme: #FF7EDB for the
   # outline, the text and a dimmed background on hovered, focused, selected
-  # and pressed widgets, and the same colour for the icons. Text at rest keeps
+  # and pressed widgets, and the same colour for the icons, except that text
+  # in a hovered widget takes the theme's own red. Text at rest keeps
   # upstream's cyan. Kvantum paints its frames from an SVG, so the states are
   # recoloured there as well as in its config, in the KDE colour scheme and
   # across the icon theme; lib/daemon-accent.py explains which is which.
@@ -62,6 +63,7 @@ let
           --out "$out" \
           --accent "#FF7EDB" \
           --accent-dim "#522741" \
+          --hover-text "#FF5048" \
           --accent-dim-strong "#683454" \
           --replaces "#5DF4FE" \
           --icon-accent-secondary "#E06FC1"
