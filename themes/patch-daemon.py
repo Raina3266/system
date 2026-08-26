@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the two small local variants of the Daemon 2.0 theme.
 
-``desktop`` changes Dolphin-facing icons and interactive-state backgrounds.
+``desktop`` changes Dolphin-facing icons plus normal and interactive backgrounds.
 ``vscode`` applies the same UI accents to Daemon's workbench and imports
 Dracula's syntax rules.
 """
@@ -32,6 +32,12 @@ CHECKED_CONTROL = re.compile(
 CYAN_ICON_COLOURS = {"#5df4fe", "#5df2ff", "#5beedc", "#5aeedc"}
 STATE_BASE_COLOURS = {"#272932", "#1e1e1e", "#14101f", "#331319"}
 STATE_OUTLINE_COLOURS = CYAN_ICON_COLOURS | {"#ff5048", "#fb3048"}
+UPSTREAM_BACKGROUND_COLOURS = {
+    "#210e15": "main",
+    "#14101f": "secondary",
+    "#130f1e": "secondary",
+    "#200d14": "chrome",
+}
 
 
 def make_writable(path: pathlib.Path) -> None:
@@ -42,6 +48,37 @@ def replace_colours(text: str, mapping: dict[str, str]) -> str:
     return HEX_COLOUR.sub(
         lambda match: mapping.get(match.group(0).lower(), match.group(0)), text
     )
+
+
+def rewrite_text_colours(path: pathlib.Path, mapping: dict[str, str]) -> int:
+    """Replace exact colour tokens in a text asset, ignoring letter case."""
+    text = path.read_text()
+    changed = 0
+    for source, target in mapping.items():
+        pattern = re.escape(source)
+        if not source.startswith("#"):
+            pattern = rf"(?<![0-9]){pattern}(?![0-9])"
+        text, replacements = re.subn(
+            pattern, target, text, flags=re.IGNORECASE
+        )
+        changed += replacements
+
+    if changed:
+        make_writable(path)
+        path.write_text(text)
+    return changed
+
+
+def background_palette(args: argparse.Namespace) -> dict[str, str]:
+    targets = {
+        "main": args.main_background.lower(),
+        "secondary": args.secondary_background.lower(),
+        "chrome": args.chrome_background.lower(),
+    }
+    return {
+        upstream: targets[layer]
+        for upstream, layer in UPSTREAM_BACKGROUND_COLOURS.items()
+    }
 
 
 def patch_dolphin_icons(directory: pathlib.Path, icon_colour: str) -> int:
@@ -323,13 +360,33 @@ def patch_desktop(args: argparse.Namespace) -> None:
         {"DecorationFocus", "DecorationHover"},
         hex_to_kde_rgb(args.pink),
     )
+    palette = background_palette(args)
+    svg_background_changes = rewrite_text_colours(
+        kvantum / "daemon-2.0.svg", palette
+    )
+    kvconfig_background_changes = rewrite_text_colours(
+        kvantum / "daemon-2.0.kvconfig", palette
+    )
+    kde_palette = {
+        hex_to_kde_rgb(source): hex_to_kde_rgb(target)
+        for source, target in palette.items()
+    }
+    colour_background_changes = rewrite_text_colours(colours, kde_palette)
+    palette_changes = (
+        svg_background_changes
+        + kvconfig_background_changes
+        + colour_background_changes
+    )
+    if palette_changes == 0:
+        raise RuntimeError("no desktop background colours were changed")
 
     print(
         f"patched {icon_files} Dolphin action/place/MIME icons and "
         f"{indicator_changes} control indicators; "
         f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
         f"across {states} interactive state elements; "
-        f"{kvconfig_changes + colour_changes} selection keys"
+        f"{kvconfig_changes + colour_changes} selection keys; "
+        f"{palette_changes} normal backgrounds darkened"
     )
 
 
@@ -494,6 +551,24 @@ def patch_vscode_workbench(
     return background_changes, icon_changes
 
 
+def patch_vscode_backgrounds(
+    colours: dict[str, str], palette: dict[str, str]
+) -> int:
+    """Darken normal workbench backgrounds without touching foregrounds."""
+    changed = 0
+    for key, value in colours.items():
+        if "background" not in key.lower() or not isinstance(value, str):
+            continue
+        replacement = palette.get(value.lower())
+        if replacement and replacement.lower() != value.lower():
+            colours[key] = replacement
+            changed += 1
+
+    if changed == 0:
+        raise RuntimeError("no VS Code normal backgrounds were changed")
+    return changed
+
+
 def patch_vscode(args: argparse.Namespace) -> None:
     daemon_path = pathlib.Path(args.daemon_theme)
     dracula_path = pathlib.Path(args.dracula_theme)
@@ -506,7 +581,10 @@ def patch_vscode(args: argparse.Namespace) -> None:
     if "tokenColors" not in dracula:
         raise RuntimeError("Dracula theme has no tokenColors")
 
-    background_changes, icon_changes = patch_vscode_workbench(
+    normal_background_changes = patch_vscode_backgrounds(
+        daemon["colors"], background_palette(args)
+    )
+    state_background_changes, icon_changes = patch_vscode_workbench(
         daemon["colors"], args.icon_colour, args.dim_pink
     )
 
@@ -522,7 +600,8 @@ def patch_vscode(args: argparse.Namespace) -> None:
         make_writable(output)
     output.write_text(json.dumps(daemon, indent=2) + "\n")
     print(
-        f"patched {background_changes} VS Code state backgrounds and "
+        f"darkened {normal_background_changes} normal VS Code backgrounds and "
+        f"patched {state_background_changes} state backgrounds plus "
         f"{icon_changes} icon colours; kept Daemon's remaining workbench colours "
         f"and imported "
         f"{len(dracula['tokenColors'])} Dracula syntax rules"
@@ -539,6 +618,9 @@ def parser() -> argparse.ArgumentParser:
     desktop.add_argument("--icon-colour", required=True)
     desktop.add_argument("--pink", required=True)
     desktop.add_argument("--dim-pink", required=True)
+    desktop.add_argument("--main-background", required=True)
+    desktop.add_argument("--secondary-background", required=True)
+    desktop.add_argument("--chrome-background", required=True)
     desktop.set_defaults(run=patch_desktop)
 
     vscode = commands.add_parser("vscode", help="combine Daemon UI with Dracula syntax")
@@ -548,6 +630,9 @@ def parser() -> argparse.ArgumentParser:
     vscode.add_argument("--name", default="Daemon-2.0")
     vscode.add_argument("--icon-colour", required=True)
     vscode.add_argument("--dim-pink", required=True)
+    vscode.add_argument("--main-background", required=True)
+    vscode.add_argument("--secondary-background", required=True)
+    vscode.add_argument("--chrome-background", required=True)
     vscode.set_defaults(run=patch_vscode)
     return result
 

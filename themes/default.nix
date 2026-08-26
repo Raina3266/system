@@ -50,10 +50,14 @@ let
   daemonRed = "#FF5048";
   daemonPink = "#FF7EDB";
   daemonDimPink = "#6F355A";
+  daemonBackground = "#180A10";
+  daemonSecondaryBackground = "#0F0C17";
+  daemonChromeBackground = "#170A0F";
 
-  # Reuse the same two local accents across KDE and VS Code: relevant icons use
-  # Daemon's bright red, while hovered, focused and selected backgrounds use
-  # dimmed pink. Text, normal states and unrelated icon categories stay intact.
+  # Reuse the same local palette across KDE and VS Code: relevant icons use
+  # Daemon red, interactive backgrounds use dimmed pink, and normal surfaces
+  # use darker variants of Daemon's burgundy palette. The deepest background,
+  # text and unrelated icon categories stay intact.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
@@ -62,7 +66,10 @@ let
           --out "$out" \
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
-          --dim-pink "${daemonDimPink}"
+          --dim-pink "${daemonDimPink}" \
+          --main-background "${daemonBackground}" \
+          --secondary-background "${daemonSecondaryBackground}" \
+          --chrome-background "${daemonChromeBackground}"
       '';
 
   # Upstream ships the VS Code theme as a plain extension directory rather
@@ -122,7 +129,10 @@ let
           --out "$dir/$daemon_theme" \
           --name "Daemon-2.0" \
           --icon-colour "${daemonRed}" \
-          --dim-pink "${daemonDimPink}"
+          --dim-pink "${daemonDimPink}" \
+          --main-background "${daemonBackground}" \
+          --secondary-background "${daemonSecondaryBackground}" \
+          --chrome-background "${daemonChromeBackground}"
       '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
