@@ -47,11 +47,23 @@ let
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
   kdeConfigHome = config.xdg.configHome;
+
+  # Both Kvantum packages ship a set of Kv* colour schemes in share/color-schemes
+  # alongside the style plugin, which is all this configuration wants from them.
+  # Drop the schemes so System Settings -> Colours offers Daemon2 alone. The
+  # style plugin itself lives under lib/ and is untouched.
+  withoutColorSchemes =
+    package:
+    package.overrideAttrs (old: {
+      postInstall = (old.postInstall or "") + ''
+        rm -rf "$out/share/color-schemes"
+      '';
+    });
 in
 {
   home.packages = with pkgs; [
-    libsForQt5.qtstyleplugin-kvantum
-    qt6Packages.qtstyleplugin-kvantum
+    (withoutColorSchemes libsForQt5.qtstyleplugin-kvantum)
+    (withoutColorSchemes qt6Packages.qtstyleplugin-kvantum)
   ];
 
   # Kvantum is the application style used by Daemon. The theme directory and
