@@ -48,25 +48,19 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
-  # Local accent overrides on top of the upstream theme: #FF7EDB outlines on
-  # hovered, focused, selected and pressed widgets, over a background dimmed
-  # from the theme's own red #FF5048 so every red on screen agrees, and the
-  # same pink for the icons. The only text that changes is the header's, which
-  # goes white; everything else stays upstream's cyan. Kvantum paints its frames from an SVG, so the states are
-  # recoloured there as well as in its config, in the KDE colour scheme and
-  # across the icon theme; lib/daemon-accent.py explains which is which.
-  daemonAccented =
-    pkgs.runCommandLocal "daemon-2.0-accented" { nativeBuildInputs = [ pkgs.python3 ]; }
+  # Keep Daemon intact except for two local choices: action/button icons use
+  # the theme's own bright red, and the interior background of hovered,
+  # focused and selected widgets uses dimmed pink. Frame edges, text, normal
+  # states and every non-action icon remain exactly as upstream ships them.
+  daemonPatched =
+    pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
-        python3 ${./lib/daemon-accent.py} \
+        python3 ${./patch-daemon.py} desktop \
           --source ${daemonTheme} \
           --out "$out" \
-          --accent "#FF7EDB" \
-          --accent-dim "#521D20" \
-          --header-text "#FFFFFF" \
-          --accent-dim-strong "#682325" \
-          --replaces "#5DF4FE" \
-          --icon-accent-secondary "#E06FC1"
+          --icon-colour "#FF5048" \
+          --pink "#FF7EDB" \
+          --dim-pink "#6F355A"
       '';
 
   # Upstream ships the VS Code theme as a plain extension directory rather
@@ -79,14 +73,8 @@ let
   daemonVscodeManifest = builtins.fromJSON (builtins.readFile "${daemonVscodeSrc}/package.json");
   daemonVscodePublisher = "MathisP75";
   daemonVscodeId = "${daemonVscodePublisher}.${daemonVscodeManifest.name}";
-
-  # A second theme contributed next to upstream's, carrying its syntax
-  # highlighting but none of its 120 workbench colours. VS Code falls back to
-  # its own dark defaults for anything a theme leaves out, so this recolours
-  # the code and leaves the editor's chrome alone. ../home/vscode.nix chooses
-  # which of the two is selected.
-  daemonVscodeSyntaxLabel = "Daemon-2.0 Syntax";
-  daemonVscodeSyntaxPath = "./themes/Daemon-2.0-syntax-color-theme.json";
+  dracula = pkgs.vscode-extensions.dracula-theme.theme-dracula;
+  draculaVscodeSrc = "${dracula}/share/vscode/extensions/${dracula.vscodeExtUniqueId}";
 
   daemonVscodeTheme =
     pkgs.runCommandLocal "vscode-extension-${daemonVscodeManifest.name}"
@@ -111,17 +99,26 @@ let
         mkdir -p "$dir/themes"
 
         jq --arg publisher "${daemonVscodePublisher}" \
-           --arg label "${daemonVscodeSyntaxLabel}" \
-           --arg path "${daemonVscodeSyntaxPath}" \
-          '. + { publisher: $publisher }
-           | .contributes.themes += [ { label: $label, uiTheme: "vs-dark", path: $path } ]' \
+          '. + { publisher: $publisher }' \
           ${daemonVscodeSrc}/package.json > "$dir/package.json"
 
         cp ${daemonVscodeSrc}/themes/*.json "$dir/themes/"
 
-        upstream="$(jq -r '.contributes.themes[0].path' "$dir/package.json")"
-        python3 ${./lib/vscode-syntax-only.py} \
-          "$dir/$upstream" "$dir/${daemonVscodeSyntaxPath}" "${daemonVscodeSyntaxLabel}"
+        daemon_theme="$(jq -r '.contributes.themes[0].path' "$dir/package.json")"
+        dracula_theme="$(jq -r \
+          '.contributes.themes[] | select(.label == "Dracula Theme") | .path' \
+          ${draculaVscodeSrc}/package.json)"
+
+        if [ -z "$dracula_theme" ]; then
+          echo "Dracula Theme was not found in ${draculaVscodeSrc}/package.json" >&2
+          exit 1
+        fi
+
+        python3 ${./patch-daemon.py} vscode \
+          --daemon-theme "$dir/$daemon_theme" \
+          --dracula-theme "${draculaVscodeSrc}/$dracula_theme" \
+          --out "$dir/$daemon_theme" \
+          --name "Daemon-2.0"
       '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
@@ -150,11 +147,9 @@ in
     kdePackages.breeze-icons
   ];
 
-  # The VS Code colour theme ships with the same upstream checkout as the KDE
-  # assets, so the editor stays in step with the rest of the desktop. Only the
-  # extension is installed here; ../home/vscode.nix selects it, because setting
-  # userSettings would hand settings.json to the store and take it away from
-  # the application. programs.vscode.enable lives in ../home/default.nix.
+  # Daemon supplies VS Code's complete application/workbench palette; its
+  # syntax rules are replaced with Dracula's during the build above. Only the
+  # resulting combined theme is installed. ../home/vscode.nix selects it.
   programs.vscode.profiles.default.extensions = [ daemonVscodeTheme ];
 
   # Kvantum is the application style used by Daemon. The theme directory and
@@ -162,7 +157,7 @@ in
   # Kvantum theme active.
   xdg.configFile = (builtins.mapAttrs (_name: link) configLinks) // {
     "Kvantum/daemon-2.0" = {
-      source = "${daemonAccented}/Kvantum/daemon-2.0";
+      source = "${daemonPatched}/Kvantum/daemon-2.0";
     };
     "Kvantum/kvantum.kvconfig".text = ''
       [General]
@@ -177,9 +172,9 @@ in
     "aurorae/themes/daemon-2.0" = {
       source = "${daemonTheme}/Window Decorations/daemon-2.0";
     };
-    "color-schemes/Daemon2.colors".source = "${daemonAccented}/color-schemes/Daemon2.colors";
+    "color-schemes/Daemon2.colors".source = "${daemonPatched}/color-schemes/Daemon2.colors";
     "icons/Daemon-Icons" = {
-      source = "${daemonAccented}/icons/Daemon-Icons";
+      source = "${daemonPatched}/icons/Daemon-Icons";
     };
     "konsole/Daemon-2.0.colorscheme".source = "${daemonTheme}/Konsole/Daemon-2.0.colorscheme";
     "plasma/desktoptheme/Daemon-2.0" = {

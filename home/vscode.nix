@@ -19,27 +19,10 @@
 let
   settingsPath = "${config.xdg.configHome}/Code/User/settings.json";
 
-  # The official Dracula extension, and a variant of its standard theme with
-  # the workbench colours stripped out so only code is recoloured. Installing
-  # the extension itself as well costs nothing — it is where the variant is
-  # built from — and leaves "Dracula Theme" and "Dracula Theme Soft" available
-  # to pick from in the editor.
-  dracula = pkgs.vscode-extensions.dracula-theme.theme-dracula;
-
-  draculaSyntax = import ../themes/lib/vscode-syntax-theme.nix {
-    inherit pkgs;
-    source = "${dracula}/share/vscode/extensions/${dracula.vscodeExtUniqueId}";
-    sourceLabel = "Dracula Theme";
-    label = "Dracula Syntax";
-    name = "dracula-syntax";
-  };
-
   settings = {
-    # Dracula's syntax highlighting over VS Code's own chrome. The full
-    # "Dracula Theme" and "Dracula Theme Soft" are installed alongside it, and
-    # ../themes/default.nix adds "Daemon-2.0" and "Daemon-2.0 Syntax"; any of
-    # those names works here.
-    "workbench.colorTheme" = "Dracula Syntax";
+    # ../themes/default.nix builds this as Daemon's application/workbench
+    # colours combined with Dracula's code syntax highlighting.
+    "workbench.colorTheme" = "Daemon-2.0";
 
     # VS Code ships Copilot chat and inline suggestions as built-in features.
     # chat.disableAIFeatures is the switch for all of it — it hides chat and
@@ -89,12 +72,6 @@ let
   '';
 in
 {
-  # ../themes/default.nix contributes the Daemon themes to the same list.
-  programs.vscode.profiles.default.extensions = [
-    dracula
-    draculaSyntax
-  ];
-
   home.activation.applyVscodeSettings = config.lib.dag.entryAfter [ "linkGeneration" ] ''
     $DRY_RUN_CMD ${mergeSettings} "${settingsPath}" "${wantedSettings}"
   '';
