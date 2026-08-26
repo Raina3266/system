@@ -109,12 +109,11 @@ in
   ];
 
   # The VS Code colour theme ships with the same upstream checkout as the KDE
-  # assets; selecting it here keeps the editor in step with the rest of the
-  # desktop. programs.vscode.enable itself lives in ../home/default.nix.
-  programs.vscode.profiles.default = {
-    extensions = [ daemonVscodeTheme ];
-    userSettings."workbench.colorTheme" = "Daemon-2.0";
-  };
+  # assets, so the editor stays in step with the rest of the desktop. Only the
+  # extension is installed here; ../home/vscode.nix selects it, because setting
+  # userSettings would hand settings.json to the store and take it away from
+  # the application. programs.vscode.enable lives in ../home/default.nix.
+  programs.vscode.profiles.default.extensions = [ daemonVscodeTheme ];
 
   # Kvantum is the application style used by Daemon. The theme directory and
   # its selection file are both managed so System Settings cannot leave an old

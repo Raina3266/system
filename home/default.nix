@@ -11,6 +11,7 @@
     ./cloud.nix
     ./desktop.nix
     ./office.nix
+    ./vscode.nix
   ];
 
   home = {
