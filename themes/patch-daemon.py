@@ -23,7 +23,11 @@ SVG_NAMESPACES = {
 }
 
 HEX_COLOUR = re.compile(r"#[0-9a-f]{6}", re.IGNORECASE)
-STATE_CENTRE = re.compile(r"-(focused|pressed|toggled)$")
+STATE_ELEMENT = re.compile(r"-(focused|pressed|toggled)(?:-|$)")
+CHECKED_CONTROL = re.compile(
+    r"^(?:checkbox-(?:checked|tristate)|radio-checked)-"
+    r"(?:normal|focused|pressed|toggled)$"
+)
 CYAN_ICON_COLOURS = {"#5df4fe", "#5df2ff", "#5beedc", "#5aeedc"}
 STATE_BASE_COLOURS = {"#272932", "#1e1e1e", "#14101f", "#331319"}
 
@@ -116,20 +120,36 @@ def fill_colour(node: ET.Element) -> str | None:
 
 
 def patch_state_backgrounds(
-    path: pathlib.Path, pink: str, dim_pink: str
-) -> tuple[int, int]:
-    """Patch only the central/interior layer of interactive Kvantum states.
+    path: pathlib.Path, pink: str, dim_pink: str, indicator_colour: str
+) -> tuple[int, int, int]:
+    """Patch every background slice of interactive Kvantum states.
 
-    Kvantum stores frame edges as sibling elements with suffixes such as
-    ``-focused-left``. Restricting the match to IDs that *end* in the state
-    name changes the background/interior while preserving those frame edges.
+    Kvantum draws a single row/button from a centre plus edge and corner SVG
+    elements, such as ``itemview-focused`` and ``itemview-focused-left``. All
+    of their translucent cyan background layers need to change together or a
+    selected row remains cyan around a pink centre. Opaque cyan strokes and
+    frame fills are deliberately left alone.
     """
     for prefix, uri in SVG_NAMESPACES.items():
         ET.register_namespace(prefix, uri)
 
     tree = ET.parse(path)
     root = tree.getroot()
-    states = [node for node in root.iter() if STATE_CENTRE.search(node.get("id", ""))]
+    parents = {child: parent for parent in root.iter() for child in parent}
+
+    def inside_state(node: ET.Element) -> bool:
+        parent = parents.get(node)
+        while parent is not None:
+            if STATE_ELEMENT.search(parent.get("id", "")):
+                return True
+            parent = parents.get(parent)
+        return False
+
+    states = [
+        node
+        for node in root.iter()
+        if STATE_ELEMENT.search(node.get("id", "")) and not inside_state(node)
+    ]
     changed = 0
 
     for state in states:
@@ -152,12 +172,23 @@ def patch_state_backgrounds(
             if fill and fill.lower() in STATE_BASE_COLOURS:
                 changed += set_fill(node, dim_pink)
 
+    indicator_changes = 0
+    for control in root.iter():
+        if not CHECKED_CONTROL.match(control.get("id", "")):
+            continue
+        for node, opacity in nodes_with_opacity(control):
+            fill = fill_colour(node)
+            if fill and fill.lower() in CYAN_ICON_COLOURS and opacity >= 1:
+                indicator_changes += set_fill(node, indicator_colour)
+
     if not states or changed == 0:
         raise RuntimeError("no Kvantum interactive-state backgrounds were changed")
+    if indicator_changes == 0:
+        raise RuntimeError("no Kvantum checked-control indicators were changed")
 
     make_writable(path)
     tree.write(path, encoding="UTF-8", xml_declaration=True)
-    return len(states), changed
+    return len(states), changed, indicator_changes
 
 
 def rewrite_ini_key(
@@ -207,8 +238,11 @@ def patch_desktop(args: argparse.Namespace) -> None:
     shutil.copy2(source / "Color Scheme" / "Daemon2.colors", colours)
 
     icon_files = patch_action_icons(icons, args.icon_colour.lower())
-    states, svg_changes = patch_state_backgrounds(
-        kvantum / "daemon-2.0.svg", args.pink.lower(), args.dim_pink.lower()
+    states, svg_changes, indicator_changes = patch_state_backgrounds(
+        kvantum / "daemon-2.0.svg",
+        args.pink.lower(),
+        args.dim_pink.lower(),
+        args.icon_colour.lower(),
     )
     kvconfig_changes = rewrite_ini_key(
         kvantum / "daemon-2.0.kvconfig",
@@ -224,8 +258,9 @@ def patch_desktop(args: argparse.Namespace) -> None:
     )
 
     print(
-        f"patched {icon_files} action icons; {svg_changes} backgrounds across "
-        f"{states} interactive states; {kvconfig_changes + colour_changes} selection keys"
+        f"patched {icon_files} action icons and {indicator_changes} control indicators; "
+        f"{svg_changes} backgrounds across {states} interactive state elements; "
+        f"{kvconfig_changes + colour_changes} selection keys"
     )
 
 
