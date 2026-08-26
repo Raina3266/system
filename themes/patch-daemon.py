@@ -30,6 +30,7 @@ CHECKED_CONTROL = re.compile(
 )
 CYAN_ICON_COLOURS = {"#5df4fe", "#5df2ff", "#5beedc", "#5aeedc"}
 STATE_BASE_COLOURS = {"#272932", "#1e1e1e", "#14101f", "#331319"}
+STATE_OUTLINE_COLOURS = CYAN_ICON_COLOURS | {"#ff5048", "#fb3048"}
 
 
 def make_writable(path: pathlib.Path) -> None:
@@ -119,16 +120,37 @@ def fill_colour(node: ET.Element) -> str | None:
     return style.get("fill", node.get("fill"))
 
 
+def set_stroke(node: ET.Element, colour: str) -> bool:
+    style = parse_style(node.get("style", ""))
+    if "stroke" in style:
+        if style["stroke"].lower() in ("none", colour.lower()):
+            return False
+        style["stroke"] = colour
+        node.set("style", format_style(style))
+        return True
+
+    stroke = node.get("stroke")
+    if stroke and stroke.lower() not in ("none", colour.lower()):
+        node.set("stroke", colour)
+        return True
+    return False
+
+
+def stroke_colour(node: ET.Element) -> str | None:
+    style = parse_style(node.get("style", ""))
+    return style.get("stroke", node.get("stroke"))
+
+
 def patch_state_backgrounds(
     path: pathlib.Path, pink: str, dim_pink: str, indicator_colour: str
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Patch every background slice of interactive Kvantum states.
 
     Kvantum draws a single row/button from a centre plus edge and corner SVG
     elements, such as ``itemview-focused`` and ``itemview-focused-left``. All
     of their translucent cyan background layers need to change together or a
-    selected row remains cyan around a pink centre. Opaque cyan strokes and
-    frame fills are deliberately left alone.
+    selected row remains cyan around a pink centre. Opaque frame fills and
+    strokes are changed to bright pink while interior fills remain dim pink.
     """
     for prefix, uri in SVG_NAMESPACES.items():
         ET.register_namespace(prefix, uri)
@@ -151,44 +173,49 @@ def patch_state_backgrounds(
         if STATE_ELEMENT.search(node.get("id", "")) and not inside_state(node)
     ]
     changed = 0
+    outline_changes = 0
 
     for state in states:
         nodes = list(nodes_with_opacity(state))
-        translucent_cyan = []
         for node, opacity in nodes:
             fill = fill_colour(node)
-            if fill and fill.lower() in CYAN_ICON_COLOURS and 0 < opacity < 1:
-                translucent_cyan.append(node)
+            if fill:
+                lowered = fill.lower()
+                if lowered in STATE_BASE_COLOURS:
+                    changed += set_fill(node, dim_pink)
+                elif lowered in STATE_OUTLINE_COLOURS:
+                    if 0 < opacity < 1:
+                        changed += set_fill(node, pink)
+                    else:
+                        outline_changes += set_fill(node, pink)
 
-        if translucent_cyan:
-            for node in translucent_cyan:
-                changed += set_fill(node, pink)
-            continue
+            stroke = stroke_colour(node)
+            if stroke and stroke.lower() in STATE_OUTLINE_COLOURS:
+                outline_changes += set_stroke(node, pink)
 
-        # Focused interiors without a translucent overlay use Daemon's dark
-        # surface directly. Replace that surface with an already-dimmed pink.
-        for node, _opacity in nodes:
-            fill = fill_colour(node)
-            if fill and fill.lower() in STATE_BASE_COLOURS:
-                changed += set_fill(node, dim_pink)
-
+    # Checked/radio glyphs are button indicators, not backgrounds or frames.
+    # They are restored to Daemon red after the state pass above turns the
+    # surrounding focused/selected frame pink.
     indicator_changes = 0
+    indicator_colours = CYAN_ICON_COLOURS | {pink.lower()}
     for control in root.iter():
         if not CHECKED_CONTROL.match(control.get("id", "")):
             continue
         for node, opacity in nodes_with_opacity(control):
             fill = fill_colour(node)
-            if fill and fill.lower() in CYAN_ICON_COLOURS and opacity >= 1:
+            if fill and fill.lower() in indicator_colours and opacity >= 1:
                 indicator_changes += set_fill(node, indicator_colour)
 
     if not states or changed == 0:
         raise RuntimeError("no Kvantum interactive-state backgrounds were changed")
+    if outline_changes == 0:
+        raise RuntimeError("no Kvantum interactive-state outlines were changed")
     if indicator_changes == 0:
         raise RuntimeError("no Kvantum checked-control indicators were changed")
 
     make_writable(path)
     tree.write(path, encoding="UTF-8", xml_declaration=True)
-    return len(states), changed, indicator_changes
+    return len(states), changed, outline_changes, indicator_changes
 
 
 def rewrite_ini_key(
@@ -210,6 +237,30 @@ def rewrite_ini_key(
 
     if changed == 0:
         raise RuntimeError(f"no keys changed in [{section_name}] of {path}")
+    make_writable(path)
+    path.write_text("\n".join(output) + "\n")
+    return changed
+
+
+def rewrite_ini_keys_in_sections(
+    path: pathlib.Path, section_prefix: str, keys: set[str], value: str
+) -> int:
+    section = ""
+    changed = 0
+    output = []
+    for line in path.read_text().splitlines():
+        heading = re.match(r"^\[(.+)]$", line)
+        if heading:
+            section = heading.group(1)
+        elif section.startswith(section_prefix):
+            setting = re.match(r"^([^=]+)=(.*)$", line)
+            if setting and setting.group(1) in keys and setting.group(2).strip() != value:
+                line = f"{setting.group(1)}={value}"
+                changed += 1
+        output.append(line)
+
+    if changed == 0:
+        raise RuntimeError(f"no {sorted(keys)} keys changed in {path}")
     make_writable(path)
     path.write_text("\n".join(output) + "\n")
     return changed
@@ -238,7 +289,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
     shutil.copy2(source / "Color Scheme" / "Daemon2.colors", colours)
 
     icon_files = patch_action_icons(icons, args.icon_colour.lower())
-    states, svg_changes, indicator_changes = patch_state_backgrounds(
+    states, svg_changes, outline_changes, indicator_changes = patch_state_backgrounds(
         kvantum / "daemon-2.0.svg",
         args.pink.lower(),
         args.dim_pink.lower(),
@@ -256,10 +307,17 @@ def patch_desktop(args: argparse.Namespace) -> None:
         {"BackgroundNormal"},
         hex_to_kde_rgb(args.dim_pink),
     )
+    decoration_changes = rewrite_ini_keys_in_sections(
+        colours,
+        "Colors:",
+        {"DecorationFocus", "DecorationHover"},
+        hex_to_kde_rgb(args.pink),
+    )
 
     print(
         f"patched {icon_files} action icons and {indicator_changes} control indicators; "
-        f"{svg_changes} backgrounds across {states} interactive state elements; "
+        f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
+        f"across {states} interactive state elements; "
         f"{kvconfig_changes + colour_changes} selection keys"
     )
 
