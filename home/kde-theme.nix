@@ -58,7 +58,7 @@ in
     $DRY_RUN_CMD ${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme Daemon2
 
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
-      --group General --key widgetStyle kvantum
+      --group KDE --key widgetStyle kvantum
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
       --group Icons --key Theme Daemon-Icons
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
@@ -69,6 +69,6 @@ in
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kwinrc" \
       --group org.kde.kdecoration2 --key library org.kde.kwin.aurorae
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kwinrc" \
-      --group org.kde.kdecoration2 --key theme daemon-2.0
+      --group org.kde.kdecoration2 --key theme __aurorae__svg__daemon-2.0
   '';
 }
