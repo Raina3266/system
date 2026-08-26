@@ -34,6 +34,7 @@ let
 
   # <path under $XDG_DATA_HOME> = <path in this repository>
   dataLinks = {
+    "color-schemes/Cyberpunk.colors" = "themes/Cyberpunk.colors"; # hand-written, edit in place
     "fcitx5/themes/cyberpunk/theme.conf" = "themes/fcitx5.conf";
   };
 
