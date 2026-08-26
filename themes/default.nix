@@ -48,19 +48,18 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
-  # Local accent overrides on top of the upstream theme: plain text in white,
-  # #FF7EDB for the outline, the text and a dimmed background on hovered,
-  # focused, selected and pressed widgets, and the same colour for the icons.
-  # Kvantum paints its frames from an SVG, so the states are recoloured there
-  # as well as in its config, in the KDE colour scheme and across the icon
-  # theme; lib/daemon-accent.py explains which is which.
+  # Local accent overrides on top of the upstream theme: #FF7EDB for the
+  # outline, the text and a dimmed background on hovered, focused, selected
+  # and pressed widgets, and the same colour for the icons. Text at rest keeps
+  # upstream's cyan. Kvantum paints its frames from an SVG, so the states are
+  # recoloured there as well as in its config, in the KDE colour scheme and
+  # across the icon theme; lib/daemon-accent.py explains which is which.
   daemonAccented =
     pkgs.runCommandLocal "daemon-2.0-accented" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
         python3 ${./lib/daemon-accent.py} \
           --source ${daemonTheme} \
           --out "$out" \
-          --text "#FFFFFF" \
           --accent "#FF7EDB" \
           --accent-dim "#522741" \
           --accent-dim-strong "#683454" \
