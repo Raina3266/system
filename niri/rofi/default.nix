@@ -43,5 +43,5 @@ in
     MimeType=application/pdf;
   '';
 
-  # The rofi config and every .rasi theme are linked from ../../home/theming.nix.
+  # The rofi config and every .rasi theme are linked from ../../themes/default.nix.
 }

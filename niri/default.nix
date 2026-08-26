@@ -90,7 +90,7 @@ in
   '';
 
   # fcitx5 theme: cyberpunk color palette matching waybar/rofi.
-  # The theme file itself is linked from ../home/theming.nix.
+  # The theme file itself is linked from ../themes/default.nix.
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False
     PerScreenDPI=True
@@ -113,7 +113,7 @@ in
     };
   };
 
-  # The GTK3/GTK4 stylesheets are linked from ../home/theming.nix. Qt/KDE
+  # The GTK3/GTK4 stylesheets are linked from ../themes/default.nix. Qt/KDE
   # appearance is managed independently by ../home/kde-theme.nix.
 
   home.pointerCursor = {
