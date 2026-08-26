@@ -49,7 +49,7 @@ let
   };
   daemonRed = "#D52C35";
   daemonPink = "#E82A9D";
-  daemonDimPink = "#5E234A";
+  daemonDimPink = "#481A39";
   daemonBackground = "#180A10";
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
