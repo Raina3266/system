@@ -3,8 +3,10 @@
 #
 # Hovered, focused, selected and pressed widgets get an accent outline and a
 # dimmed background, the latter derived from the theme's own red so every red
-# on screen agrees. Text is never touched, at rest or in a state, so it stays
-# the cyan upstream chose.
+# on screen agrees. The one text colour that changes is the header's, in both
+# places KDE defines one: Kvantum's header sections, which are the column
+# headers inside an application, and the colour scheme's Header set. All other
+# text stays the cyan upstream chose.
 #
 # Kvantum paints widget frames from an SVG rather than from its config, so the
 # states have to be recoloured there as well: every element whose id carries a
@@ -101,21 +103,30 @@ def recolour_icons(directory, mapping):
 
 # Keys naming the background a selection is painted with.
 STATE_BACKGROUND = re.compile(r"^(inactive\.)?highlight\.color$")
+# The header's text at rest, inside Kvantum's header section.
+HEADER_SECTION = "HeaderSection"
+HEADER_TEXT = "text.normal.color"
 
 
-def rewrite_kvconfig(path, accent_dim):
-    """Rewrite the background Kvantum paints behind a selection. Every text
-    colour it defines is left alone."""
+def rewrite_kvconfig(path, accent_dim, header_text):
+    """Rewrite the background Kvantum paints behind a selection, and the
+    header's own text colour. Every other text colour is left alone."""
     lines = path.read_text().splitlines()
     out = []
     changed = 0
+    section = ""
     for line in lines:
+        heading = re.match(r"^\[(.+)\]$", line)
+        if heading:
+            section = heading.group(1)
         match = re.match(r"^([A-Za-z.]+)=(.+)$", line)
         if match:
             key, value = match.group(1), match.group(2).strip()
             new = None
             if STATE_BACKGROUND.match(key):
                 new = accent_dim
+            elif section == HEADER_SECTION and key == HEADER_TEXT:
+                new = header_text
             if new is not None and new != value:
                 line = f"{key}={new}"
                 changed += 1
@@ -124,12 +135,13 @@ def rewrite_kvconfig(path, accent_dim):
     return changed
 
 
-def rewrite_colours(path, accent, accent_dim):
+def rewrite_colours(path, accent, accent_dim, header_text):
     """Rewrite the KDE colour scheme: the accent for the focus and hover
-    decorations, and the dimmed red behind a selection. Foreground colours are
-    left as they are."""
+    decorations, the dimmed red behind a selection, and the header set's text.
+    Every other foreground is left as it is."""
     highlight = ",".join(str(part) for part in hex_to_rgb(accent))
     dim = ",".join(str(part) for part in hex_to_rgb(accent_dim))
+    header = ",".join(str(part) for part in hex_to_rgb(header_text))
 
     section = ""
     out = []
@@ -147,6 +159,8 @@ def rewrite_colours(path, accent, accent_dim):
                     new = highlight
                 elif section == "Colors:Selection" and key == "BackgroundNormal":
                     new = dim
+                elif section == "Colors:Header" and key == "ForegroundNormal":
+                    new = header
                 if new is not None and new != value:
                     line = f"{key}={new}"
                     changed += 1
@@ -161,6 +175,7 @@ def main():
     parser.add_argument("--out", required=True, help="directory to write into")
     parser.add_argument("--accent", required=True, help="hover, focus and selection colour")
     parser.add_argument("--accent-dim", required=True, help="background behind those states")
+    parser.add_argument("--header-text", required=True, help="text in an application's headers")
     parser.add_argument("--accent-dim-strong", required=True, help="background for pressed states")
     parser.add_argument("--replaces", required=True, help="the theme colour being replaced")
     parser.add_argument(
@@ -210,8 +225,12 @@ def main():
             "#5beedc": args.icon_accent_secondary.lower(),
         },
     )
-    keys = rewrite_kvconfig(kvantum / "daemon-2.0.kvconfig", args.accent_dim)
-    scheme_keys = rewrite_colours(colours, args.accent, args.accent_dim)
+    keys = rewrite_kvconfig(
+        kvantum / "daemon-2.0.kvconfig", args.accent_dim, args.header_text
+    )
+    scheme_keys = rewrite_colours(
+        colours, args.accent, args.accent_dim, args.header_text
+    )
 
     print(
         f"recoloured {colours_changed} colours across {subtrees} Kvantum state elements, "
