@@ -50,6 +50,7 @@ let
   daemonRed = "#D52C35";
   daemonPink = "#E82A9D";
   daemonDimPink = "#481A39";
+  daemonAlternateBackground = "#210E15";
   daemonBackground = "#180A10";
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
@@ -68,6 +69,7 @@ let
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
+          --alternate-background "${daemonAlternateBackground}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
           --chrome-background "${daemonChromeBackground}"

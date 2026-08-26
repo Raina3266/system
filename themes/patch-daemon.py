@@ -379,6 +379,15 @@ def patch_desktop(args: argparse.Namespace) -> None:
     )
     if palette_changes == 0:
         raise RuntimeError("no desktop background colours were changed")
+    # Apply this after the broad palette conversion: the requested alternate
+    # colour is also Daemon's original main background, which the conversion
+    # above intentionally maps to the darker normal background everywhere else.
+    alternate_background_changes = rewrite_ini_key(
+        colours,
+        "Colors:View",
+        {"BackgroundAlternate"},
+        hex_to_kde_rgb(args.alternate_background),
+    )
 
     print(
         f"patched {icon_files} Dolphin action/place/MIME icons and "
@@ -386,6 +395,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
         f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
         f"across {states} interactive state elements; "
         f"{kvconfig_changes + colour_changes} selection keys; "
+        f"{alternate_background_changes} alternate-view background; "
         f"{palette_changes} normal backgrounds darkened"
     )
 
@@ -652,6 +662,7 @@ def parser() -> argparse.ArgumentParser:
     desktop.add_argument("--icon-colour", required=True)
     desktop.add_argument("--pink", required=True)
     desktop.add_argument("--dim-pink", required=True)
+    desktop.add_argument("--alternate-background", required=True)
     desktop.add_argument("--main-background", required=True)
     desktop.add_argument("--secondary-background", required=True)
     desktop.add_argument("--chrome-background", required=True)
