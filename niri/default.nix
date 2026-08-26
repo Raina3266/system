@@ -113,8 +113,8 @@ in
     };
   };
 
-  # The GTK3/GTK4 stylesheets are linked from ../themes/default.nix. Qt/KDE
-  # appearance is managed independently by ../home/kde-theme.nix.
+  # The GTK3/GTK4 stylesheets and the Qt/KDE appearance are both managed from
+  # ../themes/default.nix.
 
   home.pointerCursor = {
     enable = true;
