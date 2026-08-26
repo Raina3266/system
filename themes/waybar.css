@@ -67,7 +67,7 @@ window#waybar.bottom {
 #custom-gphotos {
     background-color: transparent;
     padding: 0 11px;
-    margin-left: 5px;
+    margin-right: 6px;
     border-radius: 6px;
     border: 2px solid rgba(255, 126, 219, 0.3);
 }
@@ -112,10 +112,6 @@ window#waybar.bottom {
     background-color: rgba(255, 126, 219, 0.2);
     color: #7afcff;
     padding: 0;
-}
-
-.niri-window-buttons {
-    margin-left: 10px;
 }
 
 .niri-window-buttons button {

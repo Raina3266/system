@@ -2,6 +2,7 @@
   pkgs,
   config,
   lib,
+  repoPackages,
   ...
 }:
 let
@@ -81,20 +82,24 @@ let
   handledBy = desktopEntry: types: lib.genAttrs types (_type: [ desktopEntry ]);
 in
 {
-  home.packages = with pkgs; [
-    kdePackages.dolphin
-    kdePackages.ark
-    kdePackages.baloo
-    kdePackages.baloo-widgets
-    kdePackages.breeze
-    kdePackages.kfilemetadata
-    kdePackages.kio-fuse
-    kdePackages.kompare
-    kdePackages.plasma-integration
-    kdePackages.systemsettings
-    kdePackages.plasma-workspace
-    kdePackages.knewstuff
-  ];
+  home.packages =
+    with pkgs;
+    [
+      kdePackages.dolphin
+      kdePackages.ark
+      kdePackages.baloo
+      kdePackages.baloo-widgets
+      kdePackages.breeze
+      kdePackages.kfilemetadata
+      kdePackages.kio-fuse
+      kdePackages.kompare
+      kdePackages.dolphin-plugins
+      kdePackages.plasma-integration
+      kdePackages.systemsettings
+      kdePackages.plasma-workspace
+      kdePackages.knewstuff
+    ]
+    ++ [ repoPackages.ocrScreenshot ];
 
   home.activation.seedKdeglobals = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       if [ ! -e "$HOME/.config/kdeglobals" ]; then
@@ -147,6 +152,26 @@ in
       "org.freedesktop.impl.portal.FileChooser" = [
         "gtk"
       ];
+    };
+  };
+
+  dconf.settings = {
+    "org/gnome/settings-daemon/plugins/media-keys" = {
+      custom-keybindings = [
+        "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ocr-shortcut/"
+      ];
+    };
+    "org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ocr-shortcut" = {
+      binding = "<Shift>Print";
+      command = "${repoPackages.ocrScreenshot}/bin/ocr-screenshot";
+      name = "OCR Screenshot";
+    };
+    "org/gnome/desktop/interface" = {
+      enable-hot-corners = false;
+      show-battery-percentage = true;
+    };
+    "org/gnome/mutter" = {
+      center-new-windows = true;
     };
   };
 

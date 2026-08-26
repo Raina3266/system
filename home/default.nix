@@ -1,7 +1,31 @@
 {
   pkgs,
+  config,
   ...
 }:
+let
+  repoRoot = "${config.home.homeDirectory}/System";
+
+  link = path: { source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/${path}"; };
+
+  configLinks = {
+    "gtk-3.0/gtk.css" = "themes/gtk3.css";
+    "gtk-4.0/gtk.css" = "themes/gtk4.css";
+    "preview-panel/preview-panel.css" = "themes/preview-panel.css";
+    "rofi/config.rasi" = "niri/rofi/config.rasi";
+    "rofi/media-control.rasi" = "themes/media-control.rasi";
+    "rofi/rofi-audio.rasi" = "themes/rofi-audio.rasi";
+    "rofi/rofi-clipboard.rasi" = "themes/rofi-clipboard.rasi";
+    "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
+    "rofi/rofi-network.rasi" = "themes/rofi-network.rasi";
+    "waybar/style.css" = "themes/waybar.css";
+    "yazi/theme.toml" = "themes/yazi.toml";
+  };
+
+  dataLinks = {
+    "fcitx5/themes/cyberpunk/theme.conf" = "themes/fcitx5.conf";
+  };
+in
 {
   imports = [
     ../niri
@@ -9,9 +33,7 @@
     ./yazi
     ./cloud.nix
     ./desktop.nix
-    ./ocr.nix
     ./office.nix
-    ./theming.nix
   ];
 
   home = {
@@ -53,6 +75,7 @@
     # media playback
     lrcget
     vlc
+    puddletag
     waylyrics
     kdePackages.elisa
 
@@ -77,4 +100,7 @@
       ];
     }))
   ];
+
+  xdg.configFile = builtins.mapAttrs (_name: link) configLinks;
+  xdg.dataFile = builtins.mapAttrs (_name: link) dataLinks;
 }

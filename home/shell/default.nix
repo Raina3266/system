@@ -35,9 +35,11 @@
       killall
       lsof
       coreutils
+      deno
 
       # Development toolchains
       cargo
+      cargo-fuzz
       rustc
       rustfmt
       clippy
