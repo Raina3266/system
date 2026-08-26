@@ -1,5 +1,5 @@
-# System, hardware, and media status modules.
-{ pkgs, packages }:
+# System, hardware, media, and Google Calendar/Tasks status modules.
+{ lib, pkgs, packages }:
 let
   drawer = {
     transition-duration = 300;
@@ -21,12 +21,29 @@ let
 in
 {
   homeConfig = {
-    home.packages = [ pkgs.mprisence ];
+    home.packages = [
+      pkgs.mprisence
+      packages.ycal.package
+    ];
     programs.google-chrome = {
       commandLineArgs = [
         "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
       ];
       nativeMessagingHosts = [ mprisenceNativeHost ];
+    };
+    systemd.user.services.waybar-ycal = {
+      Unit = {
+        Description = "waybar-ycal: Google Calendar and Tasks popup";
+        ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${packages.ycal.package}/bin/waybar-ycal-popup";
+        Restart = lib.mkForce "on-failure";
+        RestartSec = 3;
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
     };
   };
 
@@ -187,6 +204,13 @@ in
       exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
       exec = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
       on-click = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
+    };
+
+    "custom/ycal" = {
+      return-type = "json";
+      interval = 60;
+      exec = packages.ycal.barExec;
+      on-click = packages.ycal.toggle;
     };
   };
 }

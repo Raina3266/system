@@ -9,8 +9,8 @@ let
       {
         inherit pname;
         version = "0.1.0";
-        src = ./scripts;
-        cargoLock.lockFile = ./scripts/Cargo.lock;
+        src = ./.;
+        cargoLock.lockFile = ./Cargo.lock;
         cargoBuildFlags = [
           "--package"
           pname

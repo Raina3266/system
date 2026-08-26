@@ -11,24 +11,93 @@ let
   cfg = config.programs'.waybar;
 
   system = import ./system.nix {
-    inherit pkgs;
+    inherit lib pkgs;
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
     inherit pkgs;
     packages = repoPackages;
   };
-  calendar = import ./calendar.nix {
-    inherit lib;
-    packages = repoPackages;
-  };
-  taskbar = import ./taskbar.nix { packages = repoPackages; };
+  modules = system.modules // utilities.modules;
+  taskbar = utilities.taskbar;
 
-  modules = system.modules // utilities.modules // calendar.modules;
-  layout = import ./layout.nix {
-    inherit modules taskbar;
+  # ------------ Waybar layouts ------------
+  common = {
+    layer = "top";
+    height = 40;
+    smooth-scrolling-threshold = 5;
   };
 
+  # ------------ TopBar -------------
+
+  topBar =
+    common
+    // {
+      position = "top";
+      expand-center = true;
+      modules-left = [
+        "custom/ycal"
+        "group/system"
+        "group/hardware"
+      ];
+      modules-center = [
+        "custom/media"
+        "custom/lyrics"
+      ];
+      modules-right = [
+        "tray"
+        "custom/timer"
+        "custom/clipboard"
+        "custom/audio"
+        "custom/network"
+      ];
+    }
+    // modules;
+
+  # ------------ BottomBar -------------
+
+  starredApp = name: icon: cmd: {
+    format = icon;
+    tooltip = true;
+    tooltip-format = name;
+    on-click = "${cmd} &";
+  };
+
+  chromeApp =
+    name: icon: appId:
+    starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
+
+  bottomBar =
+    common
+    // {
+      position = "bottom";
+      modules-left = [
+        "niri/workspaces"
+        "custom/obsidian"
+        "custom/gcal"
+        "custom/gkeep"
+        "custom/gphotos"
+        "custom/whatsapp"
+        "custom/tauon"
+        "cffi/niri_window_buttons"
+      ];
+
+      # Workspace switcher: click to focus, middle-click to move up, right-click to move down
+      "niri/workspaces" = {
+        format = "{index}";
+        tooltip-format = "Middle-click: move up  |  Right-click: move down";
+        on-click-middle = "niri msg action focus-workspace {index} && niri msg action move-workspace-up";
+        on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";
+      };
+
+      "custom/obsidian" = starredApp "Obsidian" "💎" "obsidian";
+      "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
+      "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
+      "custom/gkeep" = chromeApp "Google Keep" "📝" "eilembjdkfgodjkcjnpgpaenohkicgjd";
+      "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
+      "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
+    }
+    // taskbar;
 in
 {
   options.programs'.waybar.enable = lib.mkEnableOption "waybar";
@@ -37,7 +106,6 @@ in
     lib.mkMerge [
       system.homeConfig
       utilities.homeConfig
-      calendar.homeConfig
 
       {
         home.packages = with pkgs; [
@@ -52,7 +120,7 @@ in
           enable = true;
           systemd.enable = true;
           settings = {
-            inherit (layout) topBar bottomBar;
+            inherit topBar bottomBar;
           };
         };
 

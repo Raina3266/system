@@ -12,12 +12,7 @@
 }:
 let
   kernelPackages = pkgs.linuxPackages_latest;
-
-  # Built once here and handed to the NixOS modules (_module.args) and to the
-  # Home Manager modules (extraSpecialArgs), so the derivations in
-  # ../packages.nix are instantiated a single time instead of once per
-  # importing module.
-  repoPackages = import ../packages.nix { inherit pkgs kernelPackages; };
+  repoPackages = import ../scripts/packages.nix { inherit pkgs kernelPackages; };
 in
 {
   imports = [
