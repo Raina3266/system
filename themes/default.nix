@@ -49,10 +49,11 @@ let
   };
 
   # Local accent overrides on top of the upstream theme: plain text in white,
-  # and #FF7EDB for the outline, the text and a dimmed background on hovered,
-  # focused, selected and pressed widgets. Kvantum paints its frames from an
-  # SVG, so the states are recoloured there as well as in its config and in
-  # the KDE colour scheme; lib/daemon-accent.py explains which is which.
+  # #FF7EDB for the outline, the text and a dimmed background on hovered,
+  # focused, selected and pressed widgets, and the same colour for the icons.
+  # Kvantum paints its frames from an SVG, so the states are recoloured there
+  # as well as in its config, in the KDE colour scheme and across the icon
+  # theme; lib/daemon-accent.py explains which is which.
   daemonAccented =
     pkgs.runCommandLocal "daemon-2.0-accented" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
@@ -63,7 +64,8 @@ let
           --accent "#FF7EDB" \
           --accent-dim "#522741" \
           --accent-dim-strong "#683454" \
-          --replaces "#5DF4FE"
+          --replaces "#5DF4FE" \
+          --icon-accent-secondary "#E06FC1"
       '';
 
   # Upstream ships the VS Code theme as a plain extension directory rather
@@ -176,7 +178,7 @@ in
     };
     "color-schemes/Daemon2.colors".source = "${daemonAccented}/color-schemes/Daemon2.colors";
     "icons/Daemon-Icons" = {
-      source = "${daemonTheme}/Icon Theme/Daemon-Icons";
+      source = "${daemonAccented}/icons/Daemon-Icons";
     };
     "konsole/Daemon-2.0.colorscheme".source = "${daemonTheme}/Konsole/Daemon-2.0.colorscheme";
     "plasma/desktoptheme/Daemon-2.0" = {

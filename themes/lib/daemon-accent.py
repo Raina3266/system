@@ -10,9 +10,14 @@
 # Kvantum status (-focused, which is Kvantum's name for hover and focus,
 # -pressed and -toggled) is recoloured along with everything inside it, while
 # -normal elements keep the theme's own red frames.
+#
+# The icon theme is a third place colour lives. Upstream builds it by recolouring
+# Breeze's grey to the theme's cyan, so the icons on buttons and toolbars take
+# the accent by the same one-colour substitution.
 import argparse
 import pathlib
 import re
+import shutil
 import xml.etree.ElementTree as ET
 
 # Kvantum statuses that make up "hover, select and focus".
@@ -73,6 +78,24 @@ def recolour_svg(path, mapping):
 
     tree.write(path, encoding="UTF-8", xml_declaration=True)
     return subtrees, changed
+
+
+def recolour_icons(directory, mapping):
+    """Recolour the icon theme in place. The theme is mostly symbolic links
+    pointing at a few thousand real files; only the real ones are rewritten,
+    which is what upstream's own recolouring script does too."""
+    files = 0
+    for path in sorted(directory.rglob("*.svg")):
+        if path.is_symlink():
+            continue
+        text = path.read_text()
+        replaced = COLOUR.sub(
+            lambda match: mapping.get(match.group(0).lower(), match.group(0)), text
+        )
+        if replaced != text:
+            path.write_text(replaced)
+            files += 1
+    return files
 
 
 # Keys naming the resting state of text, which becomes the plain text colour.
@@ -154,6 +177,11 @@ def main():
     parser.add_argument("--accent-dim", required=True, help="background behind those states")
     parser.add_argument("--accent-dim-strong", required=True, help="background for pressed states")
     parser.add_argument("--replaces", required=True, help="the theme colour being replaced")
+    parser.add_argument(
+        "--icon-accent-secondary",
+        required=True,
+        help="second tone, for the icons that use one",
+    )
     args = parser.parse_args()
 
     source = pathlib.Path(args.source)
@@ -163,6 +191,13 @@ def main():
     kvantum.mkdir(parents=True)
     for name in ("daemon-2.0.svg", "daemon-2.0.kvconfig"):
         (kvantum / name).write_bytes((source / "Kvantum" / "daemon-2.0" / name).read_bytes())
+
+    icons = out / "icons" / "Daemon-Icons"
+    shutil.copytree(source / "Icon Theme" / "Daemon-Icons", icons, symlinks=True)
+    # Everything arrives read-only from the store; make what we rewrite writable.
+    for path in icons.rglob("*"):
+        if not path.is_symlink():
+            path.chmod(0o755 if path.is_dir() else 0o644)
 
     schemes = out / "color-schemes"
     schemes.mkdir(parents=True)
@@ -181,6 +216,14 @@ def main():
     }
 
     subtrees, colours_changed = recolour_svg(kvantum / "daemon-2.0.svg", mapping)
+    icon_files = recolour_icons(
+        icons,
+        {
+            args.replaces.lower(): args.accent.lower(),
+            "#5df2ff": args.accent.lower(),
+            "#5beedc": args.icon_accent_secondary.lower(),
+        },
+    )
     keys = rewrite_kvconfig(
         kvantum / "daemon-2.0.kvconfig", args.text, args.accent, args.accent_dim, args.replaces
     )
@@ -190,7 +233,7 @@ def main():
 
     print(
         f"recoloured {colours_changed} colours across {subtrees} Kvantum state elements, "
-        f"{keys} Kvantum config keys, {scheme_keys} colour scheme keys"
+        f"{keys} Kvantum config keys, {scheme_keys} colour scheme keys, {icon_files} icons"
     )
 
 
