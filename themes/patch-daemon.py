@@ -2,7 +2,8 @@
 """Build the two small local variants of the Daemon 2.0 theme.
 
 ``desktop`` changes Dolphin-facing icons and interactive-state backgrounds.
-``vscode`` keeps Daemon's workbench colours and imports Dracula's syntax rules.
+``vscode`` applies the same UI accents to Daemon's workbench and imports
+Dracula's syntax rules.
 """
 
 import argparse
@@ -409,6 +410,89 @@ SYNTAX_KEYS = (
     "encodedTokensColors",
 )
 
+VSCODE_STATE_BACKGROUND_KEYS = {
+    "activityBar.activeBackground",
+    "activityBarTop.activeBackground",
+    "button.hoverBackground",
+    "button.secondaryHoverBackground",
+    "checkbox.selectBackground",
+    "commandCenter.activeBackground",
+    "editor.inactiveSelectionBackground",
+    "editor.selectionBackground",
+    "editor.selectionHighlightBackground",
+    "editor.wordHighlightBackground",
+    "editor.wordHighlightStrongBackground",
+    "editorActionList.focusBackground",
+    "editorStickyScrollHover.background",
+    "editorSuggestWidget.selectedBackground",
+    "extensionButton.hoverBackground",
+    "extensionButton.prominentHoverBackground",
+    "inputOption.activeBackground",
+    "inputOption.hoverBackground",
+    "list.activeSelectionBackground",
+    "list.focusBackground",
+    "list.hoverBackground",
+    "list.inactiveFocusBackground",
+    "list.inactiveSelectionBackground",
+    "menu.selectionBackground",
+    "menubar.selectionBackground",
+    "minimapSlider.activeBackground",
+    "minimapSlider.hoverBackground",
+    "notebook.focusedCellBackground",
+    "notebook.selectedCellBackground",
+    "peekViewResult.selectionBackground",
+    "quickInputList.focusBackground",
+    "radio.activeBackground",
+    "scrollbarSlider.activeBackground",
+    "scrollbarSlider.hoverBackground",
+    "settings.focusedRowBackground",
+    "settings.rowHoverBackground",
+    "statusBarItem.activeBackground",
+    "statusBarItem.focusHoverBackground",
+    "statusBarItem.hoverBackground",
+    "statusBarItem.remoteHoverBackground",
+    "tab.activeBackground",
+    "tab.hoverBackground",
+    "terminal.hoverHighlightBackground",
+    "terminal.inactiveSelectionBackground",
+    "terminal.selectionBackground",
+    "toolbar.activeBackground",
+    "toolbar.hoverBackground",
+    "welcomePage.tileHoverBackground",
+}
+
+VSCODE_ICON_FOREGROUND_KEYS = {
+    "activityBar.foreground",
+    "activityBar.inactiveForeground",
+    "activityBarTop.foreground",
+    "activityBarTop.inactiveForeground",
+    "checkbox.foreground",
+    "icon.foreground",
+    "list.activeSelectionIconForeground",
+    "list.inactiveSelectionIconForeground",
+    "quickInputList.focusIconForeground",
+    "radio.activeForeground",
+}
+
+
+def patch_vscode_workbench(
+    colours: dict[str, str], icon_colour: str, dim_pink: str
+) -> tuple[int, int]:
+    """Apply Daemon's local interaction and icon accents to VS Code."""
+    background_changes = 0
+    for key in VSCODE_STATE_BACKGROUND_KEYS:
+        if colours.get(key, "").lower() != dim_pink.lower():
+            colours[key] = dim_pink
+            background_changes += 1
+
+    icon_changes = 0
+    for key in VSCODE_ICON_FOREGROUND_KEYS:
+        if colours.get(key, "").lower() != icon_colour.lower():
+            colours[key] = icon_colour
+            icon_changes += 1
+
+    return background_changes, icon_changes
+
 
 def patch_vscode(args: argparse.Namespace) -> None:
     daemon_path = pathlib.Path(args.daemon_theme)
@@ -422,6 +506,10 @@ def patch_vscode(args: argparse.Namespace) -> None:
     if "tokenColors" not in dracula:
         raise RuntimeError("Dracula theme has no tokenColors")
 
+    background_changes, icon_changes = patch_vscode_workbench(
+        daemon["colors"], args.icon_colour, args.dim_pink
+    )
+
     for key in SYNTAX_KEYS:
         if key in dracula:
             daemon[key] = dracula[key]
@@ -434,7 +522,9 @@ def patch_vscode(args: argparse.Namespace) -> None:
         make_writable(output)
     output.write_text(json.dumps(daemon, indent=2) + "\n")
     print(
-        f"kept {len(daemon['colors'])} Daemon workbench colours and imported "
+        f"patched {background_changes} VS Code state backgrounds and "
+        f"{icon_changes} icon colours; kept Daemon's remaining workbench colours "
+        f"and imported "
         f"{len(dracula['tokenColors'])} Dracula syntax rules"
     )
 
@@ -456,6 +546,8 @@ def parser() -> argparse.ArgumentParser:
     vscode.add_argument("--dracula-theme", required=True)
     vscode.add_argument("--out", required=True)
     vscode.add_argument("--name", default="Daemon-2.0")
+    vscode.add_argument("--icon-colour", required=True)
+    vscode.add_argument("--dim-pink", required=True)
     vscode.set_defaults(run=patch_vscode)
     return result
 

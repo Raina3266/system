@@ -47,20 +47,22 @@ let
     url = "https://github.com/MathisP75/daemon-kde-mk2.git";
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
+  daemonRed = "#FF5048";
+  daemonPink = "#FF7EDB";
+  daemonDimPink = "#6F355A";
 
-  # Keep Daemon intact except for two local choices: Dolphin's action, place
-  # and file-type icons use the theme's own bright red, and the interior
-  # background of hovered, focused and selected widgets uses dimmed pink.
-  # Text, normal states and every other icon category remain as upstream.
+  # Reuse the same two local accents across KDE and VS Code: relevant icons use
+  # Daemon's bright red, while hovered, focused and selected backgrounds use
+  # dimmed pink. Text, normal states and unrelated icon categories stay intact.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
       ''
         python3 ${./patch-daemon.py} desktop \
           --source ${daemonTheme} \
           --out "$out" \
-          --icon-colour "#FF5048" \
-          --pink "#FF7EDB" \
-          --dim-pink "#6F355A"
+          --icon-colour "${daemonRed}" \
+          --pink "${daemonPink}" \
+          --dim-pink "${daemonDimPink}"
       '';
 
   # Upstream ships the VS Code theme as a plain extension directory rather
@@ -118,7 +120,9 @@ let
           --daemon-theme "$dir/$daemon_theme" \
           --dracula-theme "${draculaVscodeSrc}/$dracula_theme" \
           --out "$dir/$daemon_theme" \
-          --name "Daemon-2.0"
+          --name "Daemon-2.0" \
+          --icon-colour "${daemonRed}" \
+          --dim-pink "${daemonDimPink}"
       '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
