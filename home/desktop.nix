@@ -1,10 +1,14 @@
 {
+  config,
   pkgs,
   lib,
   repoPackages,
   ...
 }:
 let
+  kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
+  kdeConfigHome = config.xdg.configHome;
+
   # Listed once and used twice: as the Zed desktop entry's MimeType= line and
   # as the set of types that entry is the default handler for.
   codeMimeTypes = [
@@ -169,6 +173,19 @@ in
     // handledBy "zed-new-window.desktop" codeMimeTypes
     // handledBy "vlc.desktop" mediaMimeTypes;
   };
+
+  # Dolphin's "Open Terminal" (Shift+F4) goes through KIO's
+  # KTerminalLauncherJob, which reads these two kdeglobals keys only: the
+  # x-scheme-handler/terminal default above is never consulted, so without
+  # them Dolphin falls back to Konsole. kdeglobals is mutable and already
+  # written at activation by themes/default.nix, so the keys are set with
+  # kwriteconfig rather than replacing the whole file.
+  home.activation.setGhosttyAsKdeTerminal = config.lib.dag.entryAfter [ "linkGeneration" ] ''
+    $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
+      --group General --key TerminalApplication ghostty
+    $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
+      --group General --key TerminalService com.mitchellh.ghostty.desktop
+  '';
 
   systemd.user.services = {
     bt-agent = {
