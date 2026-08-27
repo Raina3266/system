@@ -85,6 +85,13 @@ in
       fi
   '';
 
+  programs.vscode.profiles.default.userSettings = {
+    "workbench.colorTheme" = "Daemon-2.0";
+    "chat.disableAIFeatures" = true;
+    "chat.commandCenter.enabled" = false;
+    "editor.inlineSuggest.enabled" = false;
+  };
+
   programs.thunderbird = {
     enable = true;
 

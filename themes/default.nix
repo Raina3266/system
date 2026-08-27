@@ -48,8 +48,8 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
   daemonRed = "#D52C35";
-  daemonPink = "#E82A9D";
-  daemonDimPink = "#481A39";
+  daemonPink = "#D656C7";
+  daemonDimPink = "#FF7EDB";
   daemonAlternateBackground = "#210E15";
   daemonBackground = "#180A10";
   daemonSecondaryBackground = "#0F0C17";
