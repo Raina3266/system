@@ -4,7 +4,9 @@
 # place with mkOutOfStoreSymlink, so they stay outside the Nix store and an
 # edit is picked up the next time the program starts without a Home Manager
 # rebuild. The Daemon KDE MK2 theme comes from a pinned upstream checkout and
-# is copied in from the store, plus the activation step that selects it.
+# is copied in from the store, plus the activation step that selects it. Its
+# VS Code extension is repackaged from that same checkout and handed to the
+# programs.vscode module.
 {
   config,
   pkgs,
@@ -45,6 +47,97 @@ let
     url = "https://github.com/MathisP75/daemon-kde-mk2.git";
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
+  daemonRed = "#D52C35";
+  daemonPink = "#D656C7";
+  daemonDimPink = "#6E2D5E";
+  daemonAlternateBackground = "#210E15";
+  daemonBackground = "#180A10";
+  daemonSecondaryBackground = "#0F0C17";
+  daemonChromeBackground = "#170A0F";
+
+  # Reuse the same local palette across KDE and VS Code: relevant icons use
+  # vivid dark red, interactive outlines use cyberpunk pink, their backgrounds
+  # use dimmed pink, and normal surfaces use darker variants of Daemon's
+  # burgundy palette. The deepest background, text and unrelated icon
+  # categories stay intact.
+  daemonPatched =
+    pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
+      ''
+        python3 ${./patch-daemon.py} desktop \
+          --source ${daemonTheme} \
+          --out "$out" \
+          --icon-colour "${daemonRed}" \
+          --pink "${daemonPink}" \
+          --dim-pink "${daemonDimPink}" \
+          --alternate-background "${daemonAlternateBackground}" \
+          --main-background "${daemonBackground}" \
+          --secondary-background "${daemonSecondaryBackground}" \
+          --chrome-background "${daemonChromeBackground}"
+      '';
+
+  # Upstream ships the VS Code theme as a plain extension directory rather
+  # than a marketplace package, so repackage it into the layout Home Manager
+  # expects (share/vscode/extensions/<unique id>). Upstream's package.json has
+  # no publisher field, which would leave VS Code calling the extension
+  # "undefined_publisher.daemon-2-0"; add one so the identifier matches the
+  # directory name.
+  daemonVscodeSrc = "${daemonTheme}/VSCode/daemon-2-0";
+  daemonVscodeManifest = builtins.fromJSON (builtins.readFile "${daemonVscodeSrc}/package.json");
+  daemonVscodePublisher = "MathisP75";
+  daemonVscodeId = "${daemonVscodePublisher}.${daemonVscodeManifest.name}";
+  dracula = pkgs.vscode-extensions.dracula-theme.theme-dracula;
+  draculaVscodeSrc = "${dracula}/share/vscode/extensions/${dracula.vscodeExtUniqueId}";
+
+  daemonVscodeTheme =
+    pkgs.runCommandLocal "vscode-extension-${daemonVscodeManifest.name}"
+      {
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.python3
+        ];
+        # Home Manager takes the extension's identity from these rather than
+        # listing the built directory, which would be an import-from-derivation
+        # on every evaluation. It writes all of them into extensions.json, so
+        # leaving any out is an evaluation error rather than a silent default.
+        passthru = {
+          inherit (daemonVscodeManifest) version;
+          vscodeExtPublisher = daemonVscodePublisher;
+          vscodeExtName = daemonVscodeManifest.name;
+          vscodeExtUniqueId = daemonVscodeId;
+        };
+      }
+      ''
+        dir="$out/share/vscode/extensions/${daemonVscodeId}"
+        mkdir -p "$dir/themes"
+
+        jq --arg publisher "${daemonVscodePublisher}" \
+          '. + { publisher: $publisher }' \
+          ${daemonVscodeSrc}/package.json > "$dir/package.json"
+
+        cp ${daemonVscodeSrc}/themes/*.json "$dir/themes/"
+
+        daemon_theme="$(jq -r '.contributes.themes[0].path' "$dir/package.json")"
+        dracula_theme="$(jq -r \
+          '.contributes.themes[] | select(.label == "Dracula Theme") | .path' \
+          ${draculaVscodeSrc}/package.json)"
+
+        if [ -z "$dracula_theme" ]; then
+          echo "Dracula Theme was not found in ${draculaVscodeSrc}/package.json" >&2
+          exit 1
+        fi
+
+        python3 ${./patch-daemon.py} vscode \
+          --daemon-theme "$dir/$daemon_theme" \
+          --dracula-theme "${draculaVscodeSrc}/$dracula_theme" \
+          --out "$dir/$daemon_theme" \
+          --name "Daemon-2.0" \
+          --icon-colour "${daemonRed}" \
+          --pink "${daemonPink}" \
+          --dim-pink "${daemonDimPink}" \
+          --main-background "${daemonBackground}" \
+          --secondary-background "${daemonSecondaryBackground}" \
+          --chrome-background "${daemonChromeBackground}"
+      '';
 
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
   kdeConfigHome = config.xdg.configHome;
@@ -65,14 +158,24 @@ in
   home.packages = with pkgs; [
     (withoutColorSchemes libsForQt5.qtstyleplugin-kvantum)
     (withoutColorSchemes qt6Packages.qtstyleplugin-kvantum)
+
+    # Daemon-Icons declares Inherits=breeze-dark,gnome,hicolor, so the Breeze
+    # set has to be reachable or GTK applications fall back to no icon at all
+    # for everything Daemon does not draw itself.
+    kdePackages.breeze-icons
   ];
+
+  # Daemon supplies VS Code's complete application/workbench palette; its
+  # syntax rules are replaced with Dracula's during the build above. Only the
+  # resulting combined theme is installed. ../home/vscode.nix selects it.
+  programs.vscode.profiles.default.extensions = [ daemonVscodeTheme ];
 
   # Kvantum is the application style used by Daemon. The theme directory and
   # its selection file are both managed so System Settings cannot leave an old
   # Kvantum theme active.
   xdg.configFile = (builtins.mapAttrs (_name: link) configLinks) // {
     "Kvantum/daemon-2.0" = {
-      source = "${daemonTheme}/Kvantum/daemon-2.0";
+      source = "${daemonPatched}/Kvantum/daemon-2.0";
     };
     "Kvantum/kvantum.kvconfig".text = ''
       [General]
@@ -87,9 +190,9 @@ in
     "aurorae/themes/daemon-2.0" = {
       source = "${daemonTheme}/Window Decorations/daemon-2.0";
     };
-    "color-schemes/Daemon2.colors".source = "${daemonTheme}/Color Scheme/Daemon2.colors";
+    "color-schemes/Daemon2.colors".source = "${daemonPatched}/color-schemes/Daemon2.colors";
     "icons/Daemon-Icons" = {
-      source = "${daemonTheme}/Icon Theme/Daemon-Icons";
+      source = "${daemonPatched}/icons/Daemon-Icons";
     };
     "konsole/Daemon-2.0.colorscheme".source = "${daemonTheme}/Konsole/Daemon-2.0.colorscheme";
     "plasma/desktoptheme/Daemon-2.0" = {

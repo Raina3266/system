@@ -100,10 +100,14 @@ in
     MenuFont="Sans 14"
   '';
 
-  # GTK theme: cyberpunk palette for all GTK apps (file dialogs, etc.)
-  # Matches the waybar/rofi/fcitx5 themes in the repository's themes/ folder.
+  # GTK theme: the Daemon 2.0 palette for all GTK apps (file dialogs, etc.),
+  # so they match the Kvantum/Qt side of the desktop. The icon set comes from
+  # the same upstream theme and is installed by ../themes/default.nix, which
+  # also pulls in the Breeze icons it inherits from.
   gtk = {
     enable = true;
+
+    iconTheme.name = "Daemon-Icons";
 
     gtk3.extraConfig = {
       gtk-application-prefer-dark-theme = 1;
