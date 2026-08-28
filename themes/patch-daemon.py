@@ -484,12 +484,17 @@ def append_gtk_overrides(path: pathlib.Path, args: argparse.Namespace) -> None:
 def patch_gtk(args: argparse.Namespace) -> None:
     source = pathlib.Path(args.source)
     output = pathlib.Path(args.out)
-    shutil.copytree(source, output, symlinks=True)
-
-    # The upstream settings file forces Breeze cursors and a colour-reload
-    # module. Cursor selection is already managed by Home Manager, so a theme
-    # package should not override it or require an otherwise unused module.
-    (output / "settings.ini").unlink(missing_ok=True)
+    # Do not copy the upstream settings file in the first place. copytree
+    # preserves the Nix store's read-only directory mode, so copying and then
+    # unlinking it would fail even if the file itself were made writable.
+    # Cursor selection is already managed by Home Manager, and the file also
+    # requests an otherwise unused colour-reload module.
+    shutil.copytree(
+        source,
+        output,
+        symlinks=True,
+        ignore=shutil.ignore_patterns("settings.ini"),
+    )
 
     named_palette = gtk_named_palette(args)
     named_changes = 0
