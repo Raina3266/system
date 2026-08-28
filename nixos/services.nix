@@ -25,6 +25,7 @@ in
     ripgrep
     ffmpegthumbnailer
     gdk-pixbuf
+    wsdd # Windows SMB discovery; gvfs spawns it on demand for wsdd:// browsing
     system-config-printer
     v4l-utils
     webcamCrop
@@ -50,6 +51,7 @@ in
     yelp
     seahorse
     totem
+    gnome-color-manager
     snapshot
     decibels
     papers

@@ -56,7 +56,9 @@ in
   fileSystems."/boot" =
     { device = "/dev/disk/by-uuid/A4CC-7EDD";
       fsType = "vfat";
-      options = [ "fmask=0022" "dmask=0022" ];
+      # Lock the ESP down to root: systemd-boot's random-seed file lives
+      # here and bootctl warns when it (and the mount point) is world-readable.
+      options = [ "fmask=0077" "dmask=0077" ];
     };
 
   swapDevices = [ ];

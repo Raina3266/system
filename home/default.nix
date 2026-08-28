@@ -52,14 +52,12 @@ in
 
     # productivity / office
     obsidian
-    meld
     krokiet
     exercism
     stirling-pdf-desktop
 
     # media playback
     lrcget
-    waylyrics
 
     # Qt/Kde based
     kdePackages.elisa

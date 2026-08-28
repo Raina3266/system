@@ -83,6 +83,16 @@ let
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
           --chrome-background "${daemonChromeBackground}"
+
+        # Daemon-Icons declares Inherits=breeze-dark,gnome,hicolor. The "gnome"
+        # fallback targets the deprecated gnome-icon-theme package, which is now
+        # only a Nixpkgs alias. Retarget it at Adwaita — the modern GNOME icon
+        # set — so the inherits chain resolves without the legacy package. The
+        # icons were copied from a read-only store path, so make the directory
+        # writable before sed -i creates its temp file there.
+        chmod +w "$out/icons/Daemon-Icons" "$out/icons/Daemon-Icons/index.theme"
+        sed -i 's/Inherits=breeze-dark,gnome,hicolor/Inherits=breeze-dark,Adwaita,hicolor/' \
+          "$out/icons/Daemon-Icons/index.theme"
       '';
 
   # Upstream ships the VS Code theme as a plain extension directory rather
@@ -179,10 +189,11 @@ in
     (withoutColorSchemes libsForQt5.qtstyleplugin-kvantum)
     (withoutColorSchemes qt6Packages.qtstyleplugin-kvantum)
 
-    # Daemon-Icons declares Inherits=breeze-dark,gnome,hicolor, so the Breeze
-    # set has to be reachable or GTK applications fall back to no icon at all
-    # for everything Daemon does not draw itself.
+    # Daemon-Icons declares Inherits=breeze-dark,Adwaita,hicolor (patched in
+    # daemonPatched above), so both fallbacks must be reachable or GTK
+    # applications fall back to no icon at all for what Daemon does not draw.
     kdePackages.breeze-icons
+    adwaita-icon-theme
   ];
 
   # Daemon supplies VS Code's complete application/workbench palette; its
