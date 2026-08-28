@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Build the two small local variants of the Daemon 2.0 theme.
+"""Build the local Daemon 2.0 desktop, GTK and VS Code themes.
 
 ``desktop`` changes Dolphin-facing icons plus normal and interactive backgrounds.
+``gtk`` rebuilds upstream's complete Breeze-based GTK theme with the same
+Daemon palette, including every GTK 2/3/4 image and symbolic asset.
 ``vscode`` applies the same UI accents to Daemon's workbench and imports
 Dracula's syntax rules.
 """
@@ -37,6 +39,46 @@ UPSTREAM_BACKGROUND_COLOURS = {
     "#14101f": "secondary",
     "#130f1e": "secondary",
     "#200d14": "chrome",
+}
+
+DAEMON_TEXT = "#5df4fe"
+DAEMON_MUTED_TEXT = "#7a9b9f"
+DAEMON_WARNING = "#fdf500"
+DAEMON_ERROR = "#ff5048"
+DAEMON_SUCCESS = "#28c775"
+
+GTK_ICON_ASSET = re.compile(
+    r"(?:arrow|bullet|check|close|dash|maximize|minimize|radio|slider|spinbutton|titlebutton)"
+)
+GTK_STOCK_SURFACES = {
+    (49, 54, 59): "secondary",  # #31363b
+    (42, 46, 50): "main",       # #2a2e32
+    (48, 53, 58): "secondary",  # #30353a
+    (44, 49, 54): "secondary",  # #2c3136
+    (44, 49, 53): "secondary",  # #2c3135
+    (27, 30, 32): "alternate",  # #1b1e20
+}
+GTK_STOCK_ACCENTS = {
+    (61, 174, 233),  # Breeze blue
+    (37, 164, 230),
+}
+GTK_STOCK_FOREGROUNDS = {
+    (252, 252, 252),
+    (253, 253, 253),
+    (250, 250, 250),
+    (255, 255, 255),
+}
+GTK_STOCK_MUTED_FOREGROUNDS = {
+    (161, 169, 177),
+    (147, 149, 151),
+    (159, 170, 176),
+    (159, 172, 179),
+}
+GTK_STOCK_BORDERS = {
+    (78, 82, 86),
+    (94, 97, 100),
+    (68, 71, 76),
+    (76, 79, 82),
 }
 
 
@@ -79,6 +121,411 @@ def background_palette(args: argparse.Namespace) -> dict[str, str]:
         upstream: targets[layer]
         for upstream, layer in UPSTREAM_BACKGROUND_COLOURS.items()
     }
+
+
+def hex_rgb(value: str) -> tuple[int, int, int]:
+    value = value.removeprefix("#")
+    if len(value) != 6:
+        raise ValueError(f"expected #RRGGBB colour, got {value!r}")
+    return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
+
+
+def css_rgba(value: str, alpha: float) -> str:
+    red, green, blue = hex_rgb(value)
+    return f"rgba({red}, {green}, {blue}, {alpha:g})"
+
+
+def blend(foreground: str, background: str, ratio: float) -> tuple[int, int, int]:
+    front = hex_rgb(foreground)
+    back = hex_rgb(background)
+    return tuple(
+        round(front[index] * ratio + back[index] * (1 - ratio))
+        for index in range(3)
+    )
+
+
+def gtk_named_palette(args: argparse.Namespace) -> dict[str, str]:
+    """Return semantic GTK colours matching the patched Kvantum theme."""
+    text = DAEMON_TEXT
+    muted = DAEMON_MUTED_TEXT
+    main = args.main_background.lower()
+    alternate = args.alternate_background.lower()
+    secondary = args.secondary_background.lower()
+    chrome = args.chrome_background.lower()
+    red = args.icon_colour.lower()
+    pink = args.pink.lower()
+    selected = args.dim_pink.lower()
+
+    result: dict[str, str] = {}
+
+    def assign(names: tuple[str, ...], value: str) -> None:
+        result.update(dict.fromkeys(names, value))
+
+    assign(
+        (
+            "theme_fg_color_breeze",
+            "theme_text_color_breeze",
+            "theme_selected_fg_color_breeze",
+            "theme_unfocused_fg_color_breeze",
+            "theme_unfocused_text_color_breeze",
+            "theme_unfocused_selected_fg_color_breeze",
+            "theme_button_foreground_normal_breeze",
+            "theme_button_foreground_active_breeze",
+            "theme_button_foreground_backdrop_breeze",
+            "theme_button_foreground_active_backdrop_breeze",
+            "theme_titlebar_foreground_breeze",
+            "tooltip_text_breeze",
+        ),
+        text,
+    )
+    assign(
+        (
+            "theme_bg_color_breeze",
+            "theme_unfocused_bg_color_breeze",
+            "theme_titlebar_background_light_breeze",
+            "theme_titlebar_background_backdrop_breeze",
+        ),
+        main,
+    )
+    assign(
+        (
+            "theme_base_color_breeze",
+            "theme_unfocused_base_color_breeze",
+            "content_view_bg_breeze",
+        ),
+        alternate,
+    )
+    assign(
+        (
+            "theme_button_background_normal_breeze",
+            "theme_button_background_backdrop_breeze",
+            "tooltip_background_breeze",
+        ),
+        secondary,
+    )
+    assign(("theme_titlebar_background_breeze",), chrome)
+    assign(
+        (
+            "theme_hovering_selected_bg_color_breeze",
+            "theme_selected_bg_color_breeze",
+            "theme_unfocused_selected_bg_color_alt_breeze",
+            "theme_unfocused_selected_bg_color_breeze",
+        ),
+        selected,
+    )
+    assign(
+        (
+            "theme_view_hover_decoration_color_breeze",
+            "theme_view_active_decoration_color_breeze",
+            "theme_button_decoration_hover_breeze",
+            "theme_button_decoration_focus_breeze",
+            "theme_button_decoration_hover_backdrop_breeze",
+            "theme_button_decoration_focus_backdrop_breeze",
+        ),
+        pink,
+    )
+    assign(
+        (
+            "borders_breeze",
+            "unfocused_borders_breeze",
+            "tooltip_border_breeze",
+        ),
+        red,
+    )
+    assign(
+        (
+            "insensitive_selected_bg_color_breeze",
+            "insensitive_unfocused_selected_bg_color_breeze",
+        ),
+        css_rgba(selected, 0.35),
+    )
+    assign(
+        (
+            "insensitive_bg_color_breeze",
+            "insensitive_unfocused_bg_color_breeze",
+        ),
+        chrome,
+    )
+    assign(
+        (
+            "insensitive_fg_color_breeze",
+            "insensitive_selected_fg_color_breeze",
+            "insensitive_unfocused_fg_color_breeze",
+            "insensitive_unfocused_selected_fg_color_breeze",
+            "theme_unfocused_view_text_color_breeze",
+            "theme_button_foreground_insensitive_breeze",
+            "theme_button_foreground_active_insensitive_breeze",
+            "theme_button_foreground_backdrop_insensitive_breeze",
+            "theme_button_foreground_active_backdrop_insensitive_breeze",
+            "theme_titlebar_foreground_insensitive_breeze",
+        ),
+        css_rgba(text, 0.35),
+    )
+    assign(
+        (
+            "insensitive_base_color_breeze",
+            "insensitive_base_fg_color_breeze",
+            "theme_unfocused_view_bg_color_breeze",
+        ),
+        secondary,
+    )
+    assign(
+        (
+            "insensitive_borders_breeze",
+            "unfocused_insensitive_borders_breeze",
+        ),
+        css_rgba(red, 0.35),
+    )
+    assign(
+        (
+            "theme_button_background_insensitive_breeze",
+            "theme_button_background_backdrop_insensitive_breeze",
+        ),
+        css_rgba(secondary, 0.6),
+    )
+    assign(
+        (
+            "theme_button_decoration_hover_insensitive_breeze",
+            "theme_button_decoration_focus_insensitive_breeze",
+            "theme_button_decoration_hover_backdrop_insensitive_breeze",
+            "theme_button_decoration_focus_backdrop_insensitive_breeze",
+        ),
+        css_rgba(pink, 0.35),
+    )
+    assign(("theme_titlebar_foreground_backdrop_breeze",), muted)
+    assign(
+        ("theme_titlebar_foreground_insensitive_backdrop_breeze",),
+        css_rgba(muted, 0.35),
+    )
+    assign(("warning_color_breeze", "warning_color_backdrop_breeze"), DAEMON_WARNING)
+    assign(("error_color_breeze", "error_color_backdrop_breeze"), DAEMON_ERROR)
+    assign(("success_color_breeze", "success_color_backdrop_breeze"), DAEMON_SUCCESS)
+    assign(
+        ("warning_color_insensitive_breeze", "warning_color_insensitive_backdrop_breeze"),
+        css_rgba(DAEMON_WARNING, 0.35),
+    )
+    assign(
+        ("error_color_insensitive_breeze", "error_color_insensitive_backdrop_breeze"),
+        css_rgba(DAEMON_ERROR, 0.35),
+    )
+    assign(
+        ("success_color_insensitive_breeze", "success_color_insensitive_backdrop_breeze"),
+        css_rgba(DAEMON_SUCCESS, 0.35),
+    )
+    assign(("link_color_breeze",), text)
+    assign(("link_visited_color_breeze",), pink)
+    return result
+
+
+def rewrite_gtk_named_colours(path: pathlib.Path, palette: dict[str, str]) -> int:
+    pattern = re.compile(r"(@define-color\s+([^\s]+)\s+)([^;]+)(;)")
+    text = path.read_text()
+    changed = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal changed
+        replacement = palette.get(match.group(2))
+        if replacement is None or replacement == match.group(3).strip():
+            return match.group(0)
+        changed += 1
+        return f"{match.group(1)}{replacement}{match.group(4)}"
+
+    rewritten = pattern.sub(replace, text)
+    if changed:
+        make_writable(path)
+        path.write_text(rewritten)
+    return changed
+
+
+def gtk_direct_palette(args: argparse.Namespace) -> dict[str, str]:
+    """Patch literal colours outside GTK's semantic named-colour header."""
+    return {
+        "#fcfcfc": DAEMON_TEXT,
+        "#2a2e32": args.main_background.lower(),
+        "#1b1e20": args.alternate_background.lower(),
+        "#181b1d": args.secondary_background.lower(),
+        "#191b1d": args.secondary_background.lower(),
+        "#262a2d": args.chrome_background.lower(),
+        "#31363b": args.secondary_background.lower(),
+        "#3daee9": args.pink.lower(),
+        "#54575a": args.icon_colour.lower(),
+        "#5a5e62": args.icon_colour.lower(),
+        "#5e6164": args.icon_colour.lower(),
+        "#616364": DAEMON_MUTED_TEXT,
+        "#6b6e70": DAEMON_MUTED_TEXT,
+        "#707376": DAEMON_MUTED_TEXT,
+        "#a1a9b1": DAEMON_MUTED_TEXT,
+        "#da4453": DAEMON_ERROR,
+        "#f67400": DAEMON_WARNING,
+        "#27ae60": DAEMON_SUCCESS,
+        "#1d99f3": DAEMON_TEXT,
+        "#9b59b6": args.pink.lower(),
+    }
+
+
+def recolour_gtk_svg(path: pathlib.Path, args: argparse.Namespace) -> bool:
+    mapping = gtk_direct_palette(args)
+    mapping.update(
+        {
+            "#4e5256": args.icon_colour.lower(),
+            "#939597": DAEMON_MUTED_TEXT,
+            "#ff667c": DAEMON_ERROR,
+        }
+    )
+    if GTK_ICON_ASSET.search(path.stem.lower()):
+        mapping["#fcfcfc"] = args.icon_colour.lower()
+        mapping["#a1a9b1"] = DAEMON_MUTED_TEXT
+        mapping["#3daee9"] = (
+            args.pink.lower()
+            if any(state in path.stem.lower() for state in ("hover", "active", "focus"))
+            else args.icon_colour.lower()
+        )
+
+    original = path.read_text()
+    rewritten = replace_colours(original, mapping)
+    if rewritten == original:
+        return False
+    make_writable(path)
+    path.write_text(rewritten)
+    return True
+
+
+def recolour_gtk_png(path: pathlib.Path, args: argparse.Namespace) -> bool:
+    # Pillow is deliberately imported only by this subcommand. The desktop and
+    # VS Code builders do not need it.
+    from PIL import Image
+
+    image = Image.open(path).convert("RGBA")
+    pixel_data = (
+        image.get_flattened_data()
+        if hasattr(image, "get_flattened_data")
+        else image.getdata()
+    )
+    pixels = list(pixel_data)
+    targets = {
+        "main": hex_rgb(args.main_background),
+        "alternate": hex_rgb(args.alternate_background),
+        "secondary": hex_rgb(args.secondary_background),
+    }
+    icon_red = hex_rgb(args.icon_colour)
+    pink = hex_rgb(args.pink)
+    muted_red = blend(args.icon_colour, args.main_background, 0.5)
+    accent = (
+        pink
+        if any(state in path.stem.lower() for state in ("hover", "active", "focus", "selected"))
+        else icon_red
+    )
+    icon_asset = GTK_ICON_ASSET.search(path.stem.lower()) is not None
+    changed = False
+    output = []
+
+    for red, green, blue, alpha in pixels:
+        rgb = (red, green, blue)
+        replacement: tuple[int, int, int] | None = None
+        surface = GTK_STOCK_SURFACES.get(rgb)
+        if surface is not None:
+            replacement = targets[surface]
+        elif rgb in GTK_STOCK_ACCENTS:
+            replacement = accent
+        elif rgb in GTK_STOCK_FOREGROUNDS:
+            replacement = icon_red if icon_asset else hex_rgb(DAEMON_TEXT)
+        elif rgb in GTK_STOCK_MUTED_FOREGROUNDS:
+            replacement = muted_red if icon_asset else hex_rgb(DAEMON_MUTED_TEXT)
+        elif rgb in GTK_STOCK_BORDERS:
+            replacement = muted_red
+        elif rgb in {(218, 68, 83), (255, 102, 124)}:
+            replacement = hex_rgb(DAEMON_ERROR)
+        elif alpha > 0 and max(rgb) - min(rgb) <= 18:
+            # Breeze contains many anti-aliased one-off greys around the exact
+            # colours above. Fold those residual pixels into Daemon's palette
+            # too, while retaining near-black shadow pixels as neutral black.
+            luminance = sum(rgb) / 3
+            if luminance >= 145:
+                replacement = icon_red if icon_asset else hex_rgb(DAEMON_TEXT)
+            elif luminance >= 65:
+                replacement = muted_red if icon_asset else hex_rgb(DAEMON_MUTED_TEXT)
+            elif luminance >= 48:
+                replacement = muted_red
+            elif luminance >= 32:
+                replacement = targets["secondary"]
+            elif luminance >= 20:
+                replacement = targets["main"]
+
+        if replacement is not None and replacement != rgb:
+            red, green, blue = replacement
+            changed = True
+        output.append((red, green, blue, alpha))
+
+    if changed:
+        make_writable(path)
+        image.putdata(output)
+        image.save(path)
+    return changed
+
+
+def append_gtk_overrides(path: pathlib.Path, args: argparse.Namespace) -> None:
+    """Make symbolic icons and keyboard focus follow the Daemon state roles."""
+    with path.open("a") as stylesheet:
+        stylesheet.write(
+            "\n/* Local Daemon 2.0 state and symbolic-icon accents. */\n"
+            f"@define-color daemon_icon_red {args.icon_colour.lower()};\n"
+            f"@define-color daemon_pink {args.pink.lower()};\n"
+            f"@define-color daemon_dim_pink {args.dim_pink.lower()};\n"
+            "image:not(:disabled), button image:not(:disabled), "
+            "headerbar image:not(:disabled), entry image:not(:disabled) {\n"
+            "  color: @daemon_icon_red;\n"
+            "}\n"
+            "button:focus, entry:focus, row:focus, check:focus, radio:focus {\n"
+            "  outline-color: @daemon_pink;\n"
+            "}\n"
+        )
+
+
+def patch_gtk(args: argparse.Namespace) -> None:
+    source = pathlib.Path(args.source)
+    output = pathlib.Path(args.out)
+    shutil.copytree(source, output, symlinks=True)
+
+    # The upstream settings file forces Breeze cursors and a colour-reload
+    # module. Cursor selection is already managed by Home Manager, so a theme
+    # package should not override it or require an otherwise unused module.
+    (output / "settings.ini").unlink(missing_ok=True)
+
+    named_palette = gtk_named_palette(args)
+    named_changes = 0
+    literal_changes = 0
+    for relative in ("gtk-3.0/gtk.css", "gtk-4.0/gtk.css"):
+        css = output / relative
+        named_changes += rewrite_gtk_named_colours(css, named_palette)
+        literal_changes += rewrite_text_colours(css, gtk_direct_palette(args))
+        append_gtk_overrides(css, args)
+
+    gtk2_changes = 0
+    for path in sorted((output / "gtk-2.0").rglob("*")):
+        if path.is_file():
+            gtk2_changes += rewrite_text_colours(path, gtk_direct_palette(args))
+
+    svg_changes = sum(
+        recolour_gtk_svg(path, args)
+        for path in sorted((output / "assets").glob("*.svg"))
+    )
+    png_changes = sum(
+        recolour_gtk_png(path, args)
+        for path in sorted((output / "assets").glob("*.png"))
+    )
+
+    if named_changes < 60:
+        raise RuntimeError(
+            f"only {named_changes} GTK semantic colours changed; upstream layout may have changed"
+        )
+    if png_changes == 0 or svg_changes == 0:
+        raise RuntimeError("GTK image assets did not contain the expected Breeze colours")
+
+    print(
+        f"built Daemon GTK theme: {named_changes} semantic and "
+        f"{literal_changes + gtk2_changes} literal colour changes; "
+        f"recoloured {png_changes} PNG and {svg_changes} SVG assets"
+    )
 
 
 def patch_dolphin_icons(directory: pathlib.Path, icon_colour: str) -> int:
@@ -667,6 +1114,18 @@ def parser() -> argparse.ArgumentParser:
     desktop.add_argument("--secondary-background", required=True)
     desktop.add_argument("--chrome-background", required=True)
     desktop.set_defaults(run=patch_desktop)
+
+    gtk = commands.add_parser("gtk", help="build the complete Daemon GTK theme")
+    gtk.add_argument("--source", required=True)
+    gtk.add_argument("--out", required=True)
+    gtk.add_argument("--icon-colour", required=True)
+    gtk.add_argument("--pink", required=True)
+    gtk.add_argument("--dim-pink", required=True)
+    gtk.add_argument("--alternate-background", required=True)
+    gtk.add_argument("--main-background", required=True)
+    gtk.add_argument("--secondary-background", required=True)
+    gtk.add_argument("--chrome-background", required=True)
+    gtk.set_defaults(run=patch_gtk)
 
     vscode = commands.add_parser("vscode", help="combine Daemon UI with Dracula syntax")
     vscode.add_argument("--daemon-theme", required=True)

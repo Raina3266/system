@@ -1,12 +1,9 @@
 # Every theme this configuration applies, in one module.
 #
-# Two mechanisms live here. The stylesheets in this repository are linked into
-# place with mkOutOfStoreSymlink, so they stay outside the Nix store and an
-# edit is picked up the next time the program starts without a Home Manager
-# rebuild. The Daemon KDE MK2 theme comes from a pinned upstream checkout and
-# is copied in from the store, plus the activation step that selects it. Its
-# VS Code extension is repackaged from that same checkout and handed to the
-# programs.vscode module.
+# Repository-owned application stylesheets are linked into place with
+# mkOutOfStoreSymlink. Daemon's KDE, GTK and VS Code themes instead come from
+# one pinned upstream checkout and are patched together during the Nix build,
+# so every toolkit uses the same local palette and asset revision.
 {
   config,
   pkgs,
@@ -21,8 +18,6 @@ let
 
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
-    "gtk-3.0/gtk.css" = "themes/gtk3.css"; # GTK3 apps (pavucontrol, file dialogs)
-    "gtk-4.0/gtk.css" = "themes/gtk4.css"; # GTK4 apps (portal file chooser, image viewer)
     "preview-panel/preview-panel.css" = "themes/preview-panel.css";
     "rofi/config.rasi" = "niri/rofi/config.rasi";
     "rofi/media-control.rasi" = "themes/media-control.rasi";
@@ -55,17 +50,32 @@ let
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
 
-  # Reuse the same local palette across KDE and VS Code: relevant icons use
-  # vivid dark red, interactive outlines use cyberpunk pink, their backgrounds
-  # use dimmed pink, and normal surfaces use darker variants of Daemon's
-  # burgundy palette. The deepest background, text and unrelated icon
-  # categories stay intact.
+  # Reuse the same local palette across KDE, GTK and VS Code: relevant icons
+  # use vivid dark red, interactive outlines use cyberpunk pink, their
+  # backgrounds use dimmed pink, and normal surfaces use darker variants of
+  # Daemon's burgundy palette.
   daemonPatched =
-    pkgs.runCommandLocal "daemon-2.0-patched" { nativeBuildInputs = [ pkgs.python3 ]; }
+    pkgs.runCommandLocal "daemon-2.0-patched"
+      {
+        nativeBuildInputs = [
+          (pkgs.python3.withPackages (pythonPackages: [ pythonPackages.pillow ]))
+        ];
+      }
       ''
         python3 ${./patch-daemon.py} desktop \
           --source ${daemonTheme} \
           --out "$out" \
+          --icon-colour "${daemonRed}" \
+          --pink "${daemonPink}" \
+          --dim-pink "${daemonDimPink}" \
+          --alternate-background "${daemonAlternateBackground}" \
+          --main-background "${daemonBackground}" \
+          --secondary-background "${daemonSecondaryBackground}" \
+          --chrome-background "${daemonChromeBackground}"
+
+        python3 ${./patch-daemon.py} gtk \
+          --source "${daemonTheme}/GTK Theme/Breeze-Dark" \
+          --out "$out/share/themes/Daemon-2.0" \
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
@@ -155,6 +165,16 @@ let
     });
 in
 {
+  # Install the complete upstream GTK 2/3/4 theme and select the locally
+  # recoloured Daemon variant. GTK 4/libadwaita applications often ignore the
+  # normal theme-name setting, so the same package CSS is also imported as the
+  # per-user override below. Asset URLs remain relative to the package CSS and
+  # therefore resolve to the copied Daemon assets in the Nix store.
+  gtk.theme = {
+    name = "Daemon-2.0";
+    package = daemonPatched;
+  };
+
   home.packages = with pkgs; [
     (withoutColorSchemes libsForQt5.qtstyleplugin-kvantum)
     (withoutColorSchemes qt6Packages.qtstyleplugin-kvantum)
@@ -174,6 +194,12 @@ in
   # its selection file are both managed so System Settings cannot leave an old
   # Kvantum theme active.
   xdg.configFile = (builtins.mapAttrs (_name: link) configLinks) // {
+    "gtk-3.0/gtk.css".text = ''
+      @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-3.0/gtk.css");
+    '';
+    "gtk-4.0/gtk.css".text = ''
+      @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-4.0/gtk.css");
+    '';
     "Kvantum/daemon-2.0" = {
       source = "${daemonPatched}/Kvantum/daemon-2.0";
     };

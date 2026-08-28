@@ -100,10 +100,8 @@ in
     MenuFont="Sans 14"
   '';
 
-  # GTK theme: the Daemon 2.0 palette for all GTK apps (file dialogs, etc.),
-  # so they match the Kvantum/Qt side of the desktop. The icon set comes from
-  # the same upstream theme and is installed by ../themes/default.nix, which
-  # also pulls in the Breeze icons it inherits from.
+  # GTK and its icon fallback settings live here; ../themes/default.nix builds
+  # and selects the complete Daemon GTK theme from the pinned upstream assets.
   gtk = {
     enable = true;
 
@@ -117,8 +115,7 @@ in
     };
   };
 
-  # The GTK3/GTK4 stylesheets and the Qt/KDE appearance are both managed from
-  # ../themes/default.nix.
+  # GTK and Qt/KDE appearance are both managed from ../themes/default.nix.
 
   home.pointerCursor = {
     enable = true;

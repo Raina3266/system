@@ -19,8 +19,8 @@ y: -850px;
 */
 
 window.preview-panel {
-    background: rgba(14, 6, 22, 0.95);
-    border: 1px solid rgba(255, 126, 219, 0.55);
+    background: rgba(24, 10, 16, 0.95);
+    border: 1px solid rgba(214, 86, 199, 0.55);
     border-radius: 15px;
     padding: 10px;
 }
@@ -28,8 +28,8 @@ window.preview-panel {
 textview.preview-text,
 textview.preview-text text {
     background: transparent;
-    color: #cbe3e7;
-    caret-color: #7afcff;
+    color: #5DF4FE;
+    caret-color: #D656C7;
     font-family: "JetBrains Mono Nerd Font", monospace;
     font-size: 12pt;
 }
@@ -41,7 +41,7 @@ picture.preview-image {
 scrollbar slider {
     min-width: 4px;
     min-height: 4px;
-    background: #ff7edb;
+    background: #D52C35;
     border-radius: 4px;
 }
 "#;
