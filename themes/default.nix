@@ -220,7 +220,8 @@ in
     '';
   };
 
-  # Install every KDE-facing component supplied by Daemon KDE MK2. Aurorae
+  # Install every KDE-facing component supplied by Daemon KDE MK2 except
+  # Konsole, which is intentionally excluded. Aurorae
   # and Plasma assets are harmless under niri and are ready if Plasma/KWin is
   # started later; Qt/KDE applications use the colours, icons and Kvantum now.
   xdg.dataFile = (builtins.mapAttrs (_name: link) dataLinks) // {
@@ -231,7 +232,6 @@ in
     "icons/Daemon-Icons" = {
       source = "${daemonPatched}/icons/Daemon-Icons";
     };
-    "konsole/Daemon-2.0.colorscheme".source = "${daemonTheme}/Konsole/Daemon-2.0.colorscheme";
     "plasma/desktoptheme/Daemon-2.0" = {
       source = "${daemonTheme}/Plasma Style/Daemon-2.0";
     };
