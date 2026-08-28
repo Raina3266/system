@@ -52,6 +52,10 @@ in
     )}
     }
 
+    // KDE authentication dialogs in Niri. GNOME starts its own agent when
+    // that session is selected, so this remains scoped to Niri.
+    spawn-at-startup "${pkgs.kdePackages.polkit-kde-agent-1}/libexec/polkit-kde-authentication-agent-1"
+
     ${builtins.readFile ./config.kdl}
   '';
 

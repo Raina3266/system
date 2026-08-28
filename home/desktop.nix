@@ -130,16 +130,29 @@ in
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [
+      kdePackages.xdg-desktop-portal-kde
       xdg-desktop-portal-gtk
       xdg-desktop-portal-gnome
     ];
+
+    # This file is selected only when XDG_CURRENT_DESKTOP is niri. GNOME
+    # keeps its own portal preferences when that session is chosen in GDM.
+    # Prefer KDE for visible desktop integration, while retaining the Niri-
+    # compatible GNOME backends for screencasting and secret storage.
     config.niri = {
       default = [
+        "kde"
         "gnome"
         "gtk"
       ];
       "org.freedesktop.impl.portal.FileChooser" = [
-        "gtk"
+        "kde"
+      ];
+      "org.freedesktop.impl.portal.ScreenCast" = [
+        "gnome"
+      ];
+      "org.freedesktop.impl.portal.Secret" = [
+        "gnome-keyring"
       ];
     };
   };
