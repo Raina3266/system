@@ -2,6 +2,17 @@
   pkgs,
   ...
 }:
+let
+  krokiet = pkgs.runCommand "krokiet-${pkgs.czkawka-full.version}" { } ''
+    cp -rL ${pkgs.czkawka-full} $out
+    chmod -R +w $out
+    rm -f $out/bin/czkawka_gui
+    rm -f $out/share/applications/com.github.qarmin.czkawka.desktop
+    rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka.svg
+    rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
+    rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
+  '';
+in
 {
   imports = [
     ../niri
@@ -35,46 +46,51 @@
 
     # communication
     discord
-    zoom-us
     wechat
     qq
-    wemeet
     whatsie
-    telegram-desktop
 
     # productivity / office
     obsidian
     meld
-    czkawka
+    krokiet
     exercism
     stirling-pdf-desktop
 
     # media playback
     lrcget
+    waylyrics
+
+    # Qt/Kde based
+    kdePackages.elisa
+    kdePackages.dolphin
+    kdePackages.ark
+    kdePackages.baloo
+    kdePackages.baloo-widgets
+    kdePackages.kfilemetadata
+    kdePackages.kio-fuse
+    kdePackages.kompare
+    kdePackages.dolphin-plugins
+    kdePackages.plasma-integration
+    kdePackages.knewstuff
+    telegram-desktop
+    zoom-us
+    wemeet
     vlc
     puddletag
-    waylyrics
-    kdePackages.elisa
+    obs-studio
+    shotcut
+    kid3
+    qbittorrent
 
     # media creation / editing
     pavucontrol
-    obs-studio
     inkscape
     gimp
-    shotcut
-    kid3
     spotdl
     yt-dlp
 
     # downloads / torrent
-    qbittorrent
     clash-verge-rev
-
-    # can be removed when it update later
-    (tauon.overrideAttrs (old: {
-      makeWrapperArgs = (old.makeWrapperArgs or [ ]) ++ [
-        "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libappindicator ]}"
-      ];
-    }))
   ];
 }

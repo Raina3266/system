@@ -85,23 +85,7 @@ let
   handledBy = desktopEntry: types: lib.genAttrs types (_type: [ desktopEntry ]);
 in
 {
-  home.packages =
-    with pkgs;
-    [
-      kdePackages.dolphin
-      kdePackages.ark
-      kdePackages.baloo
-      kdePackages.baloo-widgets
-      kdePackages.kfilemetadata
-      kdePackages.kio-fuse
-      kdePackages.kompare
-      kdePackages.dolphin-plugins
-      kdePackages.plasma-integration
-      kdePackages.systemsettings
-      kdePackages.plasma-workspace
-      kdePackages.knewstuff
-    ]
-    ++ [ repoPackages.ocrScreenshot ];
+  home.packages = [ repoPackages.ocrScreenshot ];
 
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";

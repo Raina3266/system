@@ -103,7 +103,8 @@ window#waybar.bottom {
 .scroll-arrow-right {
     color: #5c6776;
     margin-top: 2px;
-    padding: 0;
+    padding-left: 15px;
+    padding-right: 15px;
 }
 
 #workspaces button.focused {
@@ -111,7 +112,8 @@ window#waybar.bottom {
     border: 2px solid rgba(255, 126, 219, 0.5);
     background-color: rgba(255, 126, 219, 0.2);
     color: #7afcff;
-    padding: 0;
+    padding-left: 15px;
+    padding-right: 10px;
 }
 
 .niri-window-buttons button {
