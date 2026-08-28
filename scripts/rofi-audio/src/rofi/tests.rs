@@ -75,6 +75,19 @@ fn every_tab_leaves_the_next_one_a_running_refresh_tick() {
 }
 
 #[test]
+fn audio_tabs_use_two_line_rows_without_enlarging_bluetooth_rows() {
+    let render = |mode| {
+        let mut output = Vec::new();
+        write_refresh_theme(&mut output, mode, &UiState::default());
+        String::from_utf8_lossy(&output).into_owned()
+    };
+
+    assert!(render(Mode::Bluetooth).contains("listview { eh: 1; }"));
+    assert!(render(Mode::Output).contains("listview { eh: 2; }"));
+    assert!(render(Mode::Input).contains("listview { eh: 2; }"));
+}
+
+#[test]
 fn device_keys_survive_the_round_trip_to_a_bluez_address() {
     let key = format!("bt:{}", hex_encode("AA:BB:CC:DD:EE:FF"));
     assert_eq!(address_from_key(&key).as_deref(), Some("AA:BB:CC:DD:EE:FF"));

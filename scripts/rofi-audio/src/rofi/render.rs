@@ -132,10 +132,17 @@ pub(super) fn write_refresh_theme(output: &mut Vec<u8>, mode: Mode, state: &UiSt
         Mode::Bluetooth if state.pending_connect.is_some() => PENDING_REFRESH_DELAY,
         _ => REFRESH_DELAY,
     };
+    let row_height = match mode {
+        Mode::Bluetooth => 1,
+        Mode::Output | Mode::Input => 2,
+    };
     write_header(
         output,
         "theme",
-        &format!("configuration {{ timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }}"),
+        &format!(
+            "configuration {{ timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }} \
+             listview {{ eh: {row_height}; }}"
+        ),
     );
 }
 

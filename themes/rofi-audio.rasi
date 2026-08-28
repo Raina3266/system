@@ -115,6 +115,8 @@ entry {
 
 listview {
     lines: 5;
+    /* The Output and Input script modes override this to 2 for their
+       two-line device rows. Bluetooth keeps the compact single-line height. */
     eh: 1;
     dynamic: false;
     scrollbar: true;

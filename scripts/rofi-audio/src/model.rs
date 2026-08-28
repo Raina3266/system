@@ -193,13 +193,13 @@ pub struct AudioEntry {
 
 impl AudioEntry {
     pub fn row_label(&self) -> String {
-        // Volume first, so the percentages line up in a column and the eye can
-        // scan them without reading the device names.
+        let state = if self.default { "Default" } else { "Available" };
+        let mute = if self.muted { " · Muted" } else { "" };
         format!(
-            "{} {:>3}%  {}",
+            "{}  {}\n    {}%{mute} · {state}",
             self.volume_icon(),
-            self.volume,
-            truncate(&self.label, 26)
+            truncate(&self.label, 26),
+            self.volume
         )
     }
 
@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn audio_rows_put_the_volume_before_the_name() {
+    fn audio_rows_put_device_details_on_two_lines() {
         let entry = AudioEntry {
             key: "sink:00".to_owned(),
             kind: AudioKind::Output,
@@ -492,7 +492,7 @@ mod tests {
             muted: false,
             default: true,
         };
-        assert_eq!(entry.row_label(), "󰖀  45%  Built-in Audio");
+        assert_eq!(entry.row_label(), "󰖀  Built-in Audio\n    45% · Default");
     }
 
     #[test]
@@ -507,7 +507,10 @@ mod tests {
             muted: true,
             default: false,
         };
-        assert_eq!(entry.row_label(), "󰍭  80%  Webcam Mic");
+        assert_eq!(
+            entry.row_label(),
+            "󰍭  Webcam Mic\n    80% · Muted · Available"
+        );
     }
 
     #[test]
