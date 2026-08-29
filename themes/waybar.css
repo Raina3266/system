@@ -113,7 +113,7 @@ window#waybar.bottom {
     background-color: rgba(255, 126, 219, 0.2);
     color: #7afcff;
     padding-left: 15px;
-    padding-right: 10px;
+    padding-right: 15px;
 }
 
 .niri-window-buttons button {
