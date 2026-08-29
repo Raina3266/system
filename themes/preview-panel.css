@@ -34,9 +34,10 @@ picture.preview-image {
     background: transparent;
 }
 
-picture.network-qr {
+image.network-qr {
+    min-width: 50px;
+    min-height: 50px;
     background: #0E0616;
-    margin: 10px;
 }
 
 scrollbar slider {

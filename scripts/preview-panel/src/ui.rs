@@ -11,7 +11,8 @@ use std::time::Duration;
 use gtk::prelude::*;
 use gtk::{
     Align, Application, ApplicationWindow, Box as GtkBox, CssProvider, EventControllerMotion,
-    Orientation, Picture, PolicyType, ScrolledWindow, Stack, TextView, WrapMode, gdk, gio, glib,
+    Image, Orientation, Picture, PolicyType, ScrolledWindow, Stack, TextView, WrapMode, gdk, gio,
+    glib,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -21,6 +22,7 @@ use crate::ipc::{ContentSnapshot, Message, SwitchReply};
 use crate::panel_state::{ContentKind, CurrentItem, LiveState, SwitchDisposition};
 
 const THEME_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
+const NETWORK_QR_SIZE: i32 = 50;
 
 #[derive(Clone, Copy)]
 enum PanelKeyboardState {
@@ -40,7 +42,7 @@ struct LiveWidgets {
     text_view: TextView,
     picture: Picture,
     network_text_view: TextView,
-    network_picture: Picture,
+    network_picture: Image,
 }
 
 impl PanelKeyboardState {
@@ -160,10 +162,10 @@ fn build_window(
     network_scrolled.set_policy(PolicyType::Never, PolicyType::Automatic);
     network_scrolled.set_vexpand(true);
 
-    let network_picture = Picture::new();
-    network_picture.set_can_shrink(true);
+    let network_picture = Image::new();
     network_picture.set_halign(Align::Center);
-    network_picture.set_size_request(252, 252);
+    network_picture.set_pixel_size(NETWORK_QR_SIZE);
+    network_picture.set_size_request(NETWORK_QR_SIZE, NETWORK_QR_SIZE);
     network_picture.set_vexpand(false);
     network_picture.set_visible(false);
     network_picture.add_css_class("network-qr");
@@ -535,18 +537,18 @@ fn connect_live_updates(widgets: LiveWidgets, receiver: Receiver<Message>) {
                     network_text_view.scroll_to_iter(&mut start, 0.0, false, 0.0, 0.0);
 
                     if png.is_empty() {
-                        network_picture.set_paintable(Option::<&gdk::Texture>::None);
+                        network_picture.clear();
                         network_picture.set_visible(false);
                     } else {
                         let bytes = glib::Bytes::from_owned(png);
                         match gdk::Texture::from_bytes(&bytes) {
                             Ok(texture) => {
-                                network_picture.set_paintable(Some(&texture));
+                                network_picture.set_from_paintable(Some(&texture));
                                 network_picture.set_visible(true);
                             }
                             Err(error) => {
                                 eprintln!("preview-panel: decode network QR code: {error}");
-                                network_picture.set_paintable(Option::<&gdk::Texture>::None);
+                                network_picture.clear();
                                 network_picture.set_visible(false);
                             }
                         }
