@@ -26,9 +26,10 @@ in
     ffmpegthumbnailer
     gdk-pixbuf
     wsdd # Windows SMB discovery; gvfs spawns it on demand for wsdd:// browsing
-    system-config-printer
     v4l-utils
     webcamCrop
+    kdePackages.print-manager
+    kdePackages.skanpage
     gnomeExtensions.simple-timer
     gnomeExtensions.clipboard-history
     gnomeExtensions.astra-monitor
@@ -56,6 +57,7 @@ in
     decibels
     papers
     showtime
+    simple-scan
     nautilus
     # loupe  Image Viewer.
     gnome-weather
@@ -69,6 +71,7 @@ in
     gnome-calendar
     gnome-connections
     gnome-console
+    gnome-logs # use journalctl instead
   ];
 
   programs.niri.enable = true;

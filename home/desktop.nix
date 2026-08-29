@@ -97,6 +97,19 @@ in
     settings.Type = "Application";
   };
 
+  # kbd-layout-viewer5 ships from fcitx5-configtool, which is needed to
+  # configure the input methods, so the package is kept and only the menu
+  # entry is hidden. The binary stays callable from the terminal, and
+  # `localectl status` / `setxkbmap -query` show the active layout.
+  xdg.desktopEntries.kbd-layout-viewer5 = {
+    name = "Keyboard layout viewer";
+    noDisplay = true;
+    settings.Exec = "kbd-layout-viewer5";
+    settings.Type = "Application";
+    settings.Icon = "input-keyboard";
+    settings.Categories = "Qt;KDE;Utility;";
+  };
+
   xdg.desktopEntries.zed-new-window = {
     name = "Zed (new window)";
     genericName = "Text Editor";
