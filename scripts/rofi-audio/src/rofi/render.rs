@@ -140,8 +140,8 @@ pub(super) fn write_refresh_theme(output: &mut Vec<u8>, mode: Mode, state: &UiSt
         output,
         "theme",
         &format!(
-            "configuration {{ timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }} \
-             listview {{ eh: {row_height}; }}"
+            "configuration {{ eh: {row_height}; \
+             timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }}"
         ),
     );
 }

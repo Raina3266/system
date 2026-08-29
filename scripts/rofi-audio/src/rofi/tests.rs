@@ -82,9 +82,9 @@ fn audio_tabs_use_two_line_rows_without_enlarging_bluetooth_rows() {
         String::from_utf8_lossy(&output).into_owned()
     };
 
-    assert!(render(Mode::Bluetooth).contains("listview { eh: 1; }"));
-    assert!(render(Mode::Output).contains("listview { eh: 2; }"));
-    assert!(render(Mode::Input).contains("listview { eh: 2; }"));
+    assert!(render(Mode::Bluetooth).contains("configuration { eh: 1;"));
+    assert!(render(Mode::Output).contains("configuration { eh: 2;"));
+    assert!(render(Mode::Input).contains("configuration { eh: 2;"));
 }
 
 #[test]

@@ -20,6 +20,10 @@
    ticks until the user presses something. See `write_refresh_theme` in
    scripts/rofi-audio/src/rofi.rs. */
 configuration {
+    /* Bluetooth is single-line. Output and Input override this to 2 through
+       their script-mode theme header. */
+    eh: 1;
+
     timeout {
         delay: 2;
         action: "kb-custom-5";
@@ -115,9 +119,6 @@ entry {
 
 listview {
     lines: 5;
-    /* The Output and Input script modes override this to 2 for their
-       two-line device rows. Bluetooth keeps the compact single-line height. */
-    eh: 1;
     dynamic: false;
     scrollbar: true;
     spacing: 4px;
