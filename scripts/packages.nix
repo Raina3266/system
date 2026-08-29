@@ -84,6 +84,23 @@ rec {
     ];
   };
 
+  rofiFilesearch = mkWorkspacePackage "rofi-filesearch" {
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postInstall = ''
+      wrapProgram "$out/bin/rofi-filesearch" \
+        --set ROFI_FILESEARCH_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
+        --set ROFI_FILESEARCH_FD "${pkgs.lib.getExe pkgs.fd}" \
+        --set ROFI_FILESEARCH_GIO "${pkgs.lib.getExe' pkgs.glib "gio"}" \
+        --set ROFI_FILESEARCH_XDG_OPEN "${pkgs.lib.getExe' pkgs.xdg-utils "xdg-open"}" \
+        --set ROFI_FILESEARCH_DOLPHIN "${pkgs.lib.getExe pkgs.kdePackages.dolphin}" \
+        --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}" \
+        --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}" \
+        --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}" \
+        --set ROFI_FILESEARCH_ROFI_WIDTH "400" \
+        --set ROFI_FILESEARCH_PREVIEW_PANEL "${previewPanel}/bin/preview-panel"
+    '';
+  };
+
   rofiClipboard = mkWorkspacePackage "rofi-clipboard" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''

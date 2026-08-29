@@ -1,8 +1,6 @@
-/* ROFI: cyberpunk double-line theme
-   Two-line rows: main text on line one, a smaller + dimmed tooltip (e.g. the
-   parent dir from filesearch) on line two. The tooltip styling itself comes
-   from Pango markup in the caller (filesearch.sh); this theme just reserves
-   the extra row height via `eh: 2`. */
+/* ROFI: Rust-backed App / File / Folder finder.
+   App and Folder use one-line rows. File uses two lines so its dimmed parent
+   path remains visible. rofi-filesearch supplies the per-mode row height. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";
@@ -25,22 +23,23 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            500px;
+    width:            400px;
 }
 
 mainbox {
     orientation: vertical;
-    children:   [ inputbar, listview, mode-switcher ];
+    children:   [ inputbar, listview, bottom-bar ];
 }
 
 /* ── Search input ── */
 
 inputbar {
+    spacing: 10px;
     background-color: @bg-mod;
     border:           1px;
     border-color:     rgba(255, 126, 219, 0.2);
-    border-radius:    6px;
-    padding:          10px 10px;
+    border-radius:    7px;
+    padding:          6px 10px;
     children:         [ prompt, entry ];
 }
 
@@ -64,11 +63,12 @@ entry {
 
 listview {
     margin:      10px 0 0 0;
-    lines:       5;
+    lines:       6;
+    expand:      true;
     dynamic:     true;
     scrollbar:   true;
     spacing:     3px;
-    eh:          2;
+    eh:          1;
 }
 
 scrollbar {
@@ -101,28 +101,60 @@ element-text selected.normal {
 }
 
 element-icon {
-    size:         3em;
+    size:         2em;
     vertical-align: 0.5;
 }
 /* ── Mode switcher (bottom bar) ── */
 
+bottom-bar {
+    expand: false;
+    orientation:  horizontal;
+    spacing:      2px;
+    margin:       5px 0 0 0;
+    children:     [ mode-switcher, button-preview, button-reveal ];
+}
+
 mode-switcher {
-    border:       1px 0 0 0;
-    border-color: rgba(255, 126, 219, 0.2);
-    padding:      10px 0 5px 0;
+    orientation: horizontal;
+    spacing: 10px;
+    padding: 4px 2px;
 }
 
 button {
-    border-radius:  4px;
-    border:         1px;
-    border-color:   @fg;
-    padding:        2px 6px;
-    text-color:     @cyan;
+    expand: false;
+    padding: 2px 10px;
+    cursor: pointer;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
 }
 
 button selected {
     border-color: @pink;
     text-color:   @pink;
+}
+
+button-preview,
+button-reveal {
+    cursor: pointer;
+    horizontal-align: 0.5;
+    vertical-align: 0.5;
+    margin: 0px;
+    padding: 2px;
+    border-radius: 7px;
+    text-color: @cyan;
+}
+
+button-preview {
+    content: "󰈈";
+    action:  "kb-custom-1";
+}
+
+button-reveal {
+    content: "";
+    action:  "kb-custom-2";
 }
 
 /* ── Error ── */

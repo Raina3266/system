@@ -10,23 +10,10 @@ configuration {
     cycle: false;
     click-to-exit: true;
 
-    modes: "combi,filesearch:rofi-filesearch,filebrowser";
-    combi-modes: "drun,filesearch";
-    combi-display-format: "{icon} {text}";
     sidebar-mode: true;
 
     show-icons: true;
     icon-theme: "WhiteSur-dark";
-    display-combi: "󰍉 All ";
-    display-filebrowser: " Folders ";
-    display-filesearch: "󰈞 Files ";
-    filebrowser-display-format: "  {name}";
-
-    filebrowser {
-        command: "xdg-open";
-        directory: "/home/raina";
-        show-hidden: false;
-    }
 }
 
 @theme "~/.config/rofi/rofi-finder.rasi"

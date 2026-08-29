@@ -1,0 +1,6 @@
+[package]
+name = "rofi-filesearch"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
