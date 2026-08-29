@@ -63,7 +63,7 @@ entry {
 
 listview {
     margin:      10px 0 0 0;
-    lines:       8;
+    lines:       6;
     expand:      true;
     dynamic:     true;
     scrollbar:   true;
