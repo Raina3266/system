@@ -74,8 +74,11 @@ pub fn toggle(key: &str) -> AppResult<()> {
         .ok_or_else(|| io::Error::other("preview requires a selected file"))?;
     let content = preview_content(&file)?;
     cleanup(&path)?;
-    launch_panel(&path)?;
-    update_at(&path, &file, &content, 0)
+    if let Err(error) = launch_panel(&path, &file, &content) {
+        close_at(&path);
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn selection_changed(key: &str, serial: u64) -> AppResult<()> {
@@ -255,7 +258,7 @@ fn temporary_path(target: &Path) -> PathBuf {
     target.with_file_name(format!(".{name}.{}.tmp.png", std::process::id()))
 }
 
-fn launch_panel(path: &Path) -> AppResult<()> {
+fn launch_panel(path: &Path, file: &Path, content: &PanelContent) -> AppResult<()> {
     let mut command = Command::new(preview_panel_binary());
     command
         .args([
@@ -267,17 +270,28 @@ fn launch_panel(path: &Path) -> AppResult<()> {
             "--listen",
         ])
         .arg(path)
-        .arg("--companion-width")
-        .arg("500")
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
+    append_override(
+        &mut command,
+        "ROFI_FILESEARCH_ROFI_WIDTH",
+        "--companion-width",
+    );
     append_override(&mut command, "ROFI_FILESEARCH_PREVIEW_WIDTH", "--width");
     append_override(&mut command, "ROFI_FILESEARCH_PREVIEW_HEIGHT", "--height");
     append_override(&mut command, "ROFI_FILESEARCH_PREVIEW_SIDE", "--side");
     append_override(&mut command, "ROFI_FILESEARCH_PREVIEW_GAP", "--gap");
     let mut child = command.spawn()?;
-    drop(child.stdin.take());
-    wait_for_socket(&mut child, path)
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("preview-panel standard input is unavailable"))?;
+    if let PanelContent::Text(text) = content {
+        input.write_all(text.as_bytes())?;
+    }
+    drop(input);
+    wait_for_socket(&mut child, path)?;
+    update_at(path, file, content, 0)
 }
 
 fn append_override(command: &mut Command, environment: &str, option: &str) {

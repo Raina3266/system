@@ -96,6 +96,7 @@ rec {
         --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}" \
         --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}" \
         --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}" \
+        --set ROFI_FILESEARCH_ROFI_WIDTH "400" \
         --set ROFI_FILESEARCH_PREVIEW_PANEL "${previewPanel}/bin/preview-panel"
     '';
   };

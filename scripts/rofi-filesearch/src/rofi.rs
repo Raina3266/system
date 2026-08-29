@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use crate::model::{Entry, Mode, path_from_key};
+use crate::model::{Entry, Mode, path_from_key, path_key};
 use crate::{AppResult, preview, search};
 
 const RECORD_SEPARATOR: u8 = 0x1e;
@@ -15,6 +15,48 @@ const RETV_REVEAL: u8 = 11;
 const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
 const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
 const REFRESH_ON_MODE_SWITCH_ENV: &str = "ROFI_REFRESH_SCRIPT_ON_MODE_SWITCH";
+
+#[derive(Clone, Debug)]
+struct UiState {
+    initialized: bool,
+    home: PathBuf,
+    folder: PathBuf,
+}
+
+impl UiState {
+    fn from_environment() -> AppResult<Self> {
+        let home = search::home_directory()?;
+        let data = env::var("ROFI_DATA").unwrap_or_default();
+        let initialized = data == "initialized" || data.split(';').any(|part| part == "init=1");
+        let folder = data
+            .split(';')
+            .find_map(|part| part.strip_prefix("folder="))
+            .and_then(|key| path_from_key(key, Mode::Folder))
+            .filter(|path| path.starts_with(&home) && path.is_dir())
+            .unwrap_or_else(|| home.clone());
+        Ok(Self {
+            initialized,
+            home,
+            folder,
+        })
+    }
+
+    fn at_folder(&self, folder: PathBuf) -> Self {
+        Self {
+            initialized: true,
+            home: self.home.clone(),
+            folder,
+        }
+    }
+
+    fn encode(&self, mode: Mode) -> String {
+        if mode == Mode::Folder {
+            format!("init=1;folder={}", path_key(Mode::Folder, &self.folder))
+        } else {
+            "init=1".to_owned()
+        }
+    }
+}
 
 pub fn launch() -> AppResult<()> {
     let executable = env::current_exe()?;
@@ -71,9 +113,13 @@ pub fn run_script(mode: Mode) -> AppResult<()> {
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(0);
     let selected_key = env::var("ROFI_INFO").ok();
+    let state = UiState::from_environment()?;
     match retv {
         RETV_ACTIVATE => {
             if let Some(key) = selected_key.as_deref() {
+                if mode == Mode::Folder {
+                    return activate_folder(key, &state);
+                }
                 activate(mode, key)?;
             }
             Ok(())
@@ -82,7 +128,7 @@ pub fn run_script(mode: Mode) -> AppResult<()> {
             if let Some(key) = selected_key.as_deref() {
                 preview::toggle(key)?;
             }
-            render(mode, selected_key.as_deref())
+            render(mode, selected_key.as_deref(), &state)
         }
         RETV_REVEAL if mode == Mode::File => {
             if let Some(path) = selected_key
@@ -93,8 +139,24 @@ pub fn run_script(mode: Mode) -> AppResult<()> {
             }
             Ok(())
         }
-        _ => render(mode, selected_key.as_deref()),
+        _ => render(mode, selected_key.as_deref(), &state),
     }
+}
+
+fn activate_folder(key: &str, state: &UiState) -> AppResult<()> {
+    let Some(path) = path_from_key(key, Mode::Folder) else {
+        return render(Mode::Folder, None, state);
+    };
+    if path.is_dir() && path.starts_with(&state.home) {
+        let selected_key = (state.folder.parent() == Some(path.as_path()))
+            .then(|| path_key(Mode::Folder, &state.folder));
+        return render(
+            Mode::Folder,
+            selected_key.as_deref(),
+            &state.at_folder(path),
+        );
+    }
+    spawn_background(xdg_open_binary(), [path.as_os_str()])
 }
 
 fn activate(mode: Mode, key: &str) -> AppResult<()> {
@@ -103,7 +165,8 @@ fn activate(mode: Mode, key: &str) -> AppResult<()> {
     };
     match mode {
         Mode::App => spawn_background(gio_binary(), [OsStr::new("launch"), path.as_os_str()]),
-        Mode::File | Mode::Folder => spawn_background(xdg_open_binary(), [path.as_os_str()]),
+        Mode::File => spawn_background(xdg_open_binary(), [path.as_os_str()]),
+        Mode::Folder => unreachable!("folder activation is handled by the browser"),
     }
 }
 
@@ -121,26 +184,29 @@ where
     Ok(())
 }
 
-fn render(mode: Mode, selected_key: Option<&str>) -> AppResult<()> {
-    let entries = search::entries(mode)?;
+fn render(mode: Mode, selected_key: Option<&str>, state: &UiState) -> AppResult<()> {
+    let entries = if mode == Mode::Folder {
+        search::folder_entries(&state.home, &state.folder)?
+    } else {
+        search::entries(mode)?
+    };
     let selected_row = selected_key
         .and_then(|key| entries.iter().position(|entry| entry.key == key))
         .or_else(|| (!entries.is_empty()).then_some(0));
-    let initialized = env::var("ROFI_DATA").as_deref() == Ok("initialized");
     let mut output = Vec::new();
-    if !initialized {
+    if !state.initialized {
         output.push(0);
         output.extend_from_slice(b"delim");
         output.push(UNIT_SEPARATOR);
         output.push(RECORD_SEPARATOR);
         output.push(b'\n');
     }
-    write_header(&mut output, "prompt", mode.prompt());
+    write_header(&mut output, "prompt", &prompt(mode, state));
     write_header(&mut output, "markup-rows", "true");
     write_header(&mut output, "no-custom", "true");
     write_header(&mut output, "use-hot-keys", "true");
     write_header(&mut output, "keep-selection", "true");
-    write_header(&mut output, "data", "initialized");
+    write_header(&mut output, "data", &state.encode(mode));
     write_header(&mut output, "theme", &mode_theme(mode));
     if let Some(selected_row) = selected_row {
         write_header(&mut output, "new-selection", &selected_row.to_string());
@@ -154,6 +220,14 @@ fn render(mode: Mode, selected_key: Option<&str>) -> AppResult<()> {
     }
     io::stdout().write_all(&output)?;
     Ok(())
+}
+
+fn prompt(mode: Mode, state: &UiState) -> String {
+    if mode == Mode::Folder {
+        format!(" {}", search::abbreviate_home(&state.folder, &state.home))
+    } else {
+        mode.prompt().to_owned()
+    }
 }
 
 fn mode_theme(mode: Mode) -> String {
