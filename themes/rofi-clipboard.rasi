@@ -17,7 +17,6 @@
 
 window {
     width: 400px;
-    height: 615px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -79,9 +78,9 @@ clipboard-body {
 
 listview {
     width: 400px;
-    lines: 9;
+    lines: 8;
     eh: 1;
-    padding: 4px 0;
+    expand: true;
     dynamic: true;
     scrollbar: true;
     spacing: 4px;
@@ -134,7 +133,7 @@ element-text selected.active {
 action-bar {
     expand: false;
     orientation: horizontal;
-    spacing: 10px;
+    spacing: 15px;
     children: [ button-pin, button-edit, button-delete ];
 }
 
@@ -143,7 +142,7 @@ button-delete,
 button-edit {
     cursor: pointer;
     horizontal-align: 0.5;
-    margin: 5px 0px;
+    margin: 2px 0px;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(122, 252, 255, 0.28);

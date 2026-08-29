@@ -3,13 +3,13 @@
  */
  
 /* preview-panel-settings
-width: 300px;
+width: 400px;
 height: 550px;
 companion_width: 400px;
 side: left;
-gap: 5px;
+gap: 10px;
 x: 770px;
-y: -220px;
+y: -500px;
 */
 
 window.preview-panel {
