@@ -23,7 +23,7 @@ window {
     border-color:     rgba(255, 126, 219, 0.5);
     border-radius:    15px;
     padding:          10px;
-    width:            500px;
+    width:            400px;
 }
 
 mainbox {
@@ -34,11 +34,12 @@ mainbox {
 /* ── Search input ── */
 
 inputbar {
+    spacing: 10px;
     background-color: @bg-mod;
     border:           1px;
     border-color:     rgba(255, 126, 219, 0.2);
-    border-radius:    6px;
-    padding:          10px 10px;
+    border-radius:    7px;
+    padding:          6px 10px;
     children:         [ prompt, entry ];
 }
 
@@ -62,7 +63,8 @@ entry {
 
 listview {
     margin:      10px 0 0 0;
-    lines:       5;
+    lines:       8;
+    expand:      true;
     dynamic:     true;
     scrollbar:   true;
     spacing:     3px;
@@ -105,26 +107,28 @@ element-icon {
 /* ── Mode switcher (bottom bar) ── */
 
 bottom-bar {
+    expand: false;
     orientation:  horizontal;
-    spacing:      7px;
-    border:       1px 0 0 0;
-    border-color: rgba(255, 126, 219, 0.2);
-    padding:      10px 0 5px 0;
+    spacing:      2px;
+    margin:       5px 0 0 0;
     children:     [ mode-switcher, button-preview, button-reveal ];
 }
 
 mode-switcher {
     orientation: horizontal;
-    spacing:     7px;
-    expand:      true;
+    spacing: 10px;
+    padding: 4px 2px;
 }
 
 button {
-    border-radius:  4px;
-    border:         1px;
-    border-color:   @fg;
-    padding:        2px 6px;
-    text-color:     @cyan;
+    expand: false;
+    padding: 2px 10px;
+    cursor: pointer;
+    border: 1px;
+    border-radius: 7px;
+    border-color: rgba(122, 252, 255, 0.28);
+    background-color: rgba(122, 252, 255, 0.06);
+    text-color: @cyan;
 }
 
 button selected {
@@ -134,19 +138,22 @@ button selected {
 
 button-preview,
 button-reveal {
-    expand:           false;
-    cursor:           pointer;
+    cursor: pointer;
     horizontal-align: 0.5;
-    padding:          2px 9px;
+    vertical-align: 0.5;
+    margin: 0px;
+    padding: 2px;
+    border-radius: 7px;
+    text-color: @cyan;
 }
 
 button-preview {
-    content: " 󰈈 ";
+    content: "󰈈";
     action:  "kb-custom-1";
 }
 
 button-reveal {
-    content: "  ";
+    content: "";
     action:  "kb-custom-2";
 }
 
