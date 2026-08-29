@@ -5,8 +5,8 @@ let
   rofiRevision = "6d2a5281e45dee92dfbdaf6f9ba6081c4c608682";
   rofiSourceHash = "sha256-4F76JPNaM43DgnM+F0WoYvL5aBbyPSZt3q0YWKAQ9Zs=";
 
-  # Extend -on-selection-changed with two placeholders used by the clipboard
-  # editor. {completion} is the stable clipboard item ID and
+  # Extend -on-selection-changed with two placeholders used by Rust-backed
+  # companion panels. {completion} is the stable script-row key and
   # {selection-serial} lets Rust reject stale callbacks during fast navigation.
   selectionChangedCompletionPatch = final.writeText
     "on-selection-changed-completion.patch"
@@ -96,8 +96,8 @@ let
     '';
 
   # Rofi normally preserves a visible list index during refiltering. Opt in to
-  # preserving the underlying entry instead so editing a clipboard search does
-  # not move the highlight to another history item.
+  # preserving the underlying entry instead so refiltering a Rust-backed mode
+  # does not move the highlight to another item.
   preserveFilteredSelectionPatch = final.writeText
     "preserve-filtered-selection.patch"
     ''
@@ -141,8 +141,9 @@ let
 
   # Rofi honors a script's new-selection header after actions, but not when
   # entering an already initialized mode. Apply that requested row after a real
-  # mode switch so pinned rows do not steal the default selection. Also reset
-  # the callback cache so the companion preview follows the new row.
+  # mode switch. Rust modes can also opt into a refresh on every switch so
+  # per-mode theme headers (such as row height) are reapplied when revisiting a
+  # cached tab. Reset the callback cache so a companion panel follows the row.
   modeSwitchSelectionPatch = final.writeText
     "mode-switch-selection.patch"
     ''
@@ -202,7 +203,7 @@ let
       ${" "}
        #include "view-internal.h"
        #include "view.h"
-      @@ -2106,6 +2107,10 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
+      @@ -2106,6 +2107,16 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
        }
       ${" "}
        void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
@@ -210,10 +211,16 @@ let
       +  if (mode_changed) {
       +    state->previous_line = UINT32_MAX;
       +  }
+      +  if (mode_changed && mode != NULL &&
+      +      g_strcmp0(g_getenv("ROFI_REFRESH_SCRIPT_ON_MODE_SWITCH"), "true") ==
+      +          0) {
+      +    mode_destroy(mode);
+      +    mode_init(mode);
+      +  }
          state->sw = mode;
          // Update prompt;
          if (state->prompt) {
-      @@ -2129,8 +2134,15 @@ void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
+      @@ -2129,8 +2140,15 @@ void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
          rofi_view_restart(state);
          state->reload = TRUE;
          state->refilter = TRUE;
@@ -232,7 +239,7 @@ let
     '';
 
   # Rofi normally takes exclusive layer-shell keyboard focus, which prevents
-  # the clipboard's companion editor from receiving keys after it is clicked.
+  # Rust-backed companion panels from receiving keys after they are clicked.
   # Keep the upstream default unless this opt-in environment variable is set.
   onDemandKeyboardPatch = final.writeText
     "wayland-on-demand-keyboard.patch"

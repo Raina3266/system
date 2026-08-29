@@ -1,8 +1,6 @@
-/* ROFI: cyberpunk double-line theme
-   Two-line rows: main text on line one, a smaller + dimmed tooltip (e.g. the
-   parent dir from filesearch) on line two. The tooltip styling itself comes
-   from Pango markup in the caller (filesearch.sh); this theme just reserves
-   the extra row height via `eh: 2`. */
+/* ROFI: Rust-backed App / File / Folder finder.
+   App and Folder use one-line rows. File uses two lines so its dimmed parent
+   path remains visible. rofi-filesearch supplies the per-mode row height. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";
@@ -30,7 +28,7 @@ window {
 
 mainbox {
     orientation: vertical;
-    children:   [ inputbar, listview, mode-switcher ];
+    children:   [ inputbar, listview, bottom-bar ];
 }
 
 /* ── Search input ── */
@@ -68,7 +66,7 @@ listview {
     dynamic:     true;
     scrollbar:   true;
     spacing:     3px;
-    eh:          2;
+    eh:          1;
 }
 
 scrollbar {
@@ -101,15 +99,24 @@ element-text selected.normal {
 }
 
 element-icon {
-    size:         3em;
+    size:         2em;
     vertical-align: 0.5;
 }
 /* ── Mode switcher (bottom bar) ── */
 
-mode-switcher {
+bottom-bar {
+    orientation:  horizontal;
+    spacing:      7px;
     border:       1px 0 0 0;
     border-color: rgba(255, 126, 219, 0.2);
     padding:      10px 0 5px 0;
+    children:     [ mode-switcher, button-preview, button-reveal ];
+}
+
+mode-switcher {
+    orientation: horizontal;
+    spacing:     7px;
+    expand:      true;
 }
 
 button {
@@ -123,6 +130,24 @@ button {
 button selected {
     border-color: @pink;
     text-color:   @pink;
+}
+
+button-preview,
+button-reveal {
+    expand:           false;
+    cursor:           pointer;
+    horizontal-align: 0.5;
+    padding:          2px 9px;
+}
+
+button-preview {
+    content: " 󰈈 ";
+    action:  "kb-custom-1";
+}
+
+button-reveal {
+    content: "  ";
+    action:  "kb-custom-2";
 }
 
 /* ── Error ── */

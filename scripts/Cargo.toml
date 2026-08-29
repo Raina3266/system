@@ -5,6 +5,7 @@ members = [
   "preview-panel",
   "rofi-audio",
   "rofi-clipboard",
+  "rofi-filesearch",
   "rofi-network-manager",
   "waybar-timer",
   "webcam-crop",
