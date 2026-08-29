@@ -7,8 +7,10 @@ use super::UiState;
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
-/// Characters the single-line message panel can show at the window's width.
-const MESSAGE_WIDTH: usize = 50;
+/// Characters retained for the message panel. Rofi wraps them across several
+/// visual lines; the limit only stops an unusually long D-Bus error from
+/// taking over the whole menu.
+const MESSAGE_MAX_CHARS: usize = 120;
 const REFRESH_ACTION: &str = "kb-custom-5";
 /// Idle seconds between refresh ticks. Must never be 0 on any tab — see
 /// `write_refresh_theme`.
@@ -33,9 +35,9 @@ pub(super) fn render(
                 .clone()
                 .or(selected_message)
                 .unwrap_or_default();
-            // One line high; anything longer is clipped rather than silently
-            // cut off mid-glyph by the widget.
-            single_line(&raw, MESSAGE_WIDTH)
+            // Flatten backend-inserted line breaks, then let Rofi wrap the
+            // message naturally inside the panel.
+            single_line(&raw, MESSAGE_MAX_CHARS)
         }
         Mode::Output | Mode::Input => String::new(),
     };

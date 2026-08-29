@@ -386,8 +386,8 @@ fn is_pci_family(token: &str) -> bool {
         })
 }
 
-/// Collapses a message onto one line and clips it, so the single-line message
-/// widget never has more than it can draw.
+/// Collapses embedded line breaks so a backend error wraps as one paragraph,
+/// then clips it to keep the message panel bounded.
 pub fn single_line(value: &str, maximum: usize) -> String {
     let joined = value
         .split(['\n', '\r'])
