@@ -641,7 +641,11 @@ def stroke_colour(node: ET.Element) -> str | None:
 
 
 def patch_state_backgrounds(
-    path: pathlib.Path, pink: str, dim_pink: str, indicator_colour: str
+    path: pathlib.Path,
+    pink: str,
+    dim_pink: str,
+    normal_input_background: str,
+    indicator_colour: str,
 ) -> tuple[int, int, int, int]:
     """Patch every background slice of interactive Kvantum states.
 
@@ -650,6 +654,8 @@ def patch_state_backgrounds(
     of their translucent cyan background layers need to change together or a
     selected row remains cyan around a pink centre. Opaque frame fills and
     strokes are changed to bright pink while interior fills remain dim pink.
+    Focused line edits keep their normal input background so selected text is
+    still distinguishable; only their outline changes colour.
     """
     for prefix, uri in SVG_NAMESPACES.items():
         ET.register_namespace(prefix, uri)
@@ -675,13 +681,20 @@ def patch_state_backgrounds(
     outline_changes = 0
 
     for state in states:
+        state_id = state.get("id", "")
+        state_background = (
+            normal_input_background
+            if state_id == "lineedit-focused"
+            or state_id.startswith("lineedit-focused-")
+            else dim_pink
+        )
         nodes = list(nodes_with_opacity(state))
         for node, opacity in nodes:
             fill = fill_colour(node)
             if fill:
                 lowered = fill.lower()
                 if lowered in STATE_BASE_COLOURS:
-                    changed += set_fill(node, dim_pink)
+                    changed += set_fill(node, state_background)
                 elif lowered in STATE_OUTLINE_COLOURS:
                     if 0 < opacity < 1:
                         changed += set_fill(node, pink)
@@ -792,6 +805,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
         kvantum / "daemon-2.0.svg",
         args.pink.lower(),
         args.dim_pink.lower(),
+        args.secondary_background.lower(),
         args.icon_colour.lower(),
     )
     kvconfig_changes = rewrite_ini_key(
