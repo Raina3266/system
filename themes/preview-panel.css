@@ -3,13 +3,13 @@
  */
  
 /* preview-panel-settings
-width: 400px;
-height: 610px;
+width: 300px;
+height: 550px;
 companion_width: 400px;
 side: left;
 gap: 5px;
 x: 770px;
-y: -450px;
+y: -220px;
 */
 
 window.preview-panel {
@@ -35,10 +35,8 @@ picture.preview-image {
 }
 
 picture.network-qr {
-    height: 200px;
-    background: #ffffff;
-    border-radius: 9px;
-    margin: 0px 66px;
+    background: #0E0616;
+    margin: 10px;
 }
 
 scrollbar slider {
