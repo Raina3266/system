@@ -232,22 +232,44 @@ pub fn thumbnail_pdf(input: &Path, output: &Path, size: u32) -> AppResult<()> {
 }
 
 fn render_pdf_to(input: &Path, output: &Path, size: u32) -> AppResult<()> {
-    let temporary = temporary_path(output);
-    let prefix = temporary.with_extension("");
-    let status = Command::new(pdftoppm_binary())
+    let prefix = pdf_render_prefix(output);
+    let rendered = prefix.with_extension("png");
+    let _ = fs::remove_file(&rendered);
+    let conversion = Command::new(pdftoppm_binary())
         .args(["-png", "-f", "1", "-singlefile", "-scale-to"])
         .arg(size.to_string())
         .arg("--")
         .arg(input)
         .arg(&prefix)
-        .status()?;
-    let rendered = prefix.with_extension("png");
-    if !status.success() || !rendered.is_file() {
+        .output()?;
+    if !conversion.status.success() || !rendered.is_file() {
         let _ = fs::remove_file(&rendered);
-        return Err(io::Error::other(format!("pdftoppm exited with {status}")).into());
+        let stderr = String::from_utf8_lossy(&conversion.stderr);
+        let stderr = stderr.trim();
+        let reason = if conversion.status.success() {
+            format!(
+                "pdftoppm succeeded but did not create {}",
+                rendered.display()
+            )
+        } else {
+            format!("pdftoppm exited with {}", conversion.status)
+        };
+        let message = if stderr.is_empty() {
+            reason
+        } else {
+            format!("{reason}: {stderr}")
+        };
+        return Err(io::Error::other(message).into());
     }
     fs::rename(rendered, output)?;
     Ok(())
+}
+
+fn pdf_render_prefix(output: &Path) -> PathBuf {
+    output.with_file_name(format!(
+        ".rofi-filesearch-pdf-{}",
+        std::process::id()
+    ))
 }
 
 fn temporary_path(target: &Path) -> PathBuf {
