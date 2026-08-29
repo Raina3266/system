@@ -124,7 +124,7 @@ pub fn run_script(mode: Mode) -> AppResult<()> {
             }
             Ok(())
         }
-        RETV_PREVIEW if mode == Mode::File => {
+        RETV_PREVIEW if matches!(mode, Mode::File | Mode::Folder) => {
             if let Some(key) = selected_key.as_deref() {
                 preview::toggle(key)?;
             }
@@ -231,13 +231,20 @@ fn prompt(mode: Mode, state: &UiState) -> String {
 }
 
 fn mode_theme(mode: Mode) -> String {
-    let action_colour = if mode == Mode::File { "@cyan" } else { "@dim" };
+    let preview_colour = if matches!(mode, Mode::File | Mode::Folder) {
+        "@cyan"
+    } else {
+        "@dim"
+    };
+    let reveal_colour = if mode == Mode::File { "@cyan" } else { "@dim" };
     let icon_size = if mode == Mode::File { "3em" } else { "2em" };
     format!(
         "configuration {{ eh: {}; }} \
          element-icon {{ size: {icon_size}; }} \
-         button-preview, button-reveal {{ text-color: {action_colour}; \
-         border-color: {action_colour}; }}",
+         button-preview {{ text-color: {preview_colour}; \
+         border-color: {preview_colour}; }} \
+         button-reveal {{ text-color: {reveal_colour}; \
+         border-color: {reveal_colour}; }}",
         mode.row_height()
     )
 }
@@ -338,6 +345,13 @@ mod tests {
         assert!(mode_theme(Mode::App).contains("eh: 1;"));
         assert!(mode_theme(Mode::Folder).contains("eh: 1;"));
         assert!(mode_theme(Mode::File).contains("eh: 2;"));
+    }
+
+    #[test]
+    fn folder_mode_enables_preview_but_not_reveal() {
+        let theme = mode_theme(Mode::Folder);
+        assert!(theme.contains("button-preview { text-color: @cyan;"));
+        assert!(theme.contains("button-reveal { text-color: @dim;"));
     }
 
     #[test]

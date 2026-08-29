@@ -70,8 +70,9 @@ pub fn toggle(key: &str) -> AppResult<()> {
         close_at(&path);
         return Ok(());
     }
-    let file = path_from_key(key, Mode::File)
-        .ok_or_else(|| io::Error::other("preview requires a selected file"))?;
+    let Some(file) = preview_file_from_key(key) else {
+        return Ok(());
+    };
     let content = preview_content(&file)?;
     cleanup(&path)?;
     if let Err(error) = launch_panel(&path, &file, &content) {
@@ -85,20 +86,25 @@ pub fn selection_changed(key: &str, serial: u64) -> AppResult<()> {
     let Some(socket) = socket_from_environment() else {
         return Ok(());
     };
-    if mode_from_key(key) != Some(Mode::File) {
+    let Some(file) = preview_file_from_key(key) else {
         if socket.exists() {
             close_at(&socket);
         }
         return Ok(());
-    }
+    };
     if !socket.exists() {
         return Ok(());
     }
-    let Some(file) = path_from_key(key, Mode::File) else {
-        return Ok(());
-    };
     let content = preview_content(&file)?;
     update_at(&socket, &file, &content, serial)
+}
+
+fn preview_file_from_key(key: &str) -> Option<PathBuf> {
+    let mode = mode_from_key(key)?;
+    if !matches!(mode, Mode::File | Mode::Folder) {
+        return None;
+    }
+    path_from_key(key, mode).filter(|path| path.is_file())
 }
 
 fn preview_content(path: &Path) -> AppResult<PanelContent> {
@@ -429,6 +435,7 @@ fn ffmpegthumbnailer_binary() -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::path_key;
 
     #[test]
     fn only_requested_preview_families_are_supported() {
@@ -446,5 +453,31 @@ mod tests {
         write_frame(&mut frame, CLOSE, 0, &[]).unwrap();
         assert_eq!(frame.len(), 17);
         assert_eq!(frame[0], CLOSE);
+    }
+
+    #[test]
+    fn file_and_folder_mode_keys_can_preview_files_but_not_directories() {
+        let root = env::temp_dir().join(format!(
+            "rofi-filesearch-preview-key-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("notes.txt");
+        fs::write(&file, "notes").unwrap();
+
+        assert_eq!(
+            preview_file_from_key(&path_key(Mode::File, &file)),
+            Some(file.clone())
+        );
+        assert_eq!(
+            preview_file_from_key(&path_key(Mode::Folder, &file)),
+            Some(file)
+        );
+        assert_eq!(
+            preview_file_from_key(&path_key(Mode::Folder, &root)),
+            None
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

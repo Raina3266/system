@@ -35,8 +35,8 @@ picture.preview-image {
 }
 
 image.network-qr {
-    min-width: 50px;
-    min-height: 50px;
+    min-width: 200px;
+    min-height: 200px;
     background: #0E0616;
 }
 

@@ -22,7 +22,7 @@ use crate::ipc::{ContentSnapshot, Message, SwitchReply};
 use crate::panel_state::{ContentKind, CurrentItem, LiveState, SwitchDisposition};
 
 const THEME_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
-const NETWORK_QR_SIZE: i32 = 50;
+const NETWORK_QR_SIZE: i32 = 200;
 
 #[derive(Clone, Copy)]
 enum PanelKeyboardState {
