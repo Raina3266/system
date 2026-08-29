@@ -75,16 +75,16 @@ fn every_tab_leaves_the_next_one_a_running_refresh_tick() {
 }
 
 #[test]
-fn audio_tabs_use_two_line_rows_without_enlarging_bluetooth_rows() {
+fn every_tab_uses_compact_single_line_rows() {
     let render = |mode| {
         let mut output = Vec::new();
         write_refresh_theme(&mut output, mode, &UiState::default());
         String::from_utf8_lossy(&output).into_owned()
     };
 
-    assert!(render(Mode::Bluetooth).contains("configuration { eh: 1;"));
-    assert!(render(Mode::Output).contains("configuration { eh: 2;"));
-    assert!(render(Mode::Input).contains("configuration { eh: 2;"));
+    for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
+        assert!(render(mode).contains("configuration { eh: 1;"));
+    }
 }
 
 #[test]

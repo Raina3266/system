@@ -20,8 +20,7 @@
    ticks until the user presses something. See `write_refresh_theme` in
    scripts/rofi-audio/src/rofi.rs. */
 configuration {
-    /* Bluetooth is single-line. Output and Input override this to 2 through
-       their script-mode theme header. */
+    /* Every device row is one compact line. */
     eh: 1;
 
     timeout {
@@ -168,7 +167,7 @@ element-text selected.urgent {
 }
 
 message {
-    padding: 8px 10px;
+    padding: 5px 10px;
     line: 1;
     border: 1px;
     border-radius: 7px;

@@ -7,10 +7,8 @@ use super::UiState;
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
-/// Characters retained for the message panel. Rofi wraps them across several
-/// visual lines; the limit only stops an unusually long D-Bus error from
-/// taking over the whole menu.
-const MESSAGE_MAX_CHARS: usize = 120;
+/// Characters that fit on one compact message-panel line at the window width.
+const MESSAGE_MAX_CHARS: usize = 33;
 const REFRESH_ACTION: &str = "kb-custom-5";
 /// Idle seconds between refresh ticks. Must never be 0 on any tab — see
 /// `write_refresh_theme`.
@@ -35,8 +33,8 @@ pub(super) fn render(
                 .clone()
                 .or(selected_message)
                 .unwrap_or_default();
-            // Flatten backend-inserted line breaks, then let Rofi wrap the
-            // message naturally inside the panel.
+            // Flatten backend-inserted line breaks and clip before Rofi can
+            // wrap the message onto a second visual line.
             single_line(&raw, MESSAGE_MAX_CHARS)
         }
         Mode::Output | Mode::Input => String::new(),
@@ -134,15 +132,11 @@ pub(super) fn write_refresh_theme(output: &mut Vec<u8>, mode: Mode, state: &UiSt
         Mode::Bluetooth if state.pending_connect.is_some() => PENDING_REFRESH_DELAY,
         _ => REFRESH_DELAY,
     };
-    let row_height = match mode {
-        Mode::Bluetooth => 1,
-        Mode::Output | Mode::Input => 2,
-    };
     write_header(
         output,
         "theme",
         &format!(
-            "configuration {{ eh: {row_height}; \
+            "configuration {{ eh: 1; \
              timeout {{ delay: {delay}; action: \"{REFRESH_ACTION}\"; }} }}"
         ),
     );
