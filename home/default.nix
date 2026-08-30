@@ -57,10 +57,6 @@ in
     obsidian
     krokiet
     exercism
-    stirling-pdf-desktop
-
-    # media playback
-    lrcget
 
     # Qt/Kde based
     kdePackages.elisa
