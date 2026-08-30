@@ -1,21 +1,13 @@
 /* Network manager: Wi-Fi/Ethernet tabs, status message, and six actions. */
 
-/* Preview geometry may be set per launcher. Omitted fields inherit from
-   preview-panel.css; explicit environment overrides still take priority. */
+/* Preview geometry can be set per launcher.*/
 /* preview-panel-layout
 width: 300px;
-height: 400px;
-companion-width: 375px;
+height: 450px;
+x: 800px;
+y: -350px;
 */
 
-/* Rofi triggers this binding once the UI has been idle for `delay` seconds and
-   re-arms the timer on every action, which is the only way a script mode can
-   redraw itself without user input. This is only the value for the very first
-   frame; from then on the script sets `delay` through its `theme` header, and
-   keeps it non-zero throughout. It has to: Rofi arms the timer from the theme
-   as it stood *before* the script ran, so the frame that starts a connect
-   cannot start the ticking that reports its outcome — whichever frame the user
-   pressed Enter on has to have done that already. */
 configuration {
     timeout {
         delay: 0;
