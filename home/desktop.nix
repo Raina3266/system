@@ -90,13 +90,6 @@ in
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";
 
-  xdg.desktopEntries.rofi-theme-selector = {
-    name = "Rofi Theme Selector";
-    noDisplay = true;
-    settings.Exec = "rofi-theme-selector";
-    settings.Type = "Application";
-  };
-
   # kbd-layout-viewer5 ships from fcitx5-configtool, which is needed to
   # configure the input methods, so the package is kept and only the menu
   # entry is hidden. The binary stays callable from the terminal, and
@@ -112,6 +105,7 @@ in
 
   xdg.desktopEntries.zed-new-window = {
     name = "Zed (new window)";
+    noDisplay = true;
     genericName = "Text Editor";
     exec = "zeditor -n %U";
     icon = "zed";

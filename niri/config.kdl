@@ -103,6 +103,13 @@ window-rule {
     default-window-height { fixed 700; }
 }
 
+window-rule {
+    match app-id=r#"^(org\.kde\.)?dolphin$"#
+    open-floating true
+    default-column-width { fixed 800; }
+    default-window-height { fixed 600; }
+}
+
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
@@ -120,12 +127,13 @@ binds {
 
     // Application launchers and session controls
     Mod+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
-    Mod+T hotkey-overlay-title="Open a Terminal: ghostty" { spawn "ghostty"; }
+    Mod+T hotkey-overlay-title="Open Ghostty" { spawn "ghostty"; }
     Mod+F hotkey-overlay-title="App &amp; File Finder: rofi" { spawn "rofi-filesearch"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
     Mod+Y hotkey-overlay-title="Open Yazi" { spawn "ghostty" "--class=yazi" "-e" "yazi"; }
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
+    Mod+D hotkey-overlay-title="Open Dolphin" { spawn "dolphin"; }
     Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
@@ -275,7 +283,7 @@ binds {
 
     Mod+V       { toggle-window-floating; }
     Mod+Shift+V { switch-focus-between-floating-and-tiling; }
-    Mod+D { toggle-column-tabbed-display; }
+    Mod+Shift+D hotkey-overlay-title="Toggle Column Tabbed Display" { toggle-column-tabbed-display; }
 
     Print       { screenshot; }
     Ctrl+Print  { screenshot-screen; }

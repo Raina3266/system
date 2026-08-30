@@ -74,25 +74,6 @@ in
     mediactl
   ];
 
-  # fcitx5 input methods: English (GB keyboard) and Chinese (Pinyin)
-  xdg.configFile."fcitx5/profile".text = ''
-    [Groups/0]
-    Name="Default"
-    Default Layout=gb
-    DefaultIM=keyboard-gb
-
-    [Groups/0/Items/0]
-    Name=keyboard-gb
-    Layout=
-
-    [Groups/0/Items/1]
-    Name=pinyin
-    Layout=
-
-    [GroupOrder]
-    0="Default"
-  '';
-
   # fcitx5 theme: cyberpunk color palette matching waybar/rofi.
   # The theme file itself is linked from ../themes/default.nix.
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
