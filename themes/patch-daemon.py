@@ -1002,8 +1002,14 @@ def patch_desktop(args: argparse.Namespace) -> None:
     structural_config_changes = rewrite_ini_key(
         kvantum / "daemon-2.0.kvconfig",
         "GeneralColors",
-        {"light.color", "mid.light.color", "mid.color"},
+        {"light.color", "mid.light.color"},
         args.structure_colour,
+    )
+    table_separator_changes = rewrite_ini_key(
+        kvantum / "daemon-2.0.kvconfig",
+        "GeneralColors",
+        {"mid.color"},
+        args.table_separator_colour,
     )
     separator_config_changes = set_ini_key(
         kvantum / "daemon-2.0.kvconfig",
@@ -1058,6 +1064,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
         f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
         f"across {states} interactive state elements; "
         f"{structural_changes + structural_config_changes} yellow structural accents; "
+        f"{table_separator_changes} dim table separator setting; "
         f"{separator_changes + separator_config_changes} menu separator settings; "
         f"{kvconfig_changes + colour_changes} selection keys; "
         f"{alternate_background_changes} alternate-view background; "
@@ -1328,6 +1335,7 @@ def parser() -> argparse.ArgumentParser:
     desktop.add_argument("--pink", required=True)
     desktop.add_argument("--dim-pink", required=True)
     desktop.add_argument("--structure-colour", required=True)
+    desktop.add_argument("--table-separator-colour", required=True)
     desktop.add_argument("--alternate-background", required=True)
     desktop.add_argument("--main-background", required=True)
     desktop.add_argument("--secondary-background", required=True)

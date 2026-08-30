@@ -46,6 +46,7 @@ let
   daemonPink = "#D656C7";
   daemonDimPink = "#5A254D";
   daemonYellow = "#FCEE0A";
+  daemonTableSeparator = "#6B6670";
   daemonText = "#5DF4FE";
   daemonAlternateBackground = "#210E15";
   daemonBackground = "#180A10";
@@ -72,6 +73,7 @@ let
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
           --structure-colour "${daemonYellow}" \
+          --table-separator-colour "${daemonTableSeparator}" \
           --alternate-background "${daemonAlternateBackground}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
