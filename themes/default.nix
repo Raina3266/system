@@ -53,9 +53,10 @@ let
   daemonChromeBackground = "#170A0F";
 
   # Reuse the same local palette across KDE, GTK and VS Code: relevant icons
-  # and destructive controls use vivid dark red, KDE structural frames use
-  # cyberpunk yellow, interactive outlines use pink, their backgrounds use
-  # dimmed pink, and normal surfaces use darker Daemon burgundy variants.
+  # and destructive controls use vivid dark red, as do normal button frames.
+  # KDE separators, popup frames and scrollbars use cyberpunk yellow;
+  # interactive box outlines use red, their backgrounds use dimmed pink, and
+  # normal surfaces use darker Daemon burgundy variants.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched"
       {

@@ -48,7 +48,6 @@ DAEMON_ERROR = "#ff5048"
 DAEMON_SUCCESS = "#28c775"
 
 KDE_STRUCTURAL_ELEMENTS = {
-    "button",
     "common",
     "group",
     "header",
@@ -57,10 +56,11 @@ KDE_STRUCTURAL_ELEMENTS = {
     "menu",
     "menubaritem",
     "menuitem",
+    "scrollbargroove",
+    "scrollbarslider",
     "splitter",
     "ss",
     "tabframe",
-    "tbutton",
     "toolbar",
     "tooltip",
 }
@@ -677,7 +677,7 @@ def stroke_colour(node: ET.Element) -> str | None:
 
 def patch_state_backgrounds(
     path: pathlib.Path,
-    pink: str,
+    outline_colour: str,
     dim_pink: str,
     normal_input_background: str,
     indicator_colour: str,
@@ -688,7 +688,8 @@ def patch_state_backgrounds(
     elements, such as ``itemview-focused`` and ``itemview-focused-left``. All
     of their translucent cyan background layers need to change together or a
     selected row remains cyan around a pink centre. Opaque frame fills and
-    strokes are changed to bright pink while interior fills remain dim pink.
+    strokes are changed to the configured outline colour while interior fills
+    remain dim pink.
     Focused line edits keep their normal input background so selected text is
     still distinguishable; only their outline changes colour.
     """
@@ -732,26 +733,27 @@ def patch_state_backgrounds(
                     changed += set_fill(node, state_background)
                 elif lowered in STATE_OUTLINE_COLOURS:
                     if 0 < opacity < 1:
-                        changed += set_fill(node, pink)
+                        changed += set_fill(node, outline_colour)
                     else:
-                        outline_changes += set_fill(node, pink)
+                        outline_changes += set_fill(node, outline_colour)
 
             stroke = stroke_colour(node)
             if stroke and stroke.lower() in STATE_OUTLINE_COLOURS:
-                outline_changes += set_stroke(node, pink)
+                outline_changes += set_stroke(node, outline_colour)
 
     # Checked/radio glyphs are button indicators, not backgrounds or frames.
-    # They are restored to Daemon red after the state pass above turns the
-    # surrounding focused/selected frame pink.
+    # Keep them on Daemon red as well, independently of the outline colour.
     indicator_changes = 0
-    indicator_colours = CYAN_ICON_COLOURS | {pink.lower()}
+    indicator_colours = CYAN_ICON_COLOURS | {outline_colour.lower()}
     for control in root.iter():
         if not CHECKED_CONTROL.match(control.get("id", "")):
             continue
         for node, opacity in nodes_with_opacity(control):
             fill = fill_colour(node)
             if fill and fill.lower() in indicator_colours and opacity >= 1:
-                indicator_changes += set_fill(node, indicator_colour)
+                changed_here = set_fill(node, indicator_colour)
+                if changed_here or fill.lower() == indicator_colour.lower():
+                    indicator_changes += 1
 
     if not states or changed == 0:
         raise RuntimeError("no Kvantum interactive-state backgrounds were changed")
@@ -851,8 +853,10 @@ def set_ini_key(path: pathlib.Path, section_name: str, key: str, value: str) -> 
     return 1
 
 
-def patch_kde_structural_accents(path: pathlib.Path, colour: str) -> int:
-    """Turn only red structural frames into the configured section colour."""
+def patch_kde_structural_accents(
+    path: pathlib.Path, colour: str, interactive_colour: str
+) -> int:
+    """Patch structural reds plus the explicitly requested popup outline."""
     tree = ET.parse(path)
     root = tree.getroot()
     changed = 0
@@ -862,12 +866,27 @@ def patch_kde_structural_accents(path: pathlib.Path, colour: str) -> int:
         prefix = element_id.split("-", 1)[0]
         if prefix not in KDE_STRUCTURAL_ELEMENTS:
             continue
+        if STATE_ELEMENT.search(element_id) and prefix not in {
+            "scrollbargroove",
+            "scrollbarslider",
+        }:
+            # Hovered, focused and selected widget frames stay red. Scrollbars
+            # are the exception because their entire visual is explicitly
+            # assigned to the yellow structure role.
+            continue
+        source_colours = KDE_STRUCTURAL_REDS
+        if prefix in {"scrollbargroove", "scrollbarslider"}:
+            source_colours = source_colours | {interactive_colour.lower()}
+        if element_id == "menu-normal" or element_id.startswith("menu-normal-"):
+            # The menu frame is cyan upstream rather than red, but it is the
+            # outer popup outline and belongs to the same yellow structure role.
+            source_colours = source_colours | CYAN_ICON_COLOURS
 
         for node in element.iter():
             style = parse_style(node.get("style", ""))
             style_changed = False
             for key in ("fill", "stroke"):
-                if style.get(key, "").lower() in KDE_STRUCTURAL_REDS:
+                if style.get(key, "").lower() in source_colours:
                     style[key] = colour
                     changed += 1
                     style_changed = True
@@ -875,7 +894,7 @@ def patch_kde_structural_accents(path: pathlib.Path, colour: str) -> int:
                 node.set("style", format_style(style))
 
             for key in ("fill", "stroke"):
-                if node.get(key, "").lower() in KDE_STRUCTURAL_REDS:
+                if node.get(key, "").lower() in source_colours:
                     node.set(key, colour)
                     changed += 1
 
@@ -949,13 +968,15 @@ def patch_desktop(args: argparse.Namespace) -> None:
     icon_files = patch_dolphin_icons(icons, args.icon_colour.lower())
     states, svg_changes, outline_changes, indicator_changes = patch_state_backgrounds(
         kvantum / "daemon-2.0.svg",
-        args.pink.lower(),
+        args.icon_colour.lower(),
         args.dim_pink.lower(),
         args.secondary_background.lower(),
         args.icon_colour.lower(),
     )
     structural_changes = patch_kde_structural_accents(
-        kvantum / "daemon-2.0.svg", args.structure_colour.lower()
+        kvantum / "daemon-2.0.svg",
+        args.structure_colour.lower(),
+        args.icon_colour.lower(),
     )
     separator_changes = add_kvantum_menu_separator(
         kvantum / "daemon-2.0.svg", args.structure_colour.lower()
@@ -988,7 +1009,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
         colours,
         "Colors:",
         {"DecorationFocus", "DecorationHover"},
-        hex_to_kde_rgb(args.pink),
+        hex_to_kde_rgb(args.icon_colour),
     )
     palette = background_palette(args)
     svg_background_changes = rewrite_text_colours(
