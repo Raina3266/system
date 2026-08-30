@@ -884,7 +884,12 @@ def patch_kde_structural_accents(
             # outer popup outline and belongs to the same yellow structure role.
             source_colours = source_colours | CYAN_ICON_COLOURS
 
-        for node in element.iter():
+        for node, opacity in nodes_with_opacity(element):
+            if prefix == "tbutton" and (len(node) > 0 or opacity < 1):
+                # A tool-button state also contains inherited, transparent and
+                # translucent interaction fills. Only its opaque leaf geometry
+                # draws the requested yellow box outline.
+                continue
             style = parse_style(node.get("style", ""))
             style_changed = False
             for key in ("fill", "stroke"):
