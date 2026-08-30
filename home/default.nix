@@ -74,15 +74,14 @@ in
     kdePackages.dolphin-plugins
     kdePackages.plasma-integration
     kdePackages.knewstuff
-    kdePackages.partitionmanagert
+    kdePackages.partitionmanager
+
+    # media creation / editing
     vlc
     puddletag
     obs-studio
     shotcut
     kid3
-    qbittorrent
-
-    # media creation / editing
     pavucontrol
     inkscape
     gimp
@@ -91,5 +90,6 @@ in
 
     # downloads / torrent
     clash-verge-rev
+    qbittorrent
   ];
 }
