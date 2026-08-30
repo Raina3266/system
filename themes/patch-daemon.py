@@ -679,6 +679,7 @@ def stroke_colour(node: ET.Element) -> str | None:
 
 def patch_state_backgrounds(
     path: pathlib.Path,
+    state_fill_colour: str,
     outline_colour: str,
     dim_pink: str,
     normal_input_background: str,
@@ -689,9 +690,9 @@ def patch_state_backgrounds(
     Kvantum draws a single row/button from a centre plus edge and corner SVG
     elements, such as ``itemview-focused`` and ``itemview-focused-left``. All
     of their translucent cyan background layers need to change together or a
-    selected row remains cyan around a pink centre. Opaque frame fills and
-    strokes are changed to the configured outline colour while interior fills
-    remain dim pink.
+    selected row remains cyan around a pink centre. Translucent interaction
+    layers retain the pink state fill (rendering as dim pink), while only
+    opaque frame geometry and strokes use the configured outline colour.
     Focused line edits keep their normal input background so selected text is
     still distinguishable; only their outline changes colour.
     """
@@ -734,10 +735,10 @@ def patch_state_backgrounds(
                 if lowered in STATE_BASE_COLOURS:
                     changed += set_fill(node, state_background)
                 elif lowered in STATE_OUTLINE_COLOURS:
-                    if 0 < opacity < 1:
-                        changed += set_fill(node, outline_colour)
-                    else:
+                    if opacity >= 1 and len(node) == 0:
                         outline_changes += set_fill(node, outline_colour)
+                    else:
+                        changed += set_fill(node, state_fill_colour)
 
             stroke = stroke_colour(node)
             if stroke and stroke.lower() in STATE_OUTLINE_COLOURS:
@@ -746,7 +747,10 @@ def patch_state_backgrounds(
     # Checked/radio glyphs are button indicators, not backgrounds or frames.
     # Keep them on Daemon red as well, independently of the outline colour.
     indicator_changes = 0
-    indicator_colours = CYAN_ICON_COLOURS | {outline_colour.lower()}
+    indicator_colours = CYAN_ICON_COLOURS | {
+        state_fill_colour.lower(),
+        outline_colour.lower(),
+    }
     for control in root.iter():
         if not CHECKED_CONTROL.match(control.get("id", "")):
             continue
@@ -975,6 +979,7 @@ def patch_desktop(args: argparse.Namespace) -> None:
     icon_files = patch_dolphin_icons(icons, args.icon_colour.lower())
     states, svg_changes, outline_changes, indicator_changes = patch_state_backgrounds(
         kvantum / "daemon-2.0.svg",
+        args.pink.lower(),
         args.icon_colour.lower(),
         args.dim_pink.lower(),
         args.secondary_background.lower(),
