@@ -49,7 +49,10 @@ in
     wechat
     qq
     whatsie
-
+    telegram-desktop
+    zoom-us
+    wemeet
+    
     # productivity / office
     obsidian
     krokiet
@@ -71,9 +74,7 @@ in
     kdePackages.dolphin-plugins
     kdePackages.plasma-integration
     kdePackages.knewstuff
-    telegram-desktop
-    zoom-us
-    wemeet
+    kdePackages.partitionmanagert
     vlc
     puddletag
     obs-studio

@@ -52,7 +52,6 @@ in
     yelp
     seahorse
     totem
-    gnome-color-manager
     snapshot
     decibels
     papers
@@ -63,6 +62,12 @@ in
     gnome-weather
     gnome-calculator
     gnome-text-editor
+    gnome-system-monitor
+    gnome-characters
+    gnome-doc-utils
+    gnome-backgrounds
+    gnome-color-manager
+    gnome-disk-utility
     gnome-photos
     gnome-contacts
     gnome-music
