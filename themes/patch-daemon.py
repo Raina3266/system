@@ -47,6 +47,25 @@ DAEMON_WARNING = "#fdf500"
 DAEMON_ERROR = "#ff5048"
 DAEMON_SUCCESS = "#28c775"
 
+KDE_STRUCTURAL_ELEMENTS = {
+    "button",
+    "common",
+    "group",
+    "header",
+    "itemview",
+    "lineedit",
+    "menu",
+    "menubaritem",
+    "menuitem",
+    "splitter",
+    "ss",
+    "tabframe",
+    "tbutton",
+    "toolbar",
+    "tooltip",
+}
+KDE_STRUCTURAL_REDS = {"#710100", "#fb3048", "#ff5048"}
+
 GTK_ICON_ASSET = re.compile(
     r"(?:arrow|bullet|check|close|dash|maximize|minimize|radio|slider|spinbutton|titlebutton)"
 )
@@ -478,6 +497,22 @@ def append_gtk_overrides(path: pathlib.Path, args: argparse.Namespace) -> None:
             "button:focus, entry:focus, row:focus, check:focus, radio:focus {\n"
             "  outline-color: @daemon_pink;\n"
             "}\n"
+            "headerbar button.titlebutton, .titlebar button.titlebutton,\n"
+            "headerbar windowcontrols button, .titlebar windowcontrols button {\n"
+            "  min-width: 18px;\n"
+            "  min-height: 18px;\n"
+            "  margin: 0 2px;\n"
+            "  padding: 6px;\n"
+            "  border-color: transparent;\n"
+            "  background-color: transparent;\n"
+            "  box-shadow: none;\n"
+            "  outline: none;\n"
+            "}\n"
+            "headerbar button.titlebutton:hover, .titlebar button.titlebutton:hover,\n"
+            "headerbar windowcontrols button:hover, .titlebar windowcontrols button:hover {\n"
+            "  border-color: transparent;\n"
+            "  background-color: @daemon_dim_pink;\n"
+            "}\n"
         )
 
 
@@ -778,6 +813,117 @@ def rewrite_ini_keys_in_sections(
     return changed
 
 
+def set_ini_key(path: pathlib.Path, section_name: str, key: str, value: str) -> int:
+    """Set an INI key, inserting it at the end of an existing section if absent."""
+    lines = path.read_text().splitlines()
+    section = ""
+    section_found = False
+    insert_at = None
+
+    for index, line in enumerate(lines):
+        heading = re.match(r"^\[(.+)]$", line)
+        if heading:
+            if section == section_name and insert_at is None:
+                insert_at = index
+            section = heading.group(1)
+            section_found = section_found or section == section_name
+            continue
+
+        if section == section_name:
+            setting = re.match(r"^([^=]+)=(.*)$", line)
+            if setting and setting.group(1) == key:
+                replacement = f"{key}={value}"
+                if line == replacement:
+                    return 0
+                lines[index] = replacement
+                make_writable(path)
+                path.write_text("\n".join(lines) + "\n")
+                return 1
+
+    if not section_found:
+        raise RuntimeError(f"section [{section_name}] was not found in {path}")
+
+    if insert_at is None:
+        insert_at = len(lines)
+    lines.insert(insert_at, f"{key}={value}")
+    make_writable(path)
+    path.write_text("\n".join(lines) + "\n")
+    return 1
+
+
+def patch_kde_structural_accents(path: pathlib.Path, colour: str) -> int:
+    """Turn only red structural frames into the configured section colour."""
+    tree = ET.parse(path)
+    root = tree.getroot()
+    changed = 0
+
+    for element in root.iter():
+        element_id = element.get("id", "")
+        prefix = element_id.split("-", 1)[0]
+        if prefix not in KDE_STRUCTURAL_ELEMENTS:
+            continue
+
+        for node in element.iter():
+            style = parse_style(node.get("style", ""))
+            style_changed = False
+            for key in ("fill", "stroke"):
+                if style.get(key, "").lower() in KDE_STRUCTURAL_REDS:
+                    style[key] = colour
+                    changed += 1
+                    style_changed = True
+            if style_changed:
+                node.set("style", format_style(style))
+
+            for key in ("fill", "stroke"):
+                if node.get(key, "").lower() in KDE_STRUCTURAL_REDS:
+                    node.set(key, colour)
+                    changed += 1
+
+    if changed == 0:
+        raise RuntimeError("no red KDE structural accents were changed")
+
+    make_writable(path)
+    tree.write(path, encoding="UTF-8", xml_declaration=True)
+    return changed
+
+
+def add_kvantum_menu_separator(path: pathlib.Path, colour: str) -> int:
+    """Add the SVG element Kvantum expects for QMenu separators."""
+    tree = ET.parse(path)
+    root = tree.getroot()
+    if any(node.get("id") == "menuitem-separator" for node in root.iter()):
+        raise RuntimeError("Kvantum SVG already contains menuitem-separator")
+
+    namespace = f"{{{SVG_NAMESPACES['']}}}"
+    group = ET.SubElement(root, f"{namespace}g", {"id": "menuitem-separator"})
+    ET.SubElement(
+        group,
+        f"{namespace}rect",
+        {
+            "x": "0",
+            "y": "0",
+            "width": "40",
+            "height": "10",
+            "style": f"opacity:0;fill:{colour}",
+        },
+    )
+    ET.SubElement(
+        group,
+        f"{namespace}rect",
+        {
+            "x": "0",
+            "y": "4.5",
+            "width": "40",
+            "height": "1",
+            "style": f"fill:{colour}",
+        },
+    )
+
+    make_writable(path)
+    tree.write(path, encoding="UTF-8", xml_declaration=True)
+    return 1
+
+
 def hex_to_kde_rgb(value: str) -> str:
     value = value.removeprefix("#")
     if len(value) != 6:
@@ -808,11 +954,29 @@ def patch_desktop(args: argparse.Namespace) -> None:
         args.secondary_background.lower(),
         args.icon_colour.lower(),
     )
+    structural_changes = patch_kde_structural_accents(
+        kvantum / "daemon-2.0.svg", args.structure_colour.lower()
+    )
+    separator_changes = add_kvantum_menu_separator(
+        kvantum / "daemon-2.0.svg", args.structure_colour.lower()
+    )
     kvconfig_changes = rewrite_ini_key(
         kvantum / "daemon-2.0.kvconfig",
         "GeneralColors",
         {"highlight.color", "inactive.highlight.color"},
         args.dim_pink,
+    )
+    structural_config_changes = rewrite_ini_key(
+        kvantum / "daemon-2.0.kvconfig",
+        "GeneralColors",
+        {"light.color", "mid.light.color", "mid.color"},
+        args.structure_colour,
+    )
+    separator_config_changes = set_ini_key(
+        kvantum / "daemon-2.0.kvconfig",
+        "%General",
+        "menu_separator_height",
+        "7",
     )
     colour_changes = rewrite_ini_key(
         colours,
@@ -860,6 +1024,8 @@ def patch_desktop(args: argparse.Namespace) -> None:
         f"{indicator_changes} control indicators; "
         f"{svg_changes} backgrounds and {outline_changes + decoration_changes} outlines "
         f"across {states} interactive state elements; "
+        f"{structural_changes + structural_config_changes} yellow structural accents; "
+        f"{separator_changes + separator_config_changes} menu separator settings; "
         f"{kvconfig_changes + colour_changes} selection keys; "
         f"{alternate_background_changes} alternate-view background; "
         f"{palette_changes} normal backgrounds darkened"
@@ -1128,6 +1294,7 @@ def parser() -> argparse.ArgumentParser:
     desktop.add_argument("--icon-colour", required=True)
     desktop.add_argument("--pink", required=True)
     desktop.add_argument("--dim-pink", required=True)
+    desktop.add_argument("--structure-colour", required=True)
     desktop.add_argument("--alternate-background", required=True)
     desktop.add_argument("--main-background", required=True)
     desktop.add_argument("--secondary-background", required=True)

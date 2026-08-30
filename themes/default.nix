@@ -45,15 +45,17 @@ let
   daemonRed = "#D52C35";
   daemonPink = "#D656C7";
   daemonDimPink = "#5A254D";
+  daemonYellow = "#FCEE0A";
+  daemonText = "#5DF4FE";
   daemonAlternateBackground = "#210E15";
   daemonBackground = "#180A10";
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
 
   # Reuse the same local palette across KDE, GTK and VS Code: relevant icons
-  # use vivid dark red, interactive outlines use cyberpunk pink, their
-  # backgrounds use dimmed pink, and normal surfaces use darker variants of
-  # Daemon's burgundy palette.
+  # and destructive controls use vivid dark red, KDE structural frames use
+  # cyberpunk yellow, interactive outlines use pink, their backgrounds use
+  # dimmed pink, and normal surfaces use darker Daemon burgundy variants.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched"
       {
@@ -68,6 +70,7 @@ let
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
+          --structure-colour "${daemonYellow}" \
           --alternate-background "${daemonAlternateBackground}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
@@ -173,13 +176,94 @@ let
         rm -rf "$out/share/color-schemes"
       '';
     });
+
+  # Libadwaita controls its own current widget geometry. Importing Daemon's
+  # complete, older Breeze GTK 4 stylesheet here would override that geometry
+  # at user priority, breaking modern dialogs and client-side window controls.
+  # Override only semantic colours, icons and state accents instead.
+  daemonGtk4UserCss = ''
+    @define-color daemon_icon_red ${daemonRed};
+    @define-color daemon_pink ${daemonPink};
+    @define-color daemon_dim_pink ${daemonDimPink};
+
+    @define-color accent_color ${daemonPink};
+    @define-color accent_bg_color ${daemonDimPink};
+    @define-color accent_fg_color ${daemonText};
+    @define-color destructive_color ${daemonRed};
+    @define-color destructive_bg_color ${daemonRed};
+    @define-color destructive_fg_color ${daemonText};
+    @define-color window_bg_color ${daemonBackground};
+    @define-color window_fg_color ${daemonText};
+    @define-color view_bg_color ${daemonSecondaryBackground};
+    @define-color view_fg_color ${daemonText};
+    @define-color headerbar_bg_color ${daemonChromeBackground};
+    @define-color headerbar_fg_color ${daemonText};
+    @define-color headerbar_backdrop_color ${daemonBackground};
+    @define-color sidebar_bg_color ${daemonAlternateBackground};
+    @define-color sidebar_fg_color ${daemonText};
+    @define-color card_bg_color ${daemonAlternateBackground};
+    @define-color card_fg_color ${daemonText};
+    @define-color dialog_bg_color ${daemonBackground};
+    @define-color dialog_fg_color ${daemonText};
+    @define-color popover_bg_color ${daemonChromeBackground};
+    @define-color popover_fg_color ${daemonText};
+
+    :root {
+      --accent-color: ${daemonPink};
+      --accent-bg-color: ${daemonDimPink};
+      --accent-fg-color: ${daemonText};
+      --destructive-color: ${daemonRed};
+      --destructive-bg-color: ${daemonRed};
+      --destructive-fg-color: ${daemonText};
+      --window-bg-color: ${daemonBackground};
+      --window-fg-color: ${daemonText};
+      --view-bg-color: ${daemonSecondaryBackground};
+      --view-fg-color: ${daemonText};
+      --headerbar-bg-color: ${daemonChromeBackground};
+      --headerbar-fg-color: ${daemonText};
+      --headerbar-backdrop-color: ${daemonBackground};
+      --sidebar-bg-color: ${daemonAlternateBackground};
+      --sidebar-fg-color: ${daemonText};
+      --card-bg-color: ${daemonAlternateBackground};
+      --card-fg-color: ${daemonText};
+      --dialog-bg-color: ${daemonBackground};
+      --dialog-fg-color: ${daemonText};
+      --popover-bg-color: ${daemonChromeBackground};
+      --popover-fg-color: ${daemonText};
+    }
+
+    image:not(:disabled), button image:not(:disabled),
+    headerbar image:not(:disabled), entry image:not(:disabled) {
+      color: @daemon_icon_red;
+    }
+
+    button:focus, entry:focus, row:focus, check:focus, radio:focus {
+      outline-color: @daemon_pink;
+    }
+
+    headerbar button.titlebutton, .titlebar button.titlebutton,
+    headerbar windowcontrols button, .titlebar windowcontrols button {
+      min-width: 18px;
+      min-height: 18px;
+      margin: 0 2px;
+      padding: 6px;
+      border-color: transparent;
+      background-color: transparent;
+      box-shadow: none;
+      outline: none;
+    }
+
+    headerbar button.titlebutton:hover, .titlebar button.titlebutton:hover,
+    headerbar windowcontrols button:hover, .titlebar windowcontrols button:hover {
+      border-color: transparent;
+      background-color: @daemon_dim_pink;
+    }
+  '';
 in
 {
   # Install the complete upstream GTK 2/3/4 theme and select the locally
-  # recoloured Daemon variant. GTK 4/libadwaita applications often ignore the
-  # normal theme-name setting, so the same package CSS is also imported as the
-  # per-user override below. Asset URLs remain relative to the package CSS and
-  # therefore resolve to the copied Daemon assets in the Nix store.
+  # recoloured Daemon variant. Libadwaita applications receive the palette-only
+  # user override below so their current widget geometry remains intact.
   gtk.theme = {
     name = "Daemon-2.0";
     package = daemonPatched;
@@ -208,9 +292,7 @@ in
     "gtk-3.0/gtk.css".text = ''
       @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-3.0/gtk.css");
     '';
-    "gtk-4.0/gtk.css".text = ''
-      @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-4.0/gtk.css");
-    '';
+    "gtk-4.0/gtk.css".text = daemonGtk4UserCss;
     "Kvantum/daemon-2.0" = {
       source = "${daemonPatched}/Kvantum/daemon-2.0";
     };
