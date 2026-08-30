@@ -61,10 +61,12 @@ KDE_STRUCTURAL_ELEMENTS = {
     "splitter",
     "ss",
     "tabframe",
+    "tbutton",
     "toolbar",
     "tooltip",
 }
 KDE_STRUCTURAL_REDS = {"#710100", "#fb3048", "#ff5048"}
+KDE_ALWAYS_YELLOW_ELEMENTS = {"scrollbargroove", "scrollbarslider", "tbutton"}
 
 GTK_ICON_ASSET = re.compile(
     r"(?:arrow|bullet|check|close|dash|maximize|minimize|radio|slider|spinbutton|titlebutton)"
@@ -866,16 +868,16 @@ def patch_kde_structural_accents(
         prefix = element_id.split("-", 1)[0]
         if prefix not in KDE_STRUCTURAL_ELEMENTS:
             continue
-        if STATE_ELEMENT.search(element_id) and prefix not in {
-            "scrollbargroove",
-            "scrollbarslider",
-        }:
+        if (
+            STATE_ELEMENT.search(element_id)
+            and prefix not in KDE_ALWAYS_YELLOW_ELEMENTS
+        ):
             # Hovered, focused and selected widget frames stay red. Scrollbars
-            # are the exception because their entire visual is explicitly
-            # assigned to the yellow structure role.
+            # and tool buttons are exceptions because their entire visuals are
+            # explicitly assigned to the yellow structure role.
             continue
         source_colours = KDE_STRUCTURAL_REDS
-        if prefix in {"scrollbargroove", "scrollbarslider"}:
+        if prefix in KDE_ALWAYS_YELLOW_ELEMENTS:
             source_colours = source_colours | {interactive_colour.lower()}
         if element_id == "menu-normal" or element_id.startswith("menu-normal-"):
             # The menu frame is cyan upstream rather than red, but it is the
