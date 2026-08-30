@@ -1,0 +1,40 @@
+diff --git a/src/dolphinmainwindow.cpp b/src/dolphinmainwindow.cpp
+index 19e78b006..0fa1e7a85 100644
+--- a/src/dolphinmainwindow.cpp
++++ b/src/dolphinmainwindow.cpp
+@@ -113,2 +113,18 @@ const int MaxNumberOfNavigationentries = 12;
+ const int MaxActivateTabShortcuts = 9;
++
++class HistoryToolBarPopupAction final : public KToolBarPopupAction
++{
++public:
++    using KToolBarPopupAction::KToolBarPopupAction;
++
++    QWidget *createWidget(QWidget *parent) override
++    {
++        QWidget *widget = KToolBarPopupAction::createWidget(parent);
++        if (auto *button = qobject_cast<QToolButton *>(widget)) {
++            // Retain the press-and-hold history menu without drawing a second arrow.
++            button->setStyleSheet(QStringLiteral("QToolButton::menu-indicator { image: none; width: 0px; height: 0px; }"));
++        }
++        return widget;
++    }
++};
+ }
+@@ -2101,7 +2116,7 @@ void DolphinMainWindow::setupActions()
+     // setup 'Go' menu
+     {
+         QScopedPointer<QAction> backAction(KStandardAction::back(nullptr, nullptr, nullptr));
+-        m_backAction = new KToolBarPopupAction(backAction->icon(), backAction->text(), actionCollection());
++        m_backAction = new HistoryToolBarPopupAction(backAction->icon(), backAction->text(), actionCollection());
+         m_backAction->setObjectName(backAction->objectName());
+         m_backAction->setShortcuts(backAction->shortcuts());
+     }
+@@ -2153,6 +2168,6 @@ void DolphinMainWindow::setupActions()
+     {
+         QScopedPointer<QAction> forwardAction(KStandardAction::forward(nullptr, nullptr, nullptr));
+-        m_forwardAction = new KToolBarPopupAction(forwardAction->icon(), forwardAction->text(), actionCollection());
++        m_forwardAction = new HistoryToolBarPopupAction(forwardAction->icon(), forwardAction->text(), actionCollection());
+         m_forwardAction->setObjectName(forwardAction->objectName());
+         m_forwardAction->setShortcuts(forwardAction->shortcuts());
+     }
