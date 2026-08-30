@@ -87,9 +87,7 @@ fn build_window(
     let theme_path = config::configured_path();
     let (observed_theme, loaded_theme) = load_initial_theme(theme_path.as_deref());
     let css_provider = install_css(&loaded_theme.css);
-    let panel_config = loaded_theme
-        .window
-        .with_overrides(options.window_overrides);
+    let panel_config = loaded_theme.window.with_overrides(options.window_overrides);
 
     let text_view = TextView::new();
     text_view.buffer().set_text(text);
@@ -291,9 +289,7 @@ fn load_initial_theme(path: Option<&Path>) -> (Option<String>, Config) {
                 (Some(source), config::embedded())
             }
         },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            (None, config::embedded())
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, config::embedded()),
         Err(error) => {
             eprintln!(
                 "preview-panel: cannot read CSS theme {}: {error}",
@@ -455,12 +451,7 @@ fn update_companion_margins(
     );
 }
 
-fn companion_margin(
-    monitor_width: i32,
-    companion_width: i32,
-    panel_width: i32,
-    gap: i32,
-) -> i32 {
+fn companion_margin(monitor_width: i32, companion_width: i32, panel_width: i32, gap: i32) -> i32 {
     ((monitor_width - companion_width) / 2 - panel_width - gap).max(0)
 }
 
@@ -543,7 +534,7 @@ fn connect_live_updates(widgets: LiveWidgets, receiver: Receiver<Message>) {
                         let bytes = glib::Bytes::from_owned(png);
                         match gdk::Texture::from_bytes(&bytes) {
                             Ok(texture) => {
-                                network_picture.set_from_paintable(Some(&texture));
+                                network_picture.set_paintable(Some(&texture));
                                 network_picture.set_visible(true);
                             }
                             Err(error) => {
@@ -635,14 +626,8 @@ mod tests {
 
     #[test]
     fn x_offset_moves_in_the_same_screen_direction_on_both_sides() {
-        assert_eq!(
-            horizontal_margin(1920, 400, 480, 10, Side::Left, 25),
-            295
-        );
-        assert_eq!(
-            horizontal_margin(1920, 400, 480, 10, Side::Right, 25),
-            245
-        );
+        assert_eq!(horizontal_margin(1920, 400, 480, 10, Side::Left, 25), 295);
+        assert_eq!(horizontal_margin(1920, 400, 480, 10, Side::Right, 25), 245);
     }
 
     #[test]
