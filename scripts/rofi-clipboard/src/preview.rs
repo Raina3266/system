@@ -230,6 +230,9 @@ fn launch_panel(
 ) -> Result<()> {
     let mut command = Command::new(preview_panel_binary());
     command.args(arguments);
+    command
+        .arg("--layout-file")
+        .arg(crate::rofi::theme_path()?);
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_WIDTH", "--width");
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_HEIGHT", "--height");
     append_preview_override(

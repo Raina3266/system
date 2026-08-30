@@ -245,13 +245,26 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
-Panel placement, size, and GTK styling all come from
+Default panel placement, size, and GTK styling come from
 `themes/preview-panel.css`. Home Manager links that file to
 `~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
 rebuilding. The `preview-panel-settings` comment at the top controls `width`,
 `height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal
-GTK4 CSS. Positive `x` moves right and positive `y` moves down. The environment
-variables above remain available for one-launch overrides.
+GTK4 CSS. Positive `x` moves right and positive `y` moves down.
+
+Each launcher's Rasi file can override any subset of those geometry settings
+with a `preview-panel-layout` comment. For example:
+
+```css
+/* preview-panel-layout
+width: 300px;
+height: 400px;
+companion-width: 375px;
+*/
+```
+
+Omitted fields inherit from `preview-panel.css`. The effective priority is
+environment/command-line override, then launcher Rasi, then the global CSS.
 
 For a session-wide environment override, set values such as:
 

@@ -96,7 +96,6 @@ rec {
         --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}" \
         --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}" \
         --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}" \
-        --set ROFI_FILESEARCH_ROFI_WIDTH "400" \
         --set ROFI_FILESEARCH_PREVIEW_PANEL "${previewPanel}/bin/preview-panel"
     '';
   };
@@ -119,8 +118,7 @@ rec {
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
         --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
-        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
-        --set ROFI_NETWORK_ROFI_WIDTH "350"
+        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
     '';
   };
 

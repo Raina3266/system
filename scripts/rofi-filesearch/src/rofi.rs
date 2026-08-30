@@ -305,7 +305,7 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn theme_path() -> AppResult<PathBuf> {
+pub(crate) fn theme_path() -> AppResult<PathBuf> {
     if let Some(path) = env::var_os("ROFI_FILESEARCH_THEME") {
         return Ok(PathBuf::from(path));
     }

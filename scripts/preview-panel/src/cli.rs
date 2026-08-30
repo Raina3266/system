@@ -20,6 +20,7 @@ OPTIONS:
     --no-wrap           Keep long lines intact and enable horizontal scrolling
     --listen SOCKET     Accept live text updates and a close command on SOCKET
     --panel             Use a borderless Wayland layer-shell companion panel
+    --layout-file FILE  Read partial panel geometry from a Rasi theme
     --width PIXELS      Initial width (default: 720)
     --height PIXELS     Initial height (default: 520)
     --companion-width N Width of the centered companion window (default: 400)
@@ -34,7 +35,8 @@ CONFIGURATION:
     ~/.config). Its /* preview-panel-settings ... */ comment controls width,
     height, companion_width, side, gap, x, and y. The rest is normal GTK4 CSS.
     Saving valid CSS reloads appearance and geometry in every open panel.
-    Explicit window options above override their matching CSS settings.
+    A Rasi /* preview-panel-layout ... */ block may override any geometry field.
+    Explicit window options above override both Rasi and CSS settings.
 
 BUILT-IN GTK CONTROLS:
     Mouse drag          Select text
@@ -63,6 +65,22 @@ pub struct WindowOverrides {
     pub companion_width: Option<i32>,
     pub side: Option<Side>,
     pub gap: Option<i32>,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+}
+
+impl WindowOverrides {
+    pub fn overlaid_by(self, higher_priority: Self) -> Self {
+        Self {
+            width: higher_priority.width.or(self.width),
+            height: higher_priority.height.or(self.height),
+            companion_width: higher_priority.companion_width.or(self.companion_width),
+            side: higher_priority.side.or(self.side),
+            gap: higher_priority.gap.or(self.gap),
+            x: higher_priority.x.or(self.x),
+            y: higher_priority.y.or(self.y),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +98,7 @@ pub struct Options {
     pub width: i32,
     pub height: i32,
     pub listen: Option<PathBuf>,
+    pub layout_file: Option<PathBuf>,
     pub panel: bool,
     pub companion_width: i32,
     pub side: Side,
@@ -97,6 +116,7 @@ impl Default for Options {
             width: 720,
             height: 520,
             listen: None,
+            layout_file: None,
             panel: false,
             companion_width: 400,
             side: Side::Left,
@@ -172,6 +192,13 @@ where
                     options.listen = Some(PathBuf::from(next_os(&mut arguments, "--listen")?));
                     continue;
                 }
+                Some("--layout-file") => {
+                    options.layout_file = Some(PathBuf::from(next_os(
+                        &mut arguments,
+                        "--layout-file",
+                    )?));
+                    continue;
+                }
                 Some("-t" | "--title") => {
                     options.title = next_text(&mut arguments, "--title")?;
                     continue;
@@ -203,6 +230,12 @@ where
                 }
                 Some(value) if value.starts_with("--title=") => {
                     options.title = value["--title=".len()..].to_owned();
+                    continue;
+                }
+                Some(value) if value.starts_with("--layout-file=") => {
+                    options.layout_file = Some(PathBuf::from(
+                        &value["--layout-file=".len()..],
+                    ));
                     continue;
                 }
                 Some(value) if value.starts_with("--width=") => {
@@ -354,6 +387,8 @@ mod tests {
             "--no-wrap",
             "--listen",
             "/run/user/1000/preview.sock",
+            "--layout-file",
+            "/tmp/rofi-network.rasi",
             "--panel",
             "--width=900",
             "--height",
@@ -372,6 +407,10 @@ mod tests {
             options.listen,
             Some(PathBuf::from("/run/user/1000/preview.sock"))
         );
+        assert_eq!(
+            options.layout_file,
+            Some(PathBuf::from("/tmp/rofi-network.rasi"))
+        );
         assert!(options.panel);
         assert_eq!(options.companion_width, 420);
         assert_eq!(options.side, Side::Right);
@@ -384,6 +423,8 @@ mod tests {
                 companion_width: Some(420),
                 side: Some(Side::Right),
                 gap: Some(12),
+                x: None,
+                y: None,
             }
         );
     }

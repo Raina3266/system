@@ -717,12 +717,14 @@ fn rofi_binary() -> PathBuf {
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
 
-fn theme_path() -> AppResult<PathBuf> {
+pub(crate) fn theme_path() -> AppResult<PathBuf> {
     if let Some(path) = env::var_os("ROFI_NETWORK_THEME") {
         return Ok(PathBuf::from(path));
     }
     if let Some(config) = env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(config).join("rofi").join("network.rasi"));
+        return Ok(PathBuf::from(config)
+            .join("rofi")
+            .join("rofi-network.rasi"));
     }
     let home = env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is not set"))?;
     Ok(PathBuf::from(home).join(".config/rofi/rofi-network.rasi"))

@@ -1,5 +1,9 @@
 /* Clipboard menu: memo/text/file tabs and action buttons. */
 
+/* preview-panel-layout
+companion-width: 400px;
+*/
+
 * {
     font: "JetBrains Mono Nerd Font 13";
     bg:       #0E0616F2;

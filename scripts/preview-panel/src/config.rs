@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::cli::{Side, WindowOverrides};
 
 const SETTINGS_START: &str = "/* preview-panel-settings";
+const LAYOUT_START: &str = "/* preview-panel-layout";
 
 const EMBEDDED_THEME: &str = r#"/* preview-panel-settings
 width: 400px;
@@ -71,8 +72,8 @@ impl WindowConfig {
             companion_width: overrides.companion_width.unwrap_or(self.companion_width),
             side: overrides.side.unwrap_or(self.side),
             gap: overrides.gap.unwrap_or(self.gap),
-            x: self.x,
-            y: self.y,
+            x: overrides.x.unwrap_or(self.x),
+            y: overrides.y.unwrap_or(self.y),
         }
     }
 }
@@ -158,6 +159,53 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
     })
 }
 
+pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
+    let Some(settings) = optional_settings_block(source, LAYOUT_START)? else {
+        return Ok(WindowOverrides::default());
+    };
+    let mut overrides = WindowOverrides::default();
+
+    for line in settings.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let (key, value) = line.split_once(':').ok_or_else(|| {
+            ConfigError::new(format!("invalid setting {line:?}; expected name: value;"))
+        })?;
+        let key = key.trim();
+        let value = value
+            .trim()
+            .strip_suffix(';')
+            .ok_or_else(|| ConfigError::new(format!("{key} must end with a semicolon")))?
+            .trim();
+
+        match key {
+            "width" => set_once(&mut overrides.width, dimension(value, "width")?, "width")?,
+            "height" => {
+                set_once(&mut overrides.height, dimension(value, "height")?, "height")?
+            }
+            "companion_width" | "companion-width" => set_once(
+                &mut overrides.companion_width,
+                dimension(value, "companion_width")?,
+                "companion_width",
+            )?,
+            "side" => set_once(&mut overrides.side, side(value)?, "side")?,
+            "gap" => set_once(&mut overrides.gap, gap(value)?, "gap")?,
+            "x" => set_once(&mut overrides.x, offset(value, "x")?, "x")?,
+            "y" => set_once(&mut overrides.y, offset(value, "y")?, "y")?,
+            _ => {
+                return Err(ConfigError::new(format!(
+                    "unknown preview-panel layout setting {key:?}"
+                )));
+            }
+        }
+    }
+
+    Ok(overrides)
+}
+
 pub fn configured_path() -> Option<PathBuf> {
     theme_path_from(
         env::var_os("PREVIEW_PANEL_CSS").as_deref(),
@@ -194,6 +242,20 @@ fn settings_block(source: &str) -> Result<&str, ConfigError> {
         ConfigError::new("preview-panel-settings configuration block is not closed")
     })?;
     Ok(&settings[..end])
+}
+
+fn optional_settings_block<'a>(
+    source: &'a str,
+    marker: &str,
+) -> Result<Option<&'a str>, ConfigError> {
+    let Some(start) = source.find(marker) else {
+        return Ok(None);
+    };
+    let settings = &source[start + marker.len()..];
+    let end = settings.find("*/").ok_or_else(|| {
+        ConfigError::new("preview-panel-layout configuration block is not closed")
+    })?;
+    Ok(Some(&settings[..end]))
 }
 
 fn set_once<T>(slot: &mut Option<T>, value: T, key: &str) -> Result<(), ConfigError> {
@@ -330,6 +392,54 @@ window.preview-panel { color: #cbe3e7; }
     fn accepts_companion_width_with_css_style_name() {
         let source = THEME.replace("companion_width", "companion-width");
         assert_eq!(parse(&source).unwrap().window.companion_width, 400);
+    }
+
+    #[test]
+    fn parses_partial_rasi_layout_and_ignores_missing_block() {
+        let rasi = r#"/* preview-panel-layout
+height: 400px;
+companion-width: 375px;
+x: -25px;
+*/
+
+window { width: 375px; }
+"#;
+        assert_eq!(
+            parse_layout(rasi).unwrap(),
+            WindowOverrides {
+                height: Some(400),
+                companion_width: Some(375),
+                x: Some(-25),
+                ..WindowOverrides::default()
+            }
+        );
+        assert_eq!(
+            parse_layout("window { width: 400px; }").unwrap(),
+            WindowOverrides::default()
+        );
+    }
+
+    #[test]
+    fn higher_priority_overrides_win_over_rasi_layout() {
+        let layout = WindowOverrides {
+            width: Some(300),
+            height: Some(400),
+            ..WindowOverrides::default()
+        };
+        let command_line = WindowOverrides {
+            width: Some(500),
+            ..WindowOverrides::default()
+        };
+        let merged = layout.overlaid_by(command_line);
+        assert_eq!(merged.width, Some(500));
+        assert_eq!(merged.height, Some(400));
+    }
+
+    #[test]
+    fn rejects_invalid_rasi_layout_without_affecting_css_parser() {
+        let invalid = "/* preview-panel-layout\nwidth: 100px;\n*/";
+        assert!(parse_layout(invalid).unwrap_err().to_string().contains("width"));
+        assert!(parse(THEME).is_ok());
     }
 
     #[test]

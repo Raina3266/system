@@ -87,7 +87,9 @@ fn build_window(
     let theme_path = config::configured_path();
     let (observed_theme, loaded_theme) = load_initial_theme(theme_path.as_deref());
     let css_provider = install_css(&loaded_theme.css);
-    let panel_config = loaded_theme.window.with_overrides(options.window_overrides);
+    let layout_overrides = load_layout_overrides(options.layout_file.as_deref());
+    let window_overrides = layout_overrides.overlaid_by(options.window_overrides);
+    let panel_config = loaded_theme.window.with_overrides(window_overrides);
 
     let text_view = TextView::new();
     text_view.buffer().set_text(text);
@@ -209,7 +211,7 @@ fn build_window(
         theme_path,
         observed_theme,
         css_provider,
-        options.window_overrides,
+        window_overrides,
         panel_geometry,
     );
     if let Some(receiver) = receiver {
@@ -296,6 +298,32 @@ fn load_initial_theme(path: Option<&Path>) -> (Option<String>, Config) {
                 path.display()
             );
             (None, config::embedded())
+        }
+    }
+}
+
+fn load_layout_overrides(path: Option<&Path>) -> WindowOverrides {
+    let Some(path) = path else {
+        return WindowOverrides::default();
+    };
+
+    match fs::read_to_string(path) {
+        Ok(source) => match config::parse_layout(&source) {
+            Ok(overrides) => overrides,
+            Err(error) => {
+                eprintln!(
+                    "preview-panel: ignoring invalid Rasi layout {}: {error}",
+                    path.display()
+                );
+                WindowOverrides::default()
+            }
+        },
+        Err(error) => {
+            eprintln!(
+                "preview-panel: cannot read Rasi layout {}: {error}",
+                path.display()
+            );
+            WindowOverrides::default()
         }
     }
 }

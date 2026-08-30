@@ -190,7 +190,7 @@ fn preferred_selection(items: &[&ClipboardItem], selected_id: Option<u64>) -> Op
         .or_else(|| (!items.is_empty()).then_some(0))
 }
 
-fn theme_path() -> Result<PathBuf> {
+pub(crate) fn theme_path() -> Result<PathBuf> {
     if let Some(path) = env::var_os("ROFI_CLIPBOARD_THEME") {
         return Ok(PathBuf::from(path));
     }

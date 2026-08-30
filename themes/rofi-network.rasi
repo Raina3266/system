@@ -1,5 +1,13 @@
 /* Network manager: Wi-Fi/Ethernet tabs, status message, and six actions. */
 
+/* Preview geometry may be set per launcher. Omitted fields inherit from
+   preview-panel.css; explicit environment overrides still take priority. */
+/* preview-panel-layout
+width: 300px;
+height: 400px;
+companion-width: 375px;
+*/
+
 /* Rofi triggers this binding once the UI has been idle for `delay` seconds and
    re-arms the timer on every action, which is the only way a script mode can
    redraw itself without user input. This is only the value for the very first

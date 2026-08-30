@@ -300,6 +300,9 @@ fn launch_panel(path: &Path, file: &Path, content: &PanelContent) -> AppResult<(
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
+    command
+        .arg("--layout-file")
+        .arg(crate::rofi::theme_path()?);
     append_override(
         &mut command,
         "ROFI_FILESEARCH_ROFI_WIDTH",

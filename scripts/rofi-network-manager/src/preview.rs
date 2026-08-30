@@ -82,6 +82,9 @@ fn launch_panel(path: &Path) -> AppResult<()> {
             "--listen",
         ])
         .arg(path);
+    command
+        .arg("--layout-file")
+        .arg(crate::rofi::theme_path()?);
     append_override(&mut command, "ROFI_NETWORK_PREVIEW_WIDTH", "--width");
     append_override(&mut command, "ROFI_NETWORK_PREVIEW_HEIGHT", "--height");
     append_override(

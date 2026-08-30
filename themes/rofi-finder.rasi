@@ -2,6 +2,10 @@
    App and Folder use one-line rows. File uses two lines so its dimmed parent
    path remains visible. rofi-filesearch supplies the per-mode row height. */
 
+/* preview-panel-layout
+companion-width: 400px;
+*/
+
 * {
     font: "JetBrains Mono Nerd Font 13";
     bg:        #0E0616F2;
