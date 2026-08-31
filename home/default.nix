@@ -12,10 +12,6 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
-
-  dolphinWithoutHistoryMenuIndicators = pkgs.kdePackages.dolphin.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./dolphin-hide-history-menu-indicators.patch ];
-  });
 in
 {
   imports = [
@@ -64,7 +60,7 @@ in
 
     # Qt/Kde based
     kdePackages.elisa
-    dolphinWithoutHistoryMenuIndicators
+    kdePackages.dolphin
     kdePackages.ark
     kdePackages.baloo
     kdePackages.baloo-widgets
