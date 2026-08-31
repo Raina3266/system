@@ -52,7 +52,7 @@ in
     telegram-desktop
     zoom-us
     wemeet
-    
+
     # productivity / office
     obsidian
     krokiet
@@ -94,4 +94,19 @@ in
     clash-verge-rev
     qbittorrent
   ];
+
+  programs.mpv = {
+    enable = true;
+    config = {
+      hwdec = "auto-safe";
+      vo = "gpu-next";
+      profile = "high-quality";
+      osc = false;
+      osd-bar = false;
+    };
+    scripts = with pkgs.mpvScripts; [
+      thumbfast
+      uosc
+    ];
+  };
 }

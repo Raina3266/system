@@ -11,7 +11,7 @@
       command = "fish";
       theme = "Bright Lights";
       adjust-cell-height = "20%";
-      background = "#1E1010";
+      background = "#180A10";
     };
   };
 

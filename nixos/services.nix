@@ -21,23 +21,14 @@ in
 {
   # ── System packages ───────────────────────────────────────────────────
   #
-  # home-manager runs with useUserPackages, so its packages land in
-  # /etc/profiles/per-user/raina and are on PATH, XDG_DATA_DIRS and the
-  # systemd user environment just like these. Only put something here when it
-  # has to outlive the user session: reachable from a root/rescue shell, or
-  # read out of /run/current-system/sw by a root daemon (polkit, dbus-system,
-  # udev, fontconfig). Everything else belongs in ../home.
+  # Only put something here when it has to outlive the user session
   environment.systemPackages = with pkgs; [
-    vim # nixvim is user-only; this is the editor under `sudo -i` and rescue
+    vim
     wsdd # Windows SMB discovery; gvfs spawns it on demand for wsdd:// browsing
     v4l-utils # kept beside the root cropped-webcam.service below
     webcamCrop
   ];
 
-  # kpmcore ships a polkit action and a D-Bus *system* service. Both are read
-  # from /run/current-system/sw by root daemons, so a home-profile install of
-  # partitionmanager can never authorise its root helper. This module installs
-  # the app and registers the helper with dbus.
   programs.partition-manager.enable = true;
 
   # ── Desktop environment ───────────────────────────────────────────────
@@ -55,7 +46,7 @@ in
   # Power management for waybar's power-profiles-daemon module.
   services.power-profiles-daemon.enable = true;
 
-  # Intel thermal daemon: uses this CPU's DPTF/RAPL sensors to 
+  # Intel thermal daemon: uses this CPU's DPTF/RAPL sensors to
   # manage thermal limits actively.
   services.thermald.enable = true;
 
@@ -122,12 +113,6 @@ in
     # portal preferences when that session is chosen in GDM. Prefer KDE for
     # visible desktop integration, while retaining the Niri-compatible GNOME
     # backends for screencasting and secret storage.
-    #
-    # programs.niri already defines config.niri, so this has to take priority.
-    # Force the whole attribute set rather than individual keys: a niri-portals
-    # .conf in ~/.config replaces the one in /etc wholesale rather than merging
-    # key by key, so forcing the set is what the home-manager block this
-    # replaced actually did.
     config.niri = lib.mkForce {
       default = [
         "kde"
@@ -142,6 +127,9 @@ in
       ];
       "org.freedesktop.impl.portal.Secret" = [
         "gnome-keyring"
+      ];
+      "org.freedesktop.impl.portal.Settings" = [ 
+        "kde" 
       ];
     };
   };

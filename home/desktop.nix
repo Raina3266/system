@@ -97,9 +97,6 @@ in
   # GNOME Shell
   # ──────────────────────────────────────────────────────────────────────
 
-  # Installing an extension is not enough on its own — GNOME Shell only loads
-  # what is listed in org/gnome/shell enabled-extensions. This module does
-  # both, so the set survives a fresh dconf database.
   programs.gnome-shell = {
     enable = true;
     extensions = [
