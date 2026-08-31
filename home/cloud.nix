@@ -170,10 +170,9 @@ let
   fusermount = "/run/wrappers/bin/fusermount3";
 in
 {
-  home.packages = with pkgs; [
-    fuse3
-    rclone
-  ];
+  # fuse3 is not listed: the units below call /run/wrappers/bin/fusermount3,
+  # the setuid wrapper NixOS provides, never an unwrapped copy from PATH.
+  home.packages = [ pkgs.rclone ];
 
   systemd.user = {
     services = lib.mkMerge (

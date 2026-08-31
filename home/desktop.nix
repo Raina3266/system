@@ -85,43 +85,28 @@ let
   handledBy = desktopEntry: types: lib.genAttrs types (_type: [ desktopEntry ]);
 in
 {
+  # Portals are configured system-wide in ../nixos/services.nix; declaring
+  # them here as well would install a second copy into the user profile.
+
   home.packages = [ repoPackages.ocrScreenshot ];
 
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";
 
   # ──────────────────────────────────────────────────────────────────────
-  # Portals
+  # GNOME Shell
   # ──────────────────────────────────────────────────────────────────────
 
-  xdg.portal = {
+  # Installing an extension is not enough on its own — GNOME Shell only loads
+  # what is listed in org/gnome/shell enabled-extensions. This module does
+  # both, so the set survives a fresh dconf database.
+  programs.gnome-shell = {
     enable = true;
-    extraPortals = with pkgs; [
-      kdePackages.xdg-desktop-portal-kde
-      xdg-desktop-portal-gtk
-      xdg-desktop-portal-gnome
+    extensions = [
+      { package = pkgs.gnomeExtensions.simple-timer; }
+      { package = pkgs.gnomeExtensions.clipboard-history; }
+      { package = pkgs.gnomeExtensions.astra-monitor; }
     ];
-
-    # This file is selected only when XDG_CURRENT_DESKTOP is niri. GNOME
-    # keeps its own portal preferences when that session is chosen in GDM.
-    # Prefer KDE for visible desktop integration, while retaining the Niri-
-    # compatible GNOME backends for screencasting and secret storage.
-    config.niri = {
-      default = [
-        "kde"
-        "gnome"
-        "gtk"
-      ];
-      "org.freedesktop.impl.portal.FileChooser" = [
-        "kde"
-      ];
-      "org.freedesktop.impl.portal.ScreenCast" = [
-        "gnome"
-      ];
-      "org.freedesktop.impl.portal.Secret" = [
-        "gnome-keyring"
-      ];
-    };
   };
 
   dconf.settings = {

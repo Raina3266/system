@@ -15,7 +15,6 @@ let
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
-    inherit pkgs;
     packages = repoPackages;
   };
   modules = system.modules // utilities.modules;

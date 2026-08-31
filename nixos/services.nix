@@ -20,21 +20,25 @@ let
 in
 {
   # ── System packages ───────────────────────────────────────────────────
+  #
+  # home-manager runs with useUserPackages, so its packages land in
+  # /etc/profiles/per-user/raina and are on PATH, XDG_DATA_DIRS and the
+  # systemd user environment just like these. Only put something here when it
+  # has to outlive the user session: reachable from a root/rescue shell, or
+  # read out of /run/current-system/sw by a root daemon (polkit, dbus-system,
+  # udev, fontconfig). Everything else belongs in ../home.
   environment.systemPackages = with pkgs; [
-    vim
-    ffmpeg
-    ripgrep
-    ffmpegthumbnailer
-    gdk-pixbuf
+    vim # nixvim is user-only; this is the editor under `sudo -i` and rescue
     wsdd # Windows SMB discovery; gvfs spawns it on demand for wsdd:// browsing
-    v4l-utils
+    v4l-utils # kept beside the root cropped-webcam.service below
     webcamCrop
-    kdePackages.print-manager
-    kdePackages.skanpage
-    gnomeExtensions.simple-timer
-    gnomeExtensions.clipboard-history
-    gnomeExtensions.astra-monitor
   ];
+
+  # kpmcore ships a polkit action and a D-Bus *system* service. Both are read
+  # from /run/current-system/sw by root daemons, so a home-profile install of
+  # partitionmanager can never authorise its root helper. This module installs
+  # the app and registers the helper with dbus.
+  programs.partition-manager.enable = true;
 
   # ── Desktop environment ───────────────────────────────────────────────
   services.xserver.enable = true;
@@ -100,6 +104,41 @@ in
   services.gnome.localsearch.enable = false;
   services.gnome.tinysparql.enable = false;
   services.dleyna.enable = false;
+
+  # ── Portals ───────────────────────────────────────────────────────────
+  # The niri and GNOME modules already register portals here, so this must
+  # stay system-level: a second copy in the user profile puts duplicate
+  # .portal and D-Bus activation files on XDG_DATA_DIRS, which is a common
+  # cause of a portal request (file chooser, screencast) never being answered.
+  xdg.portal = {
+    enable = true;
+    extraPortals = with pkgs; [
+      kdePackages.xdg-desktop-portal-kde
+      xdg-desktop-portal-gtk
+      xdg-desktop-portal-gnome
+    ];
+
+    # Selected only when XDG_CURRENT_DESKTOP is niri. GNOME keeps its own
+    # portal preferences when that session is chosen in GDM. Prefer KDE for
+    # visible desktop integration, while retaining the Niri-compatible GNOME
+    # backends for screencasting and secret storage.
+    config.niri = {
+      default = [
+        "kde"
+        "gnome"
+        "gtk"
+      ];
+      "org.freedesktop.impl.portal.FileChooser" = [
+        "kde"
+      ];
+      "org.freedesktop.impl.portal.ScreenCast" = [
+        "gnome"
+      ];
+      "org.freedesktop.impl.portal.Secret" = [
+        "gnome-keyring"
+      ];
+    };
+  };
 
   # ── Network services ──────────────────────────────────────────────────
   services.openssh.enable = true;

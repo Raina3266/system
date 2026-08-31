@@ -64,6 +64,7 @@ in
   # Tools for niri binds and X11 app support
   home.packages = with pkgs; [
     swaybg
+    swaylock # Mod+Alt+L in config.kdl
     nwg-displays
     bluez-tools
     wireplumber # PipeWire/WirePlumber control (wpctl for niri audio binds)

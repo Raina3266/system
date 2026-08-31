@@ -26,7 +26,9 @@
     };
 
     home.packages = with pkgs; [
-      # CLI utilities
+      # CLI utilities. coreutils is deliberately absent: NixOS always provides
+      # it via environment.defaultPackages, and a second copy in the user
+      # profile only shadows the system one.
       fzf
       bat
       tree
@@ -34,7 +36,8 @@
       bottom
       killall
       lsof
-      coreutils
+      ffmpeg
+      ripgrep
 
       # JavaScript/TypeScript
       deno
