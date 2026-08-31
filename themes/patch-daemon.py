@@ -3,7 +3,8 @@
 
 ``desktop`` changes Dolphin-facing icons plus normal and interactive backgrounds.
 ``gtk`` rebuilds upstream's complete Breeze-based GTK theme with the same
-Daemon palette, including every GTK 2/3/4 image and symbolic asset.
+Daemon palette and interaction roles, including every GTK 2/3/4 image and
+symbolic asset.
 ``vscode`` applies the same UI accents to Daemon's workbench and imports
 Dracula's syntax rules.
 """
@@ -243,7 +244,7 @@ def gtk_named_palette(args: argparse.Namespace) -> dict[str, str]:
             "theme_button_decoration_hover_backdrop_breeze",
             "theme_button_decoration_focus_backdrop_breeze",
         ),
-        pink,
+        red,
     )
     assign(
         (
@@ -311,7 +312,7 @@ def gtk_named_palette(args: argparse.Namespace) -> dict[str, str]:
             "theme_button_decoration_hover_backdrop_insensitive_breeze",
             "theme_button_decoration_focus_backdrop_insensitive_breeze",
         ),
-        css_rgba(pink, 0.35),
+        css_rgba(red, 0.35),
     )
     assign(("theme_titlebar_foreground_backdrop_breeze",), muted)
     assign(
@@ -396,11 +397,9 @@ def recolour_gtk_svg(path: pathlib.Path, args: argparse.Namespace) -> bool:
     if GTK_ICON_ASSET.search(path.stem.lower()):
         mapping["#fcfcfc"] = args.icon_colour.lower()
         mapping["#a1a9b1"] = DAEMON_MUTED_TEXT
-        mapping["#3daee9"] = (
-            args.pink.lower()
-            if any(state in path.stem.lower() for state in ("hover", "active", "focus"))
-            else args.icon_colour.lower()
-        )
+        # Interactive fills stay pink, but the glyph itself follows the same
+        # always-red icon role as the patched KDE controls.
+        mapping["#3daee9"] = args.icon_colour.lower()
 
     original = path.read_text()
     rewritten = replace_colours(original, mapping)
@@ -431,12 +430,12 @@ def recolour_gtk_png(path: pathlib.Path, args: argparse.Namespace) -> bool:
     icon_red = hex_rgb(args.icon_colour)
     pink = hex_rgb(args.pink)
     muted_red = blend(args.icon_colour, args.main_background, 0.5)
-    accent = (
-        pink
-        if any(state in path.stem.lower() for state in ("hover", "active", "focus", "selected"))
-        else icon_red
-    )
     icon_asset = GTK_ICON_ASSET.search(path.stem.lower()) is not None
+    state_asset = any(
+        state in path.stem.lower()
+        for state in ("hover", "active", "focus", "selected")
+    )
+    accent = icon_red if icon_asset or not state_asset else pink
     changed = False
     output = []
 
@@ -484,38 +483,104 @@ def recolour_gtk_png(path: pathlib.Path, args: argparse.Namespace) -> bool:
     return changed
 
 
+def gtk_override_css(args: argparse.Namespace) -> str:
+    """Return GTK state rules matching the patched Kvantum interaction roles."""
+    return (
+        "\n/* Local Daemon 2.0 state, structure and symbolic-icon accents. */\n"
+        f"@define-color daemon_icon_red {args.icon_colour.lower()};\n"
+        f"@define-color daemon_pink {args.pink.lower()};\n"
+        f"@define-color daemon_dim_pink {args.dim_pink.lower()};\n"
+        f"@define-color daemon_structure {args.structure_colour.lower()};\n"
+        f"@define-color daemon_table_separator {args.table_separator_colour.lower()};\n"
+        f"@define-color daemon_input_background {args.alternate_background.lower()};\n"
+        "image:not(:disabled), button image:not(:disabled), "
+        "headerbar image:not(:disabled), entry image:not(:disabled) {\n"
+        "  color: @daemon_icon_red;\n"
+        "}\n"
+        "button:not(.flat):not(.titlebutton) {\n"
+        "  border-color: @daemon_icon_red;\n"
+        "}\n"
+        "button:hover, button:focus, button:active, button:checked,\n"
+        "row:hover, row:focus, row:selected,\n"
+        "flowboxchild:hover, flowboxchild:focus, flowboxchild:selected,\n"
+        "check:hover, check:focus, radio:hover, radio:focus {\n"
+        "  border-color: @daemon_icon_red;\n"
+        "  outline-color: @daemon_icon_red;\n"
+        "}\n"
+        "button:hover:not(.titlebutton), button:focus:not(.titlebutton),\n"
+        "button:active:not(.titlebutton), button:checked:not(.titlebutton) {\n"
+        "  background-color: alpha(@daemon_pink, 0.333);\n"
+        "}\n"
+        "row:hover, row:focus, row:selected,\n"
+        "flowboxchild:hover, flowboxchild:focus, flowboxchild:selected {\n"
+        "  background-color: @daemon_dim_pink;\n"
+        "}\n"
+        "entry:focus, spinbutton:focus, textview:focus {\n"
+        "  border-color: @daemon_icon_red;\n"
+        "  outline-color: @daemon_icon_red;\n"
+        "  background-color: @daemon_input_background;\n"
+        "}\n"
+        "toolbar button:not(.titlebutton), .toolbar button:not(.titlebutton),\n"
+        "headerbar button:not(.titlebutton) {\n"
+        "  border-color: @daemon_structure;\n"
+        "}\n"
+        "toolbar button:hover:not(.titlebutton),\n"
+        "toolbar button:focus:not(.titlebutton),\n"
+        "toolbar button:active:not(.titlebutton),\n"
+        ".toolbar button:hover:not(.titlebutton),\n"
+        ".toolbar button:focus:not(.titlebutton),\n"
+        ".toolbar button:active:not(.titlebutton),\n"
+        "headerbar button:hover:not(.titlebutton),\n"
+        "headerbar button:focus:not(.titlebutton),\n"
+        "headerbar button:active:not(.titlebutton) {\n"
+        "  border-color: @daemon_structure;\n"
+        "  outline-color: @daemon_structure;\n"
+        "  background-color: alpha(@daemon_pink, 0.333);\n"
+        "}\n"
+        "popover, popover.background, menu, .menu {\n"
+        "  border-color: @daemon_structure;\n"
+        "}\n"
+        "scrollbar trough, scrollbar slider {\n"
+        "  border-color: @daemon_structure;\n"
+        "}\n"
+        "scrollbar slider {\n"
+        "  background-color: @daemon_structure;\n"
+        "}\n"
+        "separator {\n"
+        "  background-color: @daemon_table_separator;\n"
+        "}\n"
+        "menu separator, popover separator {\n"
+        "  background-color: @daemon_structure;\n"
+        "}\n"
+        "headerbar button.titlebutton, .titlebar button.titlebutton,\n"
+        "headerbar windowcontrols button, .titlebar windowcontrols button {\n"
+        "  min-width: 18px;\n"
+        "  min-height: 18px;\n"
+        "  margin: 0 2px;\n"
+        "  padding: 6px;\n"
+        "  border-color: transparent;\n"
+        "  background-color: transparent;\n"
+        "  box-shadow: none;\n"
+        "  outline: none;\n"
+        "}\n"
+        "headerbar button.titlebutton:hover, .titlebar button.titlebutton:hover,\n"
+        "headerbar windowcontrols button:hover, .titlebar windowcontrols button:hover {\n"
+        "  border-color: transparent;\n"
+        "  background-color: @daemon_dim_pink;\n"
+        "}\n"
+    )
+
+
 def append_gtk_overrides(path: pathlib.Path, args: argparse.Namespace) -> None:
-    """Make symbolic icons and keyboard focus follow the Daemon state roles."""
+    """Install the shared GTK override and append it to the complete theme."""
+    overrides = gtk_override_css(args)
     with path.open("a") as stylesheet:
-        stylesheet.write(
-            "\n/* Local Daemon 2.0 state and symbolic-icon accents. */\n"
-            f"@define-color daemon_icon_red {args.icon_colour.lower()};\n"
-            f"@define-color daemon_pink {args.pink.lower()};\n"
-            f"@define-color daemon_dim_pink {args.dim_pink.lower()};\n"
-            "image:not(:disabled), button image:not(:disabled), "
-            "headerbar image:not(:disabled), entry image:not(:disabled) {\n"
-            "  color: @daemon_icon_red;\n"
-            "}\n"
-            "button:focus, entry:focus, row:focus, check:focus, radio:focus {\n"
-            "  outline-color: @daemon_pink;\n"
-            "}\n"
-            "headerbar button.titlebutton, .titlebar button.titlebutton,\n"
-            "headerbar windowcontrols button, .titlebar windowcontrols button {\n"
-            "  min-width: 18px;\n"
-            "  min-height: 18px;\n"
-            "  margin: 0 2px;\n"
-            "  padding: 6px;\n"
-            "  border-color: transparent;\n"
-            "  background-color: transparent;\n"
-            "  box-shadow: none;\n"
-            "  outline: none;\n"
-            "}\n"
-            "headerbar button.titlebutton:hover, .titlebar button.titlebutton:hover,\n"
-            "headerbar windowcontrols button:hover, .titlebar windowcontrols button:hover {\n"
-            "  border-color: transparent;\n"
-            "  background-color: @daemon_dim_pink;\n"
-            "}\n"
-        )
+        stylesheet.write(overrides)
+
+    # GTK 4/libadwaita imports this small palette/state file directly, avoiding
+    # the old Breeze widget geometry in the complete package stylesheet.
+    make_writable(path.parent)
+    (path.parent / "daemon-overrides.css").write_text(overrides.lstrip())
 
 
 def patch_gtk(args: argparse.Namespace) -> None:
@@ -1348,6 +1413,8 @@ def parser() -> argparse.ArgumentParser:
     gtk.add_argument("--icon-colour", required=True)
     gtk.add_argument("--pink", required=True)
     gtk.add_argument("--dim-pink", required=True)
+    gtk.add_argument("--structure-colour", required=True)
+    gtk.add_argument("--table-separator-colour", required=True)
     gtk.add_argument("--alternate-background", required=True)
     gtk.add_argument("--main-background", required=True)
     gtk.add_argument("--secondary-background", required=True)

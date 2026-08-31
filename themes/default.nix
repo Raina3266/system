@@ -55,9 +55,10 @@ let
 
   # Reuse the same local palette across KDE, GTK and VS Code: relevant icons
   # and destructive controls use vivid dark red, as do push-button frames.
-  # KDE separators, popup frames, scrollbars and toolbar-button frames use
+  # Menu separators, popup frames, scrollbars and toolbar-button frames use
   # cyberpunk yellow; other interactive box outlines use red, their backgrounds
-  # use dimmed pink, and normal surfaces use darker Daemon burgundy variants.
+  # use dimmed pink, table separators use dim grey, and normal surfaces use
+  # darker Daemon burgundy variants.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched"
       {
@@ -85,6 +86,8 @@ let
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
+          --structure-colour "${daemonYellow}" \
+          --table-separator-colour "${daemonTableSeparator}" \
           --alternate-background "${daemonAlternateBackground}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
@@ -183,11 +186,9 @@ let
   # Libadwaita controls its own current widget geometry. Importing Daemon's
   # complete, older Breeze GTK 4 stylesheet here would override that geometry
   # at user priority, breaking modern dialogs and client-side window controls.
-  # Override only semantic colours, icons and state accents instead.
+  # Import only the generated state/structure patch plus semantic colours.
   daemonGtk4UserCss = ''
-    @define-color daemon_icon_red ${daemonRed};
-    @define-color daemon_pink ${daemonPink};
-    @define-color daemon_dim_pink ${daemonDimPink};
+    @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-4.0/daemon-overrides.css");
 
     @define-color accent_color ${daemonPink};
     @define-color accent_bg_color ${daemonDimPink};
@@ -234,39 +235,12 @@ let
       --popover-bg-color: ${daemonChromeBackground};
       --popover-fg-color: ${daemonText};
     }
-
-    image:not(:disabled), button image:not(:disabled),
-    headerbar image:not(:disabled), entry image:not(:disabled) {
-      color: @daemon_icon_red;
-    }
-
-    button:focus, entry:focus, row:focus, check:focus, radio:focus {
-      outline-color: @daemon_pink;
-    }
-
-    headerbar button.titlebutton, .titlebar button.titlebutton,
-    headerbar windowcontrols button, .titlebar windowcontrols button {
-      min-width: 18px;
-      min-height: 18px;
-      margin: 0 2px;
-      padding: 6px;
-      border-color: transparent;
-      background-color: transparent;
-      box-shadow: none;
-      outline: none;
-    }
-
-    headerbar button.titlebutton:hover, .titlebar button.titlebutton:hover,
-    headerbar windowcontrols button:hover, .titlebar windowcontrols button:hover {
-      border-color: transparent;
-      background-color: @daemon_dim_pink;
-    }
   '';
 in
 {
   # Install the complete upstream GTK 2/3/4 theme and select the locally
-  # recoloured Daemon variant. Libadwaita applications receive the palette-only
-  # user override below so their current widget geometry remains intact.
+  # recoloured Daemon variant. Libadwaita applications receive only the shared
+  # palette/state override below so their current widget geometry remains intact.
   gtk.theme = {
     name = "Daemon-2.0";
     package = daemonPatched;
