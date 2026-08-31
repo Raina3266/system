@@ -22,6 +22,7 @@ in
   # ── System packages ───────────────────────────────────────────────────
   environment.systemPackages = with pkgs; [
     vim
+    ffmpeg
     ripgrep
     ffmpegthumbnailer
     gdk-pixbuf
@@ -44,6 +45,17 @@ in
   services.libinput.enable = true;
 
   services.displayManager.gdm.enable = true;
+
+  programs.niri.enable = true;
+
+  # Power management for waybar's power-profiles-daemon module.
+  services.power-profiles-daemon.enable = true;
+
+  # Intel thermal daemon: uses this CPU's DPTF/RAPL sensors to 
+  # manage thermal limits actively.
+  services.thermald.enable = true;
+
+  # ── GNOME ─────────────────────────────────────────────────────────────
   services.desktopManager.gnome.enable = true;
 
   environment.gnome.excludePackages = with pkgs; [
@@ -79,21 +91,15 @@ in
     gnome-logs # use journalctl instead
   ];
 
-  programs.niri.enable = true;
-
-  # Power management for waybar's power-profiles-daemon module.
-  services.power-profiles-daemon.enable = true;
-
-  # Intel thermal daemon: uses this CPU's DPTF/RAPL sensors to manage
-  # thermal limits actively, rather than leaving the firmware to clamp
-  # hard to the efficiency floor. Complements (does not replace)
-  # power-profiles-daemon, which sets the EPP/platform profile.
-  services.thermald.enable = true;
-
-  xdg.portal = {
-    enable = true;
-    extraPortals = with pkgs; [ xdg-desktop-portal-gtk ];
-  };
+  services.gnome.rygel.enable = false;
+  services.gnome.gnome-user-share.enable = false;
+  services.gnome.gnome-remote-desktop.enable = false;
+  services.gnome.gnome-initial-setup.enable = false;
+  services.gnome.gnome-browser-connector.enable = false;
+  services.gnome.gnome-online-accounts.enable = false;
+  services.gnome.localsearch.enable = false;
+  services.gnome.tinysparql.enable = false;
+  services.dleyna.enable = false;
 
   # ── Network services ──────────────────────────────────────────────────
   services.openssh.enable = true;

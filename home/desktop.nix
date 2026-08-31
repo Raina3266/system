@@ -90,6 +90,10 @@ in
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";
 
+  # ──────────────────────────────────────────────────────────────────────
+  # Portals
+  # ──────────────────────────────────────────────────────────────────────
+
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [
@@ -150,12 +154,6 @@ in
     // handledBy "vlc.desktop" mediaMimeTypes;
   };
 
-  # Dolphin's "Open Terminal" (Shift+F4) goes through KIO's
-  # KTerminalLauncherJob, which reads these two kdeglobals keys only: the
-  # x-scheme-handler/terminal default above is never consulted, so without
-  # them Dolphin falls back to Konsole. kdeglobals is mutable and already
-  # written at activation by themes/default.nix, so the keys are set with
-  # kwriteconfig rather than replacing the whole file.
   home.activation.setGhosttyAsKdeTerminal = config.lib.dag.entryAfter [ "linkGeneration" ] ''
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
       --group General --key TerminalApplication ghostty
@@ -287,9 +285,6 @@ in
       "Qt"
       "KDE"
       "Utility"
-      "Archiving"
-      "Compression"
-      "X-KDE-Utilities-File"
     ];
   };
 
@@ -300,7 +295,6 @@ in
     icon = "com.ulduzsoft.Birdtray";
     terminal = false;
     categories = [
-      "Network"
       "Email"
     ];
   };

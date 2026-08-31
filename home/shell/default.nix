@@ -21,12 +21,12 @@
 
     programs.direnv = {
       enable = true;
-      enableBashIntegration = true;
+      enableFishIntegration = true;
       nix-direnv.enable = true;
     };
 
     home.packages = with pkgs; [
-      ffmpeg
+      # CLI utilities
       fzf
       bat
       tree
@@ -35,9 +35,11 @@
       killall
       lsof
       coreutils
+
+      # JavaScript/TypeScript
       deno
 
-      # Development toolchains
+      # Rust
       cargo
       cargo-fuzz
       rustc
@@ -48,12 +50,24 @@
       cargo-machete
       cargo-audit
       cargo-autoinherit
+
+      # Lean
       elan
+
+      # C toolchain / libraries
       openssl
       gcc
+
+      # Nix
       nil
       nixd
+
+      # Python
       uv
+
+      # Typst
+      typst
+      tinymist
     ];
 
     programs.fish = {
