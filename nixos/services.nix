@@ -122,7 +122,13 @@ in
     # portal preferences when that session is chosen in GDM. Prefer KDE for
     # visible desktop integration, while retaining the Niri-compatible GNOME
     # backends for screencasting and secret storage.
-    config.niri = {
+    #
+    # programs.niri already defines config.niri, so this has to take priority.
+    # Force the whole attribute set rather than individual keys: a niri-portals
+    # .conf in ~/.config replaces the one in /etc wholesale rather than merging
+    # key by key, so forcing the set is what the home-manager block this
+    # replaced actually did.
+    config.niri = lib.mkForce {
       default = [
         "kde"
         "gnome"
