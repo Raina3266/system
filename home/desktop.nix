@@ -175,6 +175,50 @@ in
   # Desktop entries
   # ──────────────────────────────────────────────────────────────────────
 
+  xdg.desktopEntries."org.fcitx.Fcitx5" = {
+    name = "Fcitx 5";
+    noDisplay = true;
+    genericName = "Input Method";
+    comment = "Start Input Method";
+    exec = "fcitx5";
+    icon = "fcitx";
+    terminal = false;
+    categories = [
+      "System"
+      "Utility"
+    ];
+    settings = {
+      StartupNotify = "false";
+      X-GNOME-AutoRestart = "false";
+      X-GNOME-Autostart-Notify = "false";
+      X-KDE-autostart-after = "panel";
+      X-KDE-StartupNotify = "false";
+      X-KDE-Wayland-VirtualKeyboard = "true";
+      X-KDE-Wayland-Interfaces = "org_kde_plasma_window_management";
+    };
+  };
+
+  xdg.desktopEntries.fcitx5-configtool = {
+    name = "Fcitx 5 Configuration";
+    noDisplay = true;
+    genericName = "Input Method Configuration";
+    comment = "Change Fcitx 5 Configuration";
+    exec = "fcitx5-configtool";
+    icon = "fcitx";
+    terminal = false;
+    categories = [ "Settings" ];
+  };
+
+  xdg.desktopEntries."org.fcitx.fcitx5-migrator" = {
+    name = "Fcitx 5 Migration Wizard";
+    noDisplay = true;
+    comment = "Import data from other input method such as Fcitx 4";
+    exec = "fcitx5-migrator";
+    icon = "fcitx";
+    terminal = false;
+    categories = [ "Settings" ];
+  };
+
   xdg.desktopEntries.kbd-layout-viewer5 = {
     name = "Keyboard layout viewer";
     noDisplay = true;
