@@ -156,10 +156,21 @@ in
   services.fwupd.enable = true;
 
   # KDE System Monitor needs its sensor backend in non-Plasma sessions too.
-  # Register the D-Bus activation file and the upstream user service so the
-  # monitor can start ksystemstats on demand.
+  # Register D-Bus activation so the monitor can start ksystemstats on demand.
   services.dbus.packages = [ pkgs.kdePackages.ksystemstats ];
-  systemd.packages = [ pkgs.kdePackages.ksystemstats ];
+
+  # KDE installs its unit under share/systemd/user, which systemd.packages
+  # does not import. Define the user unit explicitly for D-Bus activation.
+  systemd.user.services.plasma-ksystemstats = {
+    description = "Track hardware statistics";
+    partOf = [ "graphical-session.target" ];
+    serviceConfig = {
+      Type = "dbus";
+      BusName = "org.kde.ksystemstats1";
+      ExecStart = "${pkgs.kdePackages.ksystemstats}/bin/ksystemstats";
+      Slice = "background.slice";
+    };
+  };
 
   # Mirror Plasma's helper permissions for Intel GPU usage statistics.
   security.wrappers.ksystemstats_intel_helper = {
