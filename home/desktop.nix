@@ -194,7 +194,6 @@ in
   xdg.desktopEntries.vim = {
     name = "Vim";
     noDisplay = true;
-    genericName = "Text Editor";
     exec = "vim %F";
     icon = "gvim";
     terminal = true;

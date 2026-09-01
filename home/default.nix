@@ -39,11 +39,6 @@ in
   };
 
   home.packages = with pkgs; [
-    # handy
-    handy
-    wtype
-    wl-clipboard
-
     # communication
     discord
     wechat
@@ -52,13 +47,19 @@ in
     telegram-desktop
     zoom-us
     wemeet
+    handy
+    wtype
+    wl-clipboard
 
-    # productivity / office
+    # productivity
     obsidian
     krokiet
     exercism
+    clash-verge-rev
 
     # Qt/Kde based.
+    qdirstat
+    qbittorrent
     kdePackages.elisa
     kdePackages.dolphin
     kdePackages.ark
@@ -69,12 +70,11 @@ in
     kdePackages.kompare
     kdePackages.dolphin-plugins
     kdePackages.plasma-integration
-    kdePackages.knewstuff
     kdePackages.print-manager
     kdePackages.skanpage
     kdePackages.plasma-systemmonitor
 
-    # media creation / editing
+    # media
     vlc
     puddletag
     obs-studio
@@ -85,24 +85,6 @@ in
     gimp
     spotdl
     yt-dlp
-
-    # downloads / torrent
-    clash-verge-rev
-    qbittorrent
+    waylyrics
   ];
-
-  programs.mpv = {
-    enable = true;
-    config = {
-      hwdec = "auto-safe";
-      vo = "gpu-next";
-      profile = "high-quality";
-      osc = false;
-      osd-bar = false;
-    };
-    scripts = with pkgs.mpvScripts; [
-      thumbfast
-      uosc
-    ];
-  };
 }

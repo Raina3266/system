@@ -188,7 +188,7 @@ in
       enableDefaultPackages = true;
       fontDir.enable = true; # Shared font tree used by the OnlyOffice activation.
       packages = with pkgs; [
-        ibm-plex
+        newcomputermodern
         font-awesome
         noto-fonts
         noto-fonts-cjk-sans

@@ -76,6 +76,7 @@ in
     gnome-backgrounds
     gnome-color-manager
     gnome-disk-utility
+    gnome-usage
     gnome-photos
     gnome-contacts
     gnome-music
