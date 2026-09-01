@@ -67,6 +67,7 @@ in
     nautilus
     # loupe  Image Viewer.
     gnome-weather
+    gnome-font-viewer
     gnome-calculator
     gnome-text-editor
     gnome-system-monitor
