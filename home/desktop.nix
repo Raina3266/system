@@ -175,6 +175,48 @@ in
   # Desktop entries
   # ──────────────────────────────────────────────────────────────────────
 
+  xdg.desktopEntries.rofi = {
+    name = "Rofi";
+    noDisplay = true;
+    exec = "rofi -show";
+    icon = "rofi";
+    terminal = false;
+  };
+
+  xdg.desktopEntries.rofi-theme-selector = {
+    name = "Rofi Theme Selector";
+    noDisplay = true;
+    exec = "rofi-theme-selector";
+    icon = "rofi";
+    terminal = false;
+  };
+
+  xdg.desktopEntries.vim = {
+    name = "Vim";
+    noDisplay = true;
+    genericName = "Text Editor";
+    exec = "vim %F";
+    icon = "gvim";
+    terminal = true;
+    categories = [
+      "Utility"
+      "TextEditor"
+    ];
+  };
+
+  xdg.desktopEntries.gvim = {
+    name = "GVim";
+    noDisplay = true;
+    genericName = "Text Editor";
+    exec = "gvim -f %F";
+    icon = "gvim";
+    terminal = false;
+    categories = [
+      "Utility"
+      "TextEditor"
+    ];
+  };
+
   xdg.desktopEntries."org.fcitx.Fcitx5" = {
     name = "Fcitx 5";
     noDisplay = true;
