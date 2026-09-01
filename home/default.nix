@@ -72,6 +72,7 @@ in
     kdePackages.knewstuff
     kdePackages.print-manager
     kdePackages.skanpage
+    kdePackages.plasma-systemmonitor
 
     # media creation / editing
     vlc
