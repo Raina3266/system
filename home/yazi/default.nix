@@ -63,7 +63,7 @@
       duckdb # duckdb plugin
       exiftool
       fd
-      ffmpeg
+      ffmpeg-full
       fzf # yafg plugin
       fontpreview
       imagemagick

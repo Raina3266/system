@@ -141,7 +141,7 @@ rec {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
       wrapProgram "$out/bin/waybar-timer" \
-        --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg}/bin/ffplay"
+        --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg-full}/bin/ffplay"
     '';
   };
 
@@ -149,7 +149,7 @@ rec {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
       wrapProgram "$out/bin/webcam-crop" \
-        --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg}/bin/ffmpeg" \
+        --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg-full}/bin/ffmpeg" \
         --set WEBCAM_CROP_FUSER "${pkgs.psmisc}/bin/fuser" \
         --set WEBCAM_CROP_INOTIFYWAIT "${pkgs.inotify-tools}/bin/inotifywait" \
         --set WEBCAM_CROP_V4L2_CTL "${pkgs.v4l-utils}/bin/v4l2-ctl" \
