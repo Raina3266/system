@@ -36,7 +36,7 @@
       bottom
       killall
       lsof
-      ffmpeg
+      ffmpeg-full
       ripgrep
 
       # JavaScript/TypeScript
