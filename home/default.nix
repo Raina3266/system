@@ -58,12 +58,7 @@ in
     krokiet
     exercism
 
-    # Qt/Kde based. ../niri/default.nix builds QT_PLUGIN_PATH and
-    # QML2_IMPORT_PATH from home.profileDirectory, so the Qt plugins below
-    # (plasma-integration, and Kvantum in ../themes) only resolve from here.
-    # kdePackages.partitionmanager is deliberately absent: it needs a polkit
-    # action registered system-wide, so ../nixos/services.nix installs it via
-    # programs.partition-manager.
+    # Qt/Kde based.
     kdePackages.elisa
     kdePackages.dolphin
     kdePackages.ark
