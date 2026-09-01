@@ -155,6 +155,20 @@ in
   services.fprintd.enable = true;
   services.fwupd.enable = true;
 
+  # KDE System Monitor needs its sensor backend in non-Plasma sessions too.
+  # Register the D-Bus activation file and the upstream user service so the
+  # monitor can start ksystemstats on demand.
+  services.dbus.packages = [ pkgs.kdePackages.ksystemstats ];
+  systemd.packages = [ pkgs.kdePackages.ksystemstats ];
+
+  # Mirror Plasma's helper permissions for Intel GPU usage statistics.
+  security.wrappers.ksystemstats_intel_helper = {
+    owner = "root";
+    group = "root";
+    capabilities = "cap_perfmon+ep";
+    source = "${pkgs.kdePackages.ksystemstats}/libexec/ksystemstats_intel_helper";
+  };
+
   # ── Printing services ──────────────────────────────────────────────────
   services.printing = {
     enable = true;
