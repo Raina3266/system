@@ -33,7 +33,6 @@
       bat
       tree
       yq
-      bottom
       killall
       lsof
       ffmpeg-full
