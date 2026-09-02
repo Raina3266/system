@@ -215,13 +215,6 @@ in
     openFirewall = true;
   };
 
-  services.sunshine = {
-    enable = true;
-    autoStart = false;
-    openFirewall = true;
-    capSysAdmin = true;
-  };
-
   # Immich and Jellyfin are installed, but start together only on demand.
   systemd.targets.media-stack = {
     description = "On-demand media services (Immich + Jellyfin)";

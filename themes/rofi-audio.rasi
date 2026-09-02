@@ -1,11 +1,5 @@
 /* rofi-audio: Bluetooth / Output / Input / Playback.
 
-   Connecting, disconnecting and confirming have no buttons of their own:
-   double-clicking a row — or pressing Enter on it — is Rofi's accept-entry
-   action, which connects or disconnects on Bluetooth and makes the row the
-   default device and selected port on Output / Input. On Playback it opens the
-   selected stream's device picker. Enter in a picker applies the choice.
-
    Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
    Alt+6 mute; Alt+7 route; Alt+9 back (also a row in the route picker).
    Profile and Bluetooth codec selection are intentionally not included. */
@@ -35,10 +29,9 @@ configuration {
     text-color: @fg;
 }
 
-/* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    width: 500px;
-    height: 495px;
+    width: 490px;
+    height: 490px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -77,14 +70,6 @@ button selected {
     text-color: @pink;
 }
 
-/* Doubles as the pairing-code box: rofi-audio allows custom input while a
-   device is waiting for a PIN or passkey, so the typed text is submitted with
-   Enter instead of opening a nested dialog.
-
-   The `prompt` widget is deliberately left out of the children. Rofi drives it
-   from the mode's display name, which is the same string the mode-switcher tab
-   shows, so keeping it here would repeat "Bluetooth" / "Output" / "Input" next
-   to the tab that already says it. A static filter glyph goes in its place. */
 inputbar {
     spacing: 10px;
     padding: 7px 10px;
@@ -137,10 +122,6 @@ element selected.urgent {
     background-color: rgba(255, 126, 219, 0.12);
 }
 
-/* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
-   Output/Input: every device is foreground, the default one is cyan.
-   Playback: live streams are foreground, muted/paused streams dim.
-   Routing picker: the current device is cyan. */
 element-text normal.normal,
 element-text alternate.normal,
 element-text selected.normal {
@@ -161,8 +142,6 @@ element-text selected.urgent {
 
 message {
     padding: 5px 10px;
-    /* This is a container, not a listview: line/lines do not constrain its
-       textbox. The script emits no-break Pango markup for one visual line. */
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);
@@ -200,8 +179,6 @@ button-route {
     text-color: @cyan;
 }
 
-/* Bluetooth tab: scan, forget. Connect/disconnect is a double-click on the
-   row. */
 button-scan {
     content: " 󰑐 ";
     action: "kb-custom-1";
@@ -212,7 +189,6 @@ button-forget {
     action: "kb-custom-2";
 }
 
-/* All three audio tabs: volume up/down and mute. */
 button-volume-up {
     content: " 󰝝 ";
     action: "kb-custom-3";
@@ -228,7 +204,6 @@ button-mute {
     action: "kb-custom-6";
 }
 
-/* Stream routing for Playback; no change to the system default. */
 button-route {
     content: " 󰁔 ";
     action: "kb-custom-7";
