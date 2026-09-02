@@ -283,23 +283,20 @@ fn playback_picker_displays_compact_names_but_keeps_full_search_metadata() {
             .enumerate()
             .map(|(index, label)| {
                 let name = format!("alsa_output.device{index}");
-                ChoiceEntry::route(
-                    AudioEntry {
-                        key: format!("sink:{}", hex_encode(&name)),
-                        kind: AudioKind::Output,
-                        name,
-                        card: None,
-                        description: format!(
-                            "Alder Lake PCH-P High Definition Audio Controller {label}"
-                        ),
-                        label: label.into(),
-                        volume: 65,
-                        muted: false,
-                        default: index == 0,
-                        port: None,
-                    },
-                    "alsa_output.device1",
-                )
+                ChoiceEntry::route(AudioEntry {
+                    key: format!("sink:{}:port:{}", hex_encode(&name), hex_encode(label)),
+                    kind: AudioKind::Output,
+                    name,
+                    card: None,
+                    description: format!(
+                        "Alder Lake PCH-P High Definition Audio Controller {label}"
+                    ),
+                    label: label.into(),
+                    volume: 65,
+                    muted: false,
+                    default: index == 1,
+                    port: Some(label.into()),
+                })
             })
             .collect(),
     };
@@ -321,7 +318,7 @@ fn playback_picker_displays_compact_names_but_keeps_full_search_metadata() {
         assert!(record.contains(&format!("display\x1f{marker}{}\x1f", choice.label)));
         assert!(record.contains(&format!("meta\x1f{}", choice.description)));
         assert_eq!(record.contains("urgent\x1ftrue"), choice.active);
-        assert!(!choice.key.contains(":port:"));
+        assert!(choice.key.contains(":port:"));
     }
 }
 

@@ -288,6 +288,9 @@ impl Backend for Controller {
             return Err(io::Error::other("The selected output changed sound cards").into());
         }
         let port = available_port(&device.ports, port)?;
+        if device.active_port.as_ref().and_then(|p| p.name.as_deref()) == Some(port) {
+            return Ok(());
+        }
         self.change(|api, done| api.set_sink_port_by_name(&output.name, port, Some(done)))
     }
 
@@ -375,12 +378,34 @@ pub(super) fn activate(controller: &mut Controller, card: &str, port: &str) -> A
     activate_with(controller, card, port)
 }
 
+pub(super) fn route(
+    controller: &mut Controller,
+    card: &str,
+    port: &str,
+    stream: &StreamEntry,
+) -> AppResult<()> {
+    activate_with_action(controller, card, port, |controller, output| {
+        move_stream_to(controller, stream, output)
+    })
+}
+
 fn activate_with(backend: &mut impl Backend, card_name: &str, port_name: &str) -> AppResult<()> {
+    activate_with_action(backend, card_name, port_name, |backend, output| {
+        backend.set_default(output)
+    })
+}
+
+fn activate_with_action<B: Backend>(
+    backend: &mut B,
+    card_name: &str,
+    port_name: &str,
+    finish: impl FnOnce(&mut B, &str) -> AppResult<()>,
+) -> AppResult<()> {
     let card = backend.card(card_name)?;
     let port = card.output_port(port_name)?;
     if let Some(output) = find_output(backend.outputs()?, card.index, port_name)? {
         backend.set_port(&output, port_name)?;
-        return backend.set_default(&output.name);
+        return finish(backend, &output.name);
     }
     let profile = profile_for(&card, port)
         .ok_or_else(|| io::Error::other("No compatible profile for the selected output"))?;
@@ -392,7 +417,7 @@ fn activate_with(backend: &mut impl Backend, card_name: &str, port_name: &str) -
     let result = (|| {
         let output = wait_for_output(backend, &card, port_name, profile)?;
         backend.set_port(&output, port_name)?;
-        backend.set_default(&output.name)
+        finish(backend, &output.name)
     })();
     if let Err(error) = result {
         if switched {

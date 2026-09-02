@@ -111,6 +111,68 @@ fn both_outputs_remain_visible_with_stable_keys_across_profile_changes() {
     assert!(speaker.inactive());
     assert!(!headphone.inactive());
     assert!(headphone.default);
+    let choices: Vec<_> = after
+        .into_iter()
+        .map(crate::model::ChoiceEntry::route)
+        .collect();
+    let speaker = choices
+        .iter()
+        .find(|choice| choice.label == "Speaker")
+        .unwrap();
+    assert!(speaker.enabled);
+    assert!(!speaker.active);
+    assert_eq!(speaker.key, speaker_key);
+}
+
+#[test]
+fn playback_can_activate_speakers_without_setting_the_default() {
+    let mut fake = Fake {
+        default: "virtual".into(),
+        ..Default::default()
+    };
+    fake.card.active = HEADPHONES.into();
+    activate_with_action(&mut fake, CARD, "[Out] Speaker", |backend, output| {
+        backend.events.push(format!("route:{output}"));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        fake.events,
+        [
+            format!("profile:{SPEAKERS}"),
+            "port:speaker-sink:[Out] Speaker".into(),
+            "route:speaker-sink".into(),
+        ]
+    );
+    assert_eq!(fake.default, "virtual");
+}
+
+#[test]
+fn playback_to_a_live_port_does_not_set_profile_or_default() {
+    let mut fake = Fake::default();
+    activate_with_action(&mut fake, CARD, "[Out] Speaker", |backend, output| {
+        backend.events.push(format!("route:{output}"));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        fake.events,
+        ["port:speaker-sink:[Out] Speaker", "route:speaker-sink"]
+    );
+}
+
+#[test]
+fn failed_playback_move_restores_the_previous_profile() {
+    let mut fake = Fake::default();
+    let error = activate_with_action(&mut fake, CARD, "[Out] Headphones", |backend, output| {
+        backend.events.push(format!("route:{output}"));
+        Err(io::Error::other("Stream ended").into())
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("Stream ended"));
+    assert!(error.to_string().contains("Previous profile restored"));
+    assert_eq!(fake.card.active, SPEAKERS);
+    assert_eq!(fake.default, "speaker-sink");
 }
 
 #[test]

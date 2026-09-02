@@ -129,8 +129,33 @@ pub fn nudge_stream_volume(entry: &StreamEntry, delta: i16) -> AppResult<()> {
     controller.change(|api, done| api.set_sink_input_volume(app.index, &volumes, Some(done)))
 }
 
-pub fn move_stream(entry: &StreamEntry, device_name: &str) -> AppResult<()> {
+pub fn move_stream(entry: &StreamEntry, destination_key: &str) -> AppResult<()> {
     let mut controller = Controller::create(AudioKind::Output)?;
+    controller.check_stream(entry)?;
+    let destination = routing_devices(&entry.device_name)?
+        .into_iter()
+        .find(|device| device.key == destination_key)
+        .ok_or_else(|| io::Error::other("The selected output is no longer available"))?;
+    if let (Some(card), Some(port)) = (destination.card.as_deref(), destination.port.as_deref()) {
+        return profiles::route(&mut controller, card, port, entry);
+    }
+    let device = controller.device_by_name(&destination.name)?;
+    if let Some(port) = destination.port.as_deref() {
+        let port = available_port(&device.ports, port)?;
+        if device.active_port.as_ref().and_then(|p| p.name.as_deref()) != Some(port) {
+            controller.change(|api, done| {
+                api.set_sink_port_by_name(&destination.name, port, Some(done))
+            })?;
+        }
+    }
+    move_stream_to(&mut controller, entry, &destination.name)
+}
+
+fn move_stream_to(
+    controller: &mut Controller,
+    entry: &StreamEntry,
+    device_name: &str,
+) -> AppResult<()> {
     let app = controller.check_stream(entry)?;
     let device = controller.device_by_name(device_name)?;
     if app.connection_id == device.index {
@@ -210,31 +235,37 @@ fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
 }
 
 pub fn snapshot(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(kind, DeviceRows::Devices)
+    snapshot_with_rows(kind, DeviceRows::Devices, None)
 }
 
 /// Output/Input rows expose physical ports without inventing independent
-/// devices. Routing and Waybar still keep one row per device.
+/// devices. Waybar still keeps one row per device.
 pub fn selections(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(kind, DeviceRows::Ports)
+    snapshot_with_rows(kind, DeviceRows::Ports, None)
 }
 
-/// Route to a device, labelled by its current port where available. Do not
-/// expand ports: moving a stream must not change a device's physical port.
-pub fn routing_devices() -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(AudioKind::Output, DeviceRows::Routing)
+/// Include ports from compatible inactive profiles, marking the stream's
+/// current port rather than the system default.
+pub fn routing_devices(current_device: &str) -> AppResult<Vec<AudioEntry>> {
+    snapshot_with_rows(AudioKind::Output, DeviceRows::Ports, Some(current_device))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DeviceRows {
     Devices,
     Ports,
-    Routing,
 }
 
-fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioEntry>> {
+fn snapshot_with_rows(
+    kind: AudioKind,
+    rows: DeviceRows,
+    current_device: Option<&str>,
+) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
-    let default_name = controller.default_name()?;
+    let default_name = match current_device {
+        Some(name) => Some(name.to_owned()),
+        None => controller.default_name()?,
+    };
     let mut device_labels = HashMap::new();
     let devices = controller.list_devices()?;
     let mut entries: Vec<_> = devices
@@ -256,14 +287,6 @@ fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioE
                     &device.ports,
                     device.active_port.as_ref().and_then(|p| p.name.as_deref()),
                 )
-            } else if rows == DeviceRows::Routing {
-                vec![route_row(
-                    base,
-                    device
-                        .active_port
-                        .as_ref()
-                        .and_then(|p| p.description.as_deref()),
-                )]
             } else {
                 vec![base]
             }
@@ -434,17 +457,6 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
     })
 }
 
-fn route_row(mut base: AudioEntry, active_port_label: Option<&str>) -> AudioEntry {
-    if let Some(label) = active_port_label
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-    {
-        base.label = single_line(label, usize::MAX);
-    }
-    // Keep base.key/name and port=None: this is still a device-only target.
-    base
-}
-
 fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -> Vec<AudioEntry> {
     // USB/Bluetooth/virtual devices without named ports still get one row.
     if !ports
@@ -612,43 +624,48 @@ mod tests {
     }
 
     #[test]
-    fn route_rows_use_short_port_labels_without_becoming_port_targets() {
-        for label in [
-            "Speakers",
-            "Headphones",
-            "HDMI / DisplayPort 1",
-            "HDMI / DisplayPort 2",
-        ] {
+    fn routing_choices_mark_only_the_streams_active_port() {
+        for on_stream_device in [true, false] {
             let mut base = device(AudioKind::Output);
-            base.description = format!("Alder Lake PCH-P High Definition Audio Controller {label}");
-            let row = route_row(base.clone(), Some(label));
-            assert_eq!(row.label, label);
-            assert_eq!(row.key, base.key);
-            assert_eq!(row.name, base.name);
-            assert_eq!(row.description, base.description);
-            assert_eq!(row.default, base.default);
-            assert!(row.port.is_none());
+            base.default = on_stream_device;
+            let ports = [
+                port("speaker", "Speaker", PortAvailable::Unknown),
+                port("jack", "Headphones", PortAvailable::Yes),
+            ];
+            let choices: Vec<_> = port_rows(base, &ports, Some("jack"))
+                .into_iter()
+                .map(crate::model::ChoiceEntry::route)
+                .collect();
+            assert_eq!(choices.len(), 2);
+            assert_eq!(choices[0].label, "Speaker");
+            assert_eq!(choices[1].label, "Headphones");
+            assert!(!choices[0].active);
+            assert_eq!(choices[1].active, on_stream_device);
+            assert!(choices.iter().all(|choice| choice.enabled));
+            assert_ne!(choices[0].key, choices[1].key);
         }
     }
 
     #[test]
-    fn route_rows_without_a_port_keep_the_device_name() {
+    fn routing_choices_without_ports_keep_the_device_name() {
         let mut base = device(AudioKind::Output);
         base.label = "WH-1000XM4".into();
-        for port in [None, Some(""), Some("  ")] {
-            assert_eq!(route_row(base.clone(), port).label, "WH-1000XM4");
-        }
+        let rows = port_rows(base.clone(), &[], None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "WH-1000XM4");
+        assert_eq!(rows[0].key, base.key);
     }
 
     #[test]
-    fn device_only_routes_disambiguate_identical_port_names() {
+    fn routing_choices_disambiguate_identical_port_names() {
         let mut usb = device(AudioKind::Output);
         usb.name = "usb".into();
         usb.key = format!("sink:{}", hex_encode(&usb.name));
-        let mut rows = vec![
-            route_row(device(AudioKind::Output), Some("Speakers")),
-            route_row(usb, Some("Speakers")),
-        ];
+        let ports = [port("speaker", "Speakers", PortAvailable::Unknown)];
+        let mut rows: Vec<_> = [device(AudioKind::Output), usb]
+            .into_iter()
+            .flat_map(|base| port_rows(base, &ports, Some("speaker")))
+            .collect();
         clarify_selection_labels(
             &mut rows,
             &HashMap::from([
@@ -658,7 +675,10 @@ mod tests {
         );
         assert_eq!(rows[0].label, "Speakers — Built-in Audio");
         assert_eq!(rows[1].label, "Speakers — USB Audio");
-        assert!(rows.iter().all(|row| row.port.is_none()));
+        assert!(
+            rows.iter()
+                .all(|row| row.port.as_deref() == Some("speaker"))
+        );
         assert_ne!(rows[0].key, rows[1].key);
     }
 

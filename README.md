@@ -121,18 +121,21 @@ Amplification above 100% can distort. Adjustments preserve
 an existing channel balance, with the ceiling applied to the loudest channel.
 The normal volume controls do not unmute a muted device or stream.
 
-Routing changes only the selected playback stream, never the system default
-or a device's active port. Its picker lists actual devices once, rather than
-expanding them into port rows. It uses compact current-port names such as
-**Speakers** or **HDMI / DisplayPort 1**, falling back to the device name when
-there is no named active port. Ambiguous names get device context or a number,
-and full hardware descriptions remain searchable. The checked row is the
-stream's current destination, which may differ from the system default.
-Persistence across application restarts
-is managed by PipeWire/WirePlumber, not this program.
+The routing picker offers the same physical outputs as the Output tab,
+including **Speaker** and **Headphones** when one requires an inactive ALSA
+profile. Selecting a row activates its port/profile when needed, then moves
+the selected playback stream. It does not explicitly change the system default.
+The checked row is the stream's current device and active port, which may
+differ from the system default. Compact port names, hardware context for
+ambiguous labels, and full searchable descriptions match the Output tab.
+Persistence across application restarts is managed by PipeWire/WirePlumber.
 
 Port rows of the same device are not independent outputs: switching ports
-affects every stream using that device. Volume/mute controls target a live device,
+affects every stream using that device. A profile switch can briefly interrupt
+audio on the card; mutually exclusive Speaker/Headphones profiles cannot play
+both at once. If the old default output disappears, PipeWire may choose a
+replacement. A failed route after a profile switch attempts to restore the
+previous profile and default. Volume/mute controls target a live device,
 without activating a different port or profile; they are not per-port controls.
 Manual profile selection, Bluetooth codecs, channel editing, latency offsets
 and digital passthrough configuration are intentionally not included.
@@ -242,7 +245,7 @@ For live checks, use a disposable PulseAudio/PipeWire session where possible:
 
 1. Mute and unmute an output and microphone; verify each previous volume stays.
 2. Start two playback applications and adjust/mute one; verify the other is unchanged.
-3. Route one playing stream to a second output; verify playback continues and
+3. Route one playing stream to a second live output; verify playback continues and
    the global default is unchanged. Check that the picker stays open and the
    selected output is checked. Select it again; playback must remain unchanged.
    Use Back to return to the stream list. Repeat with an already-paused stream
@@ -259,6 +262,10 @@ For live checks, use a disposable PulseAudio/PipeWire session where possible:
    verify both rows appear in Output. Switch in both directions; check the selected
    row becomes default, its volume appears, and microphone/HDMI choices survive.
    An inactive row's volume/mute buttons must not switch profiles.
+10. With the Headphones profile active, open a stream's playback picker and
+    choose Speaker. Check that Speaker appears, becomes checked after routing,
+    and the picker stays open. Repeat in reverse. When the system default is
+    a separate live output, check that it is unchanged.
 
 ---
 

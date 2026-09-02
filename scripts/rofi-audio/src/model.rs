@@ -309,9 +309,9 @@ pub struct ChoiceEntry {
 }
 
 impl ChoiceEntry {
-    pub fn route(device: AudioEntry, current_device: &str) -> Self {
+    pub fn route(device: AudioEntry) -> Self {
         Self {
-            active: device.name == current_device,
+            active: device.default,
             key: device.key,
             label: device.label,
             description: device.description,

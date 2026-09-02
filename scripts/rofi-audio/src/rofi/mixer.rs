@@ -4,9 +4,7 @@ use std::io;
 
 use crate::AppResult;
 use crate::audio;
-use crate::model::{
-    AudioEntry, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker, hex_decode,
-};
+use crate::model::{AudioEntry, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker};
 
 use super::{
     RETV_ACTIVATE, RETV_BACK, RETV_MUTE, RETV_ROUTE, RETV_VOLUME_DOWN, RETV_VOLUME_UP, UiState,
@@ -46,13 +44,10 @@ impl Backend for Pulse {
         match picker {
             Picker::Route(key) if mode.is_stream() => {
                 let stream = before.stream(key).ok_or_else(gone)?;
-                let devices = audio::routing_devices()?;
+                let devices = audio::routing_devices(&stream.device_name)?;
                 Ok(ChoiceList {
                     title: format!("Output for {}", stream.application),
-                    entries: devices
-                        .into_iter()
-                        .map(|device| ChoiceEntry::route(device, &stream.device_name))
-                        .collect(),
+                    entries: devices.into_iter().map(ChoiceEntry::route).collect(),
                 })
             }
             _ => Err(gone()),
@@ -74,13 +69,7 @@ impl Backend for Pulse {
             match mutation {
                 Mutation::Volume(delta) => audio::nudge_stream_volume(entry, delta),
                 Mutation::Mute => audio::toggle_stream_mute(entry),
-                Mutation::Route(key) => {
-                    let name = key
-                        .strip_prefix("sink:")
-                        .and_then(hex_decode)
-                        .ok_or_else(gone)?;
-                    audio::move_stream(entry, &name)
-                }
+                Mutation::Route(key) => audio::move_stream(entry, &key),
                 _ => Err(gone()),
             }
         } else {
