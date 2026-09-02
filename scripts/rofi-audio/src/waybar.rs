@@ -92,6 +92,7 @@ mod tests {
             name: "alsa_output.pci".to_owned(),
             description: "Built-in Audio".to_owned(),
             label: "Built-in Audio".to_owned(),
+            port: None,
             volume,
             muted,
             default: true,

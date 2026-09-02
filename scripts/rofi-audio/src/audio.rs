@@ -4,12 +4,12 @@ use libpulse_binding::context::introspect::Introspector;
 use libpulse_binding::def::PortAvailable;
 use libpulse_binding::operation::Operation;
 use libpulse_binding::volume::{ChannelVolumes, Volume};
-use pulsectl::controllers::types::{ApplicationInfo, DeviceInfo};
+use pulsectl::controllers::types::{ApplicationInfo, DeviceInfo, DevicePortInfo};
 use pulsectl::controllers::{AppControl, DeviceControl, SinkController, SourceController};
 
 use crate::AppResult;
 use crate::model::{
-    AudioEntry, AudioKind, ChoiceEntry, ChoiceList, StreamEntry, hex_encode, short_device_name,
+    AudioEntry, AudioKind, StreamEntry, hex_encode, short_device_name, single_line,
 };
 
 /// Volume step, in percent, for one press of the volume buttons.
@@ -129,49 +129,13 @@ pub fn move_stream(entry: &StreamEntry, device_name: &str) -> AppResult<()> {
     controller.change(|api, done| api.move_sink_input_by_index(app.index, device.index, Some(done)))
 }
 
-pub fn port_choices(entry: &AudioEntry) -> AppResult<ChoiceList> {
-    let device = Controller::create(entry.kind)?.device_by_name(&entry.name)?;
-    let active = device.active_port.as_ref().and_then(|p| p.name.as_deref());
-    let mut entries: Vec<_> = device
-        .ports
+fn available_port<'a>(ports: &'a [DevicePortInfo], name: &str) -> AppResult<&'a str> {
+    ports
         .iter()
-        .filter_map(|port| {
-            let name = port.name.as_deref()?;
-            let label = port.description.as_deref().unwrap_or(name);
-            let available = port.available != PortAvailable::No;
-            Some(ChoiceEntry {
-                key: format!("port:{}", hex_encode(name)),
-                label: format!("{label}{}", if available { "" } else { " (unplugged)" }),
-                active: active == Some(name),
-                enabled: available,
-            })
-        })
-        .collect();
-    entries.sort_by(|a, b| b.active.cmp(&a.active).then_with(|| a.label.cmp(&b.label)));
-    Ok(ChoiceList {
-        title: format!("Port for {}", entry.label),
-        entries,
-    })
-}
-
-pub fn set_port(entry: &AudioEntry, key: &str) -> AppResult<()> {
-    let mut controller = Controller::create(entry.kind)?;
-    let device = controller.device_by_name(&entry.name)?;
-    let port = device
-        .ports
-        .iter()
-        .find(|p| {
-            p.name
-                .as_ref()
-                .is_some_and(|name| format!("port:{}", hex_encode(name)) == key)
-        })
+        .find(|p| p.name.as_deref() == Some(name))
         .filter(|p| p.available != PortAvailable::No)
         .and_then(|p| p.name.as_deref())
-        .ok_or_else(|| io::Error::other("The selected port is no longer available"))?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.set_sink_port_by_index(device.index, port, Some(done)),
-        AudioKind::Input => api.set_source_port_by_index(device.index, port, Some(done)),
-    })
+        .ok_or_else(|| io::Error::other("The selected port is no longer available").into())
 }
 
 pub fn streams() -> AppResult<Vec<StreamEntry>> {
@@ -236,25 +200,59 @@ fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
 }
 
 pub fn snapshot(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
+    snapshot_with_ports(kind, false)
+}
+
+/// Output/Input rows expose physical ports without inventing independent
+/// devices. Routing and Waybar keep using the device-only snapshot.
+pub fn selections(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
+    snapshot_with_ports(kind, true)
+}
+
+fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
     let default_name = controller.default_name()?;
     let mut entries: Vec<_> = controller
         .list_devices()?
         .into_iter()
         .filter(|device| kind == AudioKind::Output || device.monitor.is_none())
-        .filter_map(|device| entry(kind, &device, default_name.as_deref()))
+        .flat_map(|device| {
+            let Some(base) = entry(kind, &device, default_name.as_deref()) else {
+                return Vec::new();
+            };
+            if expand_ports {
+                port_rows(
+                    base,
+                    &device.ports,
+                    device.active_port.as_ref().and_then(|p| p.name.as_deref()),
+                )
+            } else {
+                vec![base]
+            }
+        })
         .collect();
     entries.sort_by(|left, right| {
         left.description
             .to_lowercase()
             .cmp(&right.description.to_lowercase())
             .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.key.cmp(&right.key))
     });
     Ok(entries)
 }
 
 pub fn set_default(entry: &AudioEntry) -> AppResult<()> {
     let mut controller = Controller::create(entry.kind)?;
+    // Revalidate against the server: a jack can be unplugged after rendering.
+    // Switch the port first, so a rejected switch never changes the default.
+    let device = controller.device_by_name(&entry.name)?;
+    if let Some(name) = entry.port.as_deref() {
+        let port = available_port(&device.ports, name)?;
+        controller.change(|api, done| match entry.kind {
+            AudioKind::Output => api.set_sink_port_by_index(device.index, port, Some(done)),
+            AudioKind::Input => api.set_source_port_by_index(device.index, port, Some(done)),
+        })?;
+    }
     if controller.set_default_device(&entry.name)? {
         return Ok(());
     }
@@ -332,7 +330,45 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
         kind,
         name,
         description,
+        port: None,
     })
+}
+
+fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -> Vec<AudioEntry> {
+    // USB/Bluetooth/virtual devices without named ports still get one row.
+    if !ports
+        .iter()
+        .any(|p| p.name.as_deref().is_some_and(|name| !name.is_empty()))
+    {
+        return vec![base];
+    }
+    ports
+        .iter()
+        .filter_map(|port| {
+            let name = port.name.as_deref().filter(|name| !name.is_empty())?;
+            if port.available == PortAvailable::No {
+                return None;
+            }
+            let label = port
+                .description
+                .as_deref()
+                .filter(|label| !label.is_empty())
+                .unwrap_or(name);
+            Some(AudioEntry {
+                key: format!("{}:port:{}", base.key, hex_encode(name)),
+                port: Some(name.to_owned()),
+                description: format!("{} — {label}", base.description),
+                // Reserve space for the port so long device names cannot hide it.
+                label: format!(
+                    "{} — {}",
+                    single_line(&short_device_name(&base.description, None), 24),
+                    single_line(label, 21)
+                ),
+                default: base.default && active == Some(name),
+                ..base.clone()
+            })
+        })
+        .collect()
 }
 
 fn percent(volumes: &ChannelVolumes) -> u8 {
@@ -349,6 +385,142 @@ fn from_percent(percent: u8) -> Volume {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn device(kind: AudioKind) -> AudioEntry {
+        AudioEntry {
+            key: format!("{}:{}", kind.key_prefix(), hex_encode("built-in")),
+            kind,
+            name: "built-in".into(),
+            description: "Built-in Audio Analog Stereo".into(),
+            label: "Built-in Audio".into(),
+            volume: 65,
+            muted: true,
+            default: true,
+            port: None,
+        }
+    }
+
+    fn port(name: &str, label: &str, available: PortAvailable) -> DevicePortInfo {
+        DevicePortInfo {
+            name: Some(name.into()),
+            description: Some(label.into()),
+            priority: 100,
+            available,
+        }
+    }
+
+    #[test]
+    fn output_and_input_ports_are_distinct_rows_with_only_the_active_default_marked() {
+        for (kind, labels) in [
+            (AudioKind::Output, ["Speakers", "Headphones"]),
+            (AudioKind::Input, ["Internal microphone", "Microphone jack"]),
+        ] {
+            let ports = [
+                port("internal", labels[0], PortAvailable::Yes),
+                port("jack", labels[1], PortAvailable::Yes),
+            ];
+            let rows = port_rows(device(kind), &ports, Some("jack"));
+            assert_eq!(rows.len(), 2);
+            assert_ne!(rows[0].key, rows[1].key);
+            assert_eq!(rows[0].port.as_deref(), Some("internal"));
+            assert_eq!(rows[1].port.as_deref(), Some("jack"));
+            assert!(!rows[0].default);
+            assert!(rows[1].default);
+            for (row, label) in rows.iter().zip(labels) {
+                assert_eq!(row.name, "built-in");
+                assert!(row.label.contains(label));
+                assert!(row.description.contains(label));
+                assert_eq!(row.volume, 65);
+                assert!(row.muted);
+            }
+            let mut other = device(kind);
+            other.default = false;
+            assert!(
+                port_rows(other, &ports, Some("jack"))
+                    .iter()
+                    .all(|r| !r.default)
+            );
+            assert!(
+                port_rows(device(kind), &ports, None)
+                    .iter()
+                    .all(|r| !r.default)
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_ports_are_hidden_but_unknown_availability_is_allowed() {
+        let ports = [
+            port("speaker", "Speakers", PortAvailable::Unknown),
+            port("jack", "Headphones", PortAvailable::No),
+        ];
+        let rows = port_rows(device(AudioKind::Output), &ports, Some("speaker"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].port.as_deref(), Some("speaker"));
+        // Do not add a generic row that would bypass unavailable-port checks.
+        assert!(port_rows(device(AudioKind::Output), &ports[1..], Some("jack")).is_empty());
+    }
+
+    #[test]
+    fn devices_without_named_ports_keep_a_single_device_row() {
+        let base = device(AudioKind::Output);
+        let mut unnamed = port("", "", PortAvailable::Unknown);
+        unnamed.name = None;
+        for ports in [
+            vec![],
+            vec![unnamed],
+            vec![port("", "", PortAvailable::Unknown)],
+        ] {
+            let rows = port_rows(base.clone(), &ports, None);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].key, base.key);
+            assert_eq!(rows[0].label, base.label);
+            assert!(rows[0].port.is_none());
+            assert!(rows[0].default);
+        }
+    }
+
+    #[test]
+    fn port_identity_uses_names_not_labels_and_survives_active_port_changes() {
+        let ports = [
+            port("jack:one;🎧", "Headphones", PortAvailable::Yes),
+            port("jack:two", "Headphones", PortAvailable::Yes),
+        ];
+        let before = port_rows(device(AudioKind::Output), &ports, Some("jack:one;🎧"));
+        let after = port_rows(device(AudioKind::Output), &ports, Some("jack:two"));
+        assert_ne!(before[0].key, before[1].key);
+        assert_eq!(before[0].key, after[0].key);
+        assert_eq!(before[1].key, after[1].key);
+        assert!(before[0].key.is_ascii());
+        assert!(!before[0].key.contains(';'));
+        let mut other = device(AudioKind::Output);
+        other.key = format!("sink:{}", hex_encode("usb"));
+        assert_ne!(before[0].key, port_rows(other, &ports, None)[0].key);
+        assert_ne!(
+            before[0].key,
+            port_rows(device(AudioKind::Input), &ports, None)[0].key
+        );
+    }
+
+    #[test]
+    fn long_device_labels_leave_room_for_the_port() {
+        let mut base = device(AudioKind::Output);
+        base.description = "An extremely long descriptive device name for a sound card".into();
+        let ports = [port("jack", "Headphones", PortAvailable::Yes)];
+        let rows = port_rows(base, &ports, Some("jack"));
+        assert!(rows[0].row_label().ends_with("Headphones"));
+    }
+
+    #[test]
+    fn selecting_a_missing_or_unplugged_port_is_rejected() {
+        let ports = [
+            port("speaker", "Speakers", PortAvailable::Unknown),
+            port("jack", "Headphones", PortAvailable::No),
+        ];
+        assert_eq!(available_port(&ports, "speaker").unwrap(), "speaker");
+        assert!(available_port(&ports, "jack").is_err());
+        assert!(available_port(&ports, "removed").is_err());
+    }
 
     #[test]
     fn percentages_round_trip_through_pulseaudio_volume_units() {

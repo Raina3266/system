@@ -121,7 +121,7 @@ fn picker_state_round_trips_without_persisting_selection_overrides() {
     use crate::model::Picker;
     for picker in [
         Picker::Route("playback:7:3:123".into()),
-        Picker::Port("source:cafésemi;colon".into()),
+        Picker::Route("playback:cafésemi;colon".into()),
     ] {
         let state = UiState {
             picker: Some(picker.clone()),
@@ -134,6 +134,11 @@ fn picker_state_round_trips_without_persisting_selection_overrides() {
     }
     assert!(
         UiState::parse(Some("route=not-hex".into()))
+            .picker
+            .is_none()
+    );
+    assert!(
+        UiState::parse(Some(format!("port={}", hex_encode("source:old"))))
             .picker
             .is_none()
     );
@@ -175,20 +180,20 @@ fn audio_messages_are_hidden_when_idle_but_errors_are_escaped_and_visible() {
 }
 
 #[test]
-fn picker_back_is_permanent_and_unavailable_ports_cannot_be_activated() {
+fn route_picker_back_is_permanent_and_disabled_choices_cannot_be_activated() {
     use super::render::render_output;
     use crate::model::{ChoiceEntry, ChoiceList, Devices};
     let rows = Devices::Choices(ChoiceList {
-        title: "Port for Headphones".into(),
+        title: "Output for Firefox".into(),
         entries: vec![
             ChoiceEntry {
-                key: "port:00".into(),
+                key: "sink:00".into(),
                 label: "Speakers".into(),
                 active: true,
                 enabled: true,
             },
             ChoiceEntry {
-                key: "port:01".into(),
+                key: "sink:01".into(),
                 label: "Headphones (unplugged)".into(),
                 active: false,
                 enabled: false,
@@ -196,10 +201,10 @@ fn picker_back_is_permanent_and_unavailable_ports_cannot_be_activated() {
         ],
     });
     let state = UiState {
-        selection: Some("port:00".into()),
+        selection: Some("sink:00".into()),
         ..Default::default()
     };
-    let bytes = render_output(Mode::Output, state, Some("device"), &rows).unwrap();
+    let bytes = render_output(Mode::Playback, state, Some("stream"), &rows).unwrap();
     let rendered = String::from_utf8_lossy(&bytes);
     assert!(rendered.contains("new-selection\x1f1"));
     let back = rendered
@@ -209,7 +214,7 @@ fn picker_back_is_permanent_and_unavailable_ports_cannot_be_activated() {
     assert!(back.contains("permanent\x1ftrue"));
     let unplugged = rendered
         .split('\x1e')
-        .find(|r| r.starts_with("port:01\0"))
+        .find(|r| r.starts_with("sink:01\0"))
         .unwrap();
     assert!(unplugged.contains("nonselectable\x1ftrue"));
 }
@@ -276,6 +281,7 @@ fn activating_a_device_marks_it_default_even_if_the_server_lags() {
         name: name.to_owned(),
         description: name.to_owned(),
         label: name.to_owned(),
+        port: None,
         volume: 50,
         muted: false,
         default,
@@ -283,9 +289,42 @@ fn activating_a_device_marks_it_default_even_if_the_server_lags() {
     // pipewire-pulse can still report the old default right after
     // accepting the change, so both rows come back stale.
     let mut entries = vec![entry("speakers", true), entry("headset", false)];
-    apply_chosen_default(&mut entries, "headset");
+    apply_chosen_default(&mut entries, &format!("sink:{}", hex_encode("headset")));
     assert!(!entries[0].default);
     assert!(entries[1].default);
+}
+
+#[test]
+fn selecting_a_port_marks_only_that_row_default_even_when_ports_share_a_device() {
+    let speakers = AudioEntry {
+        key: "sink:00:port:01".into(),
+        kind: AudioKind::Output,
+        name: "built-in".into(),
+        description: "Built-in Audio — Speakers".into(),
+        label: "Built-in Audio — Speakers".into(),
+        port: Some("speakers".into()),
+        volume: 60,
+        muted: false,
+        default: true,
+    };
+    let headphones = AudioEntry {
+        key: "sink:00:port:02".into(),
+        port: Some("headphones".into()),
+        description: "Built-in Audio — Headphones".into(),
+        label: "Built-in Audio — Headphones".into(),
+        default: false,
+        ..speakers.clone()
+    };
+    let mut entries = vec![speakers, headphones];
+    apply_chosen_default(&mut entries, "sink:00:port:02");
+    assert!(!entries[0].default);
+    assert!(entries[1].default);
+    let mut rendered = Vec::new();
+    write_audio_row(&mut rendered, &entries[1]).unwrap();
+    let row = String::from_utf8_lossy(&rendered);
+    assert!(row.contains("Built-in Audio — Headphones"));
+    assert!(row.contains("headphones"));
+    assert!(row.contains("urgent\x1ftrue"));
 }
 
 #[test]
@@ -296,6 +335,7 @@ fn the_default_audio_device_renders_urgent_and_the_rest_render_active() {
         name: "alsa_output.pci".to_owned(),
         description: "Built-in Audio Analog Stereo".to_owned(),
         label: "Built-in Audio".to_owned(),
+        port: None,
         volume: 60,
         muted: false,
         default,

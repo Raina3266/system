@@ -228,7 +228,12 @@ pub(super) fn write_audio_row(output: &mut Vec<u8>, entry: &AudioEntry) -> io::R
         output,
         &mut first,
         "meta",
-        &format!("{} {}", entry.description, entry.name),
+        &format!(
+            "{} {} {}",
+            entry.description,
+            entry.name,
+            entry.port.as_deref().unwrap_or_default()
+        ),
     );
     if entry.default {
         write_row_option(output, &mut first, "urgent", "true");

@@ -197,6 +197,9 @@ pub struct AudioEntry {
     pub volume: u8,
     pub muted: bool,
     pub default: bool,
+    /// A physical port selected by this row. None for device-only rows used
+    /// by Waybar and the per-app routing list.
+    pub port: Option<String>,
 }
 
 impl AudioEntry {
@@ -265,18 +268,17 @@ impl StreamEntry {
     }
 }
 
-/// A sub-menu stays in the current tab; the target is a device/stream key,
+/// A routing sub-menu stays in the current tab; the target is a stream key,
 /// never its display label or row number.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Picker {
     Route(String),
-    Port(String),
 }
 
 impl Picker {
     pub fn target(&self) -> &str {
         match self {
-            Self::Route(key) | Self::Port(key) => key,
+            Self::Route(key) => key,
         }
     }
 }
@@ -598,6 +600,7 @@ mod tests {
             name: "alsa_output.pci".to_owned(),
             description: "Built-in Audio Analog Stereo".to_owned(),
             label: "Built-in Audio".to_owned(),
+            port: None,
             volume: 45,
             muted: false,
             default: true,
@@ -613,6 +616,7 @@ mod tests {
             name: "alsa_input.pci".to_owned(),
             description: "Webcam Mic".to_owned(),
             label: "Webcam Mic".to_owned(),
+            port: None,
             volume: 80,
             muted: true,
             default: false,

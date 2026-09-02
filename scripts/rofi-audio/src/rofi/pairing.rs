@@ -54,8 +54,6 @@ impl UiState {
                 state.code_kind = kind.parse().ok();
             } else if let Some(key) = part.strip_prefix("route=") {
                 state.picker = hex_decode(key).map(Picker::Route);
-            } else if let Some(key) = part.strip_prefix("port=") {
-                state.picker = hex_decode(key).map(Picker::Port);
             }
         }
         state
@@ -77,11 +75,7 @@ impl UiState {
             parts.push(format!("kind={}", kind.name()));
         }
         if let Some(picker) = &self.picker {
-            let field = match picker {
-                Picker::Route(_) => "route",
-                Picker::Port(_) => "port",
-            };
-            parts.push(format!("{field}={}", hex_encode(picker.target())));
+            parts.push(format!("route={}", hex_encode(picker.target())));
         }
         parts.join(";")
     }

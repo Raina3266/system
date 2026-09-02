@@ -3,7 +3,7 @@
    Connecting, disconnecting and confirming have no buttons of their own:
    double-clicking a row — or pressing Enter on it — is Rofi's accept-entry
    action, which connects or disconnects on Bluetooth and makes the row the
-   default device on Output / Input. On Playback it opens the
+   default device and selected port on Output / Input. On Playback it opens the
    selected stream's device picker. Enter in a picker applies the choice.
 
    Rofi builds its widget tree once and does not re-run a script mode when you
@@ -13,7 +13,7 @@
    switcher is what tells you which are meaningful.
 
    Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
-   Alt+6 mute; Alt+7 route; Alt+8 port; Alt+9 back.
+   Alt+6 mute; Alt+7 route; Alt+9 back (also a row in the route picker).
    Profile and Bluetooth codec selection are intentionally not included. */
 
 /* Rofi triggers this binding once the UI has been idle for `delay` seconds,
@@ -193,9 +193,7 @@ action-bar {
         button-volume-up,
         button-volume-down,
         button-mute,
-        button-route,
-        button-port,
-        button-back
+        button-route
     ];
 }
 
@@ -204,9 +202,7 @@ button-forget,
 button-volume-up,
 button-volume-down,
 button-mute,
-button-route,
-button-port,
-button-back {
+button-route {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
@@ -250,17 +246,6 @@ button-mute {
 button-route {
     content: " 󰁔 ";
     action: "kb-custom-7";
-}
-
-/* Physical ports for Output/Input, without changing the card profile. */
-button-port {
-    content: " 󰈀 ";
-    action: "kb-custom-8";
-}
-
-button-back {
-    content: " 󰁍 ";
-    action: "kb-custom-9";
 }
 
 error-message {

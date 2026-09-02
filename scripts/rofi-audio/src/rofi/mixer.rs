@@ -1,4 +1,4 @@
-//! Audio tab interaction and in-place routing/port pickers. The small backend
+//! Audio tab interaction and the in-place routing picker. The small backend
 //! interface lets navigation and action dispatch be tested without audio hardware.
 use std::io;
 
@@ -9,8 +9,7 @@ use crate::model::{
 };
 
 use super::{
-    RETV_ACTIVATE, RETV_BACK, RETV_MUTE, RETV_PORT, RETV_ROUTE, RETV_VOLUME_DOWN, RETV_VOLUME_UP,
-    UiState,
+    RETV_ACTIVATE, RETV_BACK, RETV_MUTE, RETV_ROUTE, RETV_VOLUME_DOWN, RETV_VOLUME_UP, UiState,
 };
 
 #[derive(Debug, PartialEq)]
@@ -19,7 +18,6 @@ enum Mutation {
     Mute,
     Default,
     Route(String),
-    Port(String),
 }
 
 trait Backend {
@@ -40,7 +38,7 @@ impl Backend for Pulse {
         if mode.is_stream() {
             Ok(Devices::Streams(audio::streams()?))
         } else {
-            Ok(Devices::Audio(audio::snapshot(kind)?))
+            Ok(Devices::Audio(audio::selections(kind)?))
         }
     }
 
@@ -62,9 +60,6 @@ impl Backend for Pulse {
                         .collect(),
                 })
             }
-            Picker::Port(key) if !mode.is_stream() => {
-                audio::port_choices(before.audio(key).ok_or_else(gone)?)
-            }
             _ => Err(gone()),
         }
     }
@@ -78,7 +73,6 @@ impl Backend for Pulse {
                 }
                 Mutation::Mute => audio::toggle_mute(entry),
                 Mutation::Default => audio::set_default(entry),
-                Mutation::Port(key) => audio::set_port(entry, &key),
                 Mutation::Route(_) => Err(gone()),
             }
         } else if let Some(entry) = before.stream(key) {
@@ -146,10 +140,7 @@ fn run_with(
             let choice =
                 selected.and_then(|key| choices.entries.iter().find(|c| c.key == key && c.enabled));
             if let Some(choice) = choice {
-                let mutation = match &picker {
-                    Picker::Route(_) => Mutation::Route(choice.key.clone()),
-                    Picker::Port(_) => Mutation::Port(choice.key.clone()),
-                };
+                let mutation = Mutation::Route(choice.key.clone());
                 match backend.apply(&before, picker.target(), mutation) {
                     Ok(()) => {
                         close_picker(state);
@@ -162,7 +153,7 @@ fn run_with(
             }
         } else if matches!(
             retv,
-            RETV_VOLUME_UP | RETV_VOLUME_DOWN | RETV_MUTE | RETV_PORT | RETV_ROUTE
+            RETV_VOLUME_UP | RETV_VOLUME_DOWN | RETV_MUTE | RETV_ROUTE
         ) {
             state.set_message("Choose a row with Enter, or go Back.");
         }
@@ -172,7 +163,6 @@ fn run_with(
     let key = selected.unwrap_or_default();
     let picker = match retv {
         RETV_ACTIVATE | RETV_ROUTE if mode.is_stream() => Some(Picker::Route(key.to_owned())),
-        RETV_PORT if !mode.is_stream() => Some(Picker::Port(key.to_owned())),
         _ => None,
     };
     if let Some(picker) = picker {
@@ -203,10 +193,6 @@ fn run_with(
             state.set_message("Device routing applies to Playback.");
             None
         }
-        RETV_PORT => {
-            state.set_message("Ports apply to Output and Input devices.");
-            None
-        }
         super::RETV_SCAN | super::RETV_FORGET => {
             state.set_message("Scan and Forget apply to Bluetooth.");
             None
@@ -222,12 +208,9 @@ fn run_with(
                 // metadata update becomes visible to introspection.
                 if is_default
                     && let Devices::Audio(entries) = &mut after
-                    && let Some(chosen) = entries
-                        .iter()
-                        .find(|e| e.key == key)
-                        .map(|e| e.name.clone())
+                    && entries.iter().any(|e| e.key == key)
                 {
-                    apply_chosen_default(entries, &chosen);
+                    apply_chosen_default(entries, key);
                 }
                 return after;
             }
@@ -239,7 +222,7 @@ fn run_with(
 
 pub(super) fn apply_chosen_default(entries: &mut [AudioEntry], chosen: &str) {
     for entry in entries {
-        entry.default = entry.name == chosen;
+        entry.default = entry.key == chosen;
     }
 }
 
@@ -335,23 +318,22 @@ mod tests {
     }
 
     #[test]
-    fn ports_are_a_picker_not_an_immediate_device_change() {
+    fn port_rows_activate_directly_without_opening_a_picker() {
         for mode in [Mode::Output, Mode::Input] {
             let mut backend = Fake::default();
             let mut state = UiState::default();
-            run_with(&mut backend, mode, RETV_PORT, Some("device"), &mut state);
-            assert!(backend.actions.is_empty());
             run_with(
                 &mut backend,
                 mode,
                 RETV_ACTIVATE,
-                Some("chosen"),
+                Some("device:port:chosen"),
                 &mut state,
             );
             assert_eq!(
                 backend.actions,
-                vec![("device".into(), Mutation::Port("chosen".into()))]
+                vec![("device:port:chosen".into(), Mutation::Default)]
             );
+            assert!(state.picker.is_none());
         }
     }
 

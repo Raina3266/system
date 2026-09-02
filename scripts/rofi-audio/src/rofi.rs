@@ -40,7 +40,7 @@ const RETV_VOLUME_DOWN: u8 = 13;
 const RETV_REFRESH: u8 = 14;
 const RETV_MUTE: u8 = 15;
 const RETV_ROUTE: u8 = 16;
-const RETV_PORT: u8 = 17;
+// Keep keyboard Back even though the only visible Back control is a list row.
 const RETV_BACK: u8 = 18;
 
 pub fn launch() -> AppResult<()> {
@@ -89,8 +89,6 @@ pub fn launch() -> AppResult<()> {
             "Alt+6",
             "-kb-custom-7",
             "Alt+7",
-            "-kb-custom-8",
-            "Alt+8",
             "-kb-custom-9",
             "Alt+9",
             "-theme",
@@ -183,7 +181,7 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
             abandon_code_prompt(state);
             forget(&backend, &before, selected_key, state).await;
         }
-        RETV_VOLUME_UP | RETV_VOLUME_DOWN | RETV_MUTE | RETV_ROUTE | RETV_PORT => {
+        RETV_VOLUME_UP | RETV_VOLUME_DOWN | RETV_MUTE | RETV_ROUTE => {
             state.set_message("Audio controls apply to the other tabs.");
         }
         _ => {}
