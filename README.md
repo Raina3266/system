@@ -4,7 +4,7 @@ This repository contains seven Rust utilities used by the desktop configuration:
 
 - `media-control` — a dynamic MPRIS controller for Rofi and Waybar
 - `preview-panel` — a reusable GTK4 text and image preview window
-- [`rofi-audio`](#rofi-audio) — a merged Bluetooth, output, and input controller with a Rofi interface
+- [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - `rofi-network-manager` — Wi-Fi and Ethernet controls with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
@@ -19,33 +19,71 @@ and the audio tabs by [`pulsectl-rs`](https://crates.io/crates/pulsectl-rs) over
 PulseAudio, which `pipewire-pulse` serves. Neither backend is reimplemented by
 hand.
 
+The package in `scripts/packages.nix` and the existing Waybar launcher provide
+all four tabs.
+
 ### Modes
 
-Rofi opens on **Bluetooth** and starts scanning; `Shift+Left`/`Shift+Right`
-move between tabs.
+Rofi opens on **Pair** (Bluetooth); `Shift+Left`/`Shift+Right` move between tabs.
+The internal mode name remains `bluetooth`.
 
-Discovery runs in a detached `scan-bg` process, so the menu appears at once
-with the devices BlueZ already knows about rather than waiting out the scan
-window. Rofi cannot redraw a script mode on its own, so devices found while the
-window is open show up the next time the list is drawn — pressing **Scan**
-again is the cheap way to do that, and it no longer blocks. An adapter you
-turned off stays off: only the Scan button powers it on, never the automatic
-scan at launch.
+| Tab | Rows | Enter / double-click |
+| --- | --- | --- |
+| Pair | Discovered and paired Bluetooth devices | Pair/connect or disconnect, as before |
+| Output | Output devices and their available ports | Activate the row's port, then set its device as default |
+| Input | Microphones and other non-monitor inputs, including their available ports | Activate the row's port, then set its device as default |
+| Play | Live playback streams, with app, volume and meaningful stream title | Choose that stream's output |
 
-- **Bluetooth** — connected devices are cyan and sort to the top, paired
-  devices are white, everything discovery turned up is dimmed. Battery level is
-  appended when the device reports one.
-- **Output** and **Input** — every sink or source, each row showing its volume
-  before the name. The current default is cyan and stays in place. Volume is
-  per device, so an idle output can be adjusted without touching the one
-  currently playing. Monitor sources are hidden from **Input**.
+Applications may expose several streams. They remain separate; no MPRIS support
+is required. Start playback in an application for its stream to
+appear. Muted or paused streams are dimmed, and lists refresh every two seconds.
+The popup width is configured in `themes/rofi-audio.rasi`.
+Tabs size themselves to their labels instead of splitting the width equally,
+so a longer label such as Output gets more space than Pair.
+There is no Recording tab or per-application input routing. The Input tab still
+controls microphone devices: default selection, volume, mute and physical ports.
 
-Rows show a shortened device name: PulseAudio descriptions carry boilerplate
-that identifies nothing ("GA104 High Definition Audio Controller Digital Stereo
-(HDMI 2)" becomes "GA104 (HDMI 2)"), and when a name is boilerplate all the way
-through, the active port's name — "Speakers", "Headphones" — is used instead.
-Filtering still matches the full description, so typing any part of the long
-name finds the row.
+For example, Output can show **Speakers**, **Headphones**, and **HDMI / DisplayPort 1**
+as separate rows, without repeating the chipset name. Hardware names are added
+only when port labels collide; any remaining identical or identically clipped
+labels get a small number at the front. Full device descriptions remain searchable.
+Input can similarly show an internal microphone
+and a microphone jack. Enter/double-click switches to that port and makes its
+device the default. Only the active port of the default device is highlighted
+in cyan. Devices without named ports still appear once, as before.
+
+For ALSA cards, Output also includes available ports from compatible inactive
+profiles. This lets **Speaker** and **Headphones** both appear on laptops whose
+HiFi profile exposes only one of them at a time. A row without a live device
+shows **—** instead of a volume: select it before using volume or mute.
+Enter/double-click switches profiles when necessary, waits for the new device,
+activates the port and sets the default output. Card/port identities remain
+stable even when the audio server replaces the underlying devices.
+
+Ports reported as unplugged are hidden; unknown availability remains selectable.
+Ports and profiles are rechecked before activation. Automatic profile selection
+preserves the current microphone ports and prefers profiles retaining the most
+other ports; it does not switch Bluetooth codecs or profiles. Profile changes
+can briefly interrupt all audio on the card. If activation fails after a switch,
+the program attempts to restore the previous profile and default output, without
+overwriting a newer profile choice made elsewhere. Input still lists ports from
+its current profile; no Profile button is added.
+
+Playback omits the generic **Playback** title and the **→ destination** suffix:
+for example, **Google Chrome: Playback → Alder Lake…** becomes **Google Chrome**.
+Real stream titles are retained. The destination remains searchable and can be
+viewed or changed in the route picker; this only changes the displayed text.
+
+Discovery runs in a detached `scan-bg` process, so the menu appears immediately
+with devices BlueZ already knows about. Lists refresh automatically while the
+menu is idle; **Scan** starts another discovery window without blocking the
+menu. Automatic discovery at launch leaves a powered-off adapter off; **Scan**
+turns it on.
+
+In **Pair**, connected devices are cyan and sort to the top, paired devices
+are white, and discovered devices are dimmed. Battery level is appended when
+the device reports one. The message panel shows the highlighted device's
+address and pairing state.
 
 The input bar shows a filter glyph rather than a prompt. Rofi drives the prompt
 widget from the mode's display name, which is the same string the mode-switcher
@@ -53,32 +91,60 @@ tab shows, so a prompt here could only repeat the tab beside it; the theme
 leaves the widget out of the input bar's children and puts a static glyph in
 its place.
 
-The message panel below the list is one line and is only used by **Bluetooth**,
-where it carries the highlighted device's address and pairing state. In
-**Output** and **Input** the row already shows the volume and name, so the
-panel stays empty until an action has something to report.
-
 ### Controls
 
-| Action | Bluetooth | Output / Input |
-| --- | --- | --- |
-| `Enter`, double-click | Connect, or disconnect if connected | Make the row the default device |
-| `Alt+1` | Refresh the list, and scan if the window has closed | — |
-| `Alt+2` | Forget the paired device | — |
-| `Alt+3`, `Alt+Up` | — | Volume +5% |
-| `Alt+4`, `Alt+Down` | — | Volume −5% |
+Buttons appear in this order, left to right. They operate on the selected row,
+not necessarily the system default. All buttons stay visible when switching
+tabs; use them only in the tabs or pickers listed below.
 
-Connecting, disconnecting and confirming a device have no button of their own:
-double-clicking a row does all three, so the action bar is left to the things a
-row cannot say for itself. Single-click still just highlights a row.
+| Button | Shortcut | Where | Action |
+| --- | --- | --- | --- |
+| 󰑐 Scan | Alt+1 | Pair | Look for nearby Bluetooth devices |
+| 󰆴 Forget | Alt+2 | Pair | Remove the selected device's saved pairing; reconnecting may require pairing again |
+| 󰝝 Volume up | Alt+3 / Alt+Up | Output, Input, Play | Increase selected device or stream volume by 5 percentage points, up to its ceiling |
+| 󰝞 Volume down | Alt+4 / Alt+Down | Output, Input, Play | Decrease selected device or stream volume by 5 percentage points, down to 0% |
+| 󰝟 Mute | Alt+6 | Output, Input, Play | Toggle mute on the selected device or stream, retaining its volume |
+| 󰁔 Route | Alt+7 | Play | Choose an output for the selected app's stream without changing the system default |
 
-The bar carries all four buttons at once and every one of them is live. Rofi
-builds its widget tree once and does not re-run a script mode when you return
-to a tab it has already drawn, so the bar can neither swap its buttons per tab
-nor keep per-tab colouring in sync with the tab you are on — a dimmed button
-would go stale the moment you switched back. The selected tab in the mode
-switcher is what says which two buttons are meaningful; the other two fall back
-to the nearest sensible action rather than doing nothing.
+Alt+5 is reserved for the existing refresh action. Escape closes the entire
+menu. In the routing picker, use the permanent **Back** row or Alt+9 to return
+without changing anything. There are no separate Port or Back toolbar buttons,
+and no port picker. Choose a routing destination with Enter; the current choice
+is checked and cyan.
+The search filter resets on actions, as before, so searching for an application
+does not hide all devices when its picker opens.
+
+Outputs and playback streams can reach **150%**; inputs are capped at **100%**.
+Amplification above 100% can distort. Adjustments preserve
+an existing channel balance, with the ceiling applied to the loudest channel.
+The normal volume controls do not unmute a muted device or stream.
+
+Routing changes only the selected playback stream, never the system default
+or a device's active port. Its picker lists actual devices once, rather than
+expanding them into port rows. It uses compact current-port names such as
+**Speakers** or **HDMI / DisplayPort 1**, falling back to the device name when
+there is no named active port. Ambiguous names get device context or a number,
+and full hardware descriptions remain searchable. The checked row is the
+stream's current destination, which may differ from the system default.
+Persistence across application restarts
+is managed by PipeWire/WirePlumber, not this program.
+
+Port rows of the same device are not independent outputs: switching ports
+affects every stream using that device. Volume/mute controls target a live device,
+without activating a different port or profile; they are not per-port controls.
+Manual profile selection, Bluetooth codecs, channel editing, latency offsets
+and digital passthrough configuration are intentionally not included.
+
+Normal audio tabs do not show a status panel. Picker instructions and errors
+are shown when necessary, on one visual line. Messages flatten embedded line
+breaks, truncate long text, and disable Pango line wrapping; overflow at narrow
+window widths is clipped rather than increasing the panel height.
+If a stream ends or a device is unplugged while its
+picker is open, the program revalidates the target rather than acting on a
+different row. Volume/mute/routing changes check the audio server's response.
+
+Single-click highlights a row. Enter or double-click connects/disconnects a
+Bluetooth device, activates an audio port, or opens a playback routing picker.
 
 ### Pairing
 
@@ -100,13 +166,13 @@ service, which auto-confirms them.
 rofi-audio [launch]
 rofi-audio status
 rofi-audio bluetooth-power [on|off|toggle]
-rofi-audio script <bluetooth|output|input>
+rofi-audio script <bluetooth|output|input|playback>
 rofi-audio connect-bg <row-key>
 rofi-audio scan-bg
 ```
 
 `script`, `connect-bg`, and `scan-bg` are internal: Rofi invokes the first,
-and the Bluetooth tab spawns the other two.
+and the Pair tab spawns the other two.
 
 ### Waybar module
 
@@ -151,6 +217,42 @@ switch; `bluetooth-power on` and `off` are available for bindings of your own.
 
 Styling lives in `themes/rofi-audio.rasi`, symlinked to
 `~/.config/rofi/rofi-audio.rasi` so edits apply without a rebuild.
+
+### Development checks
+
+From the repository root, with its Rust development environment:
+
+```sh
+nix develop .#rust
+cargo fmt --manifest-path scripts/Cargo.toml --package rofi-audio -- --check
+cargo test --manifest-path scripts/Cargo.toml --package rofi-audio --locked
+cargo clippy --manifest-path scripts/Cargo.toml --package rofi-audio --locked -- -D warnings
+```
+
+Unit tests include port-row identities, availability, active/default marking,
+device-only fallback, volume conversion/limits, channel balance, stream identity,
+picker cancellation and dispatch, disappearing targets, rejected choices,
+state round trips, row rendering and refresh behavior without hardware. Profile
+switching tests cover the split Speaker/Headphones HiFi layout, delayed device
+creation, stale/unplugged targets, server rejection and rollback.
+
+For live checks, use a disposable PulseAudio/PipeWire session where possible:
+
+1. Mute and unmute an output and microphone; verify each previous volume stays.
+2. Start two playback applications and adjust/mute one; verify the other is unchanged.
+3. Route one stream to a second output; verify the global default is unchanged.
+4. Double-click the speakers/headphone port rows, then the microphone port rows;
+   verify the selected port and default device, and that only one row is cyan.
+   Unplug a jack; check that its row disappears and an old selection is rejected.
+5. Stop a stream with its picker open; verify that Back and refresh remain usable.
+6. Check 100→105→150% output volume, the 150% ceiling, and the 100% input ceiling.
+7. Check Bluetooth scan/connect/forget and pairing-code entry still work.
+8. Verify that only Pair, Output, Input and Play tabs appear, the toolbar
+   has six buttons, and the routing picker's Back row/Alt+9 still work.
+9. On a laptop with separate Speaker/Headphones profiles, plug in headphones and
+   verify both rows appear in Output. Switch in both directions; check the selected
+   row becomes default, its volume appears, and microphone/HDMI choices survive.
+   An inactive row's volume/mute buttons must not switch profiles.
 
 ---
 
