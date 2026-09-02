@@ -163,6 +163,7 @@ let
           --icon-colour "${daemonRed}" \
           --pink "${daemonPink}" \
           --dim-pink "${daemonDimPink}" \
+          --structure-colour "${daemonYellow}" \
           --main-background "${daemonBackground}" \
           --secondary-background "${daemonSecondaryBackground}" \
           --chrome-background "${daemonChromeBackground}"

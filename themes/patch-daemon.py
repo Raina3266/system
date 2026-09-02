@@ -5,8 +5,9 @@
 ``gtk`` rebuilds upstream's complete Breeze-based GTK theme with the same
 Daemon palette and interaction roles, including every GTK 2/3/4 image and
 symbolic asset.
-``vscode`` applies the same UI accents to Daemon's workbench and imports
-Dracula's syntax rules.
+``vscode`` applies the same UI accents to Daemon's workbench, gives its
+frames, separators and scrollbars the same structural colour the desktop and
+GTK passes use, and imports Dracula's syntax rules.
 """
 
 import argparse
@@ -1302,10 +1303,35 @@ VSCODE_STATE_OUTLINE_KEYS = {
 }
 
 
+VSCODE_STRUCTURE_KEYS = {
+    "activityBar.border",
+    "editorGroup.border",
+    "editorGroupHeader.border",
+    "editorGroupHeader.tabsBorder",
+    "menu.border",
+    "menu.separatorBackground",
+    "panel.border",
+    "scrollbarSlider.background",
+    "sideBar.border",
+    "sideBarActivityBarTop.border",
+    "sideBarSectionHeader.border",
+    "sideBarStickyScroll.border",
+    "sideBySideEditor.horizontalBorder",
+    "sideBySideEditor.verticalBorder",
+    "statusBar.border",
+    "titleBar.border",
+    "widget.border",
+}
+
+
 def patch_vscode_workbench(
-    colours: dict[str, str], icon_colour: str, pink: str, dim_pink: str
-) -> tuple[int, int, int]:
-    """Apply Daemon's local interaction and icon accents to VS Code."""
+    colours: dict[str, str],
+    icon_colour: str,
+    pink: str,
+    dim_pink: str,
+    structure_colour: str,
+) -> tuple[int, int, int, int]:
+    """Apply Daemon's local interaction, icon and structural accents to VS Code."""
     background_changes = 0
     for key in VSCODE_STATE_BACKGROUND_KEYS:
         if colours.get(key, "").lower() != dim_pink.lower():
@@ -1324,7 +1350,13 @@ def patch_vscode_workbench(
             colours[key] = pink
             outline_changes += 1
 
-    return background_changes, icon_changes, outline_changes
+    structure_changes = 0
+    for key in VSCODE_STRUCTURE_KEYS:
+        if colours.get(key, "").lower() != structure_colour.lower():
+            colours[key] = structure_colour
+            structure_changes += 1
+
+    return background_changes, icon_changes, outline_changes, structure_changes
 
 
 def patch_vscode_backgrounds(
@@ -1364,8 +1396,13 @@ def patch_vscode(args: argparse.Namespace) -> None:
         state_background_changes,
         icon_changes,
         outline_changes,
+        structure_changes,
     ) = patch_vscode_workbench(
-        daemon["colors"], args.icon_colour, args.pink, args.dim_pink
+        daemon["colors"],
+        args.icon_colour,
+        args.pink,
+        args.dim_pink,
+        args.structure_colour,
     )
 
     for key in SYNTAX_KEYS:
@@ -1382,7 +1419,8 @@ def patch_vscode(args: argparse.Namespace) -> None:
     print(
         f"darkened {normal_background_changes} normal VS Code backgrounds and "
         f"patched {state_background_changes} state backgrounds plus "
-        f"{outline_changes} outlines and {icon_changes} icon colours; "
+        f"{outline_changes} outlines, {structure_changes} frames and "
+        f"{icon_changes} icon colours; "
         f"kept Daemon's remaining workbench colours "
         f"and imported "
         f"{len(dracula['tokenColors'])} Dracula syntax rules"
@@ -1429,6 +1467,7 @@ def parser() -> argparse.ArgumentParser:
     vscode.add_argument("--icon-colour", required=True)
     vscode.add_argument("--pink", required=True)
     vscode.add_argument("--dim-pink", required=True)
+    vscode.add_argument("--structure-colour", required=True)
     vscode.add_argument("--main-background", required=True)
     vscode.add_argument("--secondary-background", required=True)
     vscode.add_argument("--chrome-background", required=True)
