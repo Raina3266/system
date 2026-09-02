@@ -56,6 +56,7 @@ in
   environment.gnome.excludePackages = with pkgs; [
     epiphany
     geary
+    eog
     yelp
     seahorse
     totem
