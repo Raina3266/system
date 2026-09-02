@@ -3,13 +3,15 @@ use std::str::FromStr;
 
 use crate::{AppError, AppResult};
 
-/// The three Rofi tabs. Each one is a separate script mode, so Rofi keeps a
+/// Each tab is a separate script mode, so Rofi keeps a
 /// private `ROFI_DATA` per tab and the mode switcher renders them as buttons.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Bluetooth,
     Output,
     Input,
+    Playback,
+    Recording,
 }
 
 impl Mode {
@@ -18,6 +20,8 @@ impl Mode {
             Self::Bluetooth => "bluetooth",
             Self::Output => "output",
             Self::Input => "input",
+            Self::Playback => "playback",
+            Self::Recording => "recording",
         }
     }
 
@@ -31,15 +35,21 @@ impl Mode {
             Self::Bluetooth => "󰂯 Bluetooth",
             Self::Output => "󰕾 Output",
             Self::Input => "󰍬 Input",
+            Self::Playback => "󰐊 Playback",
+            Self::Recording => "󰑋 Recording",
         }
     }
 
     pub fn audio_kind(self) -> Option<AudioKind> {
         match self {
             Self::Bluetooth => None,
-            Self::Output => Some(AudioKind::Output),
-            Self::Input => Some(AudioKind::Input),
+            Self::Output | Self::Playback => Some(AudioKind::Output),
+            Self::Input | Self::Recording => Some(AudioKind::Input),
         }
+    }
+
+    pub fn is_stream(self) -> bool {
+        matches!(self, Self::Playback | Self::Recording)
     }
 }
 
@@ -51,6 +61,8 @@ impl FromStr for Mode {
             "bluetooth" | "bt" => Ok(Self::Bluetooth),
             "output" | "sink" | "outputs" => Ok(Self::Output),
             "input" | "source" | "inputs" => Ok(Self::Input),
+            "playback" => Ok(Self::Playback),
+            "recording" => Ok(Self::Recording),
             _ => Err(std::io::Error::other(format!("unknown mode {value:?}")).into()),
         }
     }
@@ -69,6 +81,20 @@ pub enum AudioKind {
 }
 
 impl AudioKind {
+    pub fn maximum(self) -> i16 {
+        match self {
+            Self::Output => 150,
+            Self::Input => 100,
+        }
+    }
+
+    pub fn stream_prefix(self) -> &'static str {
+        match self {
+            Self::Output => "playback",
+            Self::Input => "recording",
+        }
+    }
+
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::Output => "sink",
@@ -198,7 +224,7 @@ impl AudioEntry {
             "{} {:>3}%  {}",
             self.volume_icon(),
             self.volume,
-            truncate(&self.label, 26)
+            single_line(&self.label, 48)
         )
     }
 
@@ -218,12 +244,93 @@ impl AudioEntry {
     }
 }
 
+/// One live playback or recording stream, not an MPRIS player. Several streams
+/// from the same application remain separate and are identified by `key`.
+#[derive(Clone, Debug)]
+pub struct StreamEntry {
+    pub key: String,
+    pub kind: AudioKind,
+    pub index: u32,
+    pub application: String,
+    pub name: String,
+    pub device_name: String,
+    pub device_label: String,
+    pub volume: Option<u8>,
+    pub muted: bool,
+    pub corked: bool,
+}
+
+impl StreamEntry {
+    pub fn row_label(&self) -> String {
+        let icon = match (self.kind, self.muted, self.corked) {
+            (AudioKind::Input, true, _) => "󰍭",
+            (AudioKind::Input, false, _) => "󰍬",
+            (AudioKind::Output, true, _) => "󰝟",
+            (AudioKind::Output, false, true) => "󰏤",
+            (AudioKind::Output, false, false) => "󰐊",
+        };
+        let volume = self
+            .volume
+            .map(|v| format!("{v:>3}%"))
+            .unwrap_or_else(|| "  — ".into());
+        let title = if self.name.is_empty() || self.name == self.application {
+            self.application.clone()
+        } else {
+            format!("{}: {}", self.application, self.name)
+        };
+        let direction = if self.kind == AudioKind::Output {
+            "→"
+        } else {
+            "←"
+        };
+        format!(
+            "{icon} {volume}  {} {direction} {}",
+            single_line(&title, 27),
+            single_line(&self.device_label, 18)
+        )
+    }
+}
+
+/// A sub-menu stays in the current tab; the target is a device/stream key,
+/// never its display label or row number.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Picker {
+    Route(String),
+    Port(String),
+}
+
+impl Picker {
+    pub fn target(&self) -> &str {
+        match self {
+            Self::Route(key) | Self::Port(key) => key,
+        }
+    }
+}
+
+pub const BACK_KEY: &str = "back";
+
+#[derive(Clone, Debug)]
+pub struct ChoiceEntry {
+    pub key: String,
+    pub label: String,
+    pub active: bool,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChoiceList {
+    pub title: String,
+    pub entries: Vec<ChoiceEntry>,
+}
+
 /// One script invocation only ever renders one tab, so only that tab's devices
 /// are collected. Bluetooth reads BlueZ, the audio tabs read PulseAudio, and
 /// neither backend has to be reachable for the other tab to work.
 pub enum Devices {
     Bluetooth(Vec<BluetoothEntry>),
     Audio(Vec<AudioEntry>),
+    Streams(Vec<StreamEntry>),
+    Choices(ChoiceList),
 }
 
 impl Devices {
@@ -231,6 +338,9 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.is_empty(),
             Self::Audio(entries) => entries.is_empty(),
+            Self::Streams(entries) => entries.is_empty(),
+            // Every picker has a Back row, even when all targets disappear.
+            Self::Choices(_) => false,
         }
     }
 
@@ -238,6 +348,18 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.iter().position(|entry| entry.key == key),
             Self::Audio(entries) => entries.iter().position(|entry| entry.key == key),
+            Self::Streams(entries) => entries.iter().position(|entry| entry.key == key),
+            Self::Choices(choices) => {
+                if key == BACK_KEY {
+                    Some(0)
+                } else {
+                    choices
+                        .entries
+                        .iter()
+                        .position(|entry| entry.key == key)
+                        .map(|i| i + 1)
+                }
+            }
         }
     }
 
@@ -245,20 +367,29 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.get(index).map(BluetoothEntry::message_label),
             Self::Audio(entries) => entries.get(index).map(AudioEntry::message_label),
+            Self::Streams(_) => None,
+            Self::Choices(choices) => Some(choices.title.clone()),
         }
     }
 
     pub fn bluetooth(&self, key: &str) -> Option<&BluetoothEntry> {
         match self {
             Self::Bluetooth(entries) => entries.iter().find(|entry| entry.key == key),
-            Self::Audio(_) => None,
+            _ => None,
         }
     }
 
     pub fn audio(&self, key: &str) -> Option<&AudioEntry> {
         match self {
             Self::Audio(entries) => entries.iter().find(|entry| entry.key == key),
-            Self::Bluetooth(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn stream(&self, key: &str) -> Option<&StreamEntry> {
+        match self {
+            Self::Streams(entries) => entries.iter().find(|entry| entry.key == key),
+            _ => None,
         }
     }
 }
@@ -460,7 +591,13 @@ mod tests {
 
     #[test]
     fn modes_round_trip_through_their_script_argument() {
-        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
+        for mode in [
+            Mode::Bluetooth,
+            Mode::Output,
+            Mode::Input,
+            Mode::Playback,
+            Mode::Recording,
+        ] {
             assert_eq!(mode.name().parse::<Mode>().unwrap(), mode);
         }
     }

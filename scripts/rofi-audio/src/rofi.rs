@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::bluetooth::Backend;
-use crate::model::{AudioEntry, Devices, Mode};
-use crate::{AppResult, audio, bluetooth};
+use crate::model::{Devices, Mode};
+use crate::{AppResult, bluetooth};
 
+mod mixer;
 mod pairing;
 mod render;
 
@@ -17,7 +18,7 @@ use pairing::{
 };
 const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
 
-/// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The four action-bar buttons
+/// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The action-bar buttons
 /// are wired to these in rofi-audio.rasi.
 ///
 /// Connect/disconnect and confirm have no button and no hotkey of their own:
@@ -37,6 +38,10 @@ const RETV_VOLUME_DOWN: u8 = 13;
 /// a Bluetooth connect that outlasts `wait_for_connect`'s 6-second poll still
 /// surfaces its result. `kb-custom-5` is RETV 14.
 const RETV_REFRESH: u8 = 14;
+const RETV_MUTE: u8 = 15;
+const RETV_ROUTE: u8 = 16;
+const RETV_PORT: u8 = 17;
+const RETV_BACK: u8 = 18;
 
 pub fn launch() -> AppResult<()> {
     // A pairing abandoned by closing the menu can leave a prompt behind; drop
@@ -52,7 +57,9 @@ pub fn launch() -> AppResult<()> {
     let modes = format!(
         "bluetooth:{executable} script bluetooth,\
          output:{executable} script output,\
-         input:{executable} script input"
+         input:{executable} script input,\
+         playback:{executable} script playback,\
+         recording:{executable} script recording"
     );
     let status = Command::new(rofi_binary())
         .env(PRESERVE_SELECTION_ENV, "true")
@@ -69,12 +76,26 @@ pub fn launch() -> AppResult<()> {
             "󰕾 Output",
             "-display-input",
             "󰍬 Input",
+            "-display-playback",
+            "󰐊 Playback",
+            "-display-recording",
+            "󰑋 Recording",
             // Alt+1..Alt+4 are Rofi's defaults for the action-bar buttons;
             // volume also answers to Alt+Up/Alt+Down, which nothing else uses.
             "-kb-custom-3",
             "Alt+3,Alt+Up",
             "-kb-custom-4",
             "Alt+4,Alt+Down",
+            // Use unused default numbered bindings; do not collide with
+            // Rofi's built-in Alt+letter/arrow actions.
+            "-kb-custom-6",
+            "Alt+6",
+            "-kb-custom-7",
+            "Alt+7",
+            "-kb-custom-8",
+            "Alt+8",
+            "-kb-custom-9",
+            "Alt+9",
             "-theme",
         ])
         .arg(theme_path()?)
@@ -103,12 +124,14 @@ pub async fn run_script(mode: Mode) -> AppResult<()> {
     }
     // Pull anything the detached connect left behind before acting, so a
     // finished pairing or a pending code prompt is visible right away.
-    consume_connect_result(&mut state);
-    consume_pair_request(&mut state);
+    if mode == Mode::Bluetooth {
+        consume_connect_result(&mut state);
+        consume_pair_request(&mut state);
+    }
 
-    let devices = match mode.audio_kind() {
-        Some(kind) => run_audio(kind, retv, selected_key.as_deref(), &mut state),
-        None => run_bluetooth(retv, selected_key.as_deref(), &mut state).await,
+    let devices = match mode {
+        Mode::Bluetooth => run_bluetooth(retv, selected_key.as_deref(), &mut state).await,
+        _ => mixer::run(mode, retv, selected_key.as_deref(), &mut state),
     };
     render::render(mode, state, selected_key.as_deref(), &devices)
 }
@@ -163,8 +186,8 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
             abandon_code_prompt(state);
             forget(&backend, &before, selected_key, state).await;
         }
-        RETV_VOLUME_UP | RETV_VOLUME_DOWN => {
-            state.set_message("Volume applies to the Output and Input tabs.");
+        RETV_VOLUME_UP | RETV_VOLUME_DOWN | RETV_MUTE | RETV_ROUTE | RETV_PORT => {
+            state.set_message("Audio controls apply to the other tabs.");
         }
         _ => {}
     }
@@ -288,106 +311,6 @@ async fn forget(
             entry.name
         )),
         Err(error) => state.set_message(format!("Cannot forget {}: {error}", entry.name)),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Output and Input tabs
-// ---------------------------------------------------------------------------
-
-fn run_audio(
-    kind: crate::model::AudioKind,
-    retv: u8,
-    selected_key: Option<&str>,
-    state: &mut UiState,
-) -> Devices {
-    let before = match audio::snapshot(kind) {
-        Ok(entries) => Devices::Audio(entries),
-        Err(error) => {
-            eprintln!("rofi-audio: cannot reach PulseAudio: {error}");
-            state.set_message("Audio service is unavailable.");
-            return Devices::Audio(Vec::new());
-        }
-    };
-
-    let mut chosen_default = None;
-    match retv {
-        RETV_ACTIVATE => {
-            chosen_default = set_default(&before, selected_key, state);
-        }
-        RETV_VOLUME_UP => nudge_volume(&before, selected_key, state, audio::STEP),
-        RETV_VOLUME_DOWN => nudge_volume(&before, selected_key, state, -audio::STEP),
-        RETV_SCAN => state.set_message("Scan applies to the Bluetooth tab."),
-        RETV_FORGET => state.set_message("Forget applies to the Bluetooth tab."),
-        _ => {}
-    }
-
-    let mut after = match audio::snapshot(kind) {
-        Ok(entries) => entries,
-        Err(_) => return before,
-    };
-    if let Some(chosen) = chosen_default.as_deref() {
-        apply_chosen_default(&mut after, chosen);
-    }
-    Devices::Audio(after)
-}
-
-/// Moves the "default" mark onto the device the user just activated.
-///
-/// PulseAudio acknowledges `set_default_device` before the change is visible
-/// to a follow-up query: pipewire-pulse routes it through PipeWire's metadata
-/// and applies it asynchronously, so the snapshot taken microseconds later can
-/// still name the old default and the row would redraw in the wrong colour.
-/// The server accepted the change, so this render trusts that over the stale
-/// read; the next render reads the settled value anyway.
-fn apply_chosen_default(entries: &mut [AudioEntry], chosen: &str) {
-    for entry in entries {
-        entry.default = entry.name == chosen;
-    }
-}
-
-/// Returns the PulseAudio node name that is now the default, when it changed.
-fn set_default(
-    before: &Devices,
-    selected_key: Option<&str>,
-    state: &mut UiState,
-) -> Option<String> {
-    let Some(entry) = selected_key.and_then(|key| before.audio(key)) else {
-        state.set_message("Select a device first.");
-        return None;
-    };
-    if entry.default {
-        state.set_message(format!("{} is already the default.", entry.label));
-        return None;
-    }
-    match audio::set_default(entry) {
-        Ok(()) => {
-            state.set_message(format!(
-                "{} is now the default {}.",
-                entry.label,
-                entry.kind.noun()
-            ));
-            Some(entry.name.clone())
-        }
-        Err(error) => {
-            state.set_message(format!("Cannot select {}: {error}", entry.label));
-            None
-        }
-    }
-}
-
-fn nudge_volume(before: &Devices, selected_key: Option<&str>, state: &mut UiState, delta: i16) {
-    let Some(entry) = selected_key.and_then(|key| before.audio(key)) else {
-        state.set_message("Select a device first.");
-        return;
-    };
-    // On success the re-rendered row already shows the new level, so the
-    // message widget is left to fall back to the selected row's status line.
-    if let Err(error) = audio::nudge_volume(entry, delta) {
-        state.set_message(format!(
-            "Cannot change the volume of {}: {error}",
-            entry.label
-        ));
     }
 }
 

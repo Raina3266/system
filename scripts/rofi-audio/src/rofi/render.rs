@@ -1,14 +1,16 @@
 use std::io::{self, Write};
 
 use crate::AppResult;
-use crate::model::{AudioEntry, BluetoothEntry, Devices, Mode, single_line};
+use crate::model::{
+    AudioEntry, BACK_KEY, BluetoothEntry, ChoiceEntry, Devices, Mode, StreamEntry, single_line,
+};
 
 use super::UiState;
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
 /// Characters that fit on one compact message-panel line at the window width.
-const MESSAGE_MAX_CHARS: usize = 33;
+const MESSAGE_MAX_CHARS: usize = 54;
 const REFRESH_ACTION: &str = "kb-custom-5";
 /// Idle seconds between refresh ticks. Must never be 0 on any tab — see
 /// `write_refresh_theme`.
@@ -18,10 +20,22 @@ const PENDING_REFRESH_DELAY: u8 = 1;
 
 pub(super) fn render(
     mode: Mode,
-    mut state: UiState,
+    state: UiState,
     selected_key: Option<&str>,
     devices: &Devices,
 ) -> AppResult<()> {
+    io::stdout().write_all(&render_output(mode, state, selected_key, devices)?)?;
+    Ok(())
+}
+
+pub(super) fn render_output(
+    mode: Mode,
+    mut state: UiState,
+    selected_key: Option<&str>,
+    devices: &Devices,
+) -> io::Result<Vec<u8>> {
+    let override_selection = state.selection.take();
+    let selected_key = override_selection.as_deref().or(selected_key);
     let selected_row = selected_key
         .and_then(|key| devices.position(key))
         .or_else(|| (!devices.is_empty()).then_some(0));
@@ -37,7 +51,19 @@ pub(super) fn render(
             // wrap the message onto a second visual line.
             single_line(&raw, MESSAGE_MAX_CHARS)
         }
-        Mode::Output | Mode::Input => String::new(),
+        _ => {
+            // Normal audio tabs stay uncluttered. Errors and picker prompts
+            // must still be visible; otherwise rejected server operations
+            // would look like buttons that did nothing.
+            let prompt = match devices {
+                Devices::Choices(choices) => Some(choices.title.as_str()),
+                _ => None,
+            };
+            single_line(
+                state.message.as_deref().or(prompt).unwrap_or_default(),
+                MESSAGE_MAX_CHARS,
+            )
+        }
     };
 
     let mut output = Vec::new();
@@ -59,9 +85,34 @@ pub(super) fn render(
                 write_audio_row(&mut output, entry)?;
             }
         }
+        Devices::Streams(entries) if entries.is_empty() => {
+            write_empty_row(&mut output, empty_label(mode))?;
+        }
+        Devices::Streams(entries) => {
+            for entry in entries {
+                write_stream_row(&mut output, entry)?;
+            }
+        }
+        Devices::Choices(choices) => {
+            write_choice_row(
+                &mut output,
+                &ChoiceEntry {
+                    key: BACK_KEY.into(),
+                    label: "← Back".into(),
+                    active: false,
+                    enabled: true,
+                },
+                true,
+            )?;
+            if choices.entries.is_empty() {
+                write_empty_row(&mut output, "No choices available for this device")?;
+            }
+            for entry in &choices.entries {
+                write_choice_row(&mut output, entry, false)?;
+            }
+        }
     }
-    io::stdout().write_all(&output)?;
-    Ok(())
+    Ok(output)
 }
 
 fn empty_label(mode: Mode) -> &'static str {
@@ -69,6 +120,8 @@ fn empty_label(mode: Mode) -> &'static str {
         Mode::Bluetooth => "No Bluetooth devices found",
         Mode::Output => "No audio outputs found",
         Mode::Input => "No audio inputs found",
+        Mode::Playback => "No playback streams — start audio in an app",
+        Mode::Recording => "No recording streams — start recording in an app",
     }
 }
 
@@ -88,18 +141,21 @@ fn write_headers(
         state.initialized = true;
     }
     write_header(output, "prompt", mode.prompt());
-    write_header(output, "message", message);
-    // While a pairing code is awaited the filter box is the code entry; allow
-    // custom input so Enter submits the typed text (Rofi custom-input, RETV=2).
     write_header(
         output,
-        "no-custom",
-        if state.code_for.is_some() {
-            "false"
-        } else {
-            "true"
-        },
+        "message",
+        &message
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;"),
     );
+    // Hotkeys and refresh must reach the script even when a filter matches no
+    // row. Custom input is ignored except for Bluetooth pairing codes.
+    write_header(output, "no-custom", "false");
+    write_header(output, "markup-rows", "false");
+    // Preserve the existing reset-on-action behavior. In particular, a filter
+    // for an app must not hide the devices when its route picker opens.
+    write_header(output, "keep-filter", "false");
     write_header(output, "use-hot-keys", "true");
     write_header(output, "keep-selection", "true");
     write_refresh_theme(output, mode, state);
@@ -178,6 +234,49 @@ pub(super) fn write_audio_row(output: &mut Vec<u8>, entry: &AudioEntry) -> io::R
     if entry.default {
         write_row_option(output, &mut first, "urgent", "true");
     } else {
+        write_row_option(output, &mut first, "active", "true");
+    }
+    output.push(RECORD_SEPARATOR);
+    Ok(())
+}
+
+pub(super) fn write_stream_row(output: &mut Vec<u8>, entry: &StreamEntry) -> io::Result<()> {
+    write!(output, "{}", entry.key)?;
+    let mut first = true;
+    write_row_option(output, &mut first, "display", &entry.row_label());
+    write_row_option(output, &mut first, "info", &entry.key);
+    write_row_option(
+        output,
+        &mut first,
+        "meta",
+        &format!(
+            "{} {} {} {}",
+            entry.application, entry.name, entry.device_label, entry.device_name
+        ),
+    );
+    if !entry.muted && !entry.corked {
+        write_row_option(output, &mut first, "active", "true");
+    }
+    output.push(RECORD_SEPARATOR);
+    Ok(())
+}
+
+fn write_choice_row(output: &mut Vec<u8>, entry: &ChoiceEntry, permanent: bool) -> io::Result<()> {
+    write!(output, "{}", entry.key)?;
+    let mut first = true;
+    let label = format!("{}{}", if entry.active { "✓ " } else { "" }, entry.label);
+    write_row_option(output, &mut first, "display", &single_line(&label, 54));
+    write_row_option(output, &mut first, "info", &entry.key);
+    write_row_option(output, &mut first, "meta", &entry.label);
+    if permanent {
+        write_row_option(output, &mut first, "permanent", "true");
+    }
+    if !entry.enabled {
+        write_row_option(output, &mut first, "nonselectable", "true");
+    }
+    if entry.active {
+        write_row_option(output, &mut first, "urgent", "true");
+    } else if entry.enabled {
         write_row_option(output, &mut first, "active", "true");
     }
     output.push(RECORD_SEPARATOR);

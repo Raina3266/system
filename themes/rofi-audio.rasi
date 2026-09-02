@@ -1,16 +1,20 @@
-/* rofi-audio: Bluetooth / Output / Input tabs, a status message, and four
-   action buttons.
+/* rofi-audio: Bluetooth / Output / Input / Playback / Recording.
 
    Connecting, disconnecting and confirming have no buttons of their own:
    double-clicking a row — or pressing Enter on it — is Rofi's accept-entry
    action, which connects or disconnects on Bluetooth and makes the row the
-   default device on Output / Input.
+   default device on Output / Input. On Playback / Recording it opens the
+   selected stream's device picker. Enter in a picker applies the choice.
 
    Rofi builds its widget tree once and does not re-run a script mode when you
    switch back to a tab it has already shown, so the action bar can neither
-   swap its buttons per tab nor keep per-tab colouring in sync. All four are
+   swap its buttons per tab nor keep per-tab colouring in sync. The buttons are
    therefore always present and always live; the selected tab in the mode
-   switcher is what tells you which two are meaningful. */
+   switcher is what tells you which are meaningful.
+
+   Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
+   Alt+6 mute; Alt+7 route; Alt+8 port; Alt+9 back.
+   Profile and Bluetooth codec selection are intentionally not included. */
 
 /* Rofi triggers this binding once the UI has been idle for `delay` seconds,
    which is the only way a script mode can redraw itself without user input.
@@ -18,7 +22,7 @@
    timer is armed from whatever value was already in place — so this file's
    value is what arms the very first tick, and it must be non-zero or nothing
    ticks until the user presses something. See `write_refresh_theme` in
-   scripts/rofi-audio/src/rofi.rs. */
+    scripts/rofi-audio/src/rofi/render.rs. */
 configuration {
     /* Every device row is one compact line. */
     eh: 1;
@@ -46,7 +50,7 @@ configuration {
 
 /* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    width: 400px;
+    width: 640px;
     height: 444px;
     background-color: @bg;
     border: 1px;
@@ -63,12 +67,14 @@ mainbox {
 }
 
 mode-switcher {
+    font: "JetBrains Mono Nerd Font 11";
     orientation: horizontal;
-    spacing: 10px;
+    spacing: 6px;
     padding: 2px 0 2px 0;
 }
 
 button {
+    font: "JetBrains Mono Nerd Font 11";
     expand: true;
     cursor: pointer;
     border: 1px;
@@ -147,7 +153,9 @@ element selected.urgent {
 }
 
 /* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
-   Output/Input: every device is foreground, the default one is cyan. */
+   Output/Input: every device is foreground, the default one is cyan.
+   Playback/Recording: live streams are foreground, muted/paused streams dim.
+   Pickers: the current device/port is cyan, unavailable ports dim. */
 element-text normal.normal,
 element-text alternate.normal,
 element-text selected.normal {
@@ -183,14 +191,22 @@ action-bar {
         button-scan,
         button-forget,
         button-volume-up,
-        button-volume-down
+        button-volume-down,
+        button-mute,
+        button-route,
+        button-port,
+        button-back
     ];
 }
 
 button-scan,
 button-forget,
 button-volume-up,
-button-volume-down {
+button-volume-down,
+button-mute,
+button-route,
+button-port,
+button-back {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
@@ -214,8 +230,7 @@ button-forget {
     action: "kb-custom-2";
 }
 
-/* Output and Input tabs: volume up, volume down. Volume also answers to Alt+Up
-   and Alt+Down; a double-click on the row makes it the default device. */
+/* All four audio tabs: volume up/down and mute. */
 button-volume-up {
     content: " 󰝝 ";
     action: "kb-custom-3";
@@ -224,6 +239,28 @@ button-volume-up {
 button-volume-down {
     content: " 󰝞 ";
     action: "kb-custom-4";
+}
+
+button-mute {
+    content: " 󰝟 ";
+    action: "kb-custom-6";
+}
+
+/* Stream routing for Playback/Recording; no change to the system default. */
+button-route {
+    content: " 󰁔 ";
+    action: "kb-custom-7";
+}
+
+/* Physical ports for Output/Input, without changing the card profile. */
+button-port {
+    content: " 󰈀 ";
+    action: "kb-custom-8";
+}
+
+button-back {
+    content: " 󰁍 ";
+    action: "kb-custom-9";
 }
 
 error-message {
