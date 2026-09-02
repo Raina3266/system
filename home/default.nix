@@ -52,6 +52,7 @@ in
     wl-clipboard
 
     # productivity
+    digikam
     obsidian
     krokiet
     exercism
@@ -80,7 +81,6 @@ in
     obs-studio
     shotcut
     kid3
-    pavucontrol
     inkscape
     gimp
     spotdl

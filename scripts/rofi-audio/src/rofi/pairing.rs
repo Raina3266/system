@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::bluetooth::Backend;
-use crate::model::{CodeKind, hex_decode, hex_encode};
+use crate::model::{CodeKind, Picker, hex_decode, hex_encode};
 use crate::{AppResult, bluetooth};
 
 const CONNECT_RESULT_FILENAME: &str = "rofi-audio-connect-result";
@@ -30,6 +30,9 @@ pub(super) struct UiState {
     /// pairing agent instead of opening a nested Rofi dialog.
     pub(super) code_for: Option<String>,
     pub(super) code_kind: Option<CodeKind>,
+    pub(super) picker: Option<Picker>,
+    /// One-render override when entering/leaving an audio picker. Not persisted.
+    pub(super) selection: Option<String>,
 }
 
 impl UiState {
@@ -49,6 +52,8 @@ impl UiState {
                 state.code_for = hex_decode(awaiting);
             } else if let Some(kind) = part.strip_prefix("kind=") {
                 state.code_kind = kind.parse().ok();
+            } else if let Some(key) = part.strip_prefix("route=") {
+                state.picker = hex_decode(key).map(Picker::Route);
             }
         }
         state
@@ -68,6 +73,9 @@ impl UiState {
         }
         if let Some(kind) = self.code_kind {
             parts.push(format!("kind={}", kind.name()));
+        }
+        if let Some(picker) = &self.picker {
+            parts.push(format!("route={}", hex_encode(picker.target())));
         }
         parts.join(";")
     }

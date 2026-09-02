@@ -3,13 +3,14 @@ use std::str::FromStr;
 
 use crate::{AppError, AppResult};
 
-/// The three Rofi tabs. Each one is a separate script mode, so Rofi keeps a
+/// Each tab is a separate script mode, so Rofi keeps a
 /// private `ROFI_DATA` per tab and the mode switcher renders them as buttons.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Bluetooth,
     Output,
     Input,
+    Playback,
 }
 
 impl Mode {
@@ -18,6 +19,7 @@ impl Mode {
             Self::Bluetooth => "bluetooth",
             Self::Output => "output",
             Self::Input => "input",
+            Self::Playback => "playback",
         }
     }
 
@@ -31,15 +33,20 @@ impl Mode {
             Self::Bluetooth => "󰂯 Bluetooth",
             Self::Output => "󰕾 Output",
             Self::Input => "󰍬 Input",
+            Self::Playback => "󰐊 Play",
         }
     }
 
     pub fn audio_kind(self) -> Option<AudioKind> {
         match self {
             Self::Bluetooth => None,
-            Self::Output => Some(AudioKind::Output),
+            Self::Output | Self::Playback => Some(AudioKind::Output),
             Self::Input => Some(AudioKind::Input),
         }
+    }
+
+    pub fn is_stream(self) -> bool {
+        matches!(self, Self::Playback)
     }
 }
 
@@ -51,6 +58,7 @@ impl FromStr for Mode {
             "bluetooth" | "bt" => Ok(Self::Bluetooth),
             "output" | "sink" | "outputs" => Ok(Self::Output),
             "input" | "source" | "inputs" => Ok(Self::Input),
+            "playback" => Ok(Self::Playback),
             _ => Err(std::io::Error::other(format!("unknown mode {value:?}")).into()),
         }
     }
@@ -69,17 +77,17 @@ pub enum AudioKind {
 }
 
 impl AudioKind {
+    pub fn maximum(self) -> i16 {
+        match self {
+            Self::Output => 150,
+            Self::Input => 100,
+        }
+    }
+
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::Output => "sink",
             Self::Input => "source",
-        }
-    }
-
-    pub fn noun(self) -> &'static str {
-        match self {
-            Self::Output => "output",
-            Self::Input => "input",
         }
     }
 }
@@ -157,8 +165,7 @@ impl BluetoothEntry {
         } else {
             "available"
         };
-        // Single-line status row matched by the `lines: 1` message widget in
-        // rofi-audio.rasi.
+        // The renderer flattens this text and wraps it in no-break markup.
         format!("{} · {} · {state}", self.name, self.address)
     }
 
@@ -178,9 +185,11 @@ impl BluetoothEntry {
 pub struct AudioEntry {
     pub key: String,
     pub kind: AudioKind,
-    /// PulseAudio node name. Stable across renders, unlike the numeric index,
-    /// so it is what the row key and every follow-up action are built from.
+    /// PulseAudio node name, or empty for a card port whose profile is inactive.
     pub name: String,
+    /// Stable ALSA card name for Output ports, including inactive-profile rows.
+    /// Together with `port` it survives sink replacement during a profile switch.
+    pub card: Option<String>,
     /// Full PulseAudio description. Kept for the row's `meta`, so filtering
     /// still matches the long name even though the row shows the short one.
     pub description: String,
@@ -189,20 +198,33 @@ pub struct AudioEntry {
     pub volume: u8,
     pub muted: bool,
     pub default: bool,
+    /// A physical port selected by this row. None for device-only rows used
+    /// by Waybar and the per-app routing list.
+    pub port: Option<String>,
 }
 
 impl AudioEntry {
+    pub fn inactive(&self) -> bool {
+        self.card.is_some() && self.name.is_empty()
+    }
+
     pub fn row_label(&self) -> String {
         // Keep every device on one compact line: icon, volume, then name.
+        if self.inactive() {
+            return format!("󰕾   —   {}", single_line(&self.label, 48));
+        }
         format!(
             "{} {:>3}%  {}",
             self.volume_icon(),
             self.volume,
-            truncate(&self.label, 26)
+            single_line(&self.label, 48)
         )
     }
 
     pub fn message_label(&self) -> String {
+        if self.inactive() {
+            return format!("{} · select to enable", self.label);
+        }
         let state = if self.default { "default" } else { "available" };
         let mute = if self.muted { " · muted" } else { "" };
         format!("{} · {}%{mute} · {state}", self.label, self.volume)
@@ -218,12 +240,100 @@ impl AudioEntry {
     }
 }
 
+/// One live playback stream, not an MPRIS player. Several streams
+/// from the same application remain separate and are identified by `key`.
+#[derive(Clone, Debug)]
+pub struct StreamEntry {
+    pub key: String,
+    pub index: u32,
+    pub application: String,
+    pub name: String,
+    pub device_name: String,
+    pub device_label: String,
+    pub volume: Option<u8>,
+    pub muted: bool,
+    pub corked: bool,
+}
+
+impl StreamEntry {
+    pub fn row_label(&self) -> String {
+        let icon = match (self.muted, self.corked) {
+            (true, _) => "󰝟",
+            (false, true) => "󰏤",
+            (false, false) => "󰐊",
+        };
+        let volume = self
+            .volume
+            .map(|v| format!("{v:>3}%"))
+            .unwrap_or_else(|| "  — ".into());
+        let name = self.name.trim();
+        let title = if name.is_empty()
+            || name.eq_ignore_ascii_case(&self.application)
+            || name.eq_ignore_ascii_case("Playback")
+        {
+            self.application.clone()
+        } else {
+            format!("{}: {name}", self.application)
+        };
+        // The destination remains in search metadata and the route picker.
+        // Spend the row's space on the application and meaningful stream title.
+        format!("{icon} {volume}  {}", single_line(&title, 48))
+    }
+}
+
+/// A routing sub-menu stays in the current tab; the target is a stream key,
+/// never its display label or row number.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Picker {
+    Route(String),
+}
+
+impl Picker {
+    pub fn target(&self) -> &str {
+        match self {
+            Self::Route(key) => key,
+        }
+    }
+}
+
+pub const BACK_KEY: &str = "back";
+
+#[derive(Clone, Debug)]
+pub struct ChoiceEntry {
+    pub key: String,
+    pub label: String,
+    /// Full device description for filtering, separate from the compact label.
+    pub description: String,
+    pub active: bool,
+    pub enabled: bool,
+}
+
+impl ChoiceEntry {
+    pub fn route(device: AudioEntry, current_device: &str) -> Self {
+        Self {
+            active: device.name == current_device,
+            key: device.key,
+            label: device.label,
+            description: device.description,
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChoiceList {
+    pub title: String,
+    pub entries: Vec<ChoiceEntry>,
+}
+
 /// One script invocation only ever renders one tab, so only that tab's devices
 /// are collected. Bluetooth reads BlueZ, the audio tabs read PulseAudio, and
 /// neither backend has to be reachable for the other tab to work.
 pub enum Devices {
     Bluetooth(Vec<BluetoothEntry>),
     Audio(Vec<AudioEntry>),
+    Streams(Vec<StreamEntry>),
+    Choices(ChoiceList),
 }
 
 impl Devices {
@@ -231,6 +341,9 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.is_empty(),
             Self::Audio(entries) => entries.is_empty(),
+            Self::Streams(entries) => entries.is_empty(),
+            // Every picker has a Back row, even when all targets disappear.
+            Self::Choices(_) => false,
         }
     }
 
@@ -238,6 +351,18 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.iter().position(|entry| entry.key == key),
             Self::Audio(entries) => entries.iter().position(|entry| entry.key == key),
+            Self::Streams(entries) => entries.iter().position(|entry| entry.key == key),
+            Self::Choices(choices) => {
+                if key == BACK_KEY {
+                    Some(0)
+                } else {
+                    choices
+                        .entries
+                        .iter()
+                        .position(|entry| entry.key == key)
+                        .map(|i| i + 1)
+                }
+            }
         }
     }
 
@@ -245,20 +370,29 @@ impl Devices {
         match self {
             Self::Bluetooth(entries) => entries.get(index).map(BluetoothEntry::message_label),
             Self::Audio(entries) => entries.get(index).map(AudioEntry::message_label),
+            Self::Streams(_) => None,
+            Self::Choices(choices) => Some(choices.title.clone()),
         }
     }
 
     pub fn bluetooth(&self, key: &str) -> Option<&BluetoothEntry> {
         match self {
             Self::Bluetooth(entries) => entries.iter().find(|entry| entry.key == key),
-            Self::Audio(_) => None,
+            _ => None,
         }
     }
 
     pub fn audio(&self, key: &str) -> Option<&AudioEntry> {
         match self {
             Self::Audio(entries) => entries.iter().find(|entry| entry.key == key),
-            Self::Bluetooth(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn stream(&self, key: &str) -> Option<&StreamEntry> {
+        match self {
+            Self::Streams(entries) => entries.iter().find(|entry| entry.key == key),
+            _ => None,
         }
     }
 }
@@ -385,11 +519,11 @@ fn is_pci_family(token: &str) -> bool {
         })
 }
 
-/// Collapses embedded line breaks so a backend error wraps as one paragraph,
-/// then clips it to keep the message panel bounded.
+/// Collapses embedded line breaks, including Unicode paragraph separators,
+/// then clips the text to keep compact labels and messages bounded.
 pub fn single_line(value: &str, maximum: usize) -> String {
     let joined = value
-        .split(['\n', '\r'])
+        .split(['\n', '\r', '\u{0085}', '\u{2028}', '\u{2029}'])
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -460,9 +594,15 @@ mod tests {
 
     #[test]
     fn modes_round_trip_through_their_script_argument() {
-        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input] {
+        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input, Mode::Playback] {
             assert_eq!(mode.name().parse::<Mode>().unwrap(), mode);
         }
+    }
+
+    #[test]
+    fn recording_mode_is_not_supported() {
+        assert!("recording".parse::<Mode>().is_err());
+        assert!("Recording".parse::<Mode>().is_err());
     }
 
     #[test]
@@ -485,8 +625,10 @@ mod tests {
             key: "sink:00".to_owned(),
             kind: AudioKind::Output,
             name: "alsa_output.pci".to_owned(),
+            card: None,
             description: "Built-in Audio Analog Stereo".to_owned(),
             label: "Built-in Audio".to_owned(),
+            port: None,
             volume: 45,
             muted: false,
             default: true,
@@ -500,8 +642,10 @@ mod tests {
             key: "source:01".to_owned(),
             kind: AudioKind::Input,
             name: "alsa_input.pci".to_owned(),
+            card: None,
             description: "Webcam Mic".to_owned(),
             label: "Webcam Mic".to_owned(),
+            port: None,
             volume: 80,
             muted: true,
             default: false,
@@ -598,6 +742,10 @@ mod tests {
         );
         assert_eq!(single_line("a".repeat(60).as_str(), 10), "aaaaaaaaa…");
         assert_eq!(single_line("  spaced  ", 40), "spaced");
+        assert_eq!(
+            single_line("one\r\ntwo\u{0085}three\u{2028}four\u{2029}five", 40),
+            "one two three four five"
+        );
     }
 
     #[test]

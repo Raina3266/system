@@ -56,6 +56,7 @@ in
   environment.gnome.excludePackages = with pkgs; [
     epiphany
     geary
+    eog
     yelp
     seahorse
     totem
@@ -213,13 +214,6 @@ in
   services.immich = {
     enable = true;
     openFirewall = true;
-  };
-
-  services.sunshine = {
-    enable = true;
-    autoStart = false;
-    openFirewall = true;
-    capSysAdmin = true;
   };
 
   # Immich and Jellyfin are installed, but start together only on demand.

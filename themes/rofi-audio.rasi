@@ -1,24 +1,9 @@
-/* rofi-audio: Bluetooth / Output / Input tabs, a status message, and four
-   action buttons.
+/* rofi-audio: Bluetooth / Output / Input / Play.
 
-   Connecting, disconnecting and confirming have no buttons of their own:
-   double-clicking a row — or pressing Enter on it — is Rofi's accept-entry
-   action, which connects or disconnects on Bluetooth and makes the row the
-   default device on Output / Input.
+   Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
+   Alt+6 mute; Alt+7 route; Alt+9 back (also a row in the route picker).
+   Profile and Bluetooth codec selection are intentionally not included. */
 
-   Rofi builds its widget tree once and does not re-run a script mode when you
-   switch back to a tab it has already shown, so the action bar can neither
-   swap its buttons per tab nor keep per-tab colouring in sync. All four are
-   therefore always present and always live; the selected tab in the mode
-   switcher is what tells you which two are meaningful. */
-
-/* Rofi triggers this binding once the UI has been idle for `delay` seconds,
-   which is the only way a script mode can redraw itself without user input.
-   Each script render re-writes this block through its `theme` header, but the
-   timer is armed from whatever value was already in place — so this file's
-   value is what arms the very first tick, and it must be non-zero or nothing
-   ticks until the user presses something. See `write_refresh_theme` in
-   scripts/rofi-audio/src/rofi.rs. */
 configuration {
     /* Every device row is one compact line. */
     eh: 1;
@@ -44,10 +29,9 @@ configuration {
     text-color: @fg;
 }
 
-/* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    width: 400px;
-    height: 444px;
+    width: 490px;
+    height: 490px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -64,12 +48,13 @@ mainbox {
 
 mode-switcher {
     orientation: horizontal;
-    spacing: 10px;
+    spacing: 6px;
     padding: 2px 0 2px 0;
 }
 
 button {
-    expand: true;
+    expand: false;
+    padding: 2px 8px;
     cursor: pointer;
     border: 1px;
     border-radius: 7px;
@@ -85,14 +70,6 @@ button selected {
     text-color: @pink;
 }
 
-/* Doubles as the pairing-code box: rofi-audio allows custom input while a
-   device is waiting for a PIN or passkey, so the typed text is submitted with
-   Enter instead of opening a nested dialog.
-
-   The `prompt` widget is deliberately left out of the children. Rofi drives it
-   from the mode's display name, which is the same string the mode-switcher tab
-   shows, so keeping it here would repeat "Bluetooth" / "Output" / "Input" next
-   to the tab that already says it. A static filter glyph goes in its place. */
 inputbar {
     spacing: 10px;
     padding: 7px 10px;
@@ -117,8 +94,7 @@ entry {
 }
 
 listview {
-    lines: 5;
-    dynamic: false;
+    dynamic: true;
     scrollbar: true;
     spacing: 4px;
 }
@@ -146,8 +122,6 @@ element selected.urgent {
     background-color: rgba(255, 126, 219, 0.12);
 }
 
-/* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
-   Output/Input: every device is foreground, the default one is cyan. */
 element-text normal.normal,
 element-text alternate.normal,
 element-text selected.normal {
@@ -168,7 +142,6 @@ element-text selected.urgent {
 
 message {
     padding: 5px 10px;
-    line: 1;
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);
@@ -178,19 +151,23 @@ message {
 action-bar {
     expand: false;
     orientation: horizontal;
-    spacing: 7px;
+    spacing: 5px;
     children: [
         button-scan,
         button-forget,
         button-volume-up,
-        button-volume-down
+        button-volume-down,
+        button-mute,
+        button-route
     ];
 }
 
 button-scan,
 button-forget,
 button-volume-up,
-button-volume-down {
+button-volume-down,
+button-mute,
+button-route {
     cursor: pointer;
     expand: true;
     horizontal-align: 0.5;
@@ -202,8 +179,6 @@ button-volume-down {
     text-color: @cyan;
 }
 
-/* Bluetooth tab: scan, forget. Connect/disconnect is a double-click on the
-   row. */
 button-scan {
     content: " 󰑐 ";
     action: "kb-custom-1";
@@ -214,8 +189,6 @@ button-forget {
     action: "kb-custom-2";
 }
 
-/* Output and Input tabs: volume up, volume down. Volume also answers to Alt+Up
-   and Alt+Down; a double-click on the row makes it the default device. */
 button-volume-up {
     content: " 󰝝 ";
     action: "kb-custom-3";
@@ -224,6 +197,16 @@ button-volume-up {
 button-volume-down {
     content: " 󰝞 ";
     action: "kb-custom-4";
+}
+
+button-mute {
+    content: " 󰝟 ";
+    action: "kb-custom-6";
+}
+
+button-route {
+    content: " 󰁔 ";
+    action: "kb-custom-7";
 }
 
 error-message {

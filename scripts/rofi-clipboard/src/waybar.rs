@@ -136,7 +136,7 @@ fn print_status() -> Result<()> {
         .count();
     let latest = history.items.iter().max_by_key(|item| item.created_at);
 
-    let text = format!("<span size='large'>{}</span>", glyph(latest));
+    let text = format!("<span size='large'>{}</span>", "󰍩");
     let tooltip = tooltip(count, latest);
     let class = class(latest);
 
@@ -186,16 +186,6 @@ fn install_exit_handlers() {
         signal(SIGTERM, handle_signal);
         signal(SIGINT, handle_signal);
         signal(SIGHUP, handle_signal);
-    }
-}
-
-/// The module's single glyph, varying with the most recently captured item so
-/// the bar reflects what was last copied at a glance.
-fn glyph(latest: Option<&ClipboardItem>) -> &'static str {
-    match latest {
-        Some(item) if item.image_file.is_some() => "󰋩",
-        Some(item) if item.kind == ItemKind::File => "󰈔",
-        _ => "󰍩",
     }
 }
 
@@ -254,50 +244,6 @@ fn plural_s(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn glyph_reflects_last_copied_kind() {
-        assert_eq!(glyph(None), "󰍩");
-
-        let text = ClipboardItem {
-            id: 1,
-            kind: ItemKind::Text,
-            text: Some("hi".to_owned()),
-            image_file: None,
-            name: None,
-            mime: "text/plain;charset=utf-8".to_owned(),
-            pinned: false,
-            created_at: 1,
-            digest: "d".to_owned(),
-        };
-        assert_eq!(glyph(Some(&text)), "󰍩");
-
-        let file = ClipboardItem {
-            id: 2,
-            kind: ItemKind::File,
-            text: None,
-            image_file: None,
-            name: Some("report.pdf".to_owned()),
-            mime: "text/uri-list".to_owned(),
-            pinned: false,
-            created_at: 2,
-            digest: "d2".to_owned(),
-        };
-        assert_eq!(glyph(Some(&file)), "󰈔");
-
-        let image = ClipboardItem {
-            id: 3,
-            kind: ItemKind::File,
-            text: None,
-            image_file: Some("x.png".to_owned()),
-            name: None,
-            mime: "image/png".to_owned(),
-            pinned: false,
-            created_at: 3,
-            digest: "d3".to_owned(),
-        };
-        assert_eq!(glyph(Some(&image)), "󰋩");
-    }
 
     #[test]
     fn tooltip_collapses_multiline_text_into_one_preview_row() {

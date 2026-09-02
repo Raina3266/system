@@ -132,8 +132,6 @@ element-text selected.active {
     text-color: @cyan;
 }
 
-/* Custom widget names beginning with "button" are real rofi buttons. Their
-   action invokes the same script-mode event as the documented Alt shortcut. */
 action-bar {
     expand: false;
     orientation: horizontal;
