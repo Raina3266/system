@@ -180,6 +180,57 @@ fn audio_messages_are_hidden_when_idle_but_errors_are_escaped_and_visible() {
 }
 
 #[test]
+fn every_tab_escapes_and_prevents_wrapping_of_multiline_messages() {
+    use super::render::render_output;
+    use crate::model::Devices;
+    for mode in [Mode::Bluetooth, Mode::Output, Mode::Input, Mode::Playback] {
+        let rows = match mode {
+            Mode::Bluetooth => Devices::Bluetooth(Vec::new()),
+            Mode::Playback => Devices::Streams(Vec::new()),
+            _ => Devices::Audio(Vec::new()),
+        };
+        let state = UiState {
+            message: Some("<b>A&B</b>\r\n第二行\u{2028}Third line".into()),
+            ..Default::default()
+        };
+        let output = String::from_utf8(render_output(mode, state, None, &rows).unwrap()).unwrap();
+        let message = output
+            .split('\x1e')
+            .find_map(|record| record.strip_prefix("\0message\x1f"))
+            .unwrap();
+        assert_eq!(
+            message,
+            "<span allow_breaks=\"false\">&lt;b&gt;A&amp;B&lt;/b&gt; 第二行 Third line</span>"
+        );
+        let empty =
+            String::from_utf8(render_output(mode, UiState::default(), None, &rows).unwrap())
+                .unwrap();
+        assert!(empty.contains("\0message\x1f\x1e"));
+    }
+}
+
+#[test]
+fn long_wide_route_prompts_remain_bounded_and_cannot_wrap() {
+    use super::render::render_output;
+    use crate::model::{ChoiceList, Devices};
+    let rows = Devices::Choices(ChoiceList {
+        title: "界".repeat(100),
+        entries: Vec::new(),
+    });
+    let output =
+        String::from_utf8(render_output(Mode::Playback, UiState::default(), None, &rows).unwrap())
+            .unwrap();
+    let message = output
+        .split('\x1e')
+        .find_map(|record| record.strip_prefix("\0message\x1f"))
+        .unwrap();
+    assert_eq!(
+        message,
+        format!("<span allow_breaks=\"false\">{}…</span>", "界".repeat(53))
+    );
+}
+
+#[test]
 fn route_picker_back_is_permanent_and_disabled_choices_cannot_be_activated() {
     use super::render::render_output;
     use crate::model::{ChoiceEntry, ChoiceList, Devices};

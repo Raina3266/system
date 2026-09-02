@@ -75,7 +75,10 @@ mode-switcher {
 
 button {
     font: "JetBrains Mono Nerd Font 11";
-    expand: true;
+    /* Use each label's measured width, rather than giving every tab an equal
+       share and cutting off the longer Bluetooth label. */
+    expand: false;
+    padding: 2px 8px;
     cursor: pointer;
     border: 1px;
     border-radius: 7px;
@@ -155,7 +158,7 @@ element selected.urgent {
 /* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
    Output/Input: every device is foreground, the default one is cyan.
    Playback: live streams are foreground, muted/paused streams dim.
-   Pickers: the current device/port is cyan, unavailable ports dim. */
+   Routing picker: the current device is cyan. */
 element-text normal.normal,
 element-text alternate.normal,
 element-text selected.normal {
@@ -176,7 +179,8 @@ element-text selected.urgent {
 
 message {
     padding: 5px 10px;
-    line: 1;
+    /* This is a container, not a listview: line/lines do not constrain its
+       textbox. The script emits no-break Pango markup for one visual line. */
     border: 1px;
     border-radius: 7px;
     border-color: rgba(242, 158, 116, 0.45);

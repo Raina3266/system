@@ -9,7 +9,8 @@ use super::UiState;
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
-/// Characters that fit on one compact message-panel line at the window width.
+/// Bound the message length; no-break markup below enforces one visual line
+/// independently of the window width and the font's actual glyph widths.
 const MESSAGE_MAX_CHARS: usize = 54;
 const REFRESH_ACTION: &str = "kb-custom-5";
 /// Idle seconds between refresh ticks. Must never be 0 on any tab — see
@@ -47,8 +48,7 @@ pub(super) fn render_output(
                 .clone()
                 .or(selected_message)
                 .unwrap_or_default();
-            // Flatten backend-inserted line breaks and clip before Rofi can
-            // wrap the message onto a second visual line.
+            // Flatten backend-inserted line breaks and bound the message size.
             single_line(&raw, MESSAGE_MAX_CHARS)
         }
         _ => {
@@ -140,14 +140,20 @@ fn write_headers(
         state.initialized = true;
     }
     write_header(output, "prompt", mode.prompt());
-    write_header(
-        output,
-        "message",
-        &message
+    // Rofi creates the message textbox with TB_WRAP unconditionally. A theme
+    // line/lines/wrap property cannot turn it off in our pinned Rofi version.
+    // Pango's no-break span prevents even wide glyphs from making a second
+    // visual line. Keep an empty message genuinely empty so the panel hides.
+    let markup = if message.is_empty() {
+        String::new()
+    } else {
+        let escaped = message
             .replace('&', "&amp;")
             .replace('<', "&lt;")
-            .replace('>', "&gt;"),
-    );
+            .replace('>', "&gt;");
+        format!("<span allow_breaks=\"false\">{escaped}</span>")
+    };
+    write_header(output, "message", &markup);
     // Hotkeys and refresh must reach the script even when a filter matches no
     // row. Custom input is ignored except for Bluetooth pairing codes.
     write_header(output, "no-custom", "false");

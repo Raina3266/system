@@ -165,8 +165,7 @@ impl BluetoothEntry {
         } else {
             "available"
         };
-        // Single-line status row matched by the `lines: 1` message widget in
-        // rofi-audio.rasi.
+        // The renderer flattens this text and wraps it in no-break markup.
         format!("{} · {} · {state}", self.name, self.address)
     }
 
@@ -492,11 +491,11 @@ fn is_pci_family(token: &str) -> bool {
         })
 }
 
-/// Collapses embedded line breaks so a backend error wraps as one paragraph,
-/// then clips it to keep the message panel bounded.
+/// Collapses embedded line breaks, including Unicode paragraph separators,
+/// then clips the text to keep compact labels and messages bounded.
 pub fn single_line(value: &str, maximum: usize) -> String {
     let joined = value
-        .split(['\n', '\r'])
+        .split(['\n', '\r', '\u{0085}', '\u{2028}', '\u{2029}'])
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -713,6 +712,10 @@ mod tests {
         );
         assert_eq!(single_line("a".repeat(60).as_str(), 10), "aaaaaaaaa…");
         assert_eq!(single_line("  spaced  ", 40), "spaced");
+        assert_eq!(
+            single_line("one\r\ntwo\u{0085}three\u{2028}four\u{2029}five", 40),
+            "one two three four five"
+        );
     }
 
     #[test]

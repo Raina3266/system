@@ -17,6 +17,8 @@ Applications may expose several streams. They remain separate; no MPRIS support
 is required. Start playback in an application for its stream to
 appear. Muted or paused streams are dimmed, and lists refresh every two seconds.
 The popup is 640 px wide to accommodate the tabs and routing information.
+Tabs size themselves to their labels instead of splitting the width equally,
+so a longer label such as Bluetooth gets more space than Input.
 There is no Recording tab or per-application input routing. The Input tab still
 controls microphone devices: default selection, volume, mute and physical ports.
 
@@ -72,7 +74,10 @@ Bluetooth profiles, codecs, channel editing, latency offsets and digital
 passthrough configuration are intentionally not included.
 
 Normal audio tabs do not show a status panel. Picker instructions and errors
-are shown when necessary. If a stream ends or a device is unplugged while its
+are shown when necessary, on one visual line. Messages flatten embedded line
+breaks, truncate long text, and disable Pango line wrapping; overflow at narrow
+window widths is clipped rather than increasing the panel height.
+If a stream ends or a device is unplugged while its
 picker is open, the program revalidates the target rather than acting on a
 different row. Volume/mute/routing changes check the audio server's response.
 
