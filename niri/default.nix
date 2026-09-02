@@ -42,8 +42,10 @@ in
 {
   imports = [
     ./waybar
-    ./rofi
   ];
+
+  # Rofi's shared package override and Home Manager settings are registered
+  # together by ../nixos/default.nix through ./rofi.
 
   xdg.configFile."niri/config.kdl".text = ''
     environment {

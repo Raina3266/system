@@ -19,6 +19,7 @@ in
     inputs.home-manager.nixosModules.home-manager
     ./hardware.nix
     ./services.nix
+    ../niri/rofi
   ];
 
   config = {
@@ -27,8 +28,6 @@ in
     nixpkgs.config.allowUnfree = true;
     nixpkgs.overlays = [
       inputs.nixGL.overlay
-      # rofi with file-browser plugin + click-to-exit patch
-      (import ../niri/rofi/overlay.nix)
     ];
 
     # Nix

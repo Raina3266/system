@@ -175,21 +175,28 @@ in
   # Desktop entries
   # ──────────────────────────────────────────────────────────────────────
 
-  xdg.desktopEntries.rofi = {
-    name = "Rofi";
-    noDisplay = true;
-    exec = "rofi -show";
-    icon = "rofi";
-    terminal = false;
-  };
+  # Rofi's wrapper prepends its package to XDG_DATA_DIRS. Put these overrides
+  # in XDG_DATA_HOME/applications, which wins over every XDG_DATA_DIRS entry,
+  # instead of the user profile where xdg.desktopEntries installs them.
+  xdg.dataFile."applications/rofi.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Rofi
+    NoDisplay=true
+    Exec=rofi -show
+    Icon=rofi
+    Terminal=false
+  '';
 
-  xdg.desktopEntries.rofi-theme-selector = {
-    name = "Rofi Theme Selector";
-    noDisplay = true;
-    exec = "rofi-theme-selector";
-    icon = "rofi";
-    terminal = false;
-  };
+  xdg.dataFile."applications/rofi-theme-selector.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Rofi Theme Selector
+    NoDisplay=true
+    Exec=rofi-theme-selector
+    Icon=rofi
+    Terminal=false
+  '';
 
   xdg.desktopEntries.vim = {
     name = "Vim";
