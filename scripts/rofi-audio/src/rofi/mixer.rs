@@ -123,7 +123,7 @@ fn run_with(
             close_picker(state);
             return before;
         }
-        let choices = match backend.choices(mode, &before, &picker) {
+        let mut choices = match backend.choices(mode, &before, &picker) {
             Ok(choices) => choices,
             Err(error) => {
                 close_picker(state);
@@ -135,11 +135,17 @@ fn run_with(
             let choice =
                 selected.and_then(|key| choices.entries.iter().find(|c| c.key == key && c.enabled));
             if let Some(choice) = choice {
-                let mutation = Mutation::Route(choice.key.clone());
+                let key = choice.key.clone();
+                state.selection = Some(key.clone());
+                if choice.active {
+                    return Devices::Choices(choices);
+                }
+                let mutation = Mutation::Route(key.clone());
                 match backend.apply(&before, picker.target(), mutation) {
                     Ok(()) => {
-                        close_picker(state);
-                        return backend.snapshot(mode).unwrap_or(before);
+                        for entry in &mut choices.entries {
+                            entry.active = entry.key == key;
+                        }
                     }
                     Err(error) => state.set_message(format!("Cannot apply selection: {error}")),
                 }
@@ -235,6 +241,7 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         actions: Vec<(String, Mutation)>,
+        routed_to: Option<String>,
         missing: bool,
         reject: bool,
     }
@@ -251,10 +258,17 @@ mod tests {
                 title: "Choose device".into(),
                 entries: vec![
                     ChoiceEntry {
+                        key: "current".into(),
+                        label: "Speakers".into(),
+                        description: "Speakers".into(),
+                        active: self.routed_to.as_deref().unwrap_or("current") == "current",
+                        enabled: true,
+                    },
+                    ChoiceEntry {
                         key: "chosen".into(),
                         label: "Headphones".into(),
                         description: "Headphones".into(),
-                        active: true,
+                        active: self.routed_to.as_deref() == Some("chosen"),
                         enabled: true,
                     },
                     ChoiceEntry {
@@ -270,6 +284,9 @@ mod tests {
         fn apply(&mut self, _: &Devices, key: &str, mutation: Mutation) -> AppResult<()> {
             if self.reject {
                 return Err(io::Error::other("rejected").into());
+            }
+            if let Mutation::Route(destination) = &mutation {
+                self.routed_to = Some(destination.clone());
             }
             self.actions.push((key.to_owned(), mutation));
             Ok(())
@@ -289,9 +306,9 @@ mod tests {
         );
         assert!(matches!(rows, Devices::Choices(_)));
         assert_eq!(state.picker, Some(Picker::Route("stream".into())));
-        assert_eq!(state.selection.as_deref(), Some("chosen"));
+        assert_eq!(state.selection.as_deref(), Some("current"));
         assert!(backend.actions.is_empty());
-        run_with(
+        let rows = run_with(
             &mut backend,
             Mode::Playback,
             RETV_ACTIVATE,
@@ -302,8 +319,71 @@ mod tests {
             backend.actions,
             vec![("stream".into(), Mutation::Route("chosen".into()))]
         );
+        assert_eq!(state.picker, Some(Picker::Route("stream".into())));
+        assert_eq!(state.selection.as_deref(), Some("chosen"));
+        let Devices::Choices(choices) = rows else {
+            panic!("selecting an output must keep the routing picker open");
+        };
+        let active: Vec<_> = choices.entries.iter().filter(|c| c.active).collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].key, "chosen");
+
+        run_with(
+            &mut backend,
+            Mode::Playback,
+            RETV_ACTIVATE,
+            Some(BACK_KEY),
+            &mut state,
+        );
         assert!(state.picker.is_none());
         assert_eq!(state.selection.as_deref(), Some("stream"));
+        assert_eq!(backend.actions.len(), 1);
+    }
+
+    #[test]
+    fn selecting_the_current_output_does_not_touch_audio() {
+        let mut backend = Fake::default();
+        let mut state = UiState {
+            picker: Some(Picker::Route("stream".into())),
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            let rows = run_with(
+                &mut backend,
+                Mode::Playback,
+                RETV_ACTIVATE,
+                Some("current"),
+                &mut state,
+            );
+            assert!(matches!(rows, Devices::Choices(_)));
+            assert_eq!(state.picker, Some(Picker::Route("stream".into())));
+            assert_eq!(state.selection.as_deref(), Some("current"));
+            assert!(backend.actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn repeated_activation_and_refresh_do_not_repeat_a_move() {
+        let mut backend = Fake::default();
+        let mut state = UiState {
+            picker: Some(Picker::Route("stream".into())),
+            ..Default::default()
+        };
+        for retv in [RETV_ACTIVATE, RETV_ACTIVATE, super::super::RETV_REFRESH] {
+            let rows = run_with(
+                &mut backend,
+                Mode::Playback,
+                retv,
+                Some("chosen"),
+                &mut state,
+            );
+            assert!(matches!(rows, Devices::Choices(_)));
+            assert_eq!(state.picker, Some(Picker::Route("stream".into())));
+        }
+        assert_eq!(
+            backend.actions,
+            vec![("stream".into(), Mutation::Route("chosen".into()))]
+        );
     }
 
     #[test]
@@ -373,12 +453,27 @@ mod tests {
                 picker: Some(Picker::Route("stream".into())),
                 ..Default::default()
             };
-            run_with(
+            let rows = run_with(
                 &mut backend,
                 Mode::Playback,
                 RETV_ACTIVATE,
                 Some(key),
                 &mut state,
+            );
+            let Devices::Choices(choices) = rows else {
+                panic!("an unavailable or rejected output must keep the picker open");
+            };
+            assert!(
+                choices
+                    .entries
+                    .iter()
+                    .any(|c| c.key == "current" && c.active)
+            );
+            assert!(
+                !choices
+                    .entries
+                    .iter()
+                    .any(|c| c.key == "chosen" && c.active)
             );
             assert!(state.picker.is_some());
             assert!(state.message.is_some());
@@ -429,19 +524,21 @@ mod tests {
     }
 
     #[test]
-    fn volume_buttons_do_not_act_on_picker_rows() {
+    fn audio_buttons_do_not_act_on_picker_rows() {
         let mut backend = Fake::default();
         let mut state = UiState {
             picker: Some(Picker::Route("stream".into())),
             ..Default::default()
         };
-        run_with(
-            &mut backend,
-            Mode::Playback,
-            RETV_VOLUME_UP,
-            Some("chosen"),
-            &mut state,
-        );
+        for retv in [RETV_VOLUME_UP, RETV_VOLUME_DOWN, RETV_MUTE, RETV_ROUTE] {
+            run_with(
+                &mut backend,
+                Mode::Playback,
+                retv,
+                Some("chosen"),
+                &mut state,
+            );
+        }
         assert!(backend.actions.is_empty());
         assert!(state.picker.is_some());
     }

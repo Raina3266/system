@@ -133,6 +133,9 @@ pub fn move_stream(entry: &StreamEntry, device_name: &str) -> AppResult<()> {
     let mut controller = Controller::create(AudioKind::Output)?;
     let app = controller.check_stream(entry)?;
     let device = controller.device_by_name(device_name)?;
+    if app.connection_id == device.index {
+        return Ok(());
+    }
     controller.change(|api, done| api.move_sink_input_by_index(app.index, device.index, Some(done)))
 }
 

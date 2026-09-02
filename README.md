@@ -109,8 +109,10 @@ tabs; use them only in the tabs or pickers listed below.
 Alt+5 is reserved for the existing refresh action. Escape closes the entire
 menu. In the routing picker, use the permanent **Back** row or Alt+9 to return
 without changing anything. There are no separate Port or Back toolbar buttons,
-and no port picker. Choose a routing destination with Enter; the current choice
-is checked and cyan.
+and no port picker. Enter or double-click selects a routing destination and
+keeps the picker open, with that output checked and highlighted. Selecting the
+current output does nothing to the audio. Use **Back** or Alt+9 to return to the
+stream list; selecting an output does not mute or pause playback.
 The search filter resets on actions, as before, so searching for an application
 does not hide all devices when its picker opens.
 
@@ -240,7 +242,11 @@ For live checks, use a disposable PulseAudio/PipeWire session where possible:
 
 1. Mute and unmute an output and microphone; verify each previous volume stays.
 2. Start two playback applications and adjust/mute one; verify the other is unchanged.
-3. Route one stream to a second output; verify the global default is unchanged.
+3. Route one playing stream to a second output; verify playback continues and
+   the global default is unchanged. Check that the picker stays open and the
+   selected output is checked. Select it again; playback must remain unchanged.
+   Use Back to return to the stream list. Repeat with an already-paused stream
+   and check that routing does not resume it.
 4. Double-click the speakers/headphone port rows, then the microphone port rows;
    verify the selected port and default device, and that only one row is cyan.
    Unplug a jack; check that its row disappears and an old selection is rejected.
