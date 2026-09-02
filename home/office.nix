@@ -105,8 +105,8 @@ in
       fi
   '';
 
-  # Runs after linkGeneration so the store symlink left by an earlier
-  # generation is already gone by the time the writable file is placed.
+  # Runs after linkGeneration so Home Manager has already cleaned up the
+  # symlink an earlier generation left at this path.
   home.activation.vscodeUserSettings =
     lib.hm.dag.entryAfter [ "writeBoundary" "linkGeneration" ]
       ''
@@ -115,32 +115,37 @@ in
         settings="${vscodeUserSettingsPath}"
         managed="${vscodeUserSettingsFile}"
 
+        # Staged in the target's own directory so every update below lands as
+        # a rename. settings.json is then never absent or half written, not
+        # even briefly: a running VS Code that catches it missing reloads an
+        # empty settings model and writes that model straight back out, which
+        # drops everything the file held, the colour theme included.
+        staging="$(dirname "$settings")/.settings.json.hm-new"
+
         mkdir -p "$(dirname "$settings")"
 
-        # Switching to this arrangement from a generation that still managed
-        # the file leaves the read-only symlink behind; it has to go before a
-        # writable file can take its place.
-        if [ -L "$settings" ]; then
-          rm -f "$settings"
-        fi
-
-        # -s also covers the file being absent, and an empty settings.json
-        # is what VS Code leaves behind often enough to treat the same way.
-        if [ ! -s "$settings" ]; then
-          ${pkgs.coreutils}/bin/install -m 0644 "$managed" "$settings"
-        elif ${pkgs.jq}/bin/jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
-          # jq's * merges recursively with the right-hand side winning, so the
-          # settings declared above are reapplied while everything VS Code
-          # added on its own is carried over.
-          ${pkgs.jq}/bin/jq -s '.[0] * .[1]' "$settings" "$managed" \
-            > "$settings.hm-new"
-          mv "$settings.hm-new" "$settings"
-          chmod 0644 "$settings"
-        else
+        if [ -L "$settings" ] || [ ! -s "$settings" ]; then
+          # Either the read-only symlink from an earlier generation or no
+          # settings worth keeping, so the declared ones simply replace it.
+          ${pkgs.coreutils}/bin/install -m 0644 "$managed" "$staging"
+          mv -f "$staging" "$settings"
+        elif ! ${pkgs.jq}/bin/jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
           # VS Code accepts comments in settings.json and jq does not, so a
           # file jq cannot read is not necessarily broken. Rewriting it would
           # throw away real settings, so say something and leave it alone.
           echo "VS Code: $settings is not a JSON object; leaving it untouched"
+        elif ${pkgs.jq}/bin/jq -e -s '.[0] * .[1] == .[0]' \
+          "$settings" "$managed" >/dev/null; then
+          # Every declared key already holds its declared value. Writing now
+          # would only reformat what VS Code wrote, so leave the file alone.
+          :
+        else
+          # jq's * merges recursively with the right-hand side winning, so the
+          # settings declared above are restored while everything VS Code
+          # added on its own is carried over.
+          ${pkgs.jq}/bin/jq -s '.[0] * .[1]' "$settings" "$managed" > "$staging"
+          chmod 0644 "$staging"
+          mv -f "$staging" "$settings"
         fi
       '';
 
