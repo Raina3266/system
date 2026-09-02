@@ -18,7 +18,6 @@ in
     ../niri
     ../themes
     ./shell
-    ./yazi
     ./cloud.nix
     ./desktop.nix
     ./office.nix

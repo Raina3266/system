@@ -81,10 +81,6 @@
       shellInit = ''
         set -gx RUST_BACKTRACE 1
       '';
-      shellAbbrs = {
-        # Quick access to yazi bookmarks (press 'b' after launch)
-        yb = "yazi";
-      };
     };
 
     programs.atuin = {

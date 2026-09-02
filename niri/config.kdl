@@ -131,7 +131,6 @@ binds {
     Mod+F hotkey-overlay-title="App &amp; File Finder: rofi" { spawn "rofi-filesearch"; }
     Mod+Shift+O hotkey-overlay-title="Open Obsidian" { spawn "obsidian"; }
     Mod+C hotkey-overlay-title="Open Chrome" { spawn "google-chrome-stable"; }
-    Mod+Y hotkey-overlay-title="Open Yazi" { spawn "ghostty" "--class=yazi" "-e" "yazi"; }
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
     Mod+D hotkey-overlay-title="Open Dolphin" { spawn "dolphin"; }
     Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }

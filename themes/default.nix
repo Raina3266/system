@@ -25,7 +25,6 @@ let
     "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
     "rofi/rofi-network.rasi" = "themes/rofi-network.rasi";
     "waybar/style.css" = "themes/waybar.css";
-    "yazi/theme.toml" = "themes/yazi.toml";
   };
 
   # <path under $XDG_DATA_HOME> = <path in this repository>
