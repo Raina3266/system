@@ -80,7 +80,6 @@ in
     obs-studio
     shotcut
     kid3
-    inkscape
     gimp
     spotdl
     yt-dlp
