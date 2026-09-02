@@ -30,7 +30,7 @@ configuration {
 }
 
 window {
-    width: 447px;
+    width: 400px;
     height: 490px;
     background-color: @bg;
     border: 1px;
@@ -48,7 +48,7 @@ mainbox {
 
 mode-switcher {
     orientation: horizontal;
-    spacing: 6px;
+    spacing: 7px;
     padding: 2px 0 2px 0;
 }
 
