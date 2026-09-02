@@ -12,6 +12,8 @@ use crate::model::{
     AudioEntry, AudioKind, StreamEntry, hex_encode, short_device_name, single_line,
 };
 
+mod profiles;
+
 /// Volume step, in percent, for one press of the volume buttons.
 pub const STEP: i16 = 5;
 
@@ -24,6 +26,13 @@ enum Controller {
 }
 
 impl Controller {
+    fn handler(&mut self) -> &mut pulsectl::Handler {
+        match self {
+            Self::Sink(controller) => &mut controller.handler,
+            Self::Source(controller) => &mut controller.handler,
+        }
+    }
+
     fn create(kind: AudioKind) -> AppResult<Self> {
         Ok(match kind {
             AudioKind::Output => Self::Sink(SinkController::create()?),
@@ -73,10 +82,7 @@ impl Controller {
     ) -> AppResult<()> {
         let accepted = Rc::new(Cell::new(false));
         let result = accepted.clone();
-        let handler = match self {
-            Self::Sink(controller) => &mut controller.handler,
-            Self::Source(controller) => &mut controller.handler,
-        };
+        let handler = self.handler();
         let op = make_operation(&mut handler.introspect, Box::new(move |ok| result.set(ok)));
         handler.wait_for_operation(op)?;
         if !accepted.get() {
@@ -98,6 +104,7 @@ impl Controller {
 }
 
 pub fn toggle_mute(entry: &AudioEntry) -> AppResult<()> {
+    require_live_output(entry)?;
     let mut controller = Controller::create(entry.kind)?;
     let device = controller.device_by_name(&entry.name)?;
     controller.change(|api, done| match entry.kind {
@@ -226,12 +233,12 @@ fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioE
     let mut controller = Controller::create(kind)?;
     let default_name = controller.default_name()?;
     let mut device_labels = HashMap::new();
-    let mut entries: Vec<_> = controller
-        .list_devices()?
-        .into_iter()
+    let devices = controller.list_devices()?;
+    let mut entries: Vec<_> = devices
+        .iter()
         .filter(|device| kind == AudioKind::Output || device.monitor.is_none())
         .flat_map(|device| {
-            let Some(base) = entry(kind, &device, default_name.as_deref()) else {
+            let Some(base) = entry(kind, device, default_name.as_deref()) else {
                 return Vec::new();
             };
             if rows != DeviceRows::Devices {
@@ -259,6 +266,13 @@ fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioE
             }
         })
         .collect();
+    if kind == AudioKind::Output && rows == DeviceRows::Ports {
+        let cards = profiles::cards(&mut controller)?;
+        profiles::complete_outputs(&cards, &profiles::outputs(&devices), &mut entries);
+        for card in cards {
+            device_labels.insert(card.name, short_device_name(&card.label, None));
+        }
+    }
     entries.sort_by(|left, right| {
         left.description
             .to_lowercase()
@@ -279,7 +293,7 @@ fn clarify_selection_labels(entries: &mut [AudioEntry], device_labels: &HashMap<
     let labels: Vec<_> = entries.iter().map(|e| e.label.to_lowercase()).collect();
     for (entry, label) in entries.iter_mut().zip(&labels) {
         if labels.iter().filter(|other| *other == label).count() > 1
-            && let Some(device) = device_labels.get(&entry.name)
+            && let Some(device) = device_labels.get(entry.card.as_deref().unwrap_or(&entry.name))
             && !entry.label.eq_ignore_ascii_case(device)
         {
             entry.label = format!("{} — {device}", entry.label);
@@ -312,6 +326,11 @@ fn clarify_selection_labels(entries: &mut [AudioEntry], device_labels: &HashMap<
 
 pub fn set_default(entry: &AudioEntry) -> AppResult<()> {
     let mut controller = Controller::create(entry.kind)?;
+    if entry.kind == AudioKind::Output
+        && let (Some(card), Some(port)) = (entry.card.as_deref(), entry.port.as_deref())
+    {
+        return profiles::activate(&mut controller, card, port);
+    }
     // Revalidate against the server: a jack can be unplugged after rendering.
     // Switch the port first, so a rejected switch never changes the default.
     let device = controller.device_by_name(&entry.name)?;
@@ -332,6 +351,7 @@ pub fn set_default(entry: &AudioEntry) -> AppResult<()> {
 /// The step is applied to the value read back here rather than to the rendered
 /// row, so repeated presses never drift out of sync with the server.
 pub fn nudge_volume(entry: &AudioEntry, delta: i16) -> AppResult<u8> {
+    require_live_output(entry)?;
     let mut controller = Controller::create(entry.kind)?;
     let device = controller.device_by_name(&entry.name)?;
     let volumes = adjusted_volume(device.volume, entry.kind, delta)?;
@@ -340,6 +360,13 @@ pub fn nudge_volume(entry: &AudioEntry, delta: i16) -> AppResult<u8> {
         AudioKind::Input => api.set_source_volume_by_index(device.index, &volumes, Some(done)),
     })?;
     Ok(percent(&volumes))
+}
+
+fn require_live_output(entry: &AudioEntry) -> AppResult<()> {
+    if entry.inactive() {
+        return Err(io::Error::other("Select this output first").into());
+    }
+    Ok(())
 }
 
 fn volume_target(current: u8, kind: AudioKind, delta: i16) -> u8 {
@@ -398,6 +425,7 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
         label: short_device_name(&description, port),
         kind,
         name,
+        card: None,
         description,
         port: None,
     })
@@ -468,6 +496,7 @@ mod tests {
             key: format!("{}:{}", kind.key_prefix(), hex_encode("built-in")),
             kind,
             name: "built-in".into(),
+            card: None,
             description: "Built-in Audio Analog Stereo".into(),
             label: "Built-in Audio".into(),
             volume: 65,

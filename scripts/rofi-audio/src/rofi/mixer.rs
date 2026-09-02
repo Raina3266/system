@@ -203,13 +203,20 @@ fn run_with(
                 // metadata update becomes visible to introspection.
                 if is_default
                     && let Devices::Audio(entries) = &mut after
-                    && entries.iter().any(|e| e.key == key)
+                    && entries.iter().any(|e| e.key == key && !e.inactive())
                 {
                     apply_chosen_default(entries, key);
                 }
                 return after;
             }
-            Err(error) => state.set_message(format!("Cannot change audio: {error}")),
+            Err(error) => {
+                state.set_message(format!("Cannot change audio: {error}"));
+                // A failed profile switch may have restored/replaced sinks.
+                // Never keep displaying an old snapshot after that attempt.
+                if is_default {
+                    return backend.snapshot(mode).unwrap_or(before);
+                }
+            }
         }
     }
     before
@@ -217,7 +224,7 @@ fn run_with(
 
 pub(super) fn apply_chosen_default(entries: &mut [AudioEntry], chosen: &str) {
     for entry in entries {
-        entry.default = entry.key == chosen;
+        entry.default = entry.key == chosen && !entry.inactive();
     }
 }
 

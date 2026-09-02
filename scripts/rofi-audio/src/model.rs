@@ -185,9 +185,11 @@ impl BluetoothEntry {
 pub struct AudioEntry {
     pub key: String,
     pub kind: AudioKind,
-    /// PulseAudio node name. Stable across renders, unlike the numeric index,
-    /// so it is what the row key and every follow-up action are built from.
+    /// PulseAudio node name, or empty for a card port whose profile is inactive.
     pub name: String,
+    /// Stable ALSA card name for Output ports, including inactive-profile rows.
+    /// Together with `port` it survives sink replacement during a profile switch.
+    pub card: Option<String>,
     /// Full PulseAudio description. Kept for the row's `meta`, so filtering
     /// still matches the long name even though the row shows the short one.
     pub description: String,
@@ -202,8 +204,15 @@ pub struct AudioEntry {
 }
 
 impl AudioEntry {
+    pub fn inactive(&self) -> bool {
+        self.card.is_some() && self.name.is_empty()
+    }
+
     pub fn row_label(&self) -> String {
         // Keep every device on one compact line: icon, volume, then name.
+        if self.inactive() {
+            return format!("󰕾   —   {}", single_line(&self.label, 48));
+        }
         format!(
             "{} {:>3}%  {}",
             self.volume_icon(),
@@ -213,6 +222,9 @@ impl AudioEntry {
     }
 
     pub fn message_label(&self) -> String {
+        if self.inactive() {
+            return format!("{} · select to enable", self.label);
+        }
         let state = if self.default { "default" } else { "available" };
         let mute = if self.muted { " · muted" } else { "" };
         format!("{} · {}%{mute} · {state}", self.label, self.volume)
@@ -613,6 +625,7 @@ mod tests {
             key: "sink:00".to_owned(),
             kind: AudioKind::Output,
             name: "alsa_output.pci".to_owned(),
+            card: None,
             description: "Built-in Audio Analog Stereo".to_owned(),
             label: "Built-in Audio".to_owned(),
             port: None,
@@ -629,6 +642,7 @@ mod tests {
             key: "source:01".to_owned(),
             kind: AudioKind::Input,
             name: "alsa_input.pci".to_owned(),
+            card: None,
             description: "Webcam Mic".to_owned(),
             label: "Webcam Mic".to_owned(),
             port: None,

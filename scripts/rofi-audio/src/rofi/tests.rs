@@ -288,6 +288,7 @@ fn playback_picker_displays_compact_names_but_keeps_full_search_metadata() {
                         key: format!("sink:{}", hex_encode(&name)),
                         kind: AudioKind::Output,
                         name,
+                        card: None,
                         description: format!(
                             "Alder Lake PCH-P High Definition Audio Controller {label}"
                         ),
@@ -430,6 +431,7 @@ fn activating_a_device_marks_it_default_even_if_the_server_lags() {
         key: format!("sink:{}", hex_encode(name)),
         kind: AudioKind::Output,
         name: name.to_owned(),
+        card: None,
         description: name.to_owned(),
         label: name.to_owned(),
         port: None,
@@ -451,6 +453,7 @@ fn selecting_a_port_marks_only_that_row_default_even_when_ports_share_a_device()
         key: "sink:00:port:01".into(),
         kind: AudioKind::Output,
         name: "built-in".into(),
+        card: None,
         description: "Built-in Audio — Speakers".into(),
         label: "Built-in Audio — Speakers".into(),
         port: Some("speakers".into()),
@@ -479,11 +482,39 @@ fn selecting_a_port_marks_only_that_row_default_even_when_ports_share_a_device()
 }
 
 #[test]
+fn inactive_profile_outputs_remain_selectable_without_a_fake_volume_or_default() {
+    let entry = AudioEntry {
+        key: "card-output:00:port:01".into(),
+        kind: AudioKind::Output,
+        name: String::new(),
+        card: Some("alsa_card.test".into()),
+        description: "Alder Lake PCH-P — Headphones".into(),
+        label: "Headphones".into(),
+        port: Some("[Out] Headphones".into()),
+        volume: 0,
+        muted: false,
+        default: false,
+    };
+    let mut entries = vec![entry];
+    apply_chosen_default(&mut entries, "card-output:00:port:01");
+    assert!(!entries[0].default);
+    let mut output = Vec::new();
+    write_audio_row(&mut output, &entries[0]).unwrap();
+    let row = String::from_utf8(output).unwrap();
+    assert!(row.contains("display\x1f󰕾   —   Headphones\x1f"));
+    assert!(row.contains("alsa_card.test"));
+    assert!(!row.contains("nonselectable"));
+    assert!(!row.contains("urgent"));
+    assert!(!row.contains("0%"));
+}
+
+#[test]
 fn the_default_audio_device_renders_urgent_and_the_rest_render_active() {
     let entry = |default| AudioEntry {
         key: "sink:4141".to_owned(),
         kind: AudioKind::Output,
         name: "alsa_output.pci".to_owned(),
+        card: None,
         description: "Built-in Audio Analog Stereo".to_owned(),
         label: "Built-in Audio".to_owned(),
         port: None,

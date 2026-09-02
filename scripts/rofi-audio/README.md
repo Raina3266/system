@@ -31,10 +31,22 @@ and a microphone jack. Enter/double-click switches to that port and makes its
 device the default. Only the active port of the default device is highlighted
 in cyan. Devices without named ports still appear once, as before.
 
-Only ports exposed by the current audio profile can appear. Ports reported as
-unplugged are hidden; ports whose availability is unknown remain selectable.
-A port is rechecked before activation, so unplugging it cannot silently select
-a different row. This does not change sound-card profiles or Bluetooth codecs.
+For ALSA cards, Output also includes available ports from compatible inactive
+profiles. This lets **Speaker** and **Headphones** both appear on laptops whose
+HiFi profile exposes only one of them at a time. A row without a live device
+shows **—** instead of a volume: select it before using volume or mute.
+Enter/double-click switches profiles when necessary, waits for the new device,
+activates the port and sets the default output. Card/port identities remain
+stable even when the audio server replaces the underlying devices.
+
+Ports reported as unplugged are hidden; unknown availability remains selectable.
+Ports and profiles are rechecked before activation. Automatic profile selection
+preserves the current microphone ports and prefers profiles retaining the most
+other ports; it does not switch Bluetooth codecs or profiles. Profile changes
+can briefly interrupt all audio on the card. If activation fails after a switch,
+the program attempts to restore the previous profile and default output, without
+overwriting a newer profile choice made elsewhere. Input still lists ports from
+its current profile; no Profile button is added.
 
 Playback omits the generic **Playback** title and the **→ destination** suffix:
 for example, **Google Chrome: Playback → Alder Lake…** becomes **Google Chrome**.
@@ -80,10 +92,10 @@ Persistence across application restarts
 is managed by PipeWire/WirePlumber, not this program.
 
 Port rows of the same device are not independent outputs: switching ports
-affects every stream using that device. Volume/mute controls target the device,
-without activating the selected port; they are not separate per-port controls.
-Bluetooth profiles, codecs, channel editing, latency offsets and digital
-passthrough configuration are intentionally not included.
+affects every stream using that device. Volume/mute controls target a live device,
+without activating a different port or profile; they are not per-port controls.
+Manual profile selection, Bluetooth codecs, channel editing, latency offsets
+and digital passthrough configuration are intentionally not included.
 
 Normal audio tabs do not show a status panel. Picker instructions and errors
 are shown when necessary, on one visual line. Messages flatten embedded line
@@ -107,7 +119,9 @@ cargo clippy --manifest-path scripts/Cargo.toml --package rofi-audio --locked --
 Unit tests include port-row identities, availability, active/default marking,
 device-only fallback, volume conversion/limits, channel balance, stream identity,
 picker cancellation and dispatch, disappearing targets, rejected choices,
-state round trips, row rendering and refresh behavior without hardware.
+state round trips, row rendering and refresh behavior without hardware. Profile
+switching tests cover the split Speaker/Headphones HiFi layout, delayed device
+creation, stale/unplugged targets, server rejection and rollback.
 
 For live checks, use a disposable PulseAudio/PipeWire session where possible:
 
@@ -122,3 +136,7 @@ For live checks, use a disposable PulseAudio/PipeWire session where possible:
 7. Check Bluetooth scan/connect/forget and pairing-code entry still work.
 8. Verify that only Bluetooth, Output, Input and Playback tabs appear, the toolbar
    has six buttons, and the routing picker's Back row/Alt+9 still work.
+9. On a laptop with separate Speaker/Headphones profiles, plug in headphones and
+   verify both rows appear in Output. Switch in both directions; check the selected
+   row becomes default, its volume appears, and microphone/HDMI choices survive.
+   An inactive row's volume/mute buttons must not switch profiles.

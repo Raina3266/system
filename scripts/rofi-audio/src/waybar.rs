@@ -90,6 +90,7 @@ mod tests {
             key: "sink:00".to_owned(),
             kind: AudioKind::Output,
             name: "alsa_output.pci".to_owned(),
+            card: None,
             description: "Built-in Audio".to_owned(),
             label: "Built-in Audio".to_owned(),
             port: None,

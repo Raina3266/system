@@ -236,10 +236,11 @@ pub(super) fn write_audio_row(output: &mut Vec<u8>, entry: &AudioEntry) -> io::R
         &mut first,
         "meta",
         &format!(
-            "{} {} {}",
+            "{} {} {} {}",
             entry.description,
             entry.name,
-            entry.port.as_deref().unwrap_or_default()
+            entry.port.as_deref().unwrap_or_default(),
+            entry.card.as_deref().unwrap_or_default()
         ),
     );
     if entry.default {
