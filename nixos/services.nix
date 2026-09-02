@@ -222,8 +222,7 @@ in
     unitConfig.StopWhenUnneeded = true;
   };
 
-  # Unit overrides for the services configured above, plus the webcam
-  # supervisor whose device settings are defined in this file.
+  # Unit overrides and hardware services whose settings are defined here.
   systemd.services = {
     jellyfin = {
       wantedBy = lib.mkForce [ ];
@@ -245,6 +244,17 @@ in
       wantedBy = lib.mkForce [ ];
       restartIfChanged = false;
       stopIfChanged = false;
+    };
+
+    speaker-auto-mute = {
+      description = "Allow speakers while headphones are plugged in";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "alsa-store.service" ];
+      unitConfig.ConditionPathExists = "/proc/asound/sofhdadsp";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.alsa-utils}/bin/amixer -q -c sofhdadsp sset 'Auto-Mute Mode' Disabled";
+      };
     };
 
     cropped-webcam = {
@@ -274,6 +284,9 @@ in
   '';
 
   services.udev.extraRules = ''
+    # Also apply the speaker setting if the card appears after boot.
+    ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC[0-9]*", ATTRS{id}=="sofhdadsp", TAG+="systemd", ENV{SYSTEMD_WANTS}+="speaker-auto-mute.service"
+
     # Stable path to the real RGB sensor for the cropper service.
     SUBSYSTEM=="video4linux", ATTR{name}=="Integrated Camera: Integrated C", ATTR{index}=="0", SYMLINK+="cam-raw"
 
