@@ -56,7 +56,6 @@ in
   environment.gnome.excludePackages = with pkgs; [
     epiphany
     geary
-    eog
     yelp
     seahorse
     totem
@@ -66,7 +65,8 @@ in
     showtime
     simple-scan
     nautilus
-    # loupe  Image Viewer.
+    baobab
+    loupe
     gnome-weather
     gnome-font-viewer
     gnome-calculator

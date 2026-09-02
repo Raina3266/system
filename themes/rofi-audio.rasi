@@ -30,7 +30,7 @@ configuration {
 }
 
 window {
-    width: 490px;
+    width: 447px;
     height: 490px;
     background-color: @bg;
     border: 1px;
