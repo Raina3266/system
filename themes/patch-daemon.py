@@ -541,11 +541,20 @@ def gtk_override_css(args: argparse.Namespace) -> str:
         "popover, popover.background, menu, .menu {\n"
         "  border-color: @daemon_structure;\n"
         "}\n"
+        # Breeze and libadwaita both build a scrollbar out of transparent
+        # borders: the slider is a few pixels of background inside a wide
+        # transparent border, clipped to the padding box, and the trough
+        # reserves the rest of the gutter the same way. Colouring those
+        # borders paints the spacing itself, which is how a slider ends up as
+        # wide as the gutter it sits in. Colour the slider's background alone,
+        # leave the borders transparent, and give it the width VS Code uses.
         "scrollbar trough, scrollbar slider {\n"
-        "  border-color: @daemon_structure;\n"
+        "  border-color: transparent;\n"
         "}\n"
         "scrollbar slider {\n"
         "  background-color: @daemon_structure;\n"
+        "  min-width: 5px;\n"
+        "  min-height: 5px;\n"
         "}\n"
         "separator {\n"
         "  background-color: @daemon_table_separator;\n"
