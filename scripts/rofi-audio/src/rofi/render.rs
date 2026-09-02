@@ -99,6 +99,7 @@ pub(super) fn render_output(
                 &ChoiceEntry {
                     key: BACK_KEY.into(),
                     label: "← Back".into(),
+                    description: "Back".into(),
                     active: false,
                     enabled: true,
                 },
@@ -277,7 +278,7 @@ fn write_choice_row(output: &mut Vec<u8>, entry: &ChoiceEntry, permanent: bool) 
     let label = format!("{}{}", if entry.active { "✓ " } else { "" }, entry.label);
     write_row_option(output, &mut first, "display", &single_line(&label, 54));
     write_row_option(output, &mut first, "info", &entry.key);
-    write_row_option(output, &mut first, "meta", &entry.label);
+    write_row_option(output, &mut first, "meta", &entry.description);
     if permanent {
         write_row_option(output, &mut first, "permanent", "true");
     }

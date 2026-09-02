@@ -290,8 +290,22 @@ pub const BACK_KEY: &str = "back";
 pub struct ChoiceEntry {
     pub key: String,
     pub label: String,
+    /// Full device description for filtering, separate from the compact label.
+    pub description: String,
     pub active: bool,
     pub enabled: bool,
+}
+
+impl ChoiceEntry {
+    pub fn route(device: AudioEntry, current_device: &str) -> Self {
+        Self {
+            active: device.name == current_device,
+            key: device.key,
+            label: device.label,
+            description: device.description,
+            enabled: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

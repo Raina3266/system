@@ -240,12 +240,14 @@ fn route_picker_back_is_permanent_and_disabled_choices_cannot_be_activated() {
             ChoiceEntry {
                 key: "sink:00".into(),
                 label: "Speakers".into(),
+                description: "Built-in Audio Speakers".into(),
                 active: true,
                 enabled: true,
             },
             ChoiceEntry {
                 key: "sink:01".into(),
                 label: "Headphones (unplugged)".into(),
+                description: "Built-in Audio Headphones (unplugged)".into(),
                 active: false,
                 enabled: false,
             },
@@ -268,6 +270,58 @@ fn route_picker_back_is_permanent_and_disabled_choices_cannot_be_activated() {
         .find(|r| r.starts_with("sink:01\0"))
         .unwrap();
     assert!(unplugged.contains("nonselectable\x1ftrue"));
+}
+
+#[test]
+fn playback_picker_displays_compact_names_but_keeps_full_search_metadata() {
+    use super::render::render_output;
+    use crate::model::{AudioEntry, AudioKind, ChoiceEntry, ChoiceList, Devices, hex_encode};
+    let choices = ChoiceList {
+        title: "Output for Google Chrome".into(),
+        entries: ["Speakers", "HDMI / DisplayPort 1", "HDMI / DisplayPort 2"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, label)| {
+                let name = format!("alsa_output.device{index}");
+                ChoiceEntry::route(
+                    AudioEntry {
+                        key: format!("sink:{}", hex_encode(&name)),
+                        kind: AudioKind::Output,
+                        name,
+                        description: format!(
+                            "Alder Lake PCH-P High Definition Audio Controller {label}"
+                        ),
+                        label: label.into(),
+                        volume: 65,
+                        muted: false,
+                        default: index == 0,
+                        port: None,
+                    },
+                    "alsa_output.device1",
+                )
+            })
+            .collect(),
+    };
+    assert_eq!(choices.entries.len(), 3);
+    assert!(!choices.entries[0].active);
+    assert!(choices.entries[1].active);
+    assert!(!choices.entries[2].active);
+    let devices = Devices::Choices(choices.clone());
+    let output = String::from_utf8(
+        render_output(Mode::Playback, UiState::default(), None, &devices).unwrap(),
+    )
+    .unwrap();
+    for choice in &choices.entries {
+        let record = output
+            .split('\x1e')
+            .find(|record| record.starts_with(&format!("{}\0", choice.key)))
+            .unwrap();
+        let marker = if choice.active { "✓ " } else { "" };
+        assert!(record.contains(&format!("display\x1f{marker}{}\x1f", choice.label)));
+        assert!(record.contains(&format!("meta\x1f{}", choice.description)));
+        assert_eq!(record.contains("urgent\x1ftrue"), choice.active);
+        assert!(!choice.key.contains(":port:"));
+    }
 }
 
 #[test]

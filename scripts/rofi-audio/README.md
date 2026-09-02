@@ -71,7 +71,11 @@ The normal volume controls do not unmute a muted device or stream.
 
 Routing changes only the selected playback stream, never the system default
 or a device's active port. Its picker lists actual devices once, rather than
-expanding them into port rows.
+expanding them into port rows. It uses compact current-port names such as
+**Speakers** or **HDMI / DisplayPort 1**, falling back to the device name when
+there is no named active port. Ambiguous names get device context or a number,
+and full hardware descriptions remain searchable. The checked row is the
+stream's current destination, which may differ from the system default.
 Persistence across application restarts
 is managed by PipeWire/WirePlumber, not this program.
 

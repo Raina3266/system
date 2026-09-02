@@ -5,7 +5,7 @@ use std::io;
 use crate::AppResult;
 use crate::audio;
 use crate::model::{
-    AudioEntry, AudioKind, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker, hex_decode,
+    AudioEntry, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker, hex_decode,
 };
 
 use super::{
@@ -46,17 +46,12 @@ impl Backend for Pulse {
         match picker {
             Picker::Route(key) if mode.is_stream() => {
                 let stream = before.stream(key).ok_or_else(gone)?;
-                let devices = audio::snapshot(AudioKind::Output)?;
+                let devices = audio::routing_devices()?;
                 Ok(ChoiceList {
                     title: format!("Output for {}", stream.application),
                     entries: devices
                         .into_iter()
-                        .map(|device| ChoiceEntry {
-                            active: device.name == stream.device_name,
-                            key: device.key,
-                            label: device.description,
-                            enabled: true,
-                        })
+                        .map(|device| ChoiceEntry::route(device, &stream.device_name))
                         .collect(),
                 })
             }
@@ -251,12 +246,14 @@ mod tests {
                     ChoiceEntry {
                         key: "chosen".into(),
                         label: "Headphones".into(),
+                        description: "Headphones".into(),
                         active: true,
                         enabled: true,
                     },
                     ChoiceEntry {
                         key: "unplugged".into(),
                         label: "Unplugged".into(),
+                        description: "Unplugged".into(),
                         active: false,
                         enabled: false,
                     },

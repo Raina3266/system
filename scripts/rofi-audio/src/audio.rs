@@ -200,16 +200,29 @@ fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
 }
 
 pub fn snapshot(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_ports(kind, false)
+    snapshot_with_rows(kind, DeviceRows::Devices)
 }
 
 /// Output/Input rows expose physical ports without inventing independent
-/// devices. Routing and Waybar keep using the device-only snapshot.
+/// devices. Routing and Waybar still keep one row per device.
 pub fn selections(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_ports(kind, true)
+    snapshot_with_rows(kind, DeviceRows::Ports)
 }
 
-fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<AudioEntry>> {
+/// Route to a device, labelled by its current port where available. Do not
+/// expand ports: moving a stream must not change a device's physical port.
+pub fn routing_devices() -> AppResult<Vec<AudioEntry>> {
+    snapshot_with_rows(AudioKind::Output, DeviceRows::Routing)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeviceRows {
+    Devices,
+    Ports,
+    Routing,
+}
+
+fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
     let default_name = controller.default_name()?;
     let mut device_labels = HashMap::new();
@@ -221,16 +234,26 @@ fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<Aud
             let Some(base) = entry(kind, &device, default_name.as_deref()) else {
                 return Vec::new();
             };
-            if expand_ports {
+            if rows != DeviceRows::Devices {
                 device_labels.insert(
                     base.name.clone(),
                     short_device_name(&base.description, None),
                 );
+            }
+            if rows == DeviceRows::Ports {
                 port_rows(
                     base,
                     &device.ports,
                     device.active_port.as_ref().and_then(|p| p.name.as_deref()),
                 )
+            } else if rows == DeviceRows::Routing {
+                vec![route_row(
+                    base,
+                    device
+                        .active_port
+                        .as_ref()
+                        .and_then(|p| p.description.as_deref()),
+                )]
             } else {
                 vec![base]
             }
@@ -243,7 +266,7 @@ fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<Aud
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.key.cmp(&right.key))
     });
-    if expand_ports {
+    if rows != DeviceRows::Devices {
         clarify_selection_labels(&mut entries, &device_labels);
     }
     Ok(entries)
@@ -255,8 +278,7 @@ fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<Aud
 fn clarify_selection_labels(entries: &mut [AudioEntry], device_labels: &HashMap<String, String>) {
     let labels: Vec<_> = entries.iter().map(|e| e.label.to_lowercase()).collect();
     for (entry, label) in entries.iter_mut().zip(&labels) {
-        if entry.port.is_some()
-            && labels.iter().filter(|other| *other == label).count() > 1
+        if labels.iter().filter(|other| *other == label).count() > 1
             && let Some(device) = device_labels.get(&entry.name)
             && !entry.label.eq_ignore_ascii_case(device)
         {
@@ -379,6 +401,17 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
         description,
         port: None,
     })
+}
+
+fn route_row(mut base: AudioEntry, active_port_label: Option<&str>) -> AudioEntry {
+    if let Some(label) = active_port_label
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+    {
+        base.label = single_line(label, usize::MAX);
+    }
+    // Keep base.key/name and port=None: this is still a device-only target.
+    base
 }
 
 fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -> Vec<AudioEntry> {
@@ -544,6 +577,57 @@ mod tests {
             before[0].key,
             port_rows(device(AudioKind::Input), &ports, None)[0].key
         );
+    }
+
+    #[test]
+    fn route_rows_use_short_port_labels_without_becoming_port_targets() {
+        for label in [
+            "Speakers",
+            "Headphones",
+            "HDMI / DisplayPort 1",
+            "HDMI / DisplayPort 2",
+        ] {
+            let mut base = device(AudioKind::Output);
+            base.description = format!("Alder Lake PCH-P High Definition Audio Controller {label}");
+            let row = route_row(base.clone(), Some(label));
+            assert_eq!(row.label, label);
+            assert_eq!(row.key, base.key);
+            assert_eq!(row.name, base.name);
+            assert_eq!(row.description, base.description);
+            assert_eq!(row.default, base.default);
+            assert!(row.port.is_none());
+        }
+    }
+
+    #[test]
+    fn route_rows_without_a_port_keep_the_device_name() {
+        let mut base = device(AudioKind::Output);
+        base.label = "WH-1000XM4".into();
+        for port in [None, Some(""), Some("  ")] {
+            assert_eq!(route_row(base.clone(), port).label, "WH-1000XM4");
+        }
+    }
+
+    #[test]
+    fn device_only_routes_disambiguate_identical_port_names() {
+        let mut usb = device(AudioKind::Output);
+        usb.name = "usb".into();
+        usb.key = format!("sink:{}", hex_encode(&usb.name));
+        let mut rows = vec![
+            route_row(device(AudioKind::Output), Some("Speakers")),
+            route_row(usb, Some("Speakers")),
+        ];
+        clarify_selection_labels(
+            &mut rows,
+            &HashMap::from([
+                ("built-in".into(), "Built-in Audio".into()),
+                ("usb".into(), "USB Audio".into()),
+            ]),
+        );
+        assert_eq!(rows[0].label, "Speakers — Built-in Audio");
+        assert_eq!(rows[1].label, "Speakers — USB Audio");
+        assert!(rows.iter().all(|row| row.port.is_none()));
+        assert_ne!(rows[0].key, rows[1].key);
     }
 
     #[test]
