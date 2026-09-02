@@ -88,12 +88,11 @@ in
     MenuFont="Sans 14"
   '';
 
-  # GTK and its icon fallback settings live here; ../themes/default.nix builds
-  # and selects the complete Daemon GTK theme from the pinned upstream assets.
+  # ../themes/default.nix builds and selects the Daemon GTK widget theme.
+  # Leave the icon theme at its default: Waybar's Niri window buttons also
+  # use GTK's icon lookup, so selecting Daemon-Icons replaces their app icons.
   gtk = {
     enable = true;
-
-    iconTheme.name = "Daemon-Icons";
 
     gtk3.extraConfig = {
       gtk-application-prefer-dark-theme = 1;

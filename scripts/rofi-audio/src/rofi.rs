@@ -70,7 +70,7 @@ pub fn launch() -> AppResult<()> {
             // Same strings the script's `prompt` header sets, so a tab reads
             // the same before and after its script has first run.
             "-display-bluetooth",
-            "󰂯 Bluetooth",
+            "󰂯 Pair",
             "-display-output",
             "󰕾 Output",
             "-display-input",

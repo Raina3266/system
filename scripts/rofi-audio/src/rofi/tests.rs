@@ -110,7 +110,7 @@ fn script_rows_use_one_metadata_nul() {
 /// this string — see the `inputbar` block in rofi-audio.rasi.
 #[test]
 fn prompts_name_their_tab() {
-    assert_eq!(Mode::Bluetooth.prompt(), "󰂯 Bluetooth");
+    assert_eq!(Mode::Bluetooth.prompt(), "󰂯 Pair");
     assert_eq!(Mode::Output.prompt(), "󰕾 Output");
     assert_eq!(Mode::Input.prompt(), "󰍬 Input");
     assert_eq!(Mode::Playback.prompt(), "󰐊 Play");

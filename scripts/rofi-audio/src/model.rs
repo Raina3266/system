@@ -30,7 +30,7 @@ impl Mode {
     /// filter glyph instead — see the `inputbar` block in rofi-audio.rasi.
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::Bluetooth => "󰂯 Bluetooth",
+            Self::Bluetooth => "󰂯 Pair",
             Self::Output => "󰕾 Output",
             Self::Input => "󰍬 Input",
             Self::Playback => "󰐊 Play",
