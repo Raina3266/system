@@ -113,7 +113,7 @@ fn prompts_name_their_tab() {
     assert_eq!(Mode::Bluetooth.prompt(), "󰂯 Bluetooth");
     assert_eq!(Mode::Output.prompt(), "󰕾 Output");
     assert_eq!(Mode::Input.prompt(), "󰍬 Input");
-    assert_eq!(Mode::Playback.prompt(), "󰐊 Playback");
+    assert_eq!(Mode::Playback.prompt(), "󰐊 Play");
 }
 
 #[test]

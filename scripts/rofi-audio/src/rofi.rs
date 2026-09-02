@@ -76,7 +76,7 @@ pub fn launch() -> AppResult<()> {
             "-display-input",
             "󰍬 Input",
             "-display-playback",
-            "󰐊 Playback",
+            "󰐊 Play",
             // Alt+1..Alt+4 are Rofi's defaults for the action-bar buttons;
             // volume also answers to Alt+Up/Alt+Down, which nothing else uses.
             "-kb-custom-3",

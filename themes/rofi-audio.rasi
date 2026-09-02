@@ -1,4 +1,4 @@
-/* rofi-audio: Bluetooth / Output / Input / Playback.
+/* rofi-audio: Bluetooth / Output / Input / Play.
 
    Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
    Alt+6 mute; Alt+7 route; Alt+9 back (also a row in the route picker).

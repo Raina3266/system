@@ -33,7 +33,7 @@ impl Mode {
             Self::Bluetooth => "󰂯 Bluetooth",
             Self::Output => "󰕾 Output",
             Self::Input => "󰍬 Input",
-            Self::Playback => "󰐊 Playback",
+            Self::Playback => "󰐊 Play",
         }
     }
 

@@ -52,6 +52,7 @@ in
     wl-clipboard
 
     # productivity
+    digikam
     obsidian
     krokiet
     exercism
