@@ -58,8 +58,7 @@ pub fn launch() -> AppResult<()> {
         "bluetooth:{executable} script bluetooth,\
          output:{executable} script output,\
          input:{executable} script input,\
-         playback:{executable} script playback,\
-         recording:{executable} script recording"
+         playback:{executable} script playback"
     );
     let status = Command::new(rofi_binary())
         .env(PRESERVE_SELECTION_ENV, "true")
@@ -78,8 +77,6 @@ pub fn launch() -> AppResult<()> {
             "󰍬 Input",
             "-display-playback",
             "󰐊 Playback",
-            "-display-recording",
-            "󰑋 Recording",
             // Alt+1..Alt+4 are Rofi's defaults for the action-bar buttons;
             // volume also answers to Alt+Up/Alt+Down, which nothing else uses.
             "-kb-custom-3",

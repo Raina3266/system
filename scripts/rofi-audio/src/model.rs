@@ -11,7 +11,6 @@ pub enum Mode {
     Output,
     Input,
     Playback,
-    Recording,
 }
 
 impl Mode {
@@ -21,7 +20,6 @@ impl Mode {
             Self::Output => "output",
             Self::Input => "input",
             Self::Playback => "playback",
-            Self::Recording => "recording",
         }
     }
 
@@ -36,7 +34,6 @@ impl Mode {
             Self::Output => "󰕾 Output",
             Self::Input => "󰍬 Input",
             Self::Playback => "󰐊 Playback",
-            Self::Recording => "󰑋 Recording",
         }
     }
 
@@ -44,12 +41,12 @@ impl Mode {
         match self {
             Self::Bluetooth => None,
             Self::Output | Self::Playback => Some(AudioKind::Output),
-            Self::Input | Self::Recording => Some(AudioKind::Input),
+            Self::Input => Some(AudioKind::Input),
         }
     }
 
     pub fn is_stream(self) -> bool {
-        matches!(self, Self::Playback | Self::Recording)
+        matches!(self, Self::Playback)
     }
 }
 
@@ -62,7 +59,6 @@ impl FromStr for Mode {
             "output" | "sink" | "outputs" => Ok(Self::Output),
             "input" | "source" | "inputs" => Ok(Self::Input),
             "playback" => Ok(Self::Playback),
-            "recording" => Ok(Self::Recording),
             _ => Err(std::io::Error::other(format!("unknown mode {value:?}")).into()),
         }
     }
@@ -88,24 +84,10 @@ impl AudioKind {
         }
     }
 
-    pub fn stream_prefix(self) -> &'static str {
-        match self {
-            Self::Output => "playback",
-            Self::Input => "recording",
-        }
-    }
-
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::Output => "sink",
             Self::Input => "source",
-        }
-    }
-
-    pub fn noun(self) -> &'static str {
-        match self {
-            Self::Output => "output",
-            Self::Input => "input",
         }
     }
 }
@@ -244,12 +226,11 @@ impl AudioEntry {
     }
 }
 
-/// One live playback or recording stream, not an MPRIS player. Several streams
+/// One live playback stream, not an MPRIS player. Several streams
 /// from the same application remain separate and are identified by `key`.
 #[derive(Clone, Debug)]
 pub struct StreamEntry {
     pub key: String,
-    pub kind: AudioKind,
     pub index: u32,
     pub application: String,
     pub name: String,
@@ -262,12 +243,10 @@ pub struct StreamEntry {
 
 impl StreamEntry {
     pub fn row_label(&self) -> String {
-        let icon = match (self.kind, self.muted, self.corked) {
-            (AudioKind::Input, true, _) => "󰍭",
-            (AudioKind::Input, false, _) => "󰍬",
-            (AudioKind::Output, true, _) => "󰝟",
-            (AudioKind::Output, false, true) => "󰏤",
-            (AudioKind::Output, false, false) => "󰐊",
+        let icon = match (self.muted, self.corked) {
+            (true, _) => "󰝟",
+            (false, true) => "󰏤",
+            (false, false) => "󰐊",
         };
         let volume = self
             .volume
@@ -278,13 +257,8 @@ impl StreamEntry {
         } else {
             format!("{}: {}", self.application, self.name)
         };
-        let direction = if self.kind == AudioKind::Output {
-            "→"
-        } else {
-            "←"
-        };
         format!(
-            "{icon} {volume}  {} {direction} {}",
+            "{icon} {volume}  {} → {}",
             single_line(&title, 27),
             single_line(&self.device_label, 18)
         )
@@ -591,15 +565,15 @@ mod tests {
 
     #[test]
     fn modes_round_trip_through_their_script_argument() {
-        for mode in [
-            Mode::Bluetooth,
-            Mode::Output,
-            Mode::Input,
-            Mode::Playback,
-            Mode::Recording,
-        ] {
+        for mode in [Mode::Bluetooth, Mode::Output, Mode::Input, Mode::Playback] {
             assert_eq!(mode.name().parse::<Mode>().unwrap(), mode);
         }
+    }
+
+    #[test]
+    fn recording_mode_is_not_supported() {
+        assert!("recording".parse::<Mode>().is_err());
+        assert!("Recording".parse::<Mode>().is_err());
     }
 
     #[test]

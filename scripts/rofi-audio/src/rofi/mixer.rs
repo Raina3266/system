@@ -5,7 +5,7 @@ use std::io;
 use crate::AppResult;
 use crate::audio;
 use crate::model::{
-    AudioEntry, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker, hex_decode,
+    AudioEntry, AudioKind, BACK_KEY, ChoiceEntry, ChoiceList, Devices, Mode, Picker, hex_decode,
 };
 
 use super::{
@@ -38,7 +38,7 @@ impl Backend for Pulse {
     fn snapshot(&mut self, mode: Mode) -> AppResult<Devices> {
         let kind = mode.audio_kind().ok_or_else(gone)?;
         if mode.is_stream() {
-            Ok(Devices::Streams(audio::streams(kind)?))
+            Ok(Devices::Streams(audio::streams()?))
         } else {
             Ok(Devices::Audio(audio::snapshot(kind)?))
         }
@@ -48,9 +48,9 @@ impl Backend for Pulse {
         match picker {
             Picker::Route(key) if mode.is_stream() => {
                 let stream = before.stream(key).ok_or_else(gone)?;
-                let devices = audio::devices(stream.kind, true)?;
+                let devices = audio::snapshot(AudioKind::Output)?;
                 Ok(ChoiceList {
-                    title: format!("{} for {}", stream.kind.noun(), stream.application),
+                    title: format!("Output for {}", stream.application),
                     entries: devices
                         .into_iter()
                         .map(|device| ChoiceEntry {
@@ -86,9 +86,8 @@ impl Backend for Pulse {
                 Mutation::Volume(delta) => audio::nudge_stream_volume(entry, delta),
                 Mutation::Mute => audio::toggle_stream_mute(entry),
                 Mutation::Route(key) => {
-                    let prefix = format!("{}:", entry.kind.key_prefix());
                     let name = key
-                        .strip_prefix(&prefix)
+                        .strip_prefix("sink:")
                         .and_then(hex_decode)
                         .ok_or_else(gone)?;
                     audio::move_stream(entry, &name)
@@ -201,7 +200,7 @@ fn run_with(
         RETV_VOLUME_DOWN => Some(Mutation::Volume(-audio::STEP)),
         RETV_MUTE => Some(Mutation::Mute),
         RETV_ROUTE => {
-            state.set_message("Device routing applies to Playback and Recording.");
+            state.set_message("Device routing applies to Playback.");
             None
         }
         RETV_PORT => {
@@ -292,33 +291,46 @@ mod tests {
 
     #[test]
     fn activating_a_stream_opens_routes_without_setting_a_default() {
-        for mode in [Mode::Playback, Mode::Recording] {
+        let mut backend = Fake::default();
+        let mut state = UiState::default();
+        let rows = run_with(
+            &mut backend,
+            Mode::Playback,
+            RETV_ACTIVATE,
+            Some("stream"),
+            &mut state,
+        );
+        assert!(matches!(rows, Devices::Choices(_)));
+        assert_eq!(state.picker, Some(Picker::Route("stream".into())));
+        assert_eq!(state.selection.as_deref(), Some("chosen"));
+        assert!(backend.actions.is_empty());
+        run_with(
+            &mut backend,
+            Mode::Playback,
+            RETV_ACTIVATE,
+            Some("chosen"),
+            &mut state,
+        );
+        assert_eq!(
+            backend.actions,
+            vec![("stream".into(), Mutation::Route("chosen".into()))]
+        );
+        assert!(state.picker.is_none());
+        assert_eq!(state.selection.as_deref(), Some("stream"));
+    }
+
+    #[test]
+    fn route_button_does_not_open_a_picker_on_device_tabs() {
+        for mode in [Mode::Output, Mode::Input] {
             let mut backend = Fake::default();
             let mut state = UiState::default();
-            let rows = run_with(
-                &mut backend,
-                mode,
-                RETV_ACTIVATE,
-                Some("stream"),
-                &mut state,
-            );
-            assert!(matches!(rows, Devices::Choices(_)));
-            assert_eq!(state.picker, Some(Picker::Route("stream".into())));
-            assert_eq!(state.selection.as_deref(), Some("chosen"));
-            assert!(backend.actions.is_empty());
-            run_with(
-                &mut backend,
-                mode,
-                RETV_ACTIVATE,
-                Some("chosen"),
-                &mut state,
-            );
-            assert_eq!(
-                backend.actions,
-                vec![("stream".into(), Mutation::Route("chosen".into()))]
-            );
+            run_with(&mut backend, mode, RETV_ROUTE, Some("device"), &mut state);
             assert!(state.picker.is_none());
-            assert_eq!(state.selection.as_deref(), Some("stream"));
+            assert_eq!(
+                state.message.as_deref(),
+                Some("Device routing applies to Playback.")
+            );
+            assert!(backend.actions.is_empty());
         }
     }
 
@@ -390,7 +402,7 @@ mod tests {
 
     #[test]
     fn mute_and_volume_dispatch_to_the_selected_row() {
-        for mode in [Mode::Output, Mode::Input, Mode::Playback, Mode::Recording] {
+        for mode in [Mode::Output, Mode::Input, Mode::Playback] {
             let mut backend = Fake::default();
             let mut state = UiState::default();
             run_with(&mut backend, mode, RETV_MUTE, Some("row"), &mut state);

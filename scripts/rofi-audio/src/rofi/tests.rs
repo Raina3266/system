@@ -59,13 +59,7 @@ fn finished_connects_drop_the_pending_and_await_state() {
 /// Bluetooth tab stayed missing from Output and Input.
 #[test]
 fn every_tab_leaves_the_next_one_a_running_refresh_tick() {
-    for mode in [
-        Mode::Bluetooth,
-        Mode::Output,
-        Mode::Input,
-        Mode::Playback,
-        Mode::Recording,
-    ] {
+    for mode in [Mode::Bluetooth, Mode::Output, Mode::Input, Mode::Playback] {
         for pending in [None, Some("bt:4141".to_owned())] {
             let state = UiState {
                 pending_connect: pending,
@@ -90,13 +84,7 @@ fn every_tab_uses_compact_single_line_rows() {
         String::from_utf8_lossy(&output).into_owned()
     };
 
-    for mode in [
-        Mode::Bluetooth,
-        Mode::Output,
-        Mode::Input,
-        Mode::Playback,
-        Mode::Recording,
-    ] {
+    for mode in [Mode::Bluetooth, Mode::Output, Mode::Input, Mode::Playback] {
         assert!(render(mode).contains("configuration { eh: 1;"));
     }
 }
@@ -126,7 +114,6 @@ fn prompts_name_their_tab() {
     assert_eq!(Mode::Output.prompt(), "󰕾 Output");
     assert_eq!(Mode::Input.prompt(), "󰍬 Input");
     assert_eq!(Mode::Playback.prompt(), "󰐊 Playback");
-    assert_eq!(Mode::Recording.prompt(), "󰑋 Recording");
 }
 
 #[test]
@@ -156,7 +143,7 @@ fn picker_state_round_trips_without_persisting_selection_overrides() {
 fn empty_audio_tabs_keep_refresh_and_hotkeys_alive() {
     use super::render::render_output;
     use crate::model::Devices;
-    for mode in [Mode::Output, Mode::Input, Mode::Playback, Mode::Recording] {
+    for mode in [Mode::Output, Mode::Input, Mode::Playback] {
         let rows = if mode.is_stream() {
             Devices::Streams(Vec::new())
         } else {
@@ -233,7 +220,6 @@ fn stream_rows_keep_full_search_metadata_and_single_line_labels() {
     use crate::model::StreamEntry;
     let mut entry = StreamEntry {
         key: "playback:7:3:123".into(),
-        kind: AudioKind::Output,
         index: 7,
         application: "Firefox".into(),
         name: "A long title\nwith two lines".into(),

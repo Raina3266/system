@@ -62,20 +62,6 @@ impl Controller {
         })
     }
 
-    fn applications(&mut self) -> AppResult<Vec<ApplicationInfo>> {
-        Ok(match self {
-            Self::Sink(controller) => controller.list_applications()?,
-            Self::Source(controller) => controller.list_applications()?,
-        })
-    }
-
-    fn application(&mut self, index: u32) -> AppResult<ApplicationInfo> {
-        Ok(match self {
-            Self::Sink(controller) => controller.get_app_by_index(index)?,
-            Self::Source(controller) => controller.get_app_by_index(index)?,
-        })
-    }
-
     /// Check both transport completion and the server's acknowledgement. The
     /// convenience volume/mute setters in pulsectl discard operation errors.
     fn change(
@@ -100,8 +86,11 @@ impl Controller {
     }
 
     fn check_stream(&mut self, entry: &StreamEntry) -> AppResult<ApplicationInfo> {
-        let app = self.application(entry.index)?;
-        if stream_key(entry.kind, &app) != entry.key {
+        let Self::Sink(controller) = self else {
+            return Err(io::Error::other("Playback requires an output controller").into());
+        };
+        let app = controller.get_app_by_index(entry.index)?;
+        if stream_key(&app) != entry.key {
             return Err(io::Error::other("The selected stream has ended").into());
         }
         Ok(app)
@@ -118,37 +107,26 @@ pub fn toggle_mute(entry: &AudioEntry) -> AppResult<()> {
 }
 
 pub fn toggle_stream_mute(entry: &StreamEntry) -> AppResult<()> {
-    let mut controller = Controller::create(entry.kind)?;
+    let mut controller = Controller::create(AudioKind::Output)?;
     let app = controller.check_stream(entry)?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.set_sink_input_mute(app.index, !app.mute, Some(done)),
-        // Do not use pulsectl 0.3.2's SourceController::set_app_mute: it
-        // accidentally mutes a source device with the stream's index.
-        AudioKind::Input => api.set_source_output_mute(app.index, !app.mute, Some(done)),
-    })
+    controller.change(|api, done| api.set_sink_input_mute(app.index, !app.mute, Some(done)))
 }
 
 pub fn nudge_stream_volume(entry: &StreamEntry, delta: i16) -> AppResult<()> {
-    let mut controller = Controller::create(entry.kind)?;
+    let mut controller = Controller::create(AudioKind::Output)?;
     let app = controller.check_stream(entry)?;
     if !app.has_volume || !app.volume_writable {
         return Err(io::Error::other("This stream does not support volume changes").into());
     }
-    let volumes = adjusted_volume(app.volume, entry.kind, delta)?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.set_sink_input_volume(app.index, &volumes, Some(done)),
-        AudioKind::Input => api.set_source_output_volume(app.index, &volumes, Some(done)),
-    })
+    let volumes = adjusted_volume(app.volume, AudioKind::Output, delta)?;
+    controller.change(|api, done| api.set_sink_input_volume(app.index, &volumes, Some(done)))
 }
 
 pub fn move_stream(entry: &StreamEntry, device_name: &str) -> AppResult<()> {
-    let mut controller = Controller::create(entry.kind)?;
+    let mut controller = Controller::create(AudioKind::Output)?;
     let app = controller.check_stream(entry)?;
     let device = controller.device_by_name(device_name)?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.move_sink_input_by_index(app.index, device.index, Some(done)),
-        AudioKind::Input => api.move_source_output_by_index(app.index, device.index, Some(done)),
-    })
+    controller.change(|api, done| api.move_sink_input_by_index(app.index, device.index, Some(done)))
 }
 
 pub fn port_choices(entry: &AudioEntry) -> AppResult<ChoiceList> {
@@ -196,15 +174,15 @@ pub fn set_port(entry: &AudioEntry, key: &str) -> AppResult<()> {
     })
 }
 
-pub fn streams(kind: AudioKind) -> AppResult<Vec<StreamEntry>> {
-    let mut controller = Controller::create(kind)?;
+pub fn streams() -> AppResult<Vec<StreamEntry>> {
+    let mut controller = SinkController::create()?;
     let devices = controller.list_devices()?;
     let mut entries: Vec<_> = controller
-        .applications()?
+        .list_applications()?
         .iter()
         .map(|app| {
             let device = devices.iter().find(|d| d.index == app.connection_id);
-            let device_entry = device.and_then(|d| entry(kind, d, None));
+            let device_entry = device.and_then(|d| entry(AudioKind::Output, d, None));
             let application = app
                 .proplist
                 .get_str("application.name")
@@ -212,8 +190,7 @@ pub fn streams(kind: AudioKind) -> AppResult<Vec<StreamEntry>> {
                 .or_else(|| app.proplist.get_str("application.process.binary"))
                 .unwrap_or_else(|| "Audio stream".into());
             StreamEntry {
-                key: stream_key(kind, app),
-                kind,
+                key: stream_key(app),
                 index: app.index,
                 application,
                 name: app.name.clone().unwrap_or_default(),
@@ -240,39 +217,31 @@ pub fn streams(kind: AudioKind) -> AppResult<Vec<StreamEntry>> {
     Ok(entries)
 }
 
-fn stream_key(kind: AudioKind, app: &ApplicationInfo) -> String {
+fn stream_key(app: &ApplicationInfo) -> String {
     stream_identity(
-        kind,
         app.index,
         app.client,
         &app.proplist.get_str("object.serial").unwrap_or_default(),
     )
 }
 
-fn stream_identity(kind: AudioKind, index: u32, client: Option<u32>, serial: &str) -> String {
+fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
     // The PipeWire object serial protects a picker from stream-index reuse.
     // Native PulseAudio uses monotonically allocated stream/client indices.
     format!(
-        "{}:{index}:{}:{}",
-        kind.stream_prefix(),
+        "playback:{index}:{}:{}",
         client.map(|v| v.to_string()).unwrap_or_default(),
         hex_encode(serial)
     )
 }
 
 pub fn snapshot(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    devices(kind, false)
-}
-
-/// Recording route pickers include output monitors (desktop audio); the Input
-/// tab remains a microphone list as before.
-pub fn devices(kind: AudioKind, include_monitors: bool) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
     let default_name = controller.default_name()?;
     let mut entries: Vec<_> = controller
         .list_devices()?
         .into_iter()
-        .filter(|device| include_monitors || kind == AudioKind::Output || device.monitor.is_none())
+        .filter(|device| kind == AudioKind::Output || device.monitor.is_none())
         .filter_map(|device| entry(kind, &device, default_name.as_deref()))
         .collect();
     entries.sort_by(|left, right| {
@@ -433,10 +402,10 @@ mod tests {
     }
 
     #[test]
-    fn stream_keys_separate_clients_directions_and_reused_indices() {
-        let key = stream_identity(AudioKind::Output, 7, Some(3), "100");
-        assert_ne!(key, stream_identity(AudioKind::Input, 7, Some(3), "100"));
-        assert_ne!(key, stream_identity(AudioKind::Output, 7, Some(4), "100"));
-        assert_ne!(key, stream_identity(AudioKind::Output, 7, Some(3), "101"));
+    fn stream_keys_separate_clients_and_reused_indices() {
+        let key = stream_identity(7, Some(3), "100");
+        assert!(key.starts_with("playback:"));
+        assert_ne!(key, stream_identity(7, Some(4), "100"));
+        assert_ne!(key, stream_identity(7, Some(3), "101"));
     }
 }

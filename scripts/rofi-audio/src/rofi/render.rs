@@ -121,7 +121,6 @@ fn empty_label(mode: Mode) -> &'static str {
         Mode::Output => "No audio outputs found",
         Mode::Input => "No audio inputs found",
         Mode::Playback => "No playback streams — start audio in an app",
-        Mode::Recording => "No recording streams — start recording in an app",
     }
 }
 

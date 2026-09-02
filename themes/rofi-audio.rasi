@@ -1,9 +1,9 @@
-/* rofi-audio: Bluetooth / Output / Input / Playback / Recording.
+/* rofi-audio: Bluetooth / Output / Input / Playback.
 
    Connecting, disconnecting and confirming have no buttons of their own:
    double-clicking a row — or pressing Enter on it — is Rofi's accept-entry
    action, which connects or disconnects on Bluetooth and makes the row the
-   default device on Output / Input. On Playback / Recording it opens the
+   default device on Output / Input. On Playback it opens the
    selected stream's device picker. Enter in a picker applies the choice.
 
    Rofi builds its widget tree once and does not re-run a script mode when you
@@ -154,7 +154,7 @@ element selected.urgent {
 
 /* Bluetooth: discovered is dim, paired is foreground, connected is cyan.
    Output/Input: every device is foreground, the default one is cyan.
-   Playback/Recording: live streams are foreground, muted/paused streams dim.
+   Playback: live streams are foreground, muted/paused streams dim.
    Pickers: the current device/port is cyan, unavailable ports dim. */
 element-text normal.normal,
 element-text alternate.normal,
@@ -230,7 +230,7 @@ button-forget {
     action: "kb-custom-2";
 }
 
-/* All four audio tabs: volume up/down and mute. */
+/* All three audio tabs: volume up/down and mute. */
 button-volume-up {
     content: " 󰝝 ";
     action: "kb-custom-3";
@@ -246,7 +246,7 @@ button-mute {
     action: "kb-custom-6";
 }
 
-/* Stream routing for Playback/Recording; no change to the system default. */
+/* Stream routing for Playback; no change to the system default. */
 button-route {
     content: " 󰁔 ";
     action: "kb-custom-7";
