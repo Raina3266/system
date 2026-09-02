@@ -30,11 +30,6 @@ window#waybar.bottom {
 
 /* ── Standard modules ── */
 
-#cpu,
-#temperature,
-#memory,
-#disk,
-#network,
 #clock,
 #custom-ycal,
 #custom-network,
@@ -42,14 +37,9 @@ window#waybar.bottom {
 #custom-clipboard,
 #custom-timer,
 #custom-files,
-#backlight,
-#pulseaudio,
 #custom-battery,
-#tray,
-#group-hardware,
-#group-system,
-#group-hardware > widget,
-#group-system > widget {
+#custom-swaync,
+#tray {
     color: #7afcff;
     background-color: transparent;
     margin-right: 5px;
@@ -143,11 +133,6 @@ window#waybar.bottom {
 /* ── Hover states ── */
 
 #workspaces button:hover,
-#cpu:hover,
-#temperature:hover,
-#memory:hover,
-#disk:hover,
-#network:hover,
 #clock:hover,
 #custom-ycal:hover,
 #custom-network:hover,
@@ -155,14 +140,13 @@ window#waybar.bottom {
 #custom-clipboard:hover,
 #custom-files:hover,
 #custom-timer:hover,
+#custom-swaync:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
 #custom-whatsapp:hover,
 #custom-gkeep:hover,
 #custom-gcal:hover,
 #custom-gphotos:hover,
-#backlight:hover,
-#pulseaudio:hover,
 #tray:hover,
 .niri-window-buttons button:hover,
 .scroll-arrow-left:hover,
@@ -186,6 +170,27 @@ tooltip label {
 
 /* ── States ── */
 
+/* SwayNC bell: pink with a waiting notification, dimmed under Do Not Disturb,
+   and washed while its control center is open. */
+
+#custom-swaync.notification,
+#custom-swaync.inhibited-notification {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+#custom-swaync.dnd-none,
+#custom-swaync.dnd-notification,
+#custom-swaync.dnd-inhibited-none,
+#custom-swaync.dnd-inhibited-notification {
+    color: #5c6776;
+}
+
+#custom-swaync.cc-open {
+    background-color: rgba(255, 126, 219, 0.2);
+    border-color: rgba(255, 126, 219, 0.6);
+}
+
 #custom-timer.running {
     color: #ff7edb;
 }
@@ -198,14 +203,12 @@ tooltip label {
     border-color: darkred;
 }
 
-#temperature.warning,
 #custom-battery.warning:not(.charging),
 #custom-battery.low:not(.charging) {
     color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 
-#temperature.critical,
 #custom-battery.critical:not(.charging) {
     color: #ff3333;
     text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);

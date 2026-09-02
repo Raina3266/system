@@ -1,9 +1,10 @@
-# Rofi-backed utility modules on the right side of the top bar, plus the
-# niri_window_buttons CFFI taskbar module for the bottom bar.
+# Rofi-backed utility modules on the right side of the top bar, the SwayNC bell
+# that ends it, plus the niri_window_buttons CFFI taskbar module for the bottom
+# bar.
 # niri_window_buttons: https://github.com/adelmonte/niri_window_buttons
 # Taskbar (current workspace only): click=focus, middle=close, right=menu
 # Drag to reorder, shift-click for multi-select
-{ packages }:
+{ pkgs, packages }:
 {
   homeConfig.home.packages = [
     packages.previewPanel
@@ -54,6 +55,37 @@
       escape = false;
       on-click = "${packages.rofiAudio}/bin/rofi-audio";
       on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
+    };
+
+    # The control center opener, and the last module on the top bar. swaync's
+    # own `-swb` output already carries the count as its text and the state as
+    # its class; jq only blanks a zero so the bar shows the bell alone rather
+    # than a permanent "0". Killing Waybar closes jq's stdout, which ends the
+    # pipeline, so the subscription does not outlive the bar.
+    "custom/swaync" = {
+      exec = pkgs.writeShellScript "waybar-swaync-status" ''
+        ${pkgs.swaynotificationcenter}/bin/swaync-client -swb \
+          | ${pkgs.jq}/bin/jq --unbuffered -c \
+              '.text = (if (.text | tonumber) > 0 then .text else "" end)'
+      '';
+      return-type = "json";
+      format = "{icon}  {}";
+      format-icons = {
+        none = "󰂜";
+        notification = "󰂚";
+        "dnd-none" = "󰂛";
+        "dnd-notification" = "󰂛";
+        "inhibited-none" = "󰂜";
+        "inhibited-notification" = "󰂚";
+        "dnd-inhibited-none" = "󰂛";
+        "dnd-inhibited-notification" = "󰂛";
+      };
+      tooltip = true;
+      escape = true;
+      "exec-on-event" = false;
+      on-click = "${pkgs.swaynotificationcenter}/bin/swaync-client -t -sw";
+      on-click-right = "${pkgs.swaynotificationcenter}/bin/swaync-client -d -sw";
+      on-click-middle = "${pkgs.swaynotificationcenter}/bin/swaync-client -C -sw";
     };
 
     tray = {

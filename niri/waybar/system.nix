@@ -1,11 +1,11 @@
-# System, hardware, media, and Google Calendar/Tasks status modules.
+# Battery, media, and Google Calendar/Tasks status modules.
+#
+# Brightness, volume and the hardware readings are no longer here: they live
+# in the SwayNC control center (../swaync), which the bell at the right end of
+# the top bar opens. Battery stays in the bar, at its left end, because it is
+# the one reading worth seeing without opening anything.
 { lib, pkgs, packages }:
 let
-  drawer = {
-    transition-duration = 300;
-    transition-left-to-right = true;
-  };
-
   mprisenceNativeHost =
     pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
       (builtins.toJSON {
@@ -48,28 +48,6 @@ in
   };
 
   modules = {
-    "group/system" = {
-      orientation = "horizontal";
-      inherit drawer;
-      modules = [
-        "custom/battery"
-        "backlight"
-        "pulseaudio"
-      ];
-    };
-
-    "group/hardware" = {
-      orientation = "horizontal";
-      inherit drawer;
-      modules = [
-        "temperature"
-        "memory"
-        "cpu"
-        "disk"
-        "network"
-      ];
-    };
-
     "custom/battery" = {
       return-type = "json";
       interval = 5;
@@ -122,66 +100,6 @@ in
         powerprofilesctl set "$next" 2>/dev/null
         notify-send "Power Profile" "Set to $next"
       '';
-    };
-
-    backlight = {
-      format = "󰃠 {percent}%";
-      tooltip-format = "Backlight: {percent}%";
-      on-scroll-up = "${pkgs.brightnessctl}/bin/brightnessctl set 5%+";
-      on-scroll-down = "${pkgs.brightnessctl}/bin/brightnessctl set 5%-";
-      on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 100%";
-    };
-
-    pulseaudio = {
-      format = "󰕾 {volume}%";
-      format-bluetooth = "󰕾 {volume}%";
-      format-bluetooth-muted = "󰝟 {volume}%";
-      format-muted = "󰝟 {volume}%";
-      tooltip-format = "Volume: {volume}%";
-      scroll-step = 5;
-      on-click-right = "pavucontrol";
-      on-click = "pactl set-sink-mute 0 toggle";
-    };
-
-    temperature = {
-      thermal-zone = 8;
-      warning-threshold = 55;
-      critical-threshold = 80;
-      interval = 5;
-      format = "󰄏 {temperatureC}°C";
-      format-critical = "󰄅 {temperatureC}°C";
-      tooltip-format = "CPU package: {temperatureC}°C";
-    };
-
-    memory = {
-      interval = 5;
-      format = "󰍛 {used:0.1f}G / {total:0.1f}G";
-      format-alt = "󰍛 {percentage}%";
-      tooltip-format = "RAM: {used:0.1f}G / {total:0.1f}G ({percentage}%)\nSwap: {swapUsed:0.1f}G / {swapTotal:0.1f}G";
-    };
-
-    cpu = {
-      format = "󰻠 {usage}%";
-      tooltip = true;
-      tooltip-format = "CPU: {usage}%\n{avg_frequency} GHz";
-    };
-
-    disk = {
-      format = "󰋊 {free}";
-      format-alt = "󰋊 {percentage_used}% ({free})";
-      tooltip = true;
-    };
-
-    network = {
-      format = "󰖩  {bandwidthDownBytes}";
-      format-disconnected = "󰖪 Disconnected";
-      format-alt = "󰖩  {bandwidthUpBytes} |  {bandwidthDownBytes}";
-      format-wifi = "󰖩  {bandwidthDownBytes}";
-      format-ethernet = "󰈀  {bandwidthDownBytes}";
-      tooltip-format-wifi = "󰖩 {essid} ({signalStrength}%)\n {ipaddr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
-      tooltip-format-ethernet = "󰈀 {ifname}: {ipaddr}/{cidr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
-      tooltip-format-disconnected = "󰖪 Disconnected";
-      on-click-right = "nm-connection-editor";
     };
 
     "custom/media" = {

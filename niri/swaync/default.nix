@@ -1,0 +1,206 @@
+# SwayNC: the notification daemon and the control center behind the top-right
+# bell in Waybar.
+#
+# The control center is the single popup that owns brightness, volume, the
+# system readings and the session's power actions; Waybar keeps only the button
+# that opens it. Imported by ../../nixos/default.nix rather than by ../default.nix
+# because the package override below is a Nixpkgs overlay, and Home Manager here
+# uses global pkgs.
+{ ... }:
+{
+  nixpkgs.overlays = [
+    (final: prev: {
+      swaynotificationcenter = prev.swaynotificationcenter.overrideAttrs (oldAttrs: {
+        # Upstream's `label` widget shows a fixed string. The patch gives it an
+        # `exec`/`interval`/`pango-markup` triple so the widget can display a
+        # command's output, which is what the system monitor row needs; without
+        # `exec` the widget behaves exactly as it does upstream. Checked against
+        # v0.12.5, v0.12.6 and upstream main.
+        patches = (oldAttrs.patches or [ ]) ++ [ ./label-exec.patch ];
+      });
+    })
+  ];
+
+  home-manager.sharedModules = [
+    (
+      {
+        config,
+        lib,
+        pkgs,
+        repoPackages,
+        ...
+      }:
+      let
+        swaync = "${pkgs.swaynotificationcenter}/bin/swaync-client";
+
+        # Reboot, shutdown and logout are unrecoverable from a mis-click on a
+        # panel that opens under the pointer, so they confirm through Rofi,
+        # which is already the rest of this desktop's dialog toolkit. Suspend
+        # does not: it costs a keypress to undo.
+        power = pkgs.writeShellScriptBin "swaync-power" ''
+          set -euo pipefail
+
+          theme="''${SWAYNC_POWER_THEME:-${config.xdg.configHome}/rofi/rofi-power.rasi}"
+
+          case "''${1-}" in
+            suspend)  icon="󰤄"; label="Suspend";   confirm=false; run=(${pkgs.systemd}/bin/systemctl suspend) ;;
+            logout)   icon="󰍃"; label="Log out";   confirm=true;  run=(niri msg action quit --skip-confirmation) ;;
+            reboot)   icon="󰜉"; label="Restart";   confirm=true;  run=(${pkgs.systemd}/bin/systemctl reboot) ;;
+            poweroff) icon="󰐥"; label="Shut down"; confirm=true;  run=(${pkgs.systemd}/bin/systemctl poweroff) ;;
+            *)
+              echo "usage: swaync-power <suspend|logout|reboot|poweroff>" >&2
+              exit 2
+              ;;
+          esac
+
+          # The control center is a layer-shell overlay and would otherwise sit
+          # on top of the confirmation dialog.
+          ${swaync} --close-panel --skip-wait || true
+
+          if [ "$confirm" = true ]; then
+            choice="$(printf '󰜺  Cancel\n%s  %s\n' "$icon" "$label" \
+              | ${pkgs.rofi}/bin/rofi -dmenu -i -no-custom -p "$label?" -theme "$theme")" || exit 0
+            case "$choice" in
+              *"$label") ;;
+              *) exit 0 ;;
+            esac
+          fi
+
+          exec "''${run[@]}"
+        '';
+
+        action = label: argument: {
+          inherit label;
+          command = "${power}/bin/swaync-power ${argument}";
+          type = "normal";
+        };
+      in
+      {
+        home.packages = [
+          power
+          repoPackages.swayncSysmon
+        ];
+
+        services.swaync = {
+          enable = true;
+
+          # style.css is not set here: ../../themes/default.nix links
+          # themes/swaync.css into place so edits apply without a rebuild
+          # (`swaync-client --reload-css` picks them up).
+          settings = {
+            positionX = "right";
+            positionY = "top";
+            layer = "overlay";
+            layer-shell = true;
+
+            # Sits under the top bar's right edge, below the bell that opens it.
+            control-center-layer = "top";
+            control-center-positionX = "right";
+            control-center-positionY = "top";
+            control-center-width = 480;
+            control-center-height = 900;
+            control-center-margin-top = 8;
+            control-center-margin-right = 8;
+            control-center-margin-bottom = 8;
+            control-center-margin-left = 0;
+            control-center-exclusive-zone = false;
+            fit-to-screen = false;
+
+            notification-window-width = 440;
+            notification-icon-size = 48;
+            notification-body-image-height = 120;
+            notification-body-image-width = 200;
+            notification-grouping = true;
+            image-visibility = "when-available";
+            relative-timestamps = true;
+
+            timeout = 8;
+            timeout-low = 4;
+            timeout-critical = 0;
+            transition-time = 200;
+            hide-on-clear = false;
+            hide-on-action = true;
+            keyboard-shortcuts = true;
+
+            # Top to bottom: the header, then the controls that used to be
+            # Waybar's `group/system`, then the readings that used to be
+            # `group/hardware`, then the session actions, then the list itself.
+            widgets = [
+              "title"
+              "dnd"
+              "backlight"
+              "volume"
+              "label#sysmon"
+              "buttons-grid#power"
+              "notifications"
+            ];
+
+            widget-config = {
+              title = {
+                text = "Notifications";
+                clear-all-button = true;
+                button-text = "󰆴  Clear";
+              };
+
+              dnd.text = "󰂛  Do Not Disturb";
+
+              backlight = {
+                label = "󰃠";
+                # The panel that ../config.kdl's brightness keys drive. A
+                # different GPU reports a different name under
+                # /sys/class/backlight (amdgpu_bl0, acpi_video0, …).
+                device = "intel_backlight";
+                subsystem = "backlight";
+                min = 5;
+              };
+
+              volume = {
+                label = "󰕾";
+                show-per-app = true;
+                show-per-app-icon = true;
+                show-per-app-label = true;
+                expand-per-app = false;
+                empty-list-label = "Nothing is playing";
+                expand-button-label = "󰅀";
+                collapse-button-label = "󰅃";
+              };
+
+              # Live CPU, memory, temperature, disk and network readings. The
+              # `exec` key comes from ./label-exec.patch; swaync also re-runs
+              # the command whenever the control center opens, so the figures
+              # are never older than the panel.
+              "label#sysmon" = {
+                text = "Reading sensors…";
+                max-lines = 8;
+                exec = "${repoPackages.swayncSysmon}/bin/swaync-sysmon";
+                interval = 3;
+                pango-markup = true;
+              };
+
+              "buttons-grid#power" = {
+                buttons-per-row = 2;
+                actions = [
+                  (action "󰤄   Suspend" "suspend")
+                  (action "󰍃   Log out" "logout")
+                  (action "󰜉   Restart" "reboot")
+                  (action "󰐥   Shut down" "poweroff")
+                ];
+              };
+            };
+          };
+        };
+
+        # GNOME runs its own notification daemon, and two owners of
+        # org.freedesktop.Notifications cannot coexist, so keep this one to the
+        # Niri session — the same condition ../waybar/default.nix uses.
+        systemd.user.services.swaync = {
+          Unit.ConditionEnvironment = lib.mkForce [
+            "WAYLAND_DISPLAY"
+            "XDG_CURRENT_DESKTOP=niri"
+          ];
+          Service.RestartSec = 3;
+        };
+      }
+    )
+  ];
+}

@@ -15,6 +15,7 @@ let
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
+    inherit pkgs;
     packages = repoPackages;
   };
   modules = system.modules // utilities.modules;
@@ -34,21 +35,24 @@ let
     // {
       position = "top";
       expand-center = true;
+      # Battery first and the SwayNC bell last, at the two ends of the bar.
+      # Everything the bell owns — brightness, volume, the hardware readings
+      # and the session's power actions — is inside its popup rather than here.
       modules-left = [
+        "custom/battery"
+        "tray"
         "custom/ycal"
-        "group/system"
-        "group/hardware"
       ];
       modules-center = [
         "custom/media"
         "custom/lyrics"
       ];
       modules-right = [
-        "tray"
         "custom/timer"
         "custom/clipboard"
         "custom/audio"
         "custom/network"
+        "custom/swaync"
       ];
     }
     // modules;

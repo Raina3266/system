@@ -1,14 +1,19 @@
 # Custom Scripts
 
-This repository contains seven Rust utilities used by the desktop configuration:
+This repository contains eight Rust utilities used by the desktop configuration:
 
 - `media-control` — a dynamic MPRIS controller for Rofi and Waybar
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - `rofi-network-manager` — Wi-Fi and Ethernet controls with a Rofi interface
+- [`swaync-sysmon`](#swaync-sysmon) — the live system readings inside the notification center
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor
+
+It also documents [the notification center](#notification-center) those last
+two sit beside: SwayNC, the single popup that now owns brightness, volume, the
+hardware readings and the session's power actions.
 
 ## rofi-audio
 
@@ -202,9 +207,9 @@ The text is a single glyph:
 | On, nothing connected | 󰂯 |
 | On, device connected | 󰂱 |
 
-Giving the slot to Bluetooth while the adapter is on costs nothing, because the
-separate `pulseaudio` module in the top-left group already shows the volume and
-its own mute glyph. The module also sets a `class` — `bluetooth-connected`,
+Giving the slot to Bluetooth while the adapter is on costs nothing: the level is
+back as soon as the adapter is off, and the [notification center](#notification-center)
+carries a volume slider besides. The module also sets a `class` — `bluetooth-connected`,
 `bluetooth-on`, `muted`, `active`, or `unavailable` — so the glyph can be
 recoloured per state from `waybar.css`.
 
@@ -393,6 +398,102 @@ home.sessionVariables = {
 
 ---
 
+## swaync-sysmon
+
+`scripts/swaync-sysmon` prints the CPU, memory, temperature, disk and network
+block shown inside the SwayNC control center — the readings that used to be
+Waybar's `group/hardware` drawer. It is a plain command, not a daemon: SwayNC's
+patched `label` widget runs it every few seconds and again whenever the panel
+opens, and takes its standard output as the widget's text.
+
+### Output
+
+One line per available reading, as Pango markup in the same cyberpunk palette as
+the rest of the desktop. `--plain` prints the same rows without the markup:
+
+```text
+󰻠  CPU      12%            2.41 GHz
+󰍛  Memory   7.5G / 32.0G   24%
+󰄏  Temp     47°C
+󰋊  Disk     412G free      58% used
+󰖩  Network  ↓ 1.2K/s  ↑ 512B/s   wlan0
+```
+
+A reading the machine cannot supply is left out rather than shown as a
+placeholder: a desktop with no battery-class thermal sensor gets no `Temp` row,
+and a machine with no routing table gets no `Network` row. Swap appears only once
+something is actually swapped out. If nothing at all can be read, the block says
+so in one line.
+
+Values turn amber and then red past the thresholds the replaced Waybar modules
+used: 55/80 °C for temperature, 80/95% for CPU, 80/90% for memory and disk.
+
+### Readings
+
+| Row | Source | Notes |
+| --- | --- | --- |
+| CPU | `/proc/stat`, `/proc/cpuinfo` | Busy share of the interval since the last run; `idle` and `iowait` are not busy. The detail column is the mean core frequency |
+| Memory | `/proc/meminfo` | `MemTotal - MemAvailable`, so reclaimable page cache is not counted as used |
+| Swap | `/proc/meminfo` | Hidden unless something is in it |
+| Temp | `/sys/class/thermal`, `/sys/class/hwmon` | Prefers the package sensor (`x86_pkg_temp`, `coretemp`, `k10temp`, …) over the chassis one |
+| Disk | `df -P -B1` | The root filesystem by default |
+| Network | `/proc/net/route`, `/proc/net/dev` | The interface carrying the lowest-metric default route, so a VPN outranks the Wi-Fi link it runs over |
+
+### Counters between runs
+
+CPU load and throughput are differences between two readings of a counter that
+only ever increases, but each run is a separate process. The previous sample —
+and the rates derived from it — therefore live in a small file under
+`$XDG_RUNTIME_DIR/swaync-sysmon/`, written through a temporary file so a
+concurrent read never sees half a sample.
+
+Two consequences are deliberate. The very first run after login takes one
+reading, waits 250 ms and reports the difference, so the first panel opened is
+not blank. And a run that lands within a quarter second of the previous one —
+opening the control center just after a timer tick — repeats the figures already
+derived instead of dividing a counter delta by a near-zero interval.
+
+### Commands
+
+```text
+swaync-sysmon [--plain]
+swaync-sysmon --help
+```
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `SWAYNC_SYSMON_DF` | Override the `df` executable |
+| `SWAYNC_SYSMON_DISK` | Filesystem to report (default: `/`) |
+| `SWAYNC_SYSMON_THERMAL_ZONE` | A `/sys/class/thermal` zone index, or a full path to a sensor file (default: auto-detect) |
+| `SWAYNC_SYSMON_INTERFACE` | Network interface (default: the default route's) |
+| `SWAYNC_SYSMON_STATE` | Counter state file |
+| `SWAYNC_SYSMON_PROC` | `/proc` replacement (default: `/proc`) |
+| `SWAYNC_SYSMON_SYS` | `/sys` replacement (default: `/sys`) |
+
+The last two exist so the tests can describe fixed readings instead of asserting
+against whatever the machine running them happens to be doing.
+
+### Development checks
+
+```sh
+nix develop .#rust
+cargo fmt --manifest-path scripts/Cargo.toml --package swaync-sysmon -- --check
+cargo test --manifest-path scripts/Cargo.toml --package swaync-sysmon --locked
+cargo clippy --manifest-path scripts/Cargo.toml --package swaync-sysmon --locked -- -D warnings
+```
+
+Tests cover every parser against real `/proc` and `df` layouts (including a
+device name containing spaces and a routing table with two default routes), the
+state file's round trip and truncation behaviour, the rate arithmetic including
+reset counters and zero intervals, the formatting and thresholds, and a fixture
+`/proc` + `/sys` tree that exercises the whole block: sensor preference, the
+repeated-rates path, an absent sensor, a disconnected machine, and a machine
+where nothing can be read at all.
+
+---
+
 ## waybar-timer
 
 `scripts/waybar-timer` is a small countdown timer that outputs Waybar-compatible JSON. The main process owns the timer state, while command invocations communicate with it over a Unix datagram socket.
@@ -435,3 +536,119 @@ A minimal custom module configuration looks like this:
   }
 }
 ```
+
+---
+
+## Notification center
+
+SwayNC (`SwayNotificationCenter`) is this desktop's notification daemon and the
+one popup behind the bell at the right end of the top bar. Configuration lives in
+`niri/swaync/default.nix`; the stylesheet is `themes/swaync.css`.
+
+### What moved
+
+The top bar used to carry two hover drawers, `group/system` and
+`group/hardware`, holding nine modules between them. Both are gone; their
+contents are widgets in the control center instead, and the bar keeps the button
+that opens it.
+
+| Was | Is now |
+| --- | --- |
+| `backlight` in `group/system` | The control center's `backlight` slider |
+| `pulseaudio` in `group/system` | The control center's `volume` slider, with per-application volumes |
+| `temperature`, `memory`, `cpu`, `disk`, `network` in `group/hardware` | One live [`swaync-sysmon`](#swaync-sysmon) block |
+| — | A four-button power grid: Suspend, Log out, Restart, Shut down |
+| `custom/battery` in `group/system` | Unchanged, but now the first module on the bar |
+| `tray` at the right | Moved to the left, after the battery |
+
+The battery deliberately stayed in the bar: it is the one reading worth seeing
+without opening anything. `custom/audio` (Bluetooth and the default devices) and
+`custom/network` (Wi-Fi) are Rofi menus of their own and were not touched.
+
+The top bar is therefore `custom/battery`, `tray`, `custom/ycal` on the left,
+media and lyrics in the centre, and `custom/timer`, `custom/clipboard`,
+`custom/audio`, `custom/network`, `custom/swaync` on the right — the bell last,
+in the corner.
+
+### The panel
+
+Top to bottom: the title with its Clear button, the Do Not Disturb switch,
+brightness, volume, the system readings, the power buttons, and the notification
+list itself.
+
+Brightness drives `/sys/class/backlight/intel_backlight` and is floored at 5 so
+the slider cannot black the screen out. A different GPU reports a different
+device name there (`amdgpu_bl0`, `acpi_video0`); it is the `backlight.device`
+key in `niri/swaync/default.nix`.
+
+Volume shows each playing application as well as the default sink, so a single
+loud tab can be turned down without touching everything else.
+
+### Power buttons
+
+Suspend acts immediately — it costs a keypress to undo. Log out, Restart and
+Shut down first close the panel and then ask for confirmation through Rofi,
+using `themes/rofi-power.rasi`, because the panel opens under the pointer and a
+mis-click there is not recoverable. Cancel is highlighted first, so a stray
+Enter is harmless, and Escape cancels.
+
+The `swaync-power` wrapper takes `suspend`, `logout`, `reboot` or `poweroff`, and
+is available for bindings of your own. `SWAYNC_POWER_THEME` overrides the Rofi
+theme it uses.
+
+### The Waybar bell
+
+`custom/swaync` subscribes to SwayNC over `swaync-client -swb`, which streams the
+notification count and the daemon's state. The count is the button's text; a
+zero is blanked so the bar shows the bell alone rather than a permanent `0`.
+
+| Action | Result |
+| --- | --- |
+| Click | Open or close the control center |
+| Right-click | Toggle Do Not Disturb |
+| Middle-click | Close every notification |
+
+The module sets a class per state — `none`, `notification`, the `dnd-` and
+`inhibited-` variants, plus `cc-open` while the panel is up — so `themes/waybar.css`
+recolours it: pink with something waiting, dimmed under Do Not Disturb, and
+washed pink while the panel is open.
+
+`Mod+N` toggles the panel and `F8` toggles Do Not Disturb, both through
+`swaync-client`.
+
+### The upstream patch
+
+SwayNC's `label` widget shows a fixed string, so there is no built-in way to put
+live readings in the panel. `niri/swaync/label-exec.patch` adds three optional
+keys to it:
+
+| Key | Meaning |
+| --- | --- |
+| `exec` | A command whose standard output becomes the label's text |
+| `interval` | How often, in seconds, to re-run it. `0` re-runs it only when the control center opens |
+| `pango-markup` | Whether that output is parsed as Pango markup |
+
+Without `exec` the widget behaves exactly as it does upstream, and the patch
+carries the matching `configSchema.json` and man-page entries. It applies cleanly
+to v0.12.5, v0.12.6 and upstream `main`; the overlay that applies it is at the
+top of `niri/swaync/default.nix`, next to the same pattern used for Rofi in
+`niri/rofi/default.nix`.
+
+### Theming
+
+`themes/swaync.css` is linked to `~/.config/swaync/style.css` by
+`themes/default.nix`, so edits apply without a rebuild — SwayNC re-reads it on
+`swaync-client --reload-css`. SwayNC loads its packaged stylesheet first and this
+one second at the same priority, so the file overrides rather than replaces
+upstream: most of it is the palette shared with `themes/waybar.css` and the Rofi
+`.rasi` themes, expressed through SwayNC's own CSS variables.
+
+The system monitor supplies its own colours as Pango markup, so the widget's CSS
+only sets the monospace grid its column alignment assumes.
+
+### GNOME
+
+The systemd unit is conditioned on `XDG_CURRENT_DESKTOP=niri`, like Waybar's.
+GNOME runs its own notification daemon and two owners of
+`org.freedesktop.Notifications` cannot coexist, so SwayNC stays out of that
+session.

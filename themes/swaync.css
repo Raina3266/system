@@ -1,0 +1,350 @@
+/* SWAYNC: control center and notification popups.
+ *
+ * SwayNC loads its packaged stylesheet first and this one second, at the same
+ * priority, so everything below overrides rather than replaces upstream. Most
+ * of the theme is therefore just the palette: the same cyberpunk colours as
+ * themes/waybar.css and the Rofi .rasi themes beside this file.
+ *
+ * Home Manager links this file to ~/.config/swaync/style.css, so edits apply
+ * after `swaync-client --reload-css` — no rebuild.
+ */
+
+:root {
+    --cyber-bg: rgba(14, 6, 22, 0.96);
+    --cyber-bg-mod: rgba(20, 20, 40, 0.95);
+    --cyber-fg: #cbe3e7;
+    --cyber-pink: #ff7edb;
+    --cyber-cyan: #7afcff;
+    --cyber-amber: #f29e74;
+    --cyber-red: #ff5c57;
+    --cyber-dim: #5c6776;
+
+    --cyber-line: rgba(255, 126, 219, 0.3);
+    --cyber-line-strong: rgba(255, 126, 219, 0.55);
+    --cyber-line-cyan: rgba(122, 252, 255, 0.28);
+    --cyber-wash: rgba(255, 126, 219, 0.12);
+    --cyber-wash-strong: rgba(255, 126, 219, 0.2);
+
+    /* Upstream's own variables, repointed at the palette above. */
+    --cc-bg: var(--cyber-bg);
+    --noti-border-color: var(--cyber-line);
+    --noti-bg: 20, 20, 40;
+    --noti-bg-alpha: 0.95;
+    --noti-bg-darker: rgba(14, 6, 22, 0.95);
+    --noti-bg-hover: rgba(255, 126, 219, 0.1);
+    --noti-bg-focus: var(--cyber-wash);
+    --noti-close-bg: rgba(122, 252, 255, 0.08);
+    --noti-close-bg-hover: var(--cyber-wash-strong);
+
+    --text-color: var(--cyber-fg);
+    --text-color-disabled: var(--cyber-dim);
+    --bg-selected: var(--cyber-pink);
+
+    --border: 1px solid var(--cyber-line);
+    --border-radius: 7px;
+    --notification-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 12px 2px rgba(0, 0, 0, 0.6);
+    --font-size-body: 14px;
+    --font-size-summary: 15px;
+}
+
+* {
+    font-family:
+        "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
+        "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
+    font-size: 14px;
+}
+
+/* ── Windows ── */
+
+.blank-window {
+    background: transparent;
+}
+
+.control-center {
+    background: var(--cyber-bg);
+    color: var(--cyber-fg);
+    border: 1px solid var(--cyber-line-strong);
+    border-radius: 15px;
+    padding: 12px;
+}
+
+.control-center-list {
+    background: transparent;
+}
+
+.control-center-list-placeholder {
+    color: var(--cyber-dim);
+    opacity: 1;
+}
+
+.floating-notifications.background .notification-background {
+    background: transparent;
+}
+
+/* ── Widget cards ── */
+
+.widget {
+    background: var(--cyber-bg-mod);
+    border: 1px solid var(--cyber-line);
+    border-radius: 7px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    color: var(--cyber-fg);
+}
+
+.widget-title > label {
+    color: var(--cyber-pink);
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.widget-title > button,
+.widget-buttons-grid flowboxchild > button,
+.widget-volume > box > button,
+.widget-inhibitors > button {
+    background: rgba(122, 252, 255, 0.06);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+    padding: 6px 12px;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+.widget-title > button:hover,
+.widget-buttons-grid flowboxchild > button:hover,
+.widget-volume > box > button:hover,
+.widget-inhibitors > button:hover {
+    background: var(--cyber-wash);
+    border-color: var(--cyber-pink);
+    color: var(--cyber-pink);
+}
+
+.widget-buttons-grid flowboxchild > button {
+    padding: 12px 8px;
+    margin: 3px;
+}
+
+.widget-buttons-grid flowboxchild > button.toggle:checked {
+    background: var(--cyber-wash-strong);
+    border-color: var(--cyber-pink);
+    color: var(--cyber-pink);
+}
+
+/* ── Do Not Disturb ── */
+
+.widget-dnd > label {
+    color: var(--cyber-fg);
+}
+
+.widget-dnd > switch {
+    background: rgba(122, 252, 255, 0.08);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 12px;
+    box-shadow: none;
+}
+
+.widget-dnd > switch:checked {
+    background: var(--cyber-wash-strong);
+    border-color: var(--cyber-pink);
+}
+
+.widget-dnd > switch > slider {
+    background: var(--cyber-dim);
+    border-radius: 12px;
+    border: none;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+.widget-dnd > switch:checked > slider {
+    background: var(--cyber-pink);
+}
+
+/* ── Sliders: brightness and volume ── */
+
+.widget-backlight > label,
+.widget-volume > box > label,
+.widget-slider > label {
+    color: var(--cyber-pink);
+    font-size: 1.05rem;
+    margin-right: 10px;
+}
+
+scale trough {
+    background: rgba(122, 252, 255, 0.1);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+    min-height: 10px;
+}
+
+scale trough highlight {
+    background: linear-gradient(to right, var(--cyber-cyan), var(--cyber-pink));
+    border-radius: 7px;
+    min-height: 10px;
+}
+
+scale slider {
+    background: var(--cyber-fg);
+    border: 1px solid var(--cyber-pink);
+    border-radius: 100%;
+    min-width: 12px;
+    min-height: 12px;
+    margin: -6px;
+}
+
+scale slider:hover {
+    background: var(--cyber-pink);
+}
+
+.per-app-volume {
+    background: rgba(14, 6, 22, 0.8);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+    padding: 6px 8px;
+    margin: 6px 0 0 0;
+}
+
+.per-app-volume label {
+    color: var(--cyber-dim);
+}
+
+/* ── System monitor ──
+ * swaync-sysmon supplies its own colours as Pango markup, so the widget only
+ * needs the monospace grid the alignment assumes. */
+
+.widget-label > label {
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* ── Notifications ── */
+
+.notification-row {
+    background: transparent;
+    outline: none;
+}
+
+.notification-row:focus,
+.notification-row:hover {
+    background: transparent;
+}
+
+.notification {
+    background: var(--cyber-bg-mod);
+    border: 1px solid var(--cyber-line);
+    border-radius: 7px;
+    margin: 4px 0;
+    padding: 0;
+    box-shadow: var(--notification-shadow);
+}
+
+.notification.critical {
+    border-color: var(--cyber-red);
+}
+
+.notification.low {
+    border-color: rgba(122, 252, 255, 0.18);
+}
+
+.notification-content {
+    background: transparent;
+    color: var(--cyber-fg);
+    padding: 8px 10px;
+}
+
+.notification-default-action:hover,
+.notification-action:hover {
+    background: var(--cyber-wash);
+}
+
+.summary {
+    color: var(--cyber-cyan);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.body {
+    color: var(--cyber-fg);
+    font-size: 14px;
+    font-weight: 400;
+}
+
+.time {
+    color: var(--cyber-dim);
+    font-size: 13px;
+}
+
+.body-image {
+    border-radius: 7px;
+    margin-top: 6px;
+}
+
+.close-button {
+    background: rgba(122, 252, 255, 0.08);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 100%;
+    margin: 6px 6px 0 0;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+.close-button:hover {
+    background: var(--cyber-red);
+    border-color: var(--cyber-red);
+    color: var(--cyber-bg);
+}
+
+.notification-action {
+    background: rgba(122, 252, 255, 0.06);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+    margin: 4px;
+}
+
+.inline-reply-entry {
+    background: rgba(14, 6, 22, 0.9);
+    color: var(--cyber-fg);
+    caret-color: var(--cyber-pink);
+    border: 1px solid var(--cyber-line);
+    border-radius: 7px;
+}
+
+.inline-reply-button {
+    background: rgba(122, 252, 255, 0.06);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+}
+
+/* ── Grouped notifications ── */
+
+.notification-group-headers {
+    color: var(--cyber-pink);
+    font-weight: 700;
+}
+
+.notification-group-icon {
+    color: var(--cyber-pink);
+}
+
+.notification-group-close-button,
+.notification-group-buttons > button {
+    background: rgba(122, 252, 255, 0.06);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 7px;
+}
+
+.notification-group-close-button:hover,
+.notification-group-buttons > button:hover {
+    background: var(--cyber-wash);
+    border-color: var(--cyber-pink);
+    color: var(--cyber-pink);
+}

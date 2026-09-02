@@ -20,6 +20,7 @@ in
     ./hardware.nix
     ./services.nix
     ../niri/rofi
+    ../niri/swaync
   ];
 
   config = {

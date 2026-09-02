@@ -137,6 +137,14 @@ rec {
     '';
   };
 
+  swayncSysmon = mkWorkspacePackage "swaync-sysmon" {
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postInstall = ''
+      wrapProgram "$out/bin/swaync-sysmon" \
+        --set SWAYNC_SYSMON_DF "${pkgs.lib.getExe' pkgs.coreutils "df"}"
+    '';
+  };
+
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
