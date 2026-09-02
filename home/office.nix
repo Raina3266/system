@@ -19,6 +19,12 @@ let
     "chat.disableAIFeatures" = true;
     "chat.commandCenter.enabled" = false;
     "editor.inlineSuggest.enabled" = false;
+
+    # A scrollbar's thickness is a setting, not a theme colour: the defaults
+    # are 14 and 12 pixels, sized for a slider the eye has to hunt for. This
+    # one is solid Daemon yellow, so a third of that is plenty to grab.
+    "editor.scrollbar.verticalScrollbarSize" = 5;
+    "editor.scrollbar.horizontalScrollbarSize" = 5;
   };
 
   vscodeUserSettingsFile =
