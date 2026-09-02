@@ -48,6 +48,9 @@ DAEMON_MUTED_TEXT = "#7a9b9f"
 DAEMON_WARNING = "#fdf500"
 DAEMON_ERROR = "#ff5048"
 DAEMON_SUCCESS = "#28c775"
+# Breeze's own alternate surface. Daemon overrides it in the sets it styled and
+# left it in place in the ones it did not.
+BREEZE_ALTERNATE_SURFACE = "#1e5774"
 
 KDE_STRUCTURAL_ELEMENTS = {
     "common",
@@ -1115,7 +1118,15 @@ def patch_desktop(args: argparse.Namespace) -> None:
         hex_to_kde_rgb(source): hex_to_kde_rgb(target)
         for source, target in palette.items()
     }
-    colour_background_changes = rewrite_text_colours(colours, kde_palette)
+    colour_background_changes = rewrite_text_colours(
+        colours,
+        kde_palette
+        | {
+            hex_to_kde_rgb(BREEZE_ALTERNATE_SURFACE): hex_to_kde_rgb(
+                args.alternate_background
+            )
+        },
+    )
     palette_changes = (
         svg_background_changes
         + kvconfig_background_changes
@@ -1133,6 +1144,41 @@ def patch_desktop(args: argparse.Namespace) -> None:
         hex_to_kde_rgb(args.alternate_background),
     )
 
+    # Everything above reaches Qt applications through Kvantum, which paints
+    # QWidgets alone. A QtQuick/Kirigami application - System Monitor, and
+    # every Plasma applet - takes its whole appearance from this colour scheme
+    # instead, and upstream left the semantic roles at stock Breeze. Localise
+    # them so both kinds of application read as the same theme. Placed after
+    # the palette conversion for the same reason the alternate colour is: the
+    # complementary background below is one of the colours it rewrites.
+    semantic_changes = 0
+    for keys, colour in (
+        ({"ForegroundActive"}, args.pink),
+        ({"ForegroundLink"}, args.structure_colour),
+        ({"ForegroundVisited"}, DAEMON_MUTED_TEXT),
+        ({"ForegroundPositive"}, DAEMON_SUCCESS),
+        ({"ForegroundNeutral"}, DAEMON_WARNING),
+        ({"ForegroundNegative"}, DAEMON_ERROR),
+    ):
+        semantic_changes += rewrite_ini_keys_in_sections(
+            colours, "Colors:", keys, hex_to_kde_rgb(colour)
+        )
+
+    # Daemon never touched the complementary set at all, so Kirigami chrome
+    # that asks for it still comes back Breeze teal with white text.
+    complementary_changes = rewrite_ini_key(
+        colours,
+        "Colors:Complementary",
+        {"BackgroundNormal"},
+        hex_to_kde_rgb(args.chrome_background),
+    )
+    complementary_changes += rewrite_ini_key(
+        colours,
+        "Colors:Complementary",
+        {"ForegroundNormal"},
+        hex_to_kde_rgb(DAEMON_TEXT),
+    )
+
     print(
         f"patched {icon_files} Dolphin action/place/MIME icons and "
         f"{indicator_changes} control indicators; "
@@ -1143,6 +1189,8 @@ def patch_desktop(args: argparse.Namespace) -> None:
         f"{separator_changes + separator_config_changes} menu separator settings; "
         f"{kvconfig_changes + colour_changes} selection keys; "
         f"{alternate_background_changes} alternate-view background; "
+        f"{semantic_changes} semantic foregrounds and "
+        f"{complementary_changes} complementary colours localised; "
         f"{palette_changes} normal backgrounds darkened"
     )
 
