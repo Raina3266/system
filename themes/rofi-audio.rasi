@@ -6,23 +6,10 @@
    default device and selected port on Output / Input. On Playback it opens the
    selected stream's device picker. Enter in a picker applies the choice.
 
-   Rofi builds its widget tree once and does not re-run a script mode when you
-   switch back to a tab it has already shown, so the action bar can neither
-   swap its buttons per tab nor keep per-tab colouring in sync. The buttons are
-   therefore always present and always live; the selected tab in the mode
-   switcher is what tells you which are meaningful.
-
    Alt+1 scan; Alt+2 forget; Alt+3/Up louder; Alt+4/Down quieter;
    Alt+6 mute; Alt+7 route; Alt+9 back (also a row in the route picker).
    Profile and Bluetooth codec selection are intentionally not included. */
 
-/* Rofi triggers this binding once the UI has been idle for `delay` seconds,
-   which is the only way a script mode can redraw itself without user input.
-   Each script render re-writes this block through its `theme` header, but the
-   timer is armed from whatever value was already in place — so this file's
-   value is what arms the very first tick, and it must be non-zero or nothing
-   ticks until the user presses something. See `write_refresh_theme` in
-    scripts/rofi-audio/src/rofi/render.rs. */
 configuration {
     /* Every device row is one compact line. */
     eh: 1;
@@ -50,8 +37,8 @@ configuration {
 
 /* Anchored under the Waybar icon that opens it, like the module it replaced. */
 window {
-    width: 640px;
-    height: 444px;
+    width: 500px;
+    height: 495px;
     background-color: @bg;
     border: 1px;
     border-color: rgba(255, 126, 219, 0.55);
@@ -67,16 +54,12 @@ mainbox {
 }
 
 mode-switcher {
-    font: "JetBrains Mono Nerd Font 11";
     orientation: horizontal;
     spacing: 6px;
     padding: 2px 0 2px 0;
 }
 
 button {
-    font: "JetBrains Mono Nerd Font 11";
-    /* Use each label's measured width, rather than giving every tab an equal
-       share and cutting off the longer Bluetooth label. */
     expand: false;
     padding: 2px 8px;
     cursor: pointer;
@@ -126,8 +109,7 @@ entry {
 }
 
 listview {
-    lines: 5;
-    dynamic: false;
+    dynamic: true;
     scrollbar: true;
     spacing: 4px;
 }
@@ -190,7 +172,7 @@ message {
 action-bar {
     expand: false;
     orientation: horizontal;
-    spacing: 7px;
+    spacing: 5px;
     children: [
         button-scan,
         button-forget,
