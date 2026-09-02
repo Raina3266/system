@@ -287,6 +287,13 @@ fn stream_rows_keep_full_search_metadata_and_single_line_labels() {
     };
     assert!(!entry.row_label().contains('\n'));
     assert!(entry.row_label().contains("125%"));
+    assert!(
+        entry
+            .row_label()
+            .contains("Firefox: A long title with two lines")
+    );
+    assert!(!entry.row_label().contains('→'));
+    assert!(!entry.row_label().contains("USB headphones"));
     for (muted, corked) in [(false, false), (true, false), (false, true)] {
         entry.muted = muted;
         entry.corked = corked;
@@ -294,11 +301,50 @@ fn stream_rows_keep_full_search_metadata_and_single_line_labels() {
         write_stream_row(&mut output, &entry).unwrap();
         let row = String::from_utf8_lossy(&output);
         assert!(row.contains("alsa_output.test"));
+        assert!(row.contains("USB headphones"));
         assert_eq!(row.contains("active\x1ftrue"), !muted && !corked);
         assert_eq!(output.iter().filter(|b| **b == 0).count(), 1);
     }
     entry.volume = None;
     assert!(entry.row_label().contains('—'));
+}
+
+#[test]
+fn generic_playback_titles_are_hidden_without_changing_stream_identity() {
+    use super::render::write_stream_row;
+    use crate::model::StreamEntry;
+    let mut entry = StreamEntry {
+        key: "playback:7:3:123".into(),
+        index: 7,
+        application: "Google Chrome".into(),
+        name: "Playback".into(),
+        device_name: "alsa_output.test".into(),
+        device_label: "Alder Lake PCH-P Speaker".into(),
+        volume: Some(100),
+        muted: false,
+        corked: false,
+    };
+    for name in [
+        "Playback",
+        " playback ",
+        "",
+        "Google Chrome",
+        "google chrome",
+    ] {
+        entry.name = name.into();
+        assert_eq!(entry.row_label(), "󰐊 100%  Google Chrome");
+        let mut output = Vec::new();
+        write_stream_row(&mut output, &entry).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("playback:7:3:123\0"));
+        assert!(output.contains("Alder Lake PCH-P Speaker"));
+    }
+    // Actual titles still distinguish multiple streams belonging to one app.
+    entry.name = "Concert recording".into();
+    assert_eq!(
+        entry.row_label(),
+        "󰐊 100%  Google Chrome: Concert recording"
+    );
 }
 
 #[test]

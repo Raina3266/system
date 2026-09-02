@@ -254,16 +254,18 @@ impl StreamEntry {
             .volume
             .map(|v| format!("{v:>3}%"))
             .unwrap_or_else(|| "  — ".into());
-        let title = if self.name.is_empty() || self.name == self.application {
+        let name = self.name.trim();
+        let title = if name.is_empty()
+            || name.eq_ignore_ascii_case(&self.application)
+            || name.eq_ignore_ascii_case("Playback")
+        {
             self.application.clone()
         } else {
-            format!("{}: {}", self.application, self.name)
+            format!("{}: {name}", self.application)
         };
-        format!(
-            "{icon} {volume}  {} → {}",
-            single_line(&title, 27),
-            single_line(&self.device_label, 18)
-        )
+        // The destination remains in search metadata and the route picker.
+        // Spend the row's space on the application and meaningful stream title.
+        format!("{icon} {volume}  {}", single_line(&title, 48))
     }
 }
 

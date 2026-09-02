@@ -1,4 +1,4 @@
-use std::{cell::Cell, io, rc::Rc};
+use std::{cell::Cell, collections::HashMap, io, rc::Rc};
 
 use libpulse_binding::context::introspect::Introspector;
 use libpulse_binding::def::PortAvailable;
@@ -212,6 +212,7 @@ pub fn selections(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
 fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
     let default_name = controller.default_name()?;
+    let mut device_labels = HashMap::new();
     let mut entries: Vec<_> = controller
         .list_devices()?
         .into_iter()
@@ -221,6 +222,10 @@ fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<Aud
                 return Vec::new();
             };
             if expand_ports {
+                device_labels.insert(
+                    base.name.clone(),
+                    short_device_name(&base.description, None),
+                );
                 port_rows(
                     base,
                     &device.ports,
@@ -238,7 +243,49 @@ fn snapshot_with_ports(kind: AudioKind, expand_ports: bool) -> AppResult<Vec<Aud
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.key.cmp(&right.key))
     });
+    if expand_ports {
+        clarify_selection_labels(&mut entries, &device_labels);
+    }
     Ok(entries)
+}
+
+/// Ports carry the useful difference (Speakers, Headphones, HDMI/DisplayPort
+/// number). Only repeat the hardware name when two choices would otherwise
+/// look identical. Keep all identifiers and full search descriptions intact.
+fn clarify_selection_labels(entries: &mut [AudioEntry], device_labels: &HashMap<String, String>) {
+    let labels: Vec<_> = entries.iter().map(|e| e.label.to_lowercase()).collect();
+    for (entry, label) in entries.iter_mut().zip(&labels) {
+        if entry.port.is_some()
+            && labels.iter().filter(|other| *other == label).count() > 1
+            && let Some(device) = device_labels.get(&entry.name)
+            && !entry.label.eq_ignore_ascii_case(device)
+        {
+            entry.label = format!("{} — {device}", entry.label);
+        }
+    }
+
+    // Identical models/port descriptions can still collide. Their sorted row
+    // order is deterministic; a small number distinguishes them without using
+    // a long PulseAudio node name. Actions still use the original stable key.
+    let labels: Vec<_> = entries
+        .iter()
+        .map(|e| single_line(&e.label, 48).to_lowercase())
+        .collect();
+    let mut used: std::collections::HashSet<_> = labels.iter().cloned().collect();
+    for (entry, label) in entries.iter_mut().zip(&labels) {
+        if labels.iter().filter(|other| *other == label).count() > 1 {
+            let mut number = 1;
+            loop {
+                // Prefix the number so even a clipped row stays distinct.
+                let candidate = format!("#{number} {}", entry.label);
+                if used.insert(single_line(&candidate, 48).to_lowercase()) {
+                    entry.label = candidate;
+                    break;
+                }
+                number += 1;
+            }
+        }
+    }
 }
 
 pub fn set_default(entry: &AudioEntry) -> AppResult<()> {
@@ -358,12 +405,9 @@ fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -
                 key: format!("{}:port:{}", base.key, hex_encode(name)),
                 port: Some(name.to_owned()),
                 description: format!("{} — {label}", base.description),
-                // Reserve space for the port so long device names cannot hide it.
-                label: format!(
-                    "{} — {}",
-                    single_line(&short_device_name(&base.description, None), 24),
-                    single_line(label, 21)
-                ),
+                // The port already says what this row selects. Do not repeat
+                // the controller description or truncate HDMI port numbers.
+                label: single_line(label, usize::MAX),
                 default: base.default && active == Some(name),
                 ..base.clone()
             })
@@ -428,7 +472,7 @@ mod tests {
             assert!(rows[1].default);
             for (row, label) in rows.iter().zip(labels) {
                 assert_eq!(row.name, "built-in");
-                assert!(row.label.contains(label));
+                assert_eq!(row.label, label);
                 assert!(row.description.contains(label));
                 assert_eq!(row.volume, 65);
                 assert!(row.muted);
@@ -503,12 +547,86 @@ mod tests {
     }
 
     #[test]
-    fn long_device_labels_leave_room_for_the_port() {
+    fn long_hardware_names_do_not_hide_the_port() {
         let mut base = device(AudioKind::Output);
         base.description = "An extremely long descriptive device name for a sound card".into();
         let ports = [port("jack", "Headphones", PortAvailable::Yes)];
         let rows = port_rows(base, &ports, Some("jack"));
+        assert_eq!(rows[0].label, "Headphones");
         assert!(rows[0].row_label().ends_with("Headphones"));
+    }
+
+    #[test]
+    fn hdmi_port_numbers_survive_without_repeated_chipset_names() {
+        let mut base = device(AudioKind::Output);
+        base.description = "Alder Lake PCH-P HDMI / DisplayPort".into();
+        let ports = [
+            port("hdmi-1", "HDMI / DisplayPort 1", PortAvailable::Yes),
+            port("hdmi-2", "HDMI / DisplayPort 2", PortAvailable::Yes),
+        ];
+        let mut rows = port_rows(base, &ports, Some("hdmi-1"));
+        clarify_selection_labels(&mut rows, &HashMap::new());
+        assert_eq!(rows[0].label, "HDMI / DisplayPort 1");
+        assert_eq!(rows[1].label, "HDMI / DisplayPort 2");
+        assert!(rows[0].description.contains("Alder Lake PCH-P"));
+        assert!(rows[0].row_label().ends_with('1'));
+        assert!(rows[1].row_label().ends_with('2'));
+    }
+
+    #[test]
+    fn identical_port_labels_only_add_hardware_context_when_needed() {
+        for kind in [AudioKind::Output, AudioKind::Input] {
+            let ports = [port("jack", "Headphones", PortAvailable::Yes)];
+            let mut usb = device(kind);
+            usb.name = "usb".into();
+            usb.key = format!("{}:{}", kind.key_prefix(), hex_encode(&usb.name));
+            let mut rows = port_rows(device(kind), &ports, Some("jack"));
+            rows.extend(port_rows(usb, &ports, Some("jack")));
+            let keys: Vec<_> = rows.iter().map(|e| e.key.clone()).collect();
+            let names = HashMap::from([
+                ("built-in".into(), "Built-in Audio".into()),
+                ("usb".into(), "USB Headset".into()),
+            ]);
+            clarify_selection_labels(&mut rows, &names);
+            assert_eq!(rows[0].label, "Headphones — Built-in Audio");
+            assert_eq!(rows[1].label, "Headphones — USB Headset");
+            assert_eq!(rows.iter().map(|e| e.key.clone()).collect::<Vec<_>>(), keys);
+            assert!(rows.iter().all(|e| e.port.as_deref() == Some("jack")));
+        }
+    }
+
+    #[test]
+    fn identical_models_and_clipped_labels_still_have_distinct_rows() {
+        let ports = [
+            port("jack-1", "Headphones", PortAvailable::Yes),
+            port("jack-2", "Headphones", PortAvailable::Yes),
+        ];
+        let mut rows = port_rows(device(AudioKind::Output), &ports, Some("jack-1"));
+        clarify_selection_labels(&mut rows, &HashMap::new());
+        assert_eq!(rows[0].label, "#1 Headphones");
+        assert_eq!(rows[1].label, "#2 Headphones");
+        assert_ne!(rows[0].key, rows[1].key);
+
+        for (i, row) in rows.iter_mut().enumerate() {
+            row.label = format!("{} {i}", "Long device name ".repeat(10));
+        }
+        clarify_selection_labels(&mut rows, &HashMap::new());
+        assert_ne!(rows[0].row_label(), rows[1].row_label());
+    }
+
+    #[test]
+    fn unique_bluetooth_usb_and_virtual_device_names_are_unchanged() {
+        let mut rows: Vec<_> = ["WH-1000XM4", "Scarlett 2i2 USB", "Virtual Output"]
+            .into_iter()
+            .map(|label| AudioEntry {
+                label: label.into(),
+                ..device(AudioKind::Output)
+            })
+            .collect();
+        clarify_selection_labels(&mut rows, &HashMap::new());
+        assert_eq!(rows[0].label, "WH-1000XM4");
+        assert_eq!(rows[1].label, "Scarlett 2i2 USB");
+        assert_eq!(rows[2].label, "Virtual Output");
     }
 
     #[test]

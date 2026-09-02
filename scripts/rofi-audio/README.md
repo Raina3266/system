@@ -11,19 +11,22 @@ tabs; there are no extra runtime commands or new dependencies to install.
 | Bluetooth | Discovered and paired Bluetooth devices | Pair/connect or disconnect, as before |
 | Output | Output devices and their available ports | Activate the row's port, then set its device as default |
 | Input | Microphones and other non-monitor inputs, including their available ports | Activate the row's port, then set its device as default |
-| Playback | Live playback streams, with app, volume and destination | Choose that stream's output |
+| Playback | Live playback streams, with app, volume and meaningful stream title | Choose that stream's output |
 
 Applications may expose several streams. They remain separate; no MPRIS support
 is required. Start playback in an application for its stream to
 appear. Muted or paused streams are dimmed, and lists refresh every two seconds.
-The popup is 640 px wide to accommodate the tabs and routing information.
+The popup width is configured in `themes/rofi-audio.rasi`.
 Tabs size themselves to their labels instead of splitting the width equally,
 so a longer label such as Bluetooth gets more space than Input.
 There is no Recording tab or per-application input routing. The Input tab still
 controls microphone devices: default selection, volume, mute and physical ports.
 
-For example, Output can show **Built-in Audio — Speakers** and **Built-in Audio
-— Headphones** as separate rows. Input can similarly show an internal microphone
+For example, Output can show **Speakers**, **Headphones**, and **HDMI / DisplayPort 1**
+as separate rows, without repeating the chipset name. Hardware names are added
+only when port labels collide; any remaining identical or identically clipped
+labels get a small number at the front. Full device descriptions remain searchable.
+Input can similarly show an internal microphone
 and a microphone jack. Enter/double-click switches to that port and makes its
 device the default. Only the active port of the default device is highlighted
 in cyan. Devices without named ports still appear once, as before.
@@ -32,6 +35,11 @@ Only ports exposed by the current audio profile can appear. Ports reported as
 unplugged are hidden; ports whose availability is unknown remain selectable.
 A port is rechecked before activation, so unplugging it cannot silently select
 a different row. This does not change sound-card profiles or Bluetooth codecs.
+
+Playback omits the generic **Playback** title and the **→ destination** suffix:
+for example, **Google Chrome: Playback → Alder Lake…** becomes **Google Chrome**.
+Real stream titles are retained. The destination remains searchable and can be
+viewed or changed in the route picker; this only changes the displayed text.
 
 ## Buttons and shortcuts
 
