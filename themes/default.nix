@@ -301,6 +301,13 @@ in
   # Apply only appearance keys instead of replacing the complete KDE config;
   # Dolphin preferences and other unrelated KDE settings remain untouched.
   home.activation.applyDaemonKdeTheme = config.lib.dag.entryAfter [ "linkGeneration" ] ''
+    # plasma-apply-colorscheme copies the scheme's colours into kdeglobals,
+    # which is the file applications actually read. The scheme's name never
+    # changes here - the file behind it does - so drop the recorded name first
+    # rather than rely on the tool noticing that a scheme already selected has
+    # been rebuilt underneath it.
+    $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
+      --group General --key ColorScheme --delete
     $DRY_RUN_CMD ${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme Daemon2
 
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
