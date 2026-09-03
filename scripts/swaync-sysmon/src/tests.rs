@@ -11,6 +11,8 @@ struct Fixture {
 
 static NEXT_FIXTURE: AtomicU32 = AtomicU32::new(0);
 
+const SAMPLE_TIME: f64 = 1_000.0;
+
 impl Fixture {
     fn new() -> Self {
         let root = env::temp_dir().join(format!(
@@ -89,7 +91,7 @@ impl Fixture {
     /// counters instead of seeding itself with a sleep.
     fn seed_state(&self, seconds_ago: f64) {
         let previous = State {
-            timestamp: now_seconds() - seconds_ago,
+            timestamp: SAMPLE_TIME - seconds_ago,
             cpu_busy: 1_400,
             cpu_total: 9_100,
             net_rx: 5_000_000,
@@ -113,7 +115,10 @@ impl Drop for Fixture {
 }
 
 fn plain_rows(config: &Config) -> Vec<String> {
-    collect(config).iter().map(Row::plain).collect()
+    collect_with_clock(config, || SAMPLE_TIME)
+        .iter()
+        .map(Row::plain)
+        .collect()
 }
 
 #[test]
@@ -233,7 +238,7 @@ fn a_hot_package_is_marked_critical() {
     let fixture = Fixture::new();
     fixture.write("sys/class/thermal/thermal_zone1/temp", "91000\n");
     fixture.seed_state(2.0);
-    let row = collect(&fixture.config())
+    let row = collect_with_clock(&fixture.config(), || SAMPLE_TIME)
         .into_iter()
         .find(|row| row.name == "Temp")
         .expect("a temperature row");

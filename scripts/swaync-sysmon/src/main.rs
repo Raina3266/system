@@ -131,6 +131,11 @@ fn now_seconds() -> f64 {
 
 /// Build every row the machine can currently supply, in display order.
 fn collect(config: &Config) -> Vec<Row> {
+    collect_with_clock(config, now_seconds)
+}
+
+/// Allow tests to control sample times independently of filesystem latency.
+fn collect_with_clock(config: &Config, clock: impl Fn() -> f64) -> Vec<Row> {
     // A machine with no readable routing table has no networking to report.
     // One that has a routing table but no default route is disconnected, which
     // is worth a row of its own.
@@ -144,11 +149,11 @@ fn collect(config: &Config) -> Vec<Row> {
     if previous.is_empty() {
         // No history: take one reading, wait, and let the reading below
         // difference against it, so the first panel that opens is not blank.
-        previous = sample(config, interface.as_deref(), &State::default());
+        previous = sample(config, interface.as_deref(), &State::default(), clock());
         thread::sleep(SEED_DELAY);
     }
 
-    let current = sample(config, interface.as_deref(), &previous);
+    let current = sample(config, interface.as_deref(), &previous, clock());
     if let Err(error) = state::store(&config.state_path, &current) {
         eprintln!(
             "swaync-sysmon: could not write {}: {error}",
@@ -168,8 +173,7 @@ fn collect(config: &Config) -> Vec<Row> {
 }
 
 /// Read the counters and derive the rates against `previous`.
-fn sample(config: &Config, interface: Option<&str>, previous: &State) -> State {
-    let timestamp = now_seconds();
+fn sample(config: &Config, interface: Option<&str>, previous: &State, timestamp: f64) -> State {
     let cpu = config
         .read_proc("stat")
         .as_deref()
