@@ -1,5 +1,5 @@
 diff --git a/man/swaync.5.scd b/man/swaync.5.scd
-index 493e931..a42ff60 100644
+index 493e931..b1d7d9c 100644
 --- a/man/swaync.5.scd
 +++ b/man/swaync.5.scd
 @@ -327,6 +327,8 @@ config file to be able to detect config errors
@@ -11,7 +11,7 @@ index 493e931..a42ff60 100644
  		*mpris*++
  			optional: true ++
  		*menubar*++
-@@ -442,6 +444,42 @@ config file to be able to detect config errors
+@@ -442,6 +444,47 @@ config file to be able to detect config errors
  					default: false ++
  					description: Whether the text is parsed as Pango markup ++
  			description: A generic widget that allows the user to add custom text. ++
@@ -45,6 +45,11 @@ index 493e931..a42ff60 100644
 +					optional: true ++
 +					default: "" ++
 +					description: Command run when a row's volume slider is moved, with "$id" and "$value" substituted ++
++				seek-command: ++
++					type: string ++
++					optional: true ++
++					default: "" ++
++					description: Command run when a row's progress bar is moved, with "$id" and "$value" substituted, "$value" being a position in seconds ++
 +				empty-text: ++
 +					type: string ++
 +					optional: true ++
@@ -55,10 +60,10 @@ index 493e931..a42ff60 100644
  			type: object ++
  			css classes: ++
 diff --git a/src/configSchema.json b/src/configSchema.json
-index 7c20604..f47d87b 100644
+index 7c20604..c48d70a 100644
 --- a/src/configSchema.json
 +++ b/src/configSchema.json
-@@ -507,6 +507,38 @@
+@@ -507,6 +507,43 @@
          }
        }
      },
@@ -87,6 +92,11 @@ index 7c20604..f47d87b 100644
 +          "description": "Command run when a row's volume slider is moved, with \"$id\" and \"$value\" substituted",
 +          "default": ""
 +        },
++        "seek-command": {
++          "type": "string",
++          "description": "Command run when a row's progress bar is moved, with \"$id\" and \"$value\" substituted, \"$value\" being a position in seconds",
++          "default": ""
++        },
 +        "empty-text": {
 +          "type": "string",
 +          "description": "Shown when no player is reported",
@@ -113,10 +123,10 @@ index 7f4b9d9..7e3765e 100644
                  break;
 diff --git a/src/controlCenter/widgets/media/media.vala b/src/controlCenter/widgets/media/media.vala
 new file mode 100644
-index 0000000..7afdf33
+index 0000000..bd43fd7
 --- /dev/null
 +++ b/src/controlCenter/widgets/media/media.vala
-@@ -0,0 +1,339 @@
+@@ -0,0 +1,391 @@
 +namespace SwayNotificationCenter.Widgets {
 +    /**
 +     * One player: a play/pause button beside its title, the track's progress,
@@ -131,21 +141,37 @@ index 0000000..7afdf33
 +        private Gtk.Button toggle_button;
 +        private Gtk.Label title_label;
 +        private Gtk.Label subtitle_label;
-+        private Gtk.ProgressBar progress;
++        private Gtk.Scale progress_scale;
++        private ulong progress_handler;
 +        private Gtk.Box volume_box;
 +        private Gtk.Scale volume_scale;
 +        private ulong volume_handler;
 +
 +        /**
-+         * Refreshes leave the volume alone until this passes, so a value on its
-+         * way back from the player cannot yank the slider out from under the
-+         * pointer that just moved it.
++         * Refreshes leave a slider alone until its hold passes, so a value on
++         * its way back from the player cannot yank the handle out from under
++         * the pointer that just moved it. The track keeps advancing a second at
++         * a time, so seeking needs the same guard volume does.
 +         */
 +        private int64 volume_held_until = 0;
-+        private const int64 VOLUME_HOLD = 2 * 1000 * 1000;
++        private int64 progress_held_until = 0;
++        private const int64 HOLD = 2 * 1000 * 1000;
++
++        /**
++         * Dragging a slider emits a value per motion event, and each one would
++         * otherwise be a process. The latest value is kept here and sent once
++         * the drag has been still for a moment, so a drag across the row costs
++         * a handful of commands rather than a hundred.
++         */
++        private const uint COALESCE_MS = 150;
++        private double volume_pending = 0;
++        private uint volume_source = 0;
++        private double seek_pending = 0;
++        private uint seek_source = 0;
 +
 +        public signal void toggled ();
 +        public signal void volume_changed (double percent);
++        public signal void seeked (double seconds);
 +
 +        public MediaRow () {
 +            Object ();
@@ -178,17 +204,38 @@ index 0000000..7afdf33
 +            subtitle_label.add_css_class ("widget-media-subtitle");
 +            append (subtitle_label);
 +
-+            progress = new Gtk.ProgressBar ();
-+            progress.set_hexpand (true);
-+            progress.add_css_class ("widget-media-progress");
-+            append (progress);
++            // A scale rather than a progress bar: the same shape to look at,
++            // but one the pointer can move.
++            progress_scale = new Gtk.Scale.with_range (Gtk.Orientation.HORIZONTAL, 0, 1, 1);
++            progress_scale.set_draw_value (false);
++            progress_scale.set_hexpand (true);
++            progress_scale.add_css_class ("widget-media-progress");
++            progress_handler = progress_scale.value_changed.connect (() => {
++                progress_held_until = GLib.get_monotonic_time () + HOLD;
++                seek_pending = progress_scale.get_value ();
++                if (seek_source == 0) {
++                    seek_source = GLib.Timeout.add (COALESCE_MS, () => {
++                        seek_source = 0;
++                        seeked (seek_pending);
++                        return GLib.Source.REMOVE;
++                    });
++                }
++            });
++            append (progress_scale);
 +
 +            volume_scale = new Gtk.Scale.with_range (Gtk.Orientation.HORIZONTAL, 0, 100, 1);
 +            volume_scale.set_draw_value (false);
 +            volume_scale.set_hexpand (true);
 +            volume_handler = volume_scale.value_changed.connect (() => {
-+                volume_held_until = GLib.get_monotonic_time () + VOLUME_HOLD;
-+                volume_changed (volume_scale.get_value ());
++                volume_held_until = GLib.get_monotonic_time () + HOLD;
++                volume_pending = volume_scale.get_value ();
++                if (volume_source == 0) {
++                    volume_source = GLib.Timeout.add (COALESCE_MS, () => {
++                        volume_source = 0;
++                        volume_changed (volume_pending);
++                        return GLib.Source.REMOVE;
++                    });
++                }
 +            });
 +
 +            Gtk.Label volume_icon = new Gtk.Label ("󰕾");
@@ -223,15 +270,20 @@ index 0000000..7afdf33
 +            subtitle_label.set_text (subtitle);
 +            subtitle_label.set_visible (subtitle.length > 0);
 +
++            int64 now = GLib.get_monotonic_time ();
++
 +            bool has_progress = length > 0 && position >= 0;
-+            progress.set_visible (has_progress);
-+            if (has_progress) {
-+                progress.set_fraction ((position / length).clamp (0.0, 1.0));
++            progress_scale.set_visible (has_progress);
++            if (has_progress && now > progress_held_until) {
++                GLib.SignalHandler.block (progress_scale, progress_handler);
++                progress_scale.set_range (0, length);
++                progress_scale.set_value (position.clamp (0.0, length));
++                GLib.SignalHandler.unblock (progress_scale, progress_handler);
 +            }
 +
 +            bool has_volume = volume >= 0;
 +            volume_box.set_visible (has_volume);
-+            if (has_volume && GLib.get_monotonic_time () > volume_held_until) {
++            if (has_volume && now > volume_held_until) {
 +                GLib.SignalHandler.block (volume_scale, volume_handler);
 +                volume_scale.set_value (volume.clamp (0.0, 100.0));
 +                GLib.SignalHandler.unblock (volume_scale, volume_handler);
@@ -245,9 +297,9 @@ index 0000000..7afdf33
 +     *
 +     * The widget is only a renderer: `exec` prints one tab-separated line per
 +     * player — id, status, volume, position, length, title, subtitle — and the
-+     * two command options are run with `$id` and `$value` substituted when a
-+     * row's button or slider is used. Everything that knows what a player is
-+     * stays in the program behind `exec`.
++     * three command options are run with `$id` and `$value` substituted when a
++     * row's button, progress bar or volume slider is used. Everything that
++     * knows what a player is stays in the program behind `exec`.
 +     */
 +    public class Media : BaseWidget {
 +        public override string widget_name {
@@ -267,6 +319,7 @@ index 0000000..7afdf33
 +        private string exec = "";
 +        private string toggle_command = "";
 +        private string volume_command = "";
++        private string seek_command = "";
 +        private int interval = 0;
 +        private string empty_text = "Nothing is playing";
 +
@@ -290,6 +343,10 @@ index 0000000..7afdf33
 +                string ?volume_command = get_prop<string> (config, "volume-command");
 +                if (volume_command != null) {
 +                    this.volume_command = volume_command;
++                }
++                string ?seek_command = get_prop<string> (config, "seek-command");
++                if (seek_command != null) {
++                    this.seek_command = seek_command;
 +                }
 +                int ?interval = get_prop<int> (config, "interval");
 +                if (interval != null) {
@@ -433,6 +490,11 @@ index 0000000..7afdf33
 +            row.volume_changed.connect ((percent) => {
 +                if (volume_command != "") {
 +                    execute_command.begin (expand (volume_command, id, percent));
++                }
++            });
++            row.seeked.connect ((seconds) => {
++                if (seek_command != "") {
++                    execute_command.begin (expand (seek_command, id, seconds));
 +                }
 +            });
 +            return row;

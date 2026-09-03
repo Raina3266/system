@@ -1,28 +1,23 @@
-//! `swaync-sysmon` — the system readings shown inside SwayNC's control center.
+//! The system readings row: CPU, memory, temperature, disk and network.
 //!
-//! SwayNC's `label` widget runs a command and shows its standard output (see
-//! `niri/swaync/label-exec.patch`). This program is that command: it prints one
-//! Pango markup block holding the CPU, memory, temperature, disk and network
-//! readings that used to live in the Waybar `group/hardware` drawer.
+//! The readings that used to live in the Waybar `group/hardware` drawer, as one
+//! Pango markup block for SwayNC's patched `label` widget.
 //!
-//! It is invoked once per refresh rather than run as a daemon, so the counters
-//! needed for CPU load and network throughput are carried between runs in a
-//! small state file. See `state.rs`.
-
-mod format;
-mod parse;
-mod state;
+//! The row is rendered once per refresh rather than by a daemon, so the
+//! counters needed for CPU load and network throughput are carried between runs
+//! in a small state file. See `state.rs`.
 
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use format::{Level, Row};
-use state::State;
+use crate::format::{self, Level, Row};
+use crate::state::{self, State};
+use crate::{non_empty, parse, path_from_environment};
 
 /// How long the seeding run waits before taking the reading it reports.
 ///
@@ -48,45 +43,14 @@ mod icon {
     pub const DISCONNECTED: &str = "󰖪";
 }
 
-const USAGE: &str = "\
-usage: swaync-sysmon [--plain]
-
-Prints the SwayNC system monitor block: CPU, memory, temperature, disk and
-network. Output is Pango markup unless --plain is given.
-
-environment:
-  SWAYNC_SYSMON_PROC           /proc replacement (default: /proc)
-  SWAYNC_SYSMON_SYS            /sys replacement (default: /sys)
-  SWAYNC_SYSMON_DF             df executable (default: df)
-  SWAYNC_SYSMON_THERMAL_ZONE   thermal zone index or sensor path (default: auto)
-  SWAYNC_SYSMON_DISK           filesystem to report (default: /)
-  SWAYNC_SYSMON_INTERFACE      network interface (default: the default route's)
-  SWAYNC_SYSMON_STATE          counter state file
-";
-
-fn main() -> ExitCode {
-    let mut markup = true;
-    for argument in env::args().skip(1) {
-        match argument.as_str() {
-            "--plain" => markup = false,
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return ExitCode::SUCCESS;
-            }
-            other => {
-                eprintln!("swaync-sysmon: unknown argument: {other}\n\n{USAGE}");
-                return ExitCode::FAILURE;
-            }
-        }
-    }
-
+/// Print the block, as Pango markup unless `markup` is false.
+pub(crate) fn render(markup: bool) {
     let config = Config::from_environment();
     println!("{}", format::block(&collect(&config), markup));
-    ExitCode::SUCCESS
 }
 
 /// Everything the program reads from the environment, resolved once.
-struct Config {
+pub(crate) struct Config {
     proc_root: PathBuf,
     sys_root: PathBuf,
     df: OsString,
@@ -99,12 +63,12 @@ struct Config {
 impl Config {
     fn from_environment() -> Self {
         Config {
-            proc_root: path_from_environment("SWAYNC_SYSMON_PROC", "/proc"),
-            sys_root: path_from_environment("SWAYNC_SYSMON_SYS", "/sys"),
-            df: env::var_os("SWAYNC_SYSMON_DF").unwrap_or_else(|| OsString::from("df")),
-            thermal_zone: non_empty("SWAYNC_SYSMON_THERMAL_ZONE"),
-            disk_path: env::var_os("SWAYNC_SYSMON_DISK").unwrap_or_else(|| OsString::from("/")),
-            interface: non_empty("SWAYNC_SYSMON_INTERFACE"),
+            proc_root: path_from_environment("SWAYNC_PANEL_PROC", "/proc"),
+            sys_root: path_from_environment("SWAYNC_PANEL_SYS", "/sys"),
+            df: env::var_os("SWAYNC_PANEL_DF").unwrap_or_else(|| OsString::from("df")),
+            thermal_zone: non_empty("SWAYNC_PANEL_THERMAL_ZONE"),
+            disk_path: env::var_os("SWAYNC_PANEL_DISK").unwrap_or_else(|| OsString::from("/")),
+            interface: non_empty("SWAYNC_PANEL_INTERFACE"),
             state_path: state_path(),
         }
     }
@@ -114,20 +78,10 @@ impl Config {
     }
 }
 
-fn path_from_environment(variable: &str, fallback: &str) -> PathBuf {
-    env::var_os(variable)
-        .filter(|value| !value.is_empty())
-        .map_or_else(|| PathBuf::from(fallback), PathBuf::from)
-}
-
-fn non_empty(variable: &str) -> Option<String> {
-    env::var(variable).ok().filter(|value| !value.is_empty())
-}
-
 /// The state file lives in the runtime directory so it disappears at logout;
 /// `/tmp` is only a fallback for sessions that do not set one.
-fn state_path() -> PathBuf {
-    if let Some(path) = env::var_os("SWAYNC_SYSMON_STATE").filter(|value| !value.is_empty()) {
+pub(crate) fn state_path() -> PathBuf {
+    if let Some(path) = env::var_os("SWAYNC_PANEL_STATE").filter(|value| !value.is_empty()) {
         return PathBuf::from(path);
     }
     let directory = env::var_os("XDG_RUNTIME_DIR")
@@ -136,7 +90,7 @@ fn state_path() -> PathBuf {
     directory.join("swaync-sysmon").join("state")
 }
 
-fn now_seconds() -> f64 {
+pub(crate) fn now_seconds() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_secs_f64())
@@ -144,12 +98,12 @@ fn now_seconds() -> f64 {
 }
 
 /// Build every row the machine can currently supply, in display order.
-fn collect(config: &Config) -> Vec<Row> {
+pub(crate) fn collect(config: &Config) -> Vec<Row> {
     collect_with_clock(config, now_seconds)
 }
 
 /// Allow tests to control sample times independently of filesystem latency.
-fn collect_with_clock(config: &Config, clock: impl Fn() -> f64) -> Vec<Row> {
+pub(crate) fn collect_with_clock(config: &Config, clock: impl Fn() -> f64) -> Vec<Row> {
     // A machine with no readable routing table has no networking to report.
     // One that has a routing table but no default route is disconnected, which
     // is worth a row of its own.
@@ -400,7 +354,7 @@ fn disk_row(config: &Config) -> Option<Row> {
     )
 }
 
-fn network_row(current: &State, interface: Option<&str>) -> Option<Row> {
+pub(crate) fn network_row(current: &State, interface: Option<&str>) -> Option<Row> {
     let Some(interface) = interface else {
         return Some(Row::new(icon::DISCONNECTED, "Disconnected".to_owned()).level(Level::Warning));
     };

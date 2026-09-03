@@ -3,6 +3,7 @@
 /// The cyberpunk palette shared with `themes/waybar.css` and the Rofi themes.
 pub mod colour {
     pub const ICON: &str = "#ff7edb";
+    pub const TEXT: &str = "#cbe3e7";
     pub const NAME: &str = "#5c6776";
     pub const VALUE: &str = "#7afcff";
     pub const WARNING: &str = "#f29e74";

@@ -139,11 +139,12 @@ rec {
     '';
   };
 
-  swayncSysmon = mkWorkspacePackage "swaync-sysmon" {
+  swayncPanel = mkWorkspacePackage "swaync-panel" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
-      wrapProgram "$out/bin/swaync-sysmon" \
-        --set SWAYNC_SYSMON_DF "${pkgs.lib.getExe' pkgs.coreutils "df"}"
+      wrapProgram "$out/bin/swaync-panel" \
+        --set SWAYNC_PANEL_DF "${pkgs.lib.getExe' pkgs.coreutils "df"}" \
+        --set SWAYNC_PANEL_SWAYNC_CLIENT "${pkgs.lib.getExe' pkgs.swaynotificationcenter "swaync-client"}"
     '';
   };
 

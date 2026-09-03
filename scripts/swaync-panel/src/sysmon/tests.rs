@@ -1,4 +1,5 @@
 use super::*;
+use crate::format::{Level, Row};
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicU32, Ordering};

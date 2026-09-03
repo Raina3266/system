@@ -9,7 +9,7 @@
 use std::io::{self, Write};
 
 use crate::model::{Player, clock, media_label};
-use crate::mpris::{player_command, set_volume, snapshot};
+use crate::mpris::{player_command, set_position, set_volume, snapshot};
 
 /// Field separator. `clean_text` collapses every run of whitespace — tabs
 /// included — into single spaces, so no field can contain one.
@@ -66,6 +66,17 @@ pub(crate) fn volume(arguments: &[String]) -> Result<(), String> {
         .parse()
         .map_err(|_| format!("not a percentage: {percent}"))?;
     set_volume(id, percent)
+}
+
+/// Seek one player, as the widget's progress bar asks.
+pub(crate) fn seek(arguments: &[String]) -> Result<(), String> {
+    let [id, seconds] = arguments else {
+        return Err("usage: media-control seek <player> <seconds>".to_owned());
+    };
+    let seconds: f64 = seconds
+        .parse()
+        .map_err(|_| format!("not a number of seconds: {seconds}"))?;
+    set_position(id, seconds)
 }
 
 /// Play or pause one player, as the widget's button asks.

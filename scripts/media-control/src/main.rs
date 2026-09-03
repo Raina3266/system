@@ -17,6 +17,7 @@ fn main() -> ExitCode {
         Some("waybar") => ui::waybar(&args[1..]),
         Some("players") => players::print_players(),
         Some("volume") => players::volume(&args[1..]),
+        Some("seek") => players::seek(&args[1..]),
         Some("play-pause") => players::play_pause(&args[1..]),
         Some("toggle") => ui::toggle(),
         Some("pause-all") => mpris::pause_all(),
@@ -45,6 +46,7 @@ fn print_help() {
            media-control waybar --watch [--interval-ms 750]\n\
            media-control players\n\
            media-control volume <player> <percent>\n\
+           media-control seek <player> <seconds>\n\
            media-control play-pause <player>\n\
            media-control toggle\n\
            media-control pause-all\n\

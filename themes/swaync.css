@@ -116,7 +116,6 @@
 
 .widget-menubar button,
 .widget-title > button,
-.widget-volume > box > button,
 .widget-inhibitors > button {
     background: rgba(122, 252, 255, 0.06);
     color: var(--cyber-cyan);
@@ -134,7 +133,6 @@
 
 .widget-menubar button:hover,
 .widget-title > button:hover,
-.widget-volume > box > button:hover,
 .widget-inhibitors > button:hover {
     background: var(--cyber-wash);
     border-color: var(--cyber-pink);
@@ -148,19 +146,9 @@
     color: var(--cyber-pink);
 }
 
-/* ── The volume slider ──
- * A thin track with a small handle, the shape both GNOME and macOS use. */
-
-.widget-volume {
-    padding: 3px 8px;
-}
-
-.widget-volume > box > label,
-.widget-slider > label {
-    color: var(--cyber-pink);
-    font-size: 14px;
-    margin-right: 8px;
-}
+/* ── Sliders ──
+ * A thin track with a small handle, the shape both GNOME and macOS use. Every
+ * slider in the panel is a media row's: its volume, or its progress. */
 
 scale {
     min-height: 18px;
@@ -190,23 +178,6 @@ scale slider {
 
 scale slider:hover {
     background: var(--cyber-pink);
-}
-
-.per-app-volume {
-    background: rgba(14, 6, 22, 0.75);
-    border: 1px solid var(--cyber-line-cyan);
-    border-radius: 9px;
-    padding: 3px 6px;
-    margin: 4px 0 0 0;
-}
-
-.per-app-volume label {
-    color: var(--cyber-dim);
-    font-size: 12px;
-}
-
-.widget-volume row image {
-    -gtk-icon-size: 16px;
 }
 
 /* ── The media list ──
@@ -267,21 +238,33 @@ scale slider:hover {
     margin-left: 28px;
 }
 
+/* The progress bar is a scale so it can be dragged, but it should read as a
+   bar: a thinner track than the volume slider, and a handle that only appears
+   once the pointer is on it. */
 .widget-media-progress {
-    margin: 2px 0 2px 28px;
+    margin: 0 0 0 28px;
+    min-height: 12px;
 }
 
 .widget-media-progress trough {
-    background: rgba(122, 252, 255, 0.12);
-    border: none;
-    border-radius: 9px;
     min-height: 3px;
 }
 
-.widget-media-progress progress {
-    background: linear-gradient(to right, var(--cyber-cyan), var(--cyber-pink));
-    border-radius: 9px;
+.widget-media-progress trough highlight {
     min-height: 3px;
+}
+
+.widget-media-progress slider {
+    background: transparent;
+    border-color: transparent;
+    min-width: 10px;
+    min-height: 10px;
+    margin: -5px;
+}
+
+.widget-media-progress:hover slider {
+    background: var(--cyber-fg);
+    border-color: var(--cyber-pink);
 }
 
 .widget-media-volume {

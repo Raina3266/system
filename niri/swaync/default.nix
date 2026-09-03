@@ -1,9 +1,11 @@
 # SwayNC: the notification daemon and the control center behind the bar's
 # centre button.
 #
-# The control center is the single popup that owns the volume slider, the media
-# overview, today's calendar and tasks, and the system readings; Waybar keeps
-# only the button that opens it. Imported by ../../nixos/default.nix rather than
+# The control center is the single popup that owns the media list, today's
+# calendar and tasks, and the system readings; Waybar keeps only the button that
+# opens it. Every row it shows is rendered by one of this repository's own
+# programs — `media-control` and `swaync-panel` — so the only thing here is
+# configuration. Imported by ../../nixos/default.nix rather than
 # by ../default.nix because the package override below is a Nixpkgs overlay, and
 # Home Manager here uses global pkgs.
 { ... }:
@@ -43,66 +45,10 @@
       let
         swaync = "${pkgs.swaynotificationcenter}/bin/swaync-client";
         mediaControl = "${repoPackages.mediaControl}/bin/media-control";
-
-        # SwayNC hands a toggle button's new state to its command in the
-        # environment, so set that state rather than toggling blind and hoping
-        # the button and the daemon still agree.
-        dnd = pkgs.writeShellScript "swaync-dnd" ''
-          if [ "''${SWAYNC_TOGGLE_STATE-}" = "true" ]; then
-            exec ${swaync} --dnd-on --skip-wait
-          fi
-          exec ${swaync} --dnd-off --skip-wait
-        '';
-
-        # waybar-ycal's popup keeps today's Google Calendar events and Tasks in
-        # a cache file, so the panel row reads that rather than starting Python
-        # and a set of API calls of its own. Events are plain strings; tasks are
-        # objects carrying a done flag, and the open ones come first because
-        # they are the part that still needs doing.
-        ycalRows = pkgs.writeText "swaync-ycal.jq" ''
-          def paint($colour; $text):
-            "<span foreground=\"" + $colour + "\">" + ($text | @html) + "</span>";
-          def cell($icon; $colour; $text):
-            paint("#ff7edb"; $icon) + "  " + paint($colour; $text);
-
-          [ (.[$today] // [])[]
-            | if type == "object"
-              then { order: (if .done then 2 else 0 end),
-                     icon: (if .done then "󰄲" else "󰄱" end),
-                     colour: (if .done then "#5c6776" else "#cbe3e7" end),
-                     title: .title }
-              else { order: 1, icon: "󰃭", colour: "#cbe3e7", title: . }
-              end
-          ]
-          | sort_by(.order)
-          | if length == 0 then
-              cell("󰃭"; "#5c6776"; "Nothing scheduled today")
-            else
-              ( (.[:$limit] | map(cell(.icon; .colour; .title)))
-                + (if length > $limit
-                   then [ paint("#5c6776"; "+ " + (length - $limit | tostring) + " more") ]
-                   else [] end)
-              ) | join("\n")
-            end
-        '';
-
-        # A day the cache has nothing for renders the same as a day it has not
-        # heard about yet, so an absent cache is simply an empty one.
-        noEvents = pkgs.writeText "swaync-ycal-empty.json" "{}";
-
-        ycal = pkgs.writeShellScript "swaync-ycal" ''
-          cache="''${SWAYNC_YCAL_CACHE:-$HOME/.cache/waybar-ycal/events.json}"
-          [ -r "$cache" ] || cache=${noEvents}
-          ${pkgs.jq}/bin/jq -r \
-            --arg today "$(${pkgs.coreutils}/bin/date +%F)" \
-            --argjson limit 3 \
-            -f ${ycalRows} \
-            "$cache" 2>/dev/null \
-            || printf '%s\n' '<span foreground="#5c6776">󰃭  Calendar unavailable</span>'
-        '';
+        panel = "${repoPackages.swayncPanel}/bin/swaync-panel";
       in
       {
-        home.packages = [ repoPackages.swayncSysmon ];
+        home.packages = [ repoPackages.swayncPanel ];
 
         services.swaync = {
           enable = true;
@@ -123,7 +69,7 @@
             control-center-positionX = "right";
             control-center-positionY = "top";
             control-center-width = 380;
-            control-center-height = 680;
+            control-center-height = 640;
             control-center-margin-top = 6;
             control-center-margin-right = 6;
             control-center-margin-bottom = 6;
@@ -147,17 +93,17 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # A header of pill buttons, the system volume, the media list,
-            # then the two `label` rows that render a program's output, then the
-            # notifications. Brightness and the session's power actions are
-            # deliberately not here: brightness stays on the function keys, and
-            # a power menu on a panel that opens under the pointer is a
-            # mis-click waiting to happen.
+            # A header of pill buttons, the media list, the two `label` rows
+            # that render a program's output, then the notifications. Three
+            # things are deliberately absent: a system volume slider, because
+            # every media row carries the one that matters; brightness, which
+            # stays on the function keys; and the session's power actions,
+            # because a panel that opens under the pointer is a mis-click
+            # waiting to happen.
             widgets = [
               "menubar#header"
-              "volume"
               "media"
-              "label#ycal"
+              "label#calendar"
               "label#sysmon"
               "notifications"
             ];
@@ -171,7 +117,7 @@
                     {
                       label = "󰂛  DND";
                       type = "toggle";
-                      command = "${dnd}";
+                      command = "${panel} dnd";
                       update-command = "${swaync} --get-dnd --skip-wait";
                     }
                     {
@@ -183,34 +129,29 @@
                 };
               };
 
-              # The system's own output level. Per-application volume is not
-              # listed here any more: the media rows below carry a slider each,
-              # which is the same control against the thing you were looking
-              # for when you opened the panel.
-              volume = {
-                label = "󰕾";
-                show-per-app = false;
-              };
-
               # Every player that is playing or paused, each with a play/pause
-              # button, a progress bar and its own volume. media-control renders
-              # the rows and receives the button and slider back, so "the
-              # current player" means one thing here, on the bar button, and in
-              # the Rofi menu.
+              # button, a progress bar that can be dragged to seek, and its own
+              # volume. media-control renders the rows and receives the button
+              # and both sliders back, so "the current player" means one thing
+              # here, on the bar button, and in the Rofi menu.
+              #
+              # There is no system volume slider above this any more: the row
+              # for the thing you can hear is the one you were reaching for.
               media = {
                 exec = "${mediaControl} players";
                 toggle-command = "${mediaControl} play-pause \"$id\"";
                 volume-command = "${mediaControl} volume \"$id\" \"$value\"";
+                seek-command = "${mediaControl} seek \"$id\" \"$value\"";
                 interval = 1;
                 empty-text = "Nothing is playing";
               };
 
-              # Today's events and tasks, from waybar-ycal's own cache. Clicking
-              # the bar's calendar module still opens its full popup.
-              "label#ycal" = {
+              # Today's events and tasks, from waybar-ycal's own cache.
+              # Clicking the bar's calendar module still opens its full popup.
+              "label#calendar" = {
                 text = "Reading calendar…";
                 max-lines = 4;
-                exec = "${ycal}";
+                exec = "${panel} calendar";
                 interval = 60;
                 pango-markup = true;
               };
@@ -222,7 +163,7 @@
               "label#sysmon" = {
                 text = "Reading sensors…";
                 max-lines = 4;
-                exec = "${repoPackages.swayncSysmon}/bin/swaync-sysmon";
+                exec = "${panel} sysmon";
                 interval = 3;
                 pango-markup = true;
               };

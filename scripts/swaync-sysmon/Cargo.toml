@@ -1,4 +1,0 @@
-[package]
-name = "swaync-sysmon"
-version.workspace = true
-edition.workspace = true

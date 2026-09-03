@@ -285,6 +285,21 @@ pub(crate) fn set_volume(player: &str, percent: f64) -> Result<(), String> {
     command_result(output)
 }
 
+/// Seek one player to an absolute position, in seconds.
+///
+/// Position is optional in MPRIS, and a player that reports one may still
+/// refuse to be moved, so a player without one is left alone rather than being
+/// told to jump somewhere it does not track.
+pub(crate) fn set_position(player: &str, seconds: f64) -> Result<(), String> {
+    if player_property(player, &["position"]).is_none() {
+        return Ok(());
+    }
+    let value = format!("{:.0}", seconds.max(0.0));
+    let output =
+        playerctl(["-p", player, "position", &value]).map_err(|error| error.to_string())?;
+    command_result(output)
+}
+
 pub(crate) fn change_volume(player: &str, delta: f64) -> Result<(), String> {
     let Some(current) =
         player_property(player, &["volume"]).and_then(|value| value.parse::<f64>().ok())
