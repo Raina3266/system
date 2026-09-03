@@ -8,6 +8,9 @@ let
   # repeated here instead of being patched out of an upstream file.
   daemonRed = "#D52C35";
   daemonPink = "#D656C7";
+  # Halfway between the pink accent and red, so a process name shifts along
+  # one hue as it heats up rather than crossing two.
+  daemonPinkRed = "#D5417E";
   daemonDimPink = "#5A254D";
   daemonYellow = "#FCEE0A";
   daemonSeparator = "#6B6670";
@@ -155,10 +158,12 @@ in
       theme[upload_mid]="${daemonPink}"
       theme[upload_end]="${daemonRed}"
 
-      # Colours a process name by its own CPU use: cyan at rest, pink and then
-      # red as it climbs.
-      theme[process_start]="${daemonText}"
-      theme[process_mid]="${daemonPink}"
+      # A process name is drawn from this ramp and its pid and command line
+      # from main_fg fading to inactive_fg. Keeping the name off that cyan to
+      # grey axis is what makes the three columns tell apart: names run pink
+      # to red by how busy the process is, pids and paths stay cyan to grey.
+      theme[process_start]="${daemonPink}"
+      theme[process_mid]="${daemonPinkRed}"
       theme[process_end]="${daemonRed}"
     '';
   };
