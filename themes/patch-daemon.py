@@ -1101,11 +1101,17 @@ def patch_desktop(args: argparse.Namespace) -> None:
         {"BackgroundNormal"},
         hex_to_kde_rgb(args.dim_pink),
     )
+    # These two are the only outline colours the scheme exposes, and a QML
+    # application draws every focus ring, hover frame and highlighted menu row
+    # from them. Kvantum paints its own frames from the SVG, so this decides
+    # how QtQuick applications look and nothing else: give them the structural
+    # colour, which is what frames a menu or a toolbar button everywhere else,
+    # rather than the red reserved for painted push-button frames.
     decoration_changes = rewrite_ini_keys_in_sections(
         colours,
         "Colors:",
         {"DecorationFocus", "DecorationHover"},
-        hex_to_kde_rgb(args.icon_colour),
+        hex_to_kde_rgb(args.structure_colour),
     )
     palette = background_palette(args)
     svg_background_changes = rewrite_text_colours(
