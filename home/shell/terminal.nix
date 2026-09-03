@@ -3,21 +3,9 @@
   ...
 }:
 let
-  # The same values ../../themes/default.nix hands KDE, GTK and VS Code. btop
-  # reads one flat list of colours rather than a theme package, so they are
-  # repeated here instead of being patched out of an upstream file.
-  daemonRed = "#D52C35";
-  daemonPink = "#D656C7";
-  # Halfway between the pink accent and red, so a process name shifts along
-  # one hue as it heats up rather than crossing two.
-  daemonPinkRed = "#D5417E";
-  daemonDimPink = "#5A254D";
+  # The structural colour ../../themes/default.nix gives menus, popups and
+  # scrollbars everywhere else.
   daemonYellow = "#FCEE0A";
-  daemonSeparator = "#6B6670";
-  daemonMutedText = "#7A9B9F";
-  daemonText = "#5DF4FE";
-  daemonAlternateBackground = "#210E15";
-  daemonBackground = "#180A10";
 in
 {
   # ── Terminal emulators ───────────────────────────────────────────────────
@@ -89,8 +77,6 @@ in
       proc_sorting = "cpu lazy";
       proc_cpu_graphs = true;
       proc_mem_bytes = true;
-      # The name takes its colour from the process gradient below, and the pid
-      # and command line fade with distance down the list.
       proc_colors = true;
       proc_gradient = true;
       proc_filter_kernel = false;
@@ -101,70 +87,15 @@ in
       clock_format = "%X";
     };
 
-    # Yellow frames the boxes and nothing else, as it frames menus and popups
-    # across the rest of the desktop. Text is cyan, headings pink, shortcut
-    # keys red; meters and graphs run cool to hot, cyan through pink to red.
-    #
-    # btop draws a process name from one colour and its pid and command line
-    # from another, so the pid cannot differ from the path: both take the
-    # greyscale ramp below, which fades with distance down the list.
+    # btop falls back to its own default theme for every key a theme file
+    # leaves out, so naming the four frames is enough: everything else - text,
+    # meters, graphs, the process list - stays as btop ships it, and yellow
+    # means an outline here exactly as it does on a menu or a popup.
     themes."Daemon-2.0" = ''
-      theme[main_bg]="${daemonBackground}"
-      theme[main_fg]="${daemonText}"
-      theme[title]="${daemonPink}"
-      theme[hi_fg]="${daemonRed}"
-      theme[selected_bg]="${daemonDimPink}"
-      theme[selected_fg]="${daemonText}"
-      theme[inactive_fg]="${daemonSeparator}"
-      theme[graph_text]="${daemonMutedText}"
-      theme[meter_bg]="${daemonAlternateBackground}"
-      theme[proc_misc]="${daemonPink}"
-
       theme[cpu_box]="${daemonYellow}"
       theme[mem_box]="${daemonYellow}"
       theme[net_box]="${daemonYellow}"
       theme[proc_box]="${daemonYellow}"
-      theme[div_line]="${daemonSeparator}"
-
-      theme[temp_start]="${daemonText}"
-      theme[temp_mid]="${daemonPink}"
-      theme[temp_end]="${daemonRed}"
-
-      theme[cpu_start]="${daemonText}"
-      theme[cpu_mid]="${daemonPink}"
-      theme[cpu_end]="${daemonRed}"
-
-      theme[used_start]="${daemonText}"
-      theme[used_mid]="${daemonPink}"
-      theme[used_end]="${daemonRed}"
-
-      theme[free_start]="${daemonSeparator}"
-      theme[free_mid]="${daemonMutedText}"
-      theme[free_end]="${daemonText}"
-
-      theme[cached_start]="${daemonDimPink}"
-      theme[cached_mid]="${daemonPink}"
-      theme[cached_end]="${daemonText}"
-
-      theme[available_start]="${daemonSeparator}"
-      theme[available_mid]="${daemonText}"
-      theme[available_end]="${daemonPink}"
-
-      theme[download_start]="${daemonMutedText}"
-      theme[download_mid]="${daemonText}"
-      theme[download_end]="${daemonPink}"
-
-      theme[upload_start]="${daemonDimPink}"
-      theme[upload_mid]="${daemonPink}"
-      theme[upload_end]="${daemonRed}"
-
-      # A process name is drawn from this ramp and its pid and command line
-      # from main_fg fading to inactive_fg. Keeping the name off that cyan to
-      # grey axis is what makes the three columns tell apart: names run pink
-      # to red by how busy the process is, pids and paths stay cyan to grey.
-      theme[process_start]="${daemonPink}"
-      theme[process_mid]="${daemonPinkRed}"
-      theme[process_end]="${daemonRed}"
     '';
   };
 
