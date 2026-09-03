@@ -91,29 +91,38 @@ pub fn gibibytes(kibibytes: u64) -> String {
     format!("{:.1}G", kibibytes as f64 / (1024.0 * 1024.0))
 }
 
-/// The name column's width, chosen so the longest label ("Network") still
-/// leaves a gap before its value.
-const NAME_WIDTH: usize = 9;
+/// The value column's width, wide enough for the longest reading
+/// ("↓302B/s ↑220B/s") so the dimmed detail after it still lines up.
+const VALUE_WIDTH: usize = 16;
 
-/// One line of the widget: an icon, a name, a value, and optional dimmed
-/// detail after it.
+/// One line of the widget: an icon, a value, and optional dimmed detail.
+///
+/// There is no name column. The icons are distinct enough to carry the meaning
+/// on their own, and dropping six words of dim text is most of what makes the
+/// block read like a control-center panel rather than a table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub icon: &'static str,
-    pub name: &'static str,
     pub value: String,
     pub detail: Option<String>,
     pub level: Level,
 }
 
 impl Row {
-    pub fn new(icon: &'static str, name: &'static str, value: String) -> Self {
+    pub fn new(icon: &'static str, value: String) -> Self {
         Row {
             icon,
-            name,
             value,
             detail: None,
             level: Level::Normal,
+        }
+    }
+
+    /// The value, padded into its column only when something follows it.
+    fn column(&self) -> String {
+        match self.detail {
+            Some(_) => format!("{:<VALUE_WIDTH$}", self.value),
+            None => self.value.clone(),
         }
     }
 
@@ -130,13 +139,12 @@ impl Row {
     /// The row as Pango markup.
     pub fn markup(&self) -> String {
         let mut line = format!(
-            "{}  {}{}",
+            "{}  {}",
             span(colour::ICON, self.icon),
-            span(colour::NAME, &format!("{:<NAME_WIDTH$}", self.name)),
-            span(self.level.colour(), &self.value),
+            span(self.level.colour(), &self.column()),
         );
         if let Some(detail) = &self.detail {
-            line.push_str("   ");
+            line.push_str("  ");
             line.push_str(&span(colour::NAME, detail));
         }
         line
@@ -144,9 +152,9 @@ impl Row {
 
     /// The row as plain text, for `--plain` and for the tests.
     pub fn plain(&self) -> String {
-        let mut line = format!("{}  {:<NAME_WIDTH$}{}", self.icon, self.name, self.value);
+        let mut line = format!("{}  {}", self.icon, self.column());
         if let Some(detail) = &self.detail {
-            line.push_str("   ");
+            line.push_str("  ");
             line.push_str(detail);
         }
         line

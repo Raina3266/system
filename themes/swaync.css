@@ -1,17 +1,22 @@
 /* SWAYNC: control center and notification popups.
  *
+ * Density is the point here. The panel is meant to read like GNOME's quick
+ * settings or the macOS Control Centre — a short stack of small cards you scan
+ * in one glance — rather than a settings page, so paddings, fonts and control
+ * heights are all deliberately tight.
+ *
  * SwayNC loads its packaged stylesheet first and this one second, at the same
- * priority, so everything below overrides rather than replaces upstream. Most
- * of the theme is therefore just the palette: the same cyberpunk colours as
- * themes/waybar.css and the Rofi .rasi themes beside this file.
+ * priority, so everything below overrides rather than replaces upstream. The
+ * colours are the same cyberpunk palette as themes/waybar.css and the Rofi
+ * .rasi themes beside this file.
  *
  * Home Manager links this file to ~/.config/swaync/style.css, so edits apply
  * after `swaync-client --reload-css` — no rebuild.
  */
 
 :root {
-    --cyber-bg: rgba(14, 6, 22, 0.96);
-    --cyber-bg-mod: rgba(20, 20, 40, 0.95);
+    --cyber-bg: rgba(14, 6, 22, 0.97);
+    --cyber-bg-mod: rgba(20, 20, 40, 0.92);
     --cyber-fg: #cbe3e7;
     --cyber-pink: #ff7edb;
     --cyber-cyan: #7afcff;
@@ -19,18 +24,18 @@
     --cyber-red: #ff5c57;
     --cyber-dim: #5c6776;
 
-    --cyber-line: rgba(255, 126, 219, 0.3);
-    --cyber-line-strong: rgba(255, 126, 219, 0.55);
-    --cyber-line-cyan: rgba(122, 252, 255, 0.28);
+    --cyber-line: rgba(255, 126, 219, 0.22);
+    --cyber-line-strong: rgba(255, 126, 219, 0.5);
+    --cyber-line-cyan: rgba(122, 252, 255, 0.22);
     --cyber-wash: rgba(255, 126, 219, 0.12);
-    --cyber-wash-strong: rgba(255, 126, 219, 0.2);
+    --cyber-wash-strong: rgba(255, 126, 219, 0.22);
 
     /* Upstream's own variables, repointed at the palette above. */
     --cc-bg: var(--cyber-bg);
     --noti-border-color: var(--cyber-line);
     --noti-bg: 20, 20, 40;
-    --noti-bg-alpha: 0.95;
-    --noti-bg-darker: rgba(14, 6, 22, 0.95);
+    --noti-bg-alpha: 0.92;
+    --noti-bg-darker: rgba(14, 6, 22, 0.92);
     --noti-bg-hover: rgba(255, 126, 219, 0.1);
     --noti-bg-focus: var(--cyber-wash);
     --noti-close-bg: rgba(122, 252, 255, 0.08);
@@ -41,17 +46,17 @@
     --bg-selected: var(--cyber-pink);
 
     --border: 1px solid var(--cyber-line);
-    --border-radius: 7px;
-    --notification-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 12px 2px rgba(0, 0, 0, 0.6);
-    --font-size-body: 14px;
-    --font-size-summary: 15px;
+    --border-radius: 9px;
+    --notification-shadow: 0 1px 6px 1px rgba(0, 0, 0, 0.5);
+    --font-size-body: 12px;
+    --font-size-summary: 13px;
 }
 
 * {
     font-family:
         "JetBrains Mono Nerd Font", "Symbols Nerd Font Mono",
         "Noto Sans CJK SC", "Noto Sans CJK JP", monospace;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 /* ── Windows ── */
@@ -64,8 +69,8 @@
     background: var(--cyber-bg);
     color: var(--cyber-fg);
     border: 1px solid var(--cyber-line-strong);
-    border-radius: 15px;
-    padding: 12px;
+    border-radius: 14px;
+    padding: 8px;
 }
 
 .control-center-list {
@@ -74,6 +79,7 @@
 
 .control-center-list-placeholder {
     color: var(--cyber-dim);
+    font-size: 12px;
     opacity: 1;
 }
 
@@ -81,38 +87,53 @@
     background: transparent;
 }
 
-/* ── Widget cards ── */
+/* ── Widget cards ──
+ * One tight card per widget, with just enough separation to read as a stack. */
 
 .widget {
     background: var(--cyber-bg-mod);
     border: 1px solid var(--cyber-line);
-    border-radius: 7px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
+    border-radius: 9px;
+    padding: 5px 7px;
+    margin-bottom: 5px;
     color: var(--cyber-fg);
 }
 
-.widget-title > label {
-    color: var(--cyber-pink);
-    font-size: 1.1rem;
-    font-weight: 700;
+/* ── Header row: quick toggles and the session menu ──
+ * The buttons are pills, the way a quick-settings shade draws them. */
+
+.widget-menubar {
+    padding: 4px;
 }
 
+.widget-menubar > .menu-button-bar > .start {
+    margin-left: 0;
+}
+
+.widget-menubar > .menu-button-bar > .end {
+    margin-right: 0;
+}
+
+.widget-menubar button,
 .widget-title > button,
-.widget-buttons-grid flowboxchild > button,
 .widget-volume > box > button,
 .widget-inhibitors > button {
     background: rgba(122, 252, 255, 0.06);
     color: var(--cyber-cyan);
     border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
-    padding: 6px 12px;
+    border-radius: 9px;
+    padding: 3px 10px;
+    min-height: 0;
     box-shadow: none;
     text-shadow: none;
 }
 
+.widget-menubar > .menu-button-bar > .widget-menubar-container button {
+    margin: 0 3px 0 0;
+}
+
+.widget-menubar button:hover,
 .widget-title > button:hover,
-.widget-buttons-grid flowboxchild > button:hover,
 .widget-volume > box > button:hover,
 .widget-inhibitors > button:hover {
     background: var(--cyber-wash);
@@ -120,77 +141,77 @@
     color: var(--cyber-pink);
 }
 
-.widget-buttons-grid flowboxchild > button {
-    padding: 12px 8px;
-    margin: 3px;
-}
-
-.widget-buttons-grid flowboxchild > button.toggle:checked {
+/* A checked pill is an active toggle: Do Not Disturb on, or the power menu
+ * standing open. */
+.widget-menubar button:checked {
     background: var(--cyber-wash-strong);
     border-color: var(--cyber-pink);
     color: var(--cyber-pink);
 }
 
-/* ── Do Not Disturb ── */
+/* The power dropdown: a plain list under the row, not a second grid. */
+.widget-menubar > revealer * {
+    margin-top: 5px;
+}
 
-.widget-dnd > label {
+.widget-menubar > revealer button {
+    margin: 0 0 3px 0;
+    padding: 5px 10px;
+    border-radius: 9px;
+}
+
+.widget-menubar > revealer .power button {
+    background: transparent;
+    border-color: transparent;
     color: var(--cyber-fg);
 }
 
-.widget-dnd > switch {
-    background: rgba(122, 252, 255, 0.08);
-    border: 1px solid var(--cyber-line-cyan);
-    border-radius: 12px;
-    box-shadow: none;
+.widget-menubar > revealer .power button:hover {
+    background: var(--cyber-wash);
+    border-color: var(--cyber-line-strong);
+    color: var(--cyber-pink);
 }
 
-.widget-dnd > switch:checked {
-    background: var(--cyber-wash-strong);
-    border-color: var(--cyber-pink);
-}
+/* ── Sliders: brightness and volume ──
+ * A thin track with a small handle, the shape both GNOME and macOS use. */
 
-.widget-dnd > switch > slider {
-    background: var(--cyber-dim);
-    border-radius: 12px;
-    border: none;
-    min-width: 18px;
-    min-height: 18px;
+.widget-backlight,
+.widget-volume {
+    padding: 3px 8px;
 }
-
-.widget-dnd > switch:checked > slider {
-    background: var(--cyber-pink);
-}
-
-/* ── Sliders: brightness and volume ── */
 
 .widget-backlight > label,
 .widget-volume > box > label,
 .widget-slider > label {
     color: var(--cyber-pink);
-    font-size: 1.05rem;
-    margin-right: 10px;
+    font-size: 14px;
+    margin-right: 8px;
+}
+
+scale {
+    min-height: 18px;
 }
 
 scale trough {
-    background: rgba(122, 252, 255, 0.1);
-    border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
-    min-height: 10px;
+    background: rgba(122, 252, 255, 0.12);
+    border: none;
+    border-radius: 9px;
+    min-height: 6px;
 }
 
 scale trough highlight {
     background: linear-gradient(to right, var(--cyber-cyan), var(--cyber-pink));
-    border-radius: 7px;
-    min-height: 10px;
+    border-radius: 9px;
+    min-height: 6px;
 }
 
 scale slider {
     background: var(--cyber-fg);
     border: 1px solid var(--cyber-pink);
     border-radius: 100%;
-    min-width: 12px;
-    min-height: 12px;
-    margin: -6px;
+    min-width: 10px;
+    min-height: 10px;
+    margin: -5px;
 }
 
 scale slider:hover {
@@ -198,25 +219,34 @@ scale slider:hover {
 }
 
 .per-app-volume {
-    background: rgba(14, 6, 22, 0.8);
+    background: rgba(14, 6, 22, 0.75);
     border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
-    padding: 6px 8px;
-    margin: 6px 0 0 0;
+    border-radius: 9px;
+    padding: 3px 6px;
+    margin: 4px 0 0 0;
 }
 
 .per-app-volume label {
     color: var(--cyber-dim);
+    font-size: 12px;
+}
+
+.widget-volume row image {
+    -gtk-icon-size: 16px;
 }
 
 /* ── System monitor ──
  * swaync-sysmon supplies its own colours as Pango markup, so the widget only
- * needs the monospace grid the alignment assumes. */
+ * needs the monospace grid its column alignment assumes. */
+
+.widget-label {
+    padding: 5px 8px;
+}
 
 .widget-label > label {
     font-family: "JetBrains Mono Nerd Font", monospace;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 12px;
+    line-height: 1.45;
 }
 
 /* ── Notifications ── */
@@ -234,8 +264,8 @@ scale slider:hover {
 .notification {
     background: var(--cyber-bg-mod);
     border: 1px solid var(--cyber-line);
-    border-radius: 7px;
-    margin: 4px 0;
+    border-radius: 9px;
+    margin: 3px 0;
     padding: 0;
     box-shadow: var(--notification-shadow);
 }
@@ -245,13 +275,13 @@ scale slider:hover {
 }
 
 .notification.low {
-    border-color: rgba(122, 252, 255, 0.18);
+    border-color: rgba(122, 252, 255, 0.15);
 }
 
 .notification-content {
     background: transparent;
     color: var(--cyber-fg);
-    padding: 8px 10px;
+    padding: 5px 7px;
 }
 
 .notification-default-action:hover,
@@ -261,24 +291,24 @@ scale slider:hover {
 
 .summary {
     color: var(--cyber-cyan);
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 700;
 }
 
 .body {
     color: var(--cyber-fg);
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 400;
 }
 
 .time {
     color: var(--cyber-dim);
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .body-image {
-    border-radius: 7px;
-    margin-top: 6px;
+    border-radius: 9px;
+    margin-top: 4px;
 }
 
 .close-button {
@@ -286,9 +316,9 @@ scale slider:hover {
     color: var(--cyber-cyan);
     border: 1px solid var(--cyber-line-cyan);
     border-radius: 100%;
-    margin: 6px 6px 0 0;
-    min-width: 22px;
-    min-height: 22px;
+    margin: 4px 4px 0 0;
+    min-width: 18px;
+    min-height: 18px;
     padding: 0;
     box-shadow: none;
     text-shadow: none;
@@ -304,8 +334,10 @@ scale slider:hover {
     background: rgba(122, 252, 255, 0.06);
     color: var(--cyber-cyan);
     border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
-    margin: 4px;
+    border-radius: 9px;
+    margin: 3px;
+    padding: 3px 8px;
+    font-size: 12px;
 }
 
 .inline-reply-entry {
@@ -313,20 +345,21 @@ scale slider:hover {
     color: var(--cyber-fg);
     caret-color: var(--cyber-pink);
     border: 1px solid var(--cyber-line);
-    border-radius: 7px;
+    border-radius: 9px;
 }
 
 .inline-reply-button {
     background: rgba(122, 252, 255, 0.06);
     color: var(--cyber-cyan);
     border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
+    border-radius: 9px;
 }
 
 /* ── Grouped notifications ── */
 
 .notification-group-headers {
     color: var(--cyber-pink);
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -339,7 +372,9 @@ scale slider:hover {
     background: rgba(122, 252, 255, 0.06);
     color: var(--cyber-cyan);
     border: 1px solid var(--cyber-line-cyan);
-    border-radius: 7px;
+    border-radius: 9px;
+    min-height: 0;
+    padding: 2px 8px;
 }
 
 .notification-group-close-button:hover,

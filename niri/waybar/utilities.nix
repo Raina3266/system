@@ -57,29 +57,28 @@
       on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
     };
 
-    # The control center opener, and the last module on the top bar. swaync's
-    # own `-swb` output already carries the count as its text and the state as
-    # its class; jq only blanks a zero so the bar shows the bell alone rather
-    # than a permanent "0". Killing Waybar closes jq's stdout, which ends the
-    # pipeline, so the subscription does not outlive the bar.
+    # The control center opener, and the last module on the top bar.
+    #
+    # swaync's `-swb` output carries the count as its text and the state as its
+    # class, but no glyph. Rather than map the state onto `format-icons` and
+    # depend on Waybar resolving `{icon}` through the `alt` field, jq builds the
+    # finished label here: the bell alone when nothing is waiting, the bell and
+    # the count when something is. Killing Waybar closes jq's stdout, which ends
+    # the pipeline, so the subscription does not outlive the bar.
     "custom/swaync" = {
       exec = pkgs.writeShellScript "waybar-swaync-status" ''
         ${pkgs.swaynotificationcenter}/bin/swaync-client -swb \
-          | ${pkgs.jq}/bin/jq --unbuffered -c \
-              '.text = (if (.text | tonumber) > 0 then .text else "" end)'
+          | ${pkgs.jq}/bin/jq --unbuffered -c '
+              (.text | tonumber) as $count
+              | (if (.alt | startswith("dnd")) then "󰂛"
+                 elif $count > 0 then "󰂚"
+                 else "󰂜" end) as $icon
+              | .text = (if $count > 0 then "\($icon)  \($count)" else $icon end)
+              | .tooltip = (if .tooltip == "" then "No notifications" else .tooltip end)
+            '
       '';
       return-type = "json";
-      format = "{icon}  {}";
-      format-icons = {
-        none = "󰂜";
-        notification = "󰂚";
-        "dnd-none" = "󰂛";
-        "dnd-notification" = "󰂛";
-        "inhibited-none" = "󰂜";
-        "inhibited-notification" = "󰂚";
-        "dnd-inhibited-none" = "󰂛";
-        "dnd-inhibited-notification" = "󰂛";
-      };
+      format = "{}";
       tooltip = true;
       escape = true;
       "exec-on-event" = false;

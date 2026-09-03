@@ -69,6 +69,16 @@
           exec "''${run[@]}"
         '';
 
+        # SwayNC hands a toggle button's new state to its command in the
+        # environment, so set that state rather than toggling blind and hoping
+        # the button and the daemon still agree.
+        dnd = pkgs.writeShellScript "swaync-dnd" ''
+          if [ "''${SWAYNC_TOGGLE_STATE-}" = "true" ]; then
+            exec ${swaync} --dnd-on --skip-wait
+          fi
+          exec ${swaync} --dnd-off --skip-wait
+        '';
+
         action = label: argument: {
           inherit label;
           command = "${power}/bin/swaync-power ${argument}";
@@ -94,22 +104,25 @@
             layer-shell = true;
 
             # Sits under the top bar's right edge, below the bell that opens it.
+            # Sized like a phone's quick-settings shade rather than a sidebar:
+            # narrow enough to read as a popup, and only as tall as the widgets
+            # plus a few notifications need.
             control-center-layer = "top";
             control-center-positionX = "right";
             control-center-positionY = "top";
-            control-center-width = 480;
-            control-center-height = 900;
-            control-center-margin-top = 8;
-            control-center-margin-right = 8;
-            control-center-margin-bottom = 8;
+            control-center-width = 380;
+            control-center-height = 560;
+            control-center-margin-top = 6;
+            control-center-margin-right = 6;
+            control-center-margin-bottom = 6;
             control-center-margin-left = 0;
             control-center-exclusive-zone = false;
             fit-to-screen = false;
 
-            notification-window-width = 440;
-            notification-icon-size = 48;
-            notification-body-image-height = 120;
-            notification-body-image-width = 200;
+            notification-window-width = 360;
+            notification-icon-size = 32;
+            notification-body-image-height = 80;
+            notification-body-image-width = 160;
             notification-grouping = true;
             image-visibility = "when-available";
             relative-timestamps = true;
@@ -122,27 +135,53 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # Top to bottom: the header, then the controls that used to be
-            # Waybar's `group/system`, then the readings that used to be
-            # `group/hardware`, then the session actions, then the list itself.
+            # Five rows, in the order a quick-settings shade uses them: one
+            # header of pill buttons, the two sliders, the readings, the list.
+            # There is no separate title or Do Not Disturb row — both collapse
+            # into the header, which is most of what makes the panel short.
             widgets = [
-              "title"
-              "dnd"
+              "menubar#header"
               "backlight"
               "volume"
               "label#sysmon"
-              "buttons-grid#power"
               "notifications"
             ];
 
             widget-config = {
-              title = {
-                text = "Notifications";
-                clear-all-button = true;
-                button-text = "󰆴  Clear";
-              };
+              # Quick toggles on the left, the session menu on the right. The
+              # menu is a revealer: clicking 󰐥 slides the four power actions
+              # open underneath the row, so they cost no height until asked for.
+              "menubar#header" = {
+                "buttons#quick" = {
+                  position = "left";
+                  actions = [
+                    {
+                      label = "󰂛  DND";
+                      type = "toggle";
+                      command = "${dnd}";
+                      update-command = "${swaync} --get-dnd --skip-wait";
+                    }
+                    {
+                      label = "󰆴  Clear";
+                      command = "${swaync} --close-all --skip-wait";
+                      type = "normal";
+                    }
+                  ];
+                };
 
-              dnd.text = "󰂛  Do Not Disturb";
+                "menu#power" = {
+                  label = "󰐥";
+                  position = "right";
+                  animation-type = "slide_down";
+                  animation-duration = 200;
+                  actions = [
+                    (action "󰤄   Suspend" "suspend")
+                    (action "󰍃   Log out" "logout")
+                    (action "󰜉   Restart" "reboot")
+                    (action "󰐥   Shut down" "poweroff")
+                  ];
+                };
+              };
 
               backlight = {
                 label = "󰃠";
@@ -171,20 +210,10 @@
               # are never older than the panel.
               "label#sysmon" = {
                 text = "Reading sensors…";
-                max-lines = 8;
+                max-lines = 6;
                 exec = "${repoPackages.swayncSysmon}/bin/swaync-sysmon";
                 interval = 3;
                 pango-markup = true;
-              };
-
-              "buttons-grid#power" = {
-                buttons-per-row = 2;
-                actions = [
-                  (action "󰤄   Suspend" "suspend")
-                  (action "󰍃   Log out" "logout")
-                  (action "󰜉   Restart" "reboot")
-                  (action "󰐥   Shut down" "poweroff")
-                ];
               };
             };
           };

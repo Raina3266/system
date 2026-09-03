@@ -412,12 +412,18 @@ One line per available reading, as Pango markup in the same cyberpunk palette as
 the rest of the desktop. `--plain` prints the same rows without the markup:
 
 ```text
-󰻠  CPU      12%            2.41 GHz
-󰍛  Memory   7.5G / 32.0G   24%
-󰄏  Temp     47°C
-󰋊  Disk     412G free      58% used
-󰖩  Network  ↓ 1.2K/s  ↑ 512B/s   wlan0
+󰻠  12%               2.41 GHz
+󰍛  7.5G/32.0G        24%
+󰄏  47°C
+󰋊  412G free         58% used
+󰖩  ↓1.2K/s ↑512B/s   wlan0
 ```
+
+There is no name column. The glyphs are distinct enough to carry the meaning
+on their own, and dropping six words of dim text is most of what makes the
+block read like a control-centre panel rather than a table. The value column
+is padded so the dimmed detail after it lines up; a row with nothing after
+its value is not padded at all.
 
 A reading the machine cannot supply is left out rather than shown as a
 placeholder: a desktop with no battery-class thermal sensor gets no `Temp` row,
@@ -557,7 +563,7 @@ that opens it.
 | `backlight` in `group/system` | The control center's `backlight` slider |
 | `pulseaudio` in `group/system` | The control center's `volume` slider, with per-application volumes |
 | `temperature`, `memory`, `cpu`, `disk`, `network` in `group/hardware` | One live [`swaync-sysmon`](#swaync-sysmon) block |
-| — | A four-button power grid: Suspend, Log out, Restart, Shut down |
+| — | A power dropdown: Suspend, Log out, Restart, Shut down |
 | `custom/battery` in `group/system` | Unchanged, but now the first module on the bar |
 | `tray` at the right | Moved to the left, after the battery |
 
@@ -572,9 +578,15 @@ in the corner.
 
 ### The panel
 
-Top to bottom: the title with its Clear button, the Do Not Disturb switch,
-brightness, volume, the system readings, the power buttons, and the notification
-list itself.
+The panel is meant to read like GNOME's quick settings or the macOS Control
+Centre: a short stack of small cards you take in at a glance, not a settings
+page. It is five rows in a 380px-wide popup — a header of pill buttons, the two
+sliders, the system readings, and the notification list.
+
+There is no separate title row and no separate Do Not Disturb row. Both collapse
+into the header, which is most of what makes the panel short: Do Not Disturb is a
+toggle pill on the left, Clear is a button beside it, and the session menu is a
+single 󰐥 button on the right.
 
 Brightness drives `/sys/class/backlight/intel_backlight` and is floored at 5 so
 the slider cannot black the screen out. A different GPU reports a different
@@ -584,7 +596,13 @@ key in `niri/swaync/default.nix`.
 Volume shows each playing application as well as the default sink, so a single
 loud tab can be turned down without touching everything else.
 
-### Power buttons
+### The power dropdown
+
+The 󰐥 button on the right of the header is a revealer: clicking it slides the
+four session actions open underneath the row as a plain list, and clicking it
+again folds them away. They cost no height until asked for, which is the whole
+reason they are a dropdown rather than the grid of four large buttons this
+started as.
 
 Suspend acts immediately — it costs a keypress to undo. Log out, Restart and
 Shut down first close the panel and then ask for confirmation through Rofi,
@@ -599,8 +617,11 @@ theme it uses.
 ### The Waybar bell
 
 `custom/swaync` subscribes to SwayNC over `swaync-client -swb`, which streams the
-notification count and the daemon's state. The count is the button's text; a
-zero is blanked so the bar shows the bell alone rather than a permanent `0`.
+notification count and the daemon's state — but no glyph. Rather than map that
+state onto `format-icons` and depend on Waybar resolving `{icon}` through the
+`alt` field, `jq` builds the finished label in the pipeline: the bell alone when
+nothing is waiting, the bell and the count when something is, and a struck-out
+bell under Do Not Disturb.
 
 | Action | Result |
 | --- | --- |
@@ -645,6 +666,11 @@ upstream: most of it is the palette shared with `themes/waybar.css` and the Rofi
 
 The system monitor supplies its own colours as Pango markup, so the widget's CSS
 only sets the monospace grid its column alignment assumes.
+
+The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
+slider track with a 10px handle, and 11-13px text. If the panel ever wants to
+breathe, those are the numbers to raise, along with `control-center-width` and
+`control-center-height` in `niri/swaync/default.nix`.
 
 ### GNOME
 

@@ -34,6 +34,20 @@ const SEED_DELAY: Duration = Duration::from_millis(250);
 /// derived rates are repeated instead of dividing by a near-zero interval.
 const MIN_INTERVAL_SECONDS: f64 = 0.25;
 
+/// The glyph that names each row, now that the rows carry no words.
+mod icon {
+    pub const CPU: &str = "󰻠";
+    pub const MEMORY: &str = "󰍛";
+    pub const SWAP: &str = "󰓡";
+    pub const TEMPERATURE: &str = "󰄏";
+    pub const TEMPERATURE_HOT: &str = "󰄅";
+    pub const DISK: &str = "󰋊";
+    pub const WIRELESS: &str = "󰖩";
+    pub const WIRED: &str = "󰈀";
+    pub const TUNNEL: &str = "󰛳";
+    pub const DISCONNECTED: &str = "󰖪";
+}
+
 const USAGE: &str = "\
 usage: swaync-sysmon [--plain]
 
@@ -217,7 +231,7 @@ fn cpu_row(config: &Config, current: &State) -> Option<Row> {
         return None;
     }
     let percent = current.cpu_percent.clamp(0.0, 100.0);
-    let row = Row::new("󰻠", "CPU", format!("{percent:.0}%"))
+    let row = Row::new(icon::CPU, format!("{percent:.0}%"))
         .level(Level::from_thresholds(percent, 80.0, 95.0));
     Some(
         match config
@@ -248,10 +262,9 @@ fn memory_rows(config: &Config) -> Vec<Row> {
     let percent = (used as f64 / memory.total as f64) * 100.0;
     let mut rows = vec![
         Row::new(
-            "󰍛",
-            "Memory",
+            icon::MEMORY,
             format!(
-                "{} / {}",
+                "{}/{}",
                 format::gibibytes(used),
                 format::gibibytes(memory.total)
             ),
@@ -265,10 +278,9 @@ fn memory_rows(config: &Config) -> Vec<Row> {
         let swap_percent = (swap_used as f64 / memory.swap_total as f64) * 100.0;
         rows.push(
             Row::new(
-                "󰓡",
-                "Swap",
+                icon::SWAP,
                 format!(
-                    "{} / {}",
+                    "{}/{}",
                     format::gibibytes(swap_used),
                     format::gibibytes(memory.swap_total)
                 ),
@@ -287,12 +299,12 @@ fn temperature_row(config: &Config) -> Option<Row> {
         .and_then(parse::millidegrees)?;
     // The same thresholds the Waybar `temperature` module used.
     let level = Level::from_thresholds(celsius, 55.0, 80.0);
-    let icon = if level == Level::Critical {
-        "󰄅"
+    let glyph = if level == Level::Critical {
+        icon::TEMPERATURE_HOT
     } else {
-        "󰄏"
+        icon::TEMPERATURE
     };
-    Some(Row::new(icon, "Temp", format!("{celsius:.0}°C")).level(level))
+    Some(Row::new(glyph, format!("{celsius:.0}°C")).level(level))
 }
 
 /// Resolve which sensor to read.
@@ -380,8 +392,7 @@ fn disk_row(config: &Config) -> Option<Row> {
     let percent = (disk.used as f64 / disk.total as f64) * 100.0;
     Some(
         Row::new(
-            "󰋊",
-            "Disk",
+            icon::DISK,
             format!("{} free", format::bytes(disk.available)),
         )
         .detail(format!("{percent:.0}% used"))
@@ -391,21 +402,20 @@ fn disk_row(config: &Config) -> Option<Row> {
 
 fn network_row(current: &State, interface: Option<&str>) -> Option<Row> {
     let Some(interface) = interface else {
-        return Some(Row::new("󰖪", "Network", "Disconnected".to_owned()).level(Level::Warning));
+        return Some(Row::new(icon::DISCONNECTED, "Disconnected".to_owned()).level(Level::Warning));
     };
-    let icon = if interface.starts_with("wl") {
-        "󰖩"
+    let glyph = if interface.starts_with("wl") {
+        icon::WIRELESS
     } else if interface.starts_with("en") || interface.starts_with("eth") {
-        "󰈀"
+        icon::WIRED
     } else {
-        "󰛳"
+        icon::TUNNEL
     };
     Some(
         Row::new(
-            icon,
-            "Network",
+            glyph,
             format!(
-                "↓ {}  ↑ {}",
+                "↓{} ↑{}",
                 format::rate(current.rx_rate),
                 format::rate(current.tx_rate)
             ),

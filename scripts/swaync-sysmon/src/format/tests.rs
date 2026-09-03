@@ -57,37 +57,46 @@ fn levels_are_classified_against_ascending_thresholds() {
 }
 
 #[test]
-fn a_row_pads_its_name_so_values_line_up() {
-    let cpu = Row::new("󰻠", "CPU", "12%".to_owned()).plain();
-    let network = Row::new("󰖩", "Network", "↓ 0B/s".to_owned()).plain();
-    let column = |row: &str| row.char_indices().find(|(_, c)| *c == '1' || *c == '↓');
+fn a_row_pads_its_value_so_details_line_up() {
+    let cpu = Row::new("󰻠", "12%".to_owned()).detail("2.41 GHz").plain();
+    let disk = Row::new("󰋊", "1.6T free".to_owned())
+        .detail("12% used")
+        .plain();
     assert_eq!(
-        cpu.chars().position(|c| c == '1'),
-        network.chars().position(|c| c == '↓'),
-        "values start in the same column: {cpu:?} vs {network:?}"
+        cpu.find("2.41"),
+        disk.find("12%"),
+        "details start in the same column: {cpu:?} vs {disk:?}"
     );
-    assert!(column(&cpu).is_some());
+}
+
+#[test]
+fn a_row_without_a_detail_is_not_padded() {
+    let temp = Row::new("󰄏", "69°C".to_owned()).plain();
+    assert!(
+        !temp.ends_with(' '),
+        "nothing follows the value, so nothing needs a column: {temp:?}"
+    );
 }
 
 #[test]
 fn a_row_colours_its_value_by_level() {
-    let row = Row::new("󰄏", "Temp", "91°C".to_owned()).level(Level::Critical);
+    let row = Row::new("󰄏", "91°C".to_owned()).level(Level::Critical);
     assert!(row.markup().contains(colour::CRITICAL));
     assert!(row.markup().contains(colour::ICON));
 }
 
 #[test]
 fn a_detail_is_appended_in_the_dim_colour() {
-    let row = Row::new("󰻠", "CPU", "12%".to_owned()).detail("2.41 GHz");
+    let row = Row::new("󰻠", "12%".to_owned()).detail("2.41 GHz");
     assert!(row.plain().ends_with("2.41 GHz"));
-    assert_eq!(row.markup().matches(colour::NAME).count(), 2);
+    assert_eq!(row.markup().matches(colour::NAME).count(), 1);
 }
 
 #[test]
 fn a_block_joins_rows_with_newlines() {
     let rows = [
-        Row::new("󰻠", "CPU", "12%".to_owned()),
-        Row::new("󰍛", "Memory", "7.5G / 32.0G".to_owned()),
+        Row::new("󰻠", "12%".to_owned()),
+        Row::new("󰍛", "7.5G/32.0G".to_owned()),
     ];
     assert_eq!(block(&rows, false).lines().count(), 2);
     assert_eq!(block(&rows, true).lines().count(), 2);
