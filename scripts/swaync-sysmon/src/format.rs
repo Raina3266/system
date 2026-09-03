@@ -91,9 +91,19 @@ pub fn gibibytes(kibibytes: u64) -> String {
     format!("{:.1}G", kibibytes as f64 / (1024.0 * 1024.0))
 }
 
-/// The value column's width, wide enough for the longest reading
-/// ("↓302B/s ↑220B/s") so the dimmed detail after it still lines up.
-const VALUE_WIDTH: usize = 16;
+/// How wide each cell's text is, counted from the icon's trailing space.
+///
+/// Two cells share a 380px panel, so this is the widest the longest reading
+/// ("↓302B/s ↑220B/s") can be and still leave the second column room. Every
+/// cell holds exactly one icon, so padding the text alone keeps the second
+/// column aligned regardless of what the glyph's real advance width is.
+const CELL_WIDTH: usize = 18;
+
+/// What separates the two columns.
+const COLUMN_GAP: &str = "  ";
+
+/// How many readings share a line.
+const COLUMNS: usize = 2;
 
 /// One line of the widget: an icon, a value, and optional dimmed detail.
 ///
@@ -118,12 +128,17 @@ impl Row {
         }
     }
 
-    /// The value, padded into its column only when something follows it.
-    fn column(&self) -> String {
-        match self.detail {
-            Some(_) => format!("{:<VALUE_WIDTH$}", self.value),
+    /// The cell's text: the value, then the dimmed detail.
+    fn text(&self) -> String {
+        match &self.detail {
+            Some(detail) => format!("{} {detail}", self.value),
             None => self.value.clone(),
         }
+    }
+
+    /// The spaces that carry the next column out to its own start.
+    fn padding(&self) -> String {
+        " ".repeat(CELL_WIDTH.saturating_sub(self.text().chars().count()))
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
@@ -136,32 +151,31 @@ impl Row {
         self
     }
 
-    /// The row as Pango markup.
+    /// The cell as Pango markup.
     pub fn markup(&self) -> String {
-        let mut line = format!(
+        let mut cell = format!(
             "{}  {}",
             span(colour::ICON, self.icon),
-            span(self.level.colour(), &self.column()),
+            span(self.level.colour(), &self.value),
         );
         if let Some(detail) = &self.detail {
-            line.push_str("  ");
-            line.push_str(&span(colour::NAME, detail));
+            cell.push(' ');
+            cell.push_str(&span(colour::NAME, detail));
         }
-        line
+        cell
     }
 
-    /// The row as plain text, for `--plain` and for the tests.
+    /// The cell as plain text, for `--plain` and for the tests.
     pub fn plain(&self) -> String {
-        let mut line = format!("{}  {}", self.icon, self.column());
-        if let Some(detail) = &self.detail {
-            line.push_str("  ");
-            line.push_str(detail);
-        }
-        line
+        format!("{}  {}", self.icon, self.text())
     }
 }
 
-/// Join rows into the block the widget shows.
+/// Lay the readings out two to a line.
+///
+/// A single column left the panel narrow and tall next to everything else in
+/// the control center; paired cells fit the readings into half the height at
+/// the width the panel already has.
 pub fn block(rows: &[Row], markup: bool) -> String {
     if rows.is_empty() {
         let unavailable = "No system readings available";
@@ -171,10 +185,23 @@ pub fn block(rows: &[Row], markup: bool) -> String {
             unavailable.to_owned()
         };
     }
-    rows.iter()
-        .map(|row| if markup { row.markup() } else { row.plain() })
+    rows.chunks(COLUMNS)
+        .map(|line| render_line(line, markup))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// One line of cells. The last cell on a line needs no padding after it.
+fn render_line(cells: &[Row], markup: bool) -> String {
+    let mut line = String::new();
+    for (index, cell) in cells.iter().enumerate() {
+        line.push_str(&if markup { cell.markup() } else { cell.plain() });
+        if index + 1 < cells.len() {
+            line.push_str(&cell.padding());
+            line.push_str(COLUMN_GAP);
+        }
+    }
+    line
 }
 
 #[cfg(test)]

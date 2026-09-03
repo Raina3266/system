@@ -88,6 +88,22 @@ pub(crate) fn clean_field(value: &str) -> String {
         .collect()
 }
 
+/// Escape the five characters Pango's markup parser treats as syntax.
+pub(crate) fn pango_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 pub(crate) fn json_escape(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {

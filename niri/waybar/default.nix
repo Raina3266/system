@@ -15,7 +15,6 @@ let
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
-    inherit pkgs;
     packages = repoPackages;
   };
   modules = system.modules // utilities.modules;
@@ -35,9 +34,10 @@ let
     // {
       position = "top";
       expand-center = true;
-      # Battery first and the SwayNC bell last, at the two ends of the bar.
-      # Everything the bell owns — brightness, volume, the hardware readings
-      # and the session's power actions — is inside its popup rather than here.
+      # Battery at the far left, and `custom/media` in the middle: one button
+      # carrying the notification count and the current track, and the only way
+      # into the control center, where the volume slider, the media overview,
+      # today's calendar and the hardware readings all live.
       modules-left = [
         "custom/battery"
         "tray"
@@ -52,7 +52,6 @@ let
         "custom/clipboard"
         "custom/audio"
         "custom/network"
-        "custom/swaync"
       ];
     }
     // modules;

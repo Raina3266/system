@@ -2,8 +2,17 @@ use crate::model::{PlaybackStatus, Player, compare_players, media_label, row_tex
 use crate::mpris::{
     display_source, is_excluded_player, is_publishable_web_media_url, should_include_player,
 };
+use crate::notifications::{Notifications, parse};
+use crate::panel;
 use crate::text::{hex_decode, hex_encode, json_escape, truncate_display};
-use crate::ui::{rofi_row_state, waybar_json, waybar_toggle_action};
+use crate::ui::{bar_text, bar_tooltip, rofi_row_state, waybar_json, waybar_toggle_action};
+
+/// Nothing waiting and Do Not Disturb off: the state most tests want.
+const QUIET: Notifications = Notifications {
+    count: 0,
+    dnd: false,
+    visible: false,
+};
 
 #[test]
 fn truncates_ascii_at_about_forty_columns() {
@@ -48,7 +57,7 @@ fn visible_media_labels_include_the_artist_when_available() {
 
     assert_eq!(media_label(&player), "Delulu — SZA");
     assert!(row_text(&player).ends_with("{Chrome} Delulu — SZA"));
-    assert!(waybar_json(Some(&player)).contains("\"text\":\"Delulu — SZA\""));
+    assert!(bar_text(Some(&player), QUIET).ends_with("Delulu — SZA"));
 }
 
 #[test]
@@ -65,7 +74,7 @@ fn visible_media_labels_fall_back_to_the_title_without_an_artist() {
     };
 
     assert_eq!(media_label(&player), "Video title");
-    assert!(waybar_json(Some(&player)).contains("\"text\":\"Video title\""));
+    assert!(bar_text(Some(&player), QUIET).ends_with("Video title"));
 }
 
 #[test]
@@ -197,4 +206,148 @@ fn leaves_non_browser_players_and_real_generic_media_unchanged() {
         "mprisence_web",
         "https://example.com/videos/episode-1"
     ));
+}
+
+#[test]
+fn the_bar_button_shows_a_quiet_bell_with_nothing_to_report() {
+    assert_eq!(bar_text(None, QUIET), "󰂜");
+    assert_eq!(
+        bar_tooltip(None, QUIET),
+        "No notifications\nNo active media"
+    );
+}
+
+#[test]
+fn the_bar_button_counts_waiting_notifications() {
+    let waiting = Notifications {
+        count: 3,
+        dnd: false,
+        visible: false,
+    };
+    assert_eq!(bar_text(None, waiting), "󰂚 3");
+    assert!(bar_tooltip(None, waiting).starts_with("3 notifications"));
+    assert!(waybar_json(None, waiting).contains("\"class\":[\"notification\",\"empty\"]"));
+}
+
+#[test]
+fn do_not_disturb_silences_the_bell_and_keeps_the_count_out_of_the_label() {
+    let silenced = Notifications {
+        count: 3,
+        dnd: true,
+        visible: false,
+    };
+    assert_eq!(bar_text(None, silenced), "󰂛");
+    assert!(bar_tooltip(None, silenced).contains("Do Not Disturb is on"));
+    assert!(waybar_json(None, silenced).contains("\"class\":[\"dnd\",\"empty\"]"));
+}
+
+#[test]
+fn the_bar_button_carries_the_badge_and_the_track_together() {
+    let player = playing_player();
+    let text = bar_text(
+        Some(&player),
+        Notifications {
+            count: 2,
+            dnd: false,
+            visible: false,
+        },
+    );
+    assert!(text.starts_with("󰂚 2"), "{text}");
+    assert!(text.ends_with("Delulu \u{2014} SZA"), "{text}");
+    assert!(
+        text.contains('\u{b7}'),
+        "the two halves are separated: {text}"
+    );
+
+    let json = waybar_json(Some(&player), QUIET);
+    assert!(json.contains("\"class\":[\"quiet\",\"playing\"]"), "{json}");
+}
+
+#[test]
+fn a_long_track_is_truncated_rather_than_pushing_the_bar_wide() {
+    let mut player = playing_player();
+    player.title = "A".repeat(120);
+    let text = bar_text(Some(&player), QUIET);
+    assert!(text.contains('\u{2026}'), "{text}");
+    assert!(text.chars().count() < 60, "{text}");
+}
+
+#[test]
+fn the_panel_row_names_the_track_then_the_player() {
+    let player = playing_player();
+    let markup = panel::markup(Some(&player));
+    let lines: Vec<&str> = markup.lines().collect();
+    assert_eq!(lines.len(), 2, "{markup}");
+    assert!(lines[0].contains("Delulu \u{2014} SZA"), "{markup}");
+    assert!(lines[1].contains("Chrome"), "{markup}");
+    assert!(lines[1].contains("45%"), "{markup}");
+}
+
+#[test]
+fn the_panel_row_says_so_when_nothing_is_playing() {
+    assert!(panel::markup(None).contains("No active media"));
+    assert_eq!(panel::markup(None).lines().count(), 1);
+}
+
+#[test]
+fn the_panel_row_escapes_a_track_title_that_looks_like_markup() {
+    let mut player = playing_player();
+    player.title = "Rock & <Roll>".to_owned();
+    player.artist = String::new();
+    let markup = panel::markup(Some(&player));
+    assert!(markup.contains("Rock &amp; &lt;Roll&gt;"), "{markup}");
+}
+
+#[test]
+fn a_subscribe_line_yields_the_count_and_the_dnd_flag() {
+    assert_eq!(
+        parse("{ \"count\": 3, \"dnd\": false, \"visible\": false, \"inhibited\": false }"),
+        Some(Notifications {
+            count: 3,
+            dnd: false,
+            visible: false
+        })
+    );
+    assert_eq!(
+        parse("{ \"count\": 0, \"dnd\": true, \"visible\": true, \"inhibited\": false }"),
+        Some(Notifications {
+            count: 0,
+            dnd: true,
+            visible: true
+        })
+    );
+}
+
+#[test]
+fn a_line_without_a_count_is_not_a_subscribe_line() {
+    assert_eq!(parse("waiting for swaync..."), None);
+    assert_eq!(parse(""), None);
+}
+
+/// A player the bar and panel assertions above can share.
+fn playing_player() -> Player {
+    Player {
+        id: "youtube-music".to_owned(),
+        source: "Chrome".to_owned(),
+        title: "Delulu".to_owned(),
+        artist: "SZA".to_owned(),
+        status: PlaybackStatus::Playing,
+        volume: Some(45),
+        pinned: false,
+        activity: 0,
+    }
+}
+
+#[test]
+fn an_open_control_center_adds_its_own_class() {
+    let open = Notifications {
+        count: 0,
+        dnd: false,
+        visible: true,
+    };
+    let json = waybar_json(None, open);
+    assert!(
+        json.contains("\"class\":[\"quiet\",\"empty\",\"cc-open\"]"),
+        "{json}"
+    );
 }

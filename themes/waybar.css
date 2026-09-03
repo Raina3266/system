@@ -38,7 +38,7 @@ window#waybar.bottom {
 #custom-timer,
 #custom-files,
 #custom-battery,
-#custom-swaync,
+#custom-media,
 #tray {
     color: #7afcff;
     background-color: transparent;
@@ -62,18 +62,16 @@ window#waybar.bottom {
     border: 2px solid rgba(255, 126, 219, 0.3);
 }
 
-/* ── Borderless modules (media / workspaces) ── */
+/* ── Borderless modules (lyrics / workspaces) ── */
 
-#custom-media,
 #custom-lyrics {
     color: #7afcff;
-    padding-left: 50px;
-    padding-right: 50px;
+    padding-left: 20px;
+    padding-right: 20px;
     border: none;
     background-color: transparent;
 }
 
-#custom-media.paused,
 #custom-lyrics.paused {
     color: #5c6776;
     margin-top: 2px;
@@ -140,7 +138,7 @@ window#waybar.bottom {
 #custom-clipboard:hover,
 #custom-files:hover,
 #custom-timer:hover,
-#custom-swaync:hover,
+#custom-media:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
 #custom-whatsapp:hover,
@@ -170,25 +168,28 @@ tooltip label {
 
 /* ── States ── */
 
-/* SwayNC bell: pink with a waiting notification, dimmed under Do Not Disturb,
-   and washed while its control center is open. */
+/* The centre button carries two classes at once, one per half of its label:
+   the notification state, then the playback state. Pink with something
+   waiting, dimmed under Do Not Disturb, and washed while the panel is open. */
 
-#custom-swaync.notification,
-#custom-swaync.inhibited-notification {
+#custom-media.notification {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
-#custom-swaync.dnd-none,
-#custom-swaync.dnd-notification,
-#custom-swaync.dnd-inhibited-none,
-#custom-swaync.dnd-inhibited-notification {
+#custom-media.dnd {
     color: #5c6776;
 }
 
-#custom-swaync.cc-open {
+#custom-media.cc-open {
     background-color: rgba(255, 126, 219, 0.2);
     border-color: rgba(255, 126, 219, 0.6);
+}
+
+/* A paused track dims the label, but not when the badge has something of its
+   own to say. */
+#custom-media.quiet.paused {
+    color: #5c6776;
 }
 
 #custom-timer.running {

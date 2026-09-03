@@ -155,7 +155,7 @@ fn cpu_load_is_the_difference_against_the_stored_sample() {
     let rows = plain_rows(&fixture.config());
     // busy 1400 -> 1600 while total 9100 -> 10100.
     assert!(rows[0].contains("20%"), "{}", rows[0]);
-    assert!(rows[0].ends_with("2.41 GHz"), "{}", rows[0]);
+    assert!(rows[0].ends_with("2.41GHz"), "{}", rows[0]);
 }
 
 #[test]
@@ -166,8 +166,7 @@ fn network_throughput_is_the_byte_delta_over_the_interval() {
     let network = rows.last().expect("a network row");
     // 2048 received and 1024 sent over two seconds.
     assert!(network.contains("↓1.0K/s"), "{network}");
-    assert!(network.contains("↑512B/s"), "{network}");
-    assert!(network.ends_with("wlan0"), "{network}");
+    assert!(network.ends_with("↑512B/s"), "{network}");
 }
 
 #[test]

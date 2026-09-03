@@ -57,25 +57,21 @@ fn levels_are_classified_against_ascending_thresholds() {
 }
 
 #[test]
-fn a_row_pads_its_value_so_details_line_up() {
-    let cpu = Row::new("󰻠", "12%".to_owned()).detail("2.41 GHz").plain();
-    let disk = Row::new("󰋊", "1.6T free".to_owned())
-        .detail("12% used")
-        .plain();
+fn cells_pad_to_a_shared_width_so_the_second_column_lines_up() {
+    let short = Row::new("󰄏", "69°C".to_owned());
+    let long = Row::new("󰍛", "13.1G/31.1G".to_owned()).detail("42%");
     assert_eq!(
-        cpu.find("2.41"),
-        disk.find("12%"),
-        "details start in the same column: {cpu:?} vs {disk:?}"
+        short.plain().chars().count() + short.padding().len(),
+        long.plain().chars().count() + long.padding().len(),
+        "{short:?} and {long:?} occupy the same width"
     );
 }
 
 #[test]
-fn a_row_without_a_detail_is_not_padded() {
-    let temp = Row::new("󰄏", "69°C".to_owned()).plain();
-    assert!(
-        !temp.ends_with(' '),
-        "nothing follows the value, so nothing needs a column: {temp:?}"
-    );
+fn a_cell_wider_than_its_column_is_not_truncated() {
+    let wide = Row::new("󰍛", "1234.5G/1234.5G".to_owned()).detail("100%");
+    assert!(wide.padding().is_empty());
+    assert!(wide.plain().contains("1234.5G/1234.5G 100%"));
 }
 
 #[test]
@@ -93,13 +89,21 @@ fn a_detail_is_appended_in_the_dim_colour() {
 }
 
 #[test]
-fn a_block_joins_rows_with_newlines() {
+fn a_block_pairs_rows_two_to_a_line() {
     let rows = [
         Row::new("󰻠", "12%".to_owned()),
         Row::new("󰍛", "7.5G/32.0G".to_owned()),
+        Row::new("󰄏", "47°C".to_owned()),
     ];
-    assert_eq!(block(&rows, false).lines().count(), 2);
+    assert_eq!(block(&rows[..2], false).lines().count(), 1);
+    assert_eq!(block(&rows, false).lines().count(), 2, "the odd cell wraps");
     assert_eq!(block(&rows, true).lines().count(), 2);
+
+    let line = block(&rows[..2], false);
+    assert!(
+        line.contains("12%") && line.contains("7.5G/32.0G"),
+        "{line}"
+    );
 }
 
 #[test]

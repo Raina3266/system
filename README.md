@@ -2,7 +2,7 @@
 
 This repository contains eight Rust utilities used by the desktop configuration:
 
-- `media-control` — a dynamic MPRIS controller for Rofi and Waybar
+- [`media-control`](#media-control) — the bar's centre button: MPRIS control for Rofi, Waybar and the notification centre
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
@@ -11,9 +11,115 @@ This repository contains eight Rust utilities used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor
 
-It also documents [the notification center](#notification-center) those last
-two sit beside: SwayNC, the single popup that now owns brightness, volume, the
-hardware readings and the session's power actions.
+It also documents [the notification center](#notification-center) two of them
+feed: SwayNC, the single popup that owns the volume slider, the media overview,
+today's calendar and the hardware readings.
+
+## media-control
+
+`scripts/media-control` is the MPRIS controller behind the bar's centre button,
+its Rofi menu, and the media row inside the notification centre. One program
+owns all three, so "the current player" means the same thing wherever it is
+shown.
+
+The players it considers, how they are ranked, and how browser tabs are filtered
+are unchanged; what follows is only the three faces it renders.
+
+### The bar button
+
+`media-control waybar --watch` streams Waybar JSON for `custom/media`, the one
+module in the centre of the top bar. Its label is a notification badge followed
+by the current track:
+
+```text
+󰂜                          nothing waiting, nothing playing
+󰂚 3                        three notifications, nothing playing
+󰂜  ·  󰐊  Delulu — SZA      playing, nothing waiting
+󰂚 3  ·  󰏤  Delulu — SZA    three notifications, paused
+󰂛                          Do Not Disturb; the count is not worth showing
+```
+
+The count comes from `swaync-client --subscribe`, which prints one line per
+change and flushes it, so following it costs one long-lived child rather than a
+D-Bus round trip on every tick. The subscriber runs on its own thread and
+restarts itself if the daemon does; until its first line arrives the button
+shows a quiet bell, which is also what it shows when there is genuinely nothing
+waiting. A missing `swaync-client` stops the thread rather than retrying
+forever — waiting will not make the binary appear.
+
+Waybar escapes the label before setting it as markup, so the text stays plain
+and the colours come from classes. The module emits two, sometimes three: the
+notification state (`quiet`, `notification`, `dnd`), the playback state
+(`playing`, `paused`, `empty`), and `cc-open` while the panel is up.
+`themes/waybar.css` recolours it from those.
+
+| Action | Result |
+| --- | --- |
+| Click | Open or close the notification centre |
+| Middle-click | Play/pause the current player |
+| Right-click | Open the Rofi media menu |
+
+Left-click is the panel rather than playback because the button is the only way
+into the notification centre, and because the panel is where the rest of the
+media detail lives.
+
+### The panel row
+
+`media-control panel` prints the same snapshot as Pango markup for SwayNC's
+`label#media` widget: the track on one line, then who is playing it and how
+loudly.
+
+```text
+󰐊  Delulu — SZA
+   Chrome  ·  45%
+```
+
+Track titles are escaped before they reach Pango, so a song called
+`Rock & <Roll>` renders as its name rather than breaking the widget.
+
+### The Rofi menu
+
+Unchanged: `media-control menu` opens the full list, with per-player volume,
+pinning and transport controls. `media-control list`, `toggle` and `pause-all`
+are also unchanged.
+
+### Commands
+
+```text
+media-control menu
+media-control waybar --watch [--interval-ms 750]
+media-control panel
+media-control toggle
+media-control pause-all
+media-control list
+```
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `MEDIA_CONTROL_PLAYERCTL` | Override the `playerctl` executable |
+| `MEDIA_CONTROL_ROFI` | Override the `rofi` executable |
+| `MEDIA_CONTROL_SWAYNC_CLIENT` | Override the `swaync-client` executable |
+| `MEDIA_CONTROL_WITH_PARENT_DEATH` | Guard the subscriber child so it exits with this process |
+| `MEDIA_CONTROL_THEME` | Override the Rofi theme path |
+| `MEDIA_CONTROL_FALLBACK_THEME` | Theme used when no configured one exists |
+
+### Development checks
+
+```sh
+nix develop .#rust
+cargo fmt --manifest-path scripts/Cargo.toml --package media-control -- --check
+cargo test --manifest-path scripts/Cargo.toml --package media-control --locked
+cargo clippy --manifest-path scripts/Cargo.toml --package media-control --locked -- -D warnings
+```
+
+Tests cover the badge for each daemon state, the badge and track sharing one
+label, truncation of a long title, the class array including `cc-open`, the
+panel row's two lines and its markup escaping, and the `--subscribe` line
+scanner.
+
+---
 
 ## rofi-audio
 
@@ -408,22 +514,22 @@ opens, and takes its standard output as the widget's text.
 
 ### Output
 
-One line per available reading, as Pango markup in the same cyberpunk palette as
-the rest of the desktop. `--plain` prints the same rows without the markup:
+Every reading the machine can supply, as Pango markup in the same cyberpunk
+palette as the rest of the desktop. `--plain` prints the same cells without the
+markup:
 
 ```text
-󰻠  12%               2.41 GHz
-󰍛  7.5G/32.0G        24%
-󰄏  47°C
-󰋊  412G free         58% used
-󰖩  ↓1.2K/s ↑512B/s   wlan0
+󰻠  12% 2.41GHz       󰍛  7.5G/32.0G 24%
+󰄏  47°C              󰋊  412G free 58%
+󰖩  ↓1.2K/s ↑512B/s
 ```
 
-There is no name column. The glyphs are distinct enough to carry the meaning
-on their own, and dropping six words of dim text is most of what makes the
-block read like a control-centre panel rather than a table. The value column
-is padded so the dimmed detail after it lines up; a row with nothing after
-its value is not padded at all.
+Two readings share a line, and there is no name column. The glyphs are
+distinct enough to carry the meaning on their own, and a single labelled
+column left the block narrow and tall beside everything else in the panel.
+Each cell pads its text to a shared width so the second column starts in the
+same place on every line; a cell wider than that column is not truncated, it
+just pushes its neighbour along.
 
 A reading the machine cannot supply is left out rather than shown as a
 placeholder: a desktop with no battery-class thermal sensor gets no `Temp` row,
@@ -443,7 +549,7 @@ used: 55/80 °C for temperature, 80/95% for CPU, 80/90% for memory and disk.
 | Swap | `/proc/meminfo` | Hidden unless something is in it |
 | Temp | `/sys/class/thermal`, `/sys/class/hwmon` | Prefers the package sensor (`x86_pkg_temp`, `coretemp`, `k10temp`, …) over the chassis one |
 | Disk | `df -P -B1` | The root filesystem by default |
-| Network | `/proc/net/route`, `/proc/net/dev` | The interface carrying the lowest-metric default route, so a VPN outranks the Wi-Fi link it runs over |
+| Network | `/proc/net/route`, `/proc/net/dev` | The interface carrying the lowest-metric default route, so a VPN outranks the Wi-Fi link it runs over. The wired/wireless/tunnel glyph says which kind of link it is |
 
 ### Counters between runs
 
@@ -548,22 +654,23 @@ A minimal custom module configuration looks like this:
 ## Notification center
 
 SwayNC (`SwayNotificationCenter`) is this desktop's notification daemon and the
-one popup behind the bell at the right end of the top bar. Configuration lives in
+one popup behind the bar's centre button. Configuration lives in
 `niri/swaync/default.nix`; the stylesheet is `themes/swaync.css`.
 
 ### What moved
 
 The top bar used to carry two hover drawers, `group/system` and
 `group/hardware`, holding nine modules between them. Both are gone; their
-contents are widgets in the control center instead, and the bar keeps the button
+contents are widgets in the control center instead, and the bar keeps one button
 that opens it.
 
 | Was | Is now |
 | --- | --- |
-| `backlight` in `group/system` | The control center's `backlight` slider |
 | `pulseaudio` in `group/system` | The control center's `volume` slider, with per-application volumes |
-| `temperature`, `memory`, `cpu`, `disk`, `network` in `group/hardware` | One live [`swaync-sysmon`](#swaync-sysmon) block |
-| — | A power dropdown: Suspend, Log out, Restart, Shut down |
+| `temperature`, `memory`, `cpu`, `disk`, `network` in `group/hardware` | One live [`swaync-sysmon`](#swaync-sysmon) block, two readings to a line |
+| `custom/media` in the centre | Still there, but now also the notification badge and the panel's opener; the same snapshot is a [panel row](#the-panel-row) as well |
+| `custom/ycal` on the left | Still there; today's events and tasks also appear as a panel row |
+| `backlight` in `group/system` | Gone. Brightness stays on `XF86MonBrightness*` and `F5`/`F6` |
 | `custom/battery` in `group/system` | Unchanged, but now the first module on the bar |
 | `tray` at the right | Moved to the left, after the battery |
 
@@ -572,76 +679,84 @@ without opening anything. `custom/audio` (Bluetooth and the default devices) and
 `custom/network` (Wi-Fi) are Rofi menus of their own and were not touched.
 
 The top bar is therefore `custom/battery`, `tray`, `custom/ycal` on the left,
-media and lyrics in the centre, and `custom/timer`, `custom/clipboard`,
-`custom/audio`, `custom/network`, `custom/swaync` on the right — the bell last,
-in the corner.
+`custom/media` and `custom/lyrics` in the centre, and `custom/timer`,
+`custom/clipboard`, `custom/audio`, `custom/network` on the right. There is no
+separate notification module: the centre button is it.
 
 ### The panel
 
-The panel is meant to read like GNOME's quick settings or the macOS Control
-Centre: a short stack of small cards you take in at a glance, not a settings
-page. It is five rows in a 380px-wide popup — a header of pill buttons, the two
-sliders, the system readings, and the notification list.
+The panel reads like GNOME's quick settings or the macOS Control Centre: a short
+stack of small cards you take in at a glance, not a settings page. It is six
+rows in a 380px-wide popup.
 
-There is no separate title row and no separate Do Not Disturb row. Both collapse
-into the header, which is most of what makes the panel short: Do Not Disturb is a
-toggle pill on the left, Clear is a button beside it, and the session menu is a
-single 󰐥 button on the right.
+| Row | Widget | Source |
+| --- | --- | --- |
+| Header | `menubar#header` | A Do Not Disturb toggle pill and a Clear button |
+| Volume | `volume` | PulseAudio, with each playing application listed under it |
+| Media | `label#media` | [`media-control panel`](#the-panel-row) |
+| Calendar | `label#ycal` | waybar-ycal's cache, read directly |
+| Readings | `label#sysmon` | [`swaync-sysmon`](#swaync-sysmon) |
+| Notifications | `notifications` | The daemon itself |
 
-Brightness drives `/sys/class/backlight/intel_backlight` and is floored at 5 so
-the slider cannot black the screen out. A different GPU reports a different
-device name there (`amdgpu_bl0`, `acpi_video0`); it is the `backlight.device`
-key in `niri/swaync/default.nix`.
+There is no title row and no separate Do Not Disturb row: both collapse into the
+header, which is most of what keeps the panel short.
+
+Three of the six rows are the same widget — SwayNC's `label`, taught to run a
+command by [the patch below](#the-upstream-patch). Each renders one program's
+Pango markup, and SwayNC turns the `#suffix` in a widget's name into a CSS class,
+which is how `themes/swaync.css` tells `media` from `ycal` from `sysmon`.
 
 Volume shows each playing application as well as the default sink, so a single
 loud tab can be turned down without touching everything else.
 
-### The power dropdown
+### What is deliberately not in the panel
 
-The 󰐥 button on the right of the header is a revealer: clicking it slides the
-four session actions open underneath the row as a plain list, and clicking it
-again folds them away. They cost no height until asked for, which is the whole
-reason they are a dropdown rather than the grid of four large buttons this
-started as.
+**Brightness.** SwayNC's `backlight` widget drives one named device under
+`/sys/class/backlight`, which is a guess that goes wrong on any machine with a
+different GPU. The function keys and `XF86MonBrightness*` already drive
+`brightnessctl`, which finds the device itself.
 
-Suspend acts immediately — it costs a keypress to undo. Log out, Restart and
-Shut down first close the panel and then ask for confirmation through Rofi,
-using `themes/rofi-power.rasi`, because the panel opens under the pointer and a
-mis-click there is not recoverable. Cancel is highlighted first, so a stray
-Enter is harmless, and Escape cancels.
+**Power actions.** A panel that opens under the pointer is the wrong place for
+Shut down. `Mod+Shift+E` and `Ctrl+Alt+Delete` quit the session, and
+`Mod+Alt+L` locks it.
 
-The `swaync-power` wrapper takes `suspend`, `logout`, `reboot` or `poweroff`, and
-is available for bindings of your own. `SWAYNC_POWER_THEME` overrides the Rofi
-theme it uses.
+### The calendar row
 
-### The Waybar bell
+waybar-ycal's popup keeps today's Google Calendar events and Tasks in
+`~/.cache/waybar-ycal/events.json`, so the panel row reads that file rather than
+starting Python and a set of API calls of its own. Events are stored as plain
+strings, tasks as objects carrying a done flag:
 
-`custom/swaync` subscribes to SwayNC over `swaync-client -swb`, which streams the
-notification count and the daemon's state — but no glyph. Rather than map that
-state onto `format-icons` and depend on Waybar resolving `{icon}` through the
-`alt` field, `jq` builds the finished label in the pipeline: the bell alone when
-nothing is waiting, the bell and the count when something is, and a struck-out
-bell under Do Not Disturb.
+```text
+󰄱  Pay rent & council tax
+󰄱  Submit form
+󰃭  Standup 09:30-10:00
++ 2 more
+```
 
-| Action | Result |
-| --- | --- |
-| Click | Open or close the control center |
-| Right-click | Toggle Do Not Disturb |
-| Middle-click | Close every notification |
+Open tasks come first because they are the part that still needs doing, then
+events, then anything already ticked off. Three items show at most; the rest are
+a count. A day with nothing on it, an absent cache and a cache that has not
+heard about today all render the same way, and a malformed one says the calendar
+is unavailable rather than showing a blank row.
 
-The module sets a class per state — `none`, `notification`, the `dnd-` and
-`inhibited-` variants, plus `cc-open` while the panel is up — so `themes/waybar.css`
-recolours it: pink with something waiting, dimmed under Do Not Disturb, and
-washed pink while the panel is open.
+Titles are escaped through `jq`'s `@html`, which covers exactly the characters
+Pango's markup parser treats as syntax. `SWAYNC_YCAL_CACHE` overrides the path.
 
-`Mod+N` toggles the panel and `F8` toggles Do Not Disturb, both through
-`swaync-client`.
+Clicking `custom/ycal` in the bar still opens waybar-ycal's own popup, which is
+where the full month and the task checkboxes live.
+
+### The bar button
+
+The centre button is `custom/media`, and its label, classes and click actions
+are all described under [media-control](#the-bar-button). `Mod+N` toggles the
+panel and `F8` toggles Do Not Disturb, both through `swaync-client`.
 
 ### The upstream patch
 
 SwayNC's `label` widget shows a fixed string, so there is no built-in way to put
-live readings in the panel. `niri/swaync/label-exec.patch` adds three optional
-keys to it:
+a program's output in the panel — which is what the media, calendar and readings
+rows all are. `niri/swaync/label-exec.patch` adds three optional keys to it:
 
 | Key | Meaning |
 | --- | --- |
@@ -664,8 +779,10 @@ one second at the same priority, so the file overrides rather than replaces
 upstream: most of it is the palette shared with `themes/waybar.css` and the Rofi
 `.rasi` themes, expressed through SwayNC's own CSS variables.
 
-The system monitor supplies its own colours as Pango markup, so the widget's CSS
-only sets the monospace grid its column alignment assumes.
+All three `label` rows supply their own colours as Pango markup, so their CSS is
+only spacing. They stay monospace: the readings need it for their two columns,
+and matching the bar and the Rofi menus is worth more than the couple of
+characters a proportional font would save on a track title.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
 slider track with a 10px handle, and 11-13px text. If the panel ever wants to

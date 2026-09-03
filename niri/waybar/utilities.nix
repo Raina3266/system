@@ -1,10 +1,9 @@
-# Rofi-backed utility modules on the right side of the top bar, the SwayNC bell
-# that ends it, plus the niri_window_buttons CFFI taskbar module for the bottom
-# bar.
+# Rofi-backed utility modules on the right side of the top bar, plus the
+# niri_window_buttons CFFI taskbar module for the bottom bar.
 # niri_window_buttons: https://github.com/adelmonte/niri_window_buttons
 # Taskbar (current workspace only): click=focus, middle=close, right=menu
 # Drag to reorder, shift-click for multi-select
-{ pkgs, packages }:
+{ packages }:
 {
   homeConfig.home.packages = [
     packages.previewPanel
@@ -55,36 +54,6 @@
       escape = false;
       on-click = "${packages.rofiAudio}/bin/rofi-audio";
       on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
-    };
-
-    # The control center opener, and the last module on the top bar.
-    #
-    # swaync's `-swb` output carries the count as its text and the state as its
-    # class, but no glyph. Rather than map the state onto `format-icons` and
-    # depend on Waybar resolving `{icon}` through the `alt` field, jq builds the
-    # finished label here: the bell alone when nothing is waiting, the bell and
-    # the count when something is. Killing Waybar closes jq's stdout, which ends
-    # the pipeline, so the subscription does not outlive the bar.
-    "custom/swaync" = {
-      exec = pkgs.writeShellScript "waybar-swaync-status" ''
-        ${pkgs.swaynotificationcenter}/bin/swaync-client -swb \
-          | ${pkgs.jq}/bin/jq --unbuffered -c '
-              (.text | tonumber) as $count
-              | (if (.alt | startswith("dnd")) then "󰂛"
-                 elif $count > 0 then "󰂚"
-                 else "󰂜" end) as $icon
-              | .text = (if $count > 0 then "\($icon)  \($count)" else $icon end)
-              | .tooltip = (if .tooltip == "" then "No notifications" else .tooltip end)
-            '
-      '';
-      return-type = "json";
-      format = "{}";
-      tooltip = true;
-      escape = true;
-      "exec-on-event" = false;
-      on-click = "${pkgs.swaynotificationcenter}/bin/swaync-client -t -sw";
-      on-click-right = "${pkgs.swaynotificationcenter}/bin/swaync-client -d -sw";
-      on-click-middle = "${pkgs.swaynotificationcenter}/bin/swaync-client -C -sw";
     };
 
     tray = {

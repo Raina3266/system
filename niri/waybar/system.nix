@@ -1,9 +1,9 @@
 # Battery, media, and Google Calendar/Tasks status modules.
 #
-# Brightness, volume and the hardware readings are no longer here: they live
-# in the SwayNC control center (../swaync), which the bell at the right end of
-# the top bar opens. Battery stays in the bar, at its left end, because it is
-# the one reading worth seeing without opening anything.
+# Volume and the hardware readings are no longer here: they live in the SwayNC
+# control center (../swaync), which `custom/media` — the bar's centre button —
+# opens. Battery stays in the bar, at its left end, because it is the one
+# reading worth seeing without opening anything.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -102,8 +102,12 @@ in
       '';
     };
 
+    # The bar's centre button, and the only one that opens the control center.
+    # media-control composes the whole label: the notification badge it follows
+    # over `swaync-client --subscribe`, then the current track. Keeping both in
+    # one module keeps one program in charge of what "now playing" means, and
+    # costs the bar one slot instead of two.
     "custom/media" = {
-      hide-empty-text = true;
       format = "{}";
       return-type = "json";
       exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.mediaControl}/bin/media-control waybar --watch --interval-ms 750";
@@ -111,7 +115,8 @@ in
       escape = true;
       "restart-interval" = 2;
       "exec-on-event" = false;
-      on-click = "${packages.mediaControl}/bin/media-control toggle";
+      on-click = "${pkgs.swaynotificationcenter}/bin/swaync-client -t -sw";
+      on-click-middle = "${packages.mediaControl}/bin/media-control toggle";
       on-click-right = "${packages.mediaControl}/bin/media-control menu";
     };
 

@@ -5,12 +5,24 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use crate::model::{media_label, row_text, Player};
+use crate::model::{Player, media_label, row_text};
 use crate::mpris::{change_volume, executable, player_command, snapshot, toggle_pin};
+use crate::notifications::{Notifications, Subscription};
 use crate::text::{clean_field, json_escape, truncate_display};
 
 const DEFAULT_INTERVAL_MS: u64 = 750;
-const DISPLAY_WIDTH: usize = 60;
+
+/// The bar button's notification badge.
+const BELL_QUIET: &str = "󰂜";
+const BELL_ACTIVE: &str = "󰂚";
+const BELL_SILENCED: &str = "󰂛";
+
+/// The media half of the bar button shares the centre of the bar with the
+/// lyrics module, so it gets less room than the old media-only module had.
+const BAR_MEDIA_WIDTH: usize = 46;
+
+/// What separates the badge from the media label.
+const BAR_SEPARATOR: &str = "  ·  ";
 
 pub(crate) fn launch_menu() -> Result<(), String> {
     let current_exe = env::current_exe().map_err(|error| error.to_string())?;
@@ -155,8 +167,13 @@ pub(crate) fn waybar(arguments: &[String]) -> Result<(), String> {
         .unwrap_or(DEFAULT_INTERVAL_MS)
         .max(100);
 
+    // The button opens the notification centre as well as showing the current
+    // track, so the count travels with the media label rather than through a
+    // second Waybar module that would need its own slot in the bar.
+    let notifications = Subscription::start();
+
     loop {
-        let line = waybar_json(snapshot().first());
+        let line = waybar_json(snapshot().first(), notifications.get());
         if writeln!(io::stdout(), "{line}").is_err() {
             return Ok(());
         }
@@ -168,23 +185,70 @@ pub(crate) fn waybar(arguments: &[String]) -> Result<(), String> {
     }
 }
 
-pub(crate) fn waybar_json(player: Option<&Player>) -> String {
+/// The badge glyph and the CSS class that goes with the daemon's state.
+fn notification_badge(notifications: Notifications) -> (String, &'static str) {
+    if notifications.dnd {
+        (BELL_SILENCED.to_owned(), "dnd")
+    } else if notifications.count > 0 {
+        (
+            format!("{BELL_ACTIVE} {}", notifications.count),
+            "notification",
+        )
+    } else {
+        (BELL_QUIET.to_owned(), "quiet")
+    }
+}
+
+/// The bar button's label: the notification badge, then the current track.
+///
+/// Waybar escapes this text before setting it as markup, so it stays plain and
+/// the colours come from the classes below and `themes/waybar.css`.
+pub(crate) fn bar_text(player: Option<&Player>, notifications: Notifications) -> String {
+    let (badge, _) = notification_badge(notifications);
+    match player {
+        Some(player) => format!(
+            "{badge}{BAR_SEPARATOR}{}  {}",
+            player.status.icon(),
+            truncate_display(&media_label(player), BAR_MEDIA_WIDTH),
+        ),
+        None => badge,
+    }
+}
+
+/// What hovering the button explains, in the order it matters.
+pub(crate) fn bar_tooltip(player: Option<&Player>, notifications: Notifications) -> String {
+    let mut lines = Vec::new();
+    lines.push(match notifications.count {
+        0 => "No notifications".to_owned(),
+        1 => "1 notification".to_owned(),
+        count => format!("{count} notifications"),
+    });
+    if notifications.dnd {
+        lines.push("Do Not Disturb is on".to_owned());
+    }
     match player {
         Some(player) => {
-            let label = media_label(player);
-            let text = truncate_display(&label, DISPLAY_WIDTH);
-            let tooltip = format!("{}\nPlayer: {}", label, player.source);
-            format!(
-                "{{\"text\":\"{}\",\"tooltip\":\"{}\",\"class\":\"{}\",\"alt\":\"{}\"}}",
-                json_escape(&text),
-                json_escape(&tooltip),
-                player.status.class(),
-                player.status.class()
-            )
+            lines.push(media_label(player));
+            lines.push(format!("Player: {}", player.source));
         }
-        None => {
-            "{\"text\":\"\",\"tooltip\":\"No active media\",\"class\":\"empty\",\"alt\":\"empty\"}"
-                .to_owned()
-        }
+        None => lines.push("No active media".to_owned()),
     }
+    lines.join("\n")
+}
+
+pub(crate) fn waybar_json(player: Option<&Player>, notifications: Notifications) -> String {
+    let (_, notification_class) = notification_badge(notifications);
+    let media_class = player.map_or("empty", |player| player.status.class());
+    let mut classes = vec![notification_class, media_class];
+    if notifications.visible {
+        classes.push("cc-open");
+    }
+    let classes: Vec<String> = classes.iter().map(|class| format!("\"{class}\"")).collect();
+    format!(
+        "{{\"text\":\"{}\",\"tooltip\":\"{}\",\"class\":[{}],\"alt\":\"{}\"}}",
+        json_escape(&bar_text(player, notifications)),
+        json_escape(&bar_tooltip(player, notifications)),
+        classes.join(","),
+        media_class,
+    )
 }

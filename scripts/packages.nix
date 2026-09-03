@@ -56,7 +56,9 @@ rec {
       wrapProgram "$out/bin/media-control" \
         --set MEDIA_CONTROL_PLAYERCTL "${pkgs.lib.getExe pkgs.playerctl}" \
         --set MEDIA_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set MEDIA_CONTROL_FALLBACK_THEME "$out/share/rofi/themes/media-control.rasi"
+        --set MEDIA_CONTROL_FALLBACK_THEME "$out/share/rofi/themes/media-control.rasi" \
+        --set MEDIA_CONTROL_SWAYNC_CLIENT "${pkgs.lib.getExe' pkgs.swaynotificationcenter "swaync-client"}" \
+        --set MEDIA_CONTROL_WITH_PARENT_DEATH "${withParentDeath}/bin/with-parent-death"
     '';
   };
 

@@ -1,11 +1,11 @@
-# SwayNC: the notification daemon and the control center behind the top-right
-# bell in Waybar.
+# SwayNC: the notification daemon and the control center behind the bar's
+# centre button.
 #
-# The control center is the single popup that owns brightness, volume, the
-# system readings and the session's power actions; Waybar keeps only the button
-# that opens it. Imported by ../../nixos/default.nix rather than by ../default.nix
-# because the package override below is a Nixpkgs overlay, and Home Manager here
-# uses global pkgs.
+# The control center is the single popup that owns the volume slider, the media
+# overview, today's calendar and tasks, and the system readings; Waybar keeps
+# only the button that opens it. Imported by ../../nixos/default.nix rather than
+# by ../default.nix because the package override below is a Nixpkgs overlay, and
+# Home Manager here uses global pkgs.
 { ... }:
 {
   nixpkgs.overlays = [
@@ -13,9 +13,9 @@
       swaynotificationcenter = prev.swaynotificationcenter.overrideAttrs (oldAttrs: {
         # Upstream's `label` widget shows a fixed string. The patch gives it an
         # `exec`/`interval`/`pango-markup` triple so the widget can display a
-        # command's output, which is what the system monitor row needs; without
-        # `exec` the widget behaves exactly as it does upstream. Checked against
-        # v0.12.5, v0.12.6 and upstream main.
+        # command's output, which is what the media, calendar and system rows
+        # all need; without `exec` the widget behaves exactly as it does
+        # upstream. Checked against v0.12.5, v0.12.6 and upstream main.
         patches = (oldAttrs.patches or [ ]) ++ [ ./label-exec.patch ];
       });
     })
@@ -24,7 +24,6 @@
   home-manager.sharedModules = [
     (
       {
-        config,
         lib,
         pkgs,
         repoPackages,
@@ -32,42 +31,6 @@
       }:
       let
         swaync = "${pkgs.swaynotificationcenter}/bin/swaync-client";
-
-        # Reboot, shutdown and logout are unrecoverable from a mis-click on a
-        # panel that opens under the pointer, so they confirm through Rofi,
-        # which is already the rest of this desktop's dialog toolkit. Suspend
-        # does not: it costs a keypress to undo.
-        power = pkgs.writeShellScriptBin "swaync-power" ''
-          set -euo pipefail
-
-          theme="''${SWAYNC_POWER_THEME:-${config.xdg.configHome}/rofi/rofi-power.rasi}"
-
-          case "''${1-}" in
-            suspend)  icon="󰤄"; label="Suspend";   confirm=false; run=(${pkgs.systemd}/bin/systemctl suspend) ;;
-            logout)   icon="󰍃"; label="Log out";   confirm=true;  run=(niri msg action quit --skip-confirmation) ;;
-            reboot)   icon="󰜉"; label="Restart";   confirm=true;  run=(${pkgs.systemd}/bin/systemctl reboot) ;;
-            poweroff) icon="󰐥"; label="Shut down"; confirm=true;  run=(${pkgs.systemd}/bin/systemctl poweroff) ;;
-            *)
-              echo "usage: swaync-power <suspend|logout|reboot|poweroff>" >&2
-              exit 2
-              ;;
-          esac
-
-          # The control center is a layer-shell overlay and would otherwise sit
-          # on top of the confirmation dialog.
-          ${swaync} --close-panel --skip-wait || true
-
-          if [ "$confirm" = true ]; then
-            choice="$(printf '󰜺  Cancel\n%s  %s\n' "$icon" "$label" \
-              | ${pkgs.rofi}/bin/rofi -dmenu -i -no-custom -p "$label?" -theme "$theme")" || exit 0
-            case "$choice" in
-              *"$label") ;;
-              *) exit 0 ;;
-            esac
-          fi
-
-          exec "''${run[@]}"
-        '';
 
         # SwayNC hands a toggle button's new state to its command in the
         # environment, so set that state rather than toggling blind and hoping
@@ -79,17 +42,55 @@
           exec ${swaync} --dnd-off --skip-wait
         '';
 
-        action = label: argument: {
-          inherit label;
-          command = "${power}/bin/swaync-power ${argument}";
-          type = "normal";
-        };
+        # waybar-ycal's popup keeps today's Google Calendar events and Tasks in
+        # a cache file, so the panel row reads that rather than starting Python
+        # and a set of API calls of its own. Events are plain strings; tasks are
+        # objects carrying a done flag, and the open ones come first because
+        # they are the part that still needs doing.
+        ycalRows = pkgs.writeText "swaync-ycal.jq" ''
+          def paint($colour; $text):
+            "<span foreground=\"" + $colour + "\">" + ($text | @html) + "</span>";
+          def cell($icon; $colour; $text):
+            paint("#ff7edb"; $icon) + "  " + paint($colour; $text);
+
+          [ (.[$today] // [])[]
+            | if type == "object"
+              then { order: (if .done then 2 else 0 end),
+                     icon: (if .done then "󰄲" else "󰄱" end),
+                     colour: (if .done then "#5c6776" else "#cbe3e7" end),
+                     title: .title }
+              else { order: 1, icon: "󰃭", colour: "#cbe3e7", title: . }
+              end
+          ]
+          | sort_by(.order)
+          | if length == 0 then
+              cell("󰃭"; "#5c6776"; "Nothing scheduled today")
+            else
+              ( (.[:$limit] | map(cell(.icon; .colour; .title)))
+                + (if length > $limit
+                   then [ paint("#5c6776"; "+ " + (length - $limit | tostring) + " more") ]
+                   else [] end)
+              ) | join("\n")
+            end
+        '';
+
+        # A day the cache has nothing for renders the same as a day it has not
+        # heard about yet, so an absent cache is simply an empty one.
+        noEvents = pkgs.writeText "swaync-ycal-empty.json" "{}";
+
+        ycal = pkgs.writeShellScript "swaync-ycal" ''
+          cache="''${SWAYNC_YCAL_CACHE:-$HOME/.cache/waybar-ycal/events.json}"
+          [ -r "$cache" ] || cache=${noEvents}
+          ${pkgs.jq}/bin/jq -r \
+            --arg today "$(${pkgs.coreutils}/bin/date +%F)" \
+            --argjson limit 3 \
+            -f ${ycalRows} \
+            "$cache" 2>/dev/null \
+            || printf '%s\n' '<span foreground="#5c6776">󰃭  Calendar unavailable</span>'
+        '';
       in
       {
-        home.packages = [
-          power
-          repoPackages.swayncSysmon
-        ];
+        home.packages = [ repoPackages.swayncSysmon ];
 
         services.swaync = {
           enable = true;
@@ -103,7 +104,6 @@
             layer = "overlay";
             layer-shell = true;
 
-            # Sits under the top bar's right edge, below the bell that opens it.
             # Sized like a phone's quick-settings shade rather than a sidebar:
             # narrow enough to read as a popup, and only as tall as the widgets
             # plus a few notifications need.
@@ -111,7 +111,7 @@
             control-center-positionX = "right";
             control-center-positionY = "top";
             control-center-width = 380;
-            control-center-height = 560;
+            control-center-height = 620;
             control-center-margin-top = 6;
             control-center-margin-right = 6;
             control-center-margin-bottom = 6;
@@ -135,22 +135,23 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # Five rows, in the order a quick-settings shade uses them: one
-            # header of pill buttons, the two sliders, the readings, the list.
-            # There is no separate title or Do Not Disturb row — both collapse
-            # into the header, which is most of what makes the panel short.
+            # A header of pill buttons, the volume slider, then the three
+            # `label` rows that each render one program's output, then the list.
+            # Brightness and the session's power actions are deliberately not
+            # here: brightness stays on the function keys, and a power menu on a
+            # panel that opens under the pointer is a mis-click waiting to
+            # happen.
             widgets = [
               "menubar#header"
-              "backlight"
               "volume"
+              "label#media"
+              "label#ycal"
               "label#sysmon"
               "notifications"
             ];
 
             widget-config = {
-              # Quick toggles on the left, the session menu on the right. The
-              # menu is a revealer: clicking 󰐥 slides the four power actions
-              # open underneath the row, so they cost no height until asked for.
+              # Quick toggles, the way a quick-settings shade draws them.
               "menubar#header" = {
                 "buttons#quick" = {
                   position = "left";
@@ -168,29 +169,6 @@
                     }
                   ];
                 };
-
-                "menu#power" = {
-                  label = "󰐥";
-                  position = "right";
-                  animation-type = "slide_down";
-                  animation-duration = 200;
-                  actions = [
-                    (action "󰤄   Suspend" "suspend")
-                    (action "󰍃   Log out" "logout")
-                    (action "󰜉   Restart" "reboot")
-                    (action "󰐥   Shut down" "poweroff")
-                  ];
-                };
-              };
-
-              backlight = {
-                label = "󰃠";
-                # The panel that ../config.kdl's brightness keys drive. A
-                # different GPU reports a different name under
-                # /sys/class/backlight (amdgpu_bl0, acpi_video0, …).
-                device = "intel_backlight";
-                subsystem = "backlight";
-                min = 5;
               };
 
               volume = {
@@ -204,13 +182,34 @@
                 collapse-button-label = "󰅃";
               };
 
-              # Live CPU, memory, temperature, disk and network readings. The
-              # `exec` key comes from ./label-exec.patch; swaync also re-runs
-              # the command whenever the control center opens, so the figures
-              # are never older than the panel.
+              # The same snapshot the bar button shows, rendered by the same
+              # program, so "the current player" means one thing in both places.
+              # Playback controls stay on the button and in its Rofi menu.
+              "label#media" = {
+                text = "Reading players…";
+                max-lines = 2;
+                exec = "${repoPackages.mediaControl}/bin/media-control panel";
+                interval = 3;
+                pango-markup = true;
+              };
+
+              # Today's events and tasks, from waybar-ycal's own cache. Clicking
+              # the bar's calendar module still opens its full popup.
+              "label#ycal" = {
+                text = "Reading calendar…";
+                max-lines = 4;
+                exec = "${ycal}";
+                interval = 60;
+                pango-markup = true;
+              };
+
+              # Live CPU, memory, temperature, disk and network readings, two to
+              # a line. The `exec` key comes from ./label-exec.patch; swaync
+              # also re-runs the command whenever the control center opens, so
+              # the figures are never older than the panel.
               "label#sysmon" = {
                 text = "Reading sensors…";
-                max-lines = 6;
+                max-lines = 4;
                 exec = "${repoPackages.swayncSysmon}/bin/swaync-sysmon";
                 interval = 3;
                 pango-markup = true;

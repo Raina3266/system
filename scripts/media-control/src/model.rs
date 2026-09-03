@@ -22,7 +22,7 @@ impl PlaybackStatus {
         }
     }
 
-    fn icon(self) -> &'static str {
+    pub(crate) fn icon(self) -> &'static str {
         match self {
             Self::Playing => "󰐊",
             Self::Paused => "󰏤",

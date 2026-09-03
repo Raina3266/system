@@ -99,7 +99,7 @@
     color: var(--cyber-fg);
 }
 
-/* ── Header row: quick toggles and the session menu ──
+/* ── Header row: quick toggles ──
  * The buttons are pills, the way a quick-settings shade draws them. */
 
 .widget-menubar {
@@ -141,46 +141,20 @@
     color: var(--cyber-pink);
 }
 
-/* A checked pill is an active toggle: Do Not Disturb on, or the power menu
- * standing open. */
+/* A checked pill is an active toggle: Do Not Disturb standing on. */
 .widget-menubar button:checked {
     background: var(--cyber-wash-strong);
     border-color: var(--cyber-pink);
     color: var(--cyber-pink);
 }
 
-/* The power dropdown: a plain list under the row, not a second grid. */
-.widget-menubar > revealer * {
-    margin-top: 5px;
-}
-
-.widget-menubar > revealer button {
-    margin: 0 0 3px 0;
-    padding: 5px 10px;
-    border-radius: 9px;
-}
-
-.widget-menubar > revealer .power button {
-    background: transparent;
-    border-color: transparent;
-    color: var(--cyber-fg);
-}
-
-.widget-menubar > revealer .power button:hover {
-    background: var(--cyber-wash);
-    border-color: var(--cyber-line-strong);
-    color: var(--cyber-pink);
-}
-
-/* ── Sliders: brightness and volume ──
+/* ── The volume slider ──
  * A thin track with a small handle, the shape both GNOME and macOS use. */
 
-.widget-backlight,
 .widget-volume {
     padding: 3px 8px;
 }
 
-.widget-backlight > label,
 .widget-volume > box > label,
 .widget-slider > label {
     color: var(--cyber-pink);
@@ -235,9 +209,14 @@ scale slider:hover {
     -gtk-icon-size: 16px;
 }
 
-/* ── System monitor ──
- * swaync-sysmon supplies its own colours as Pango markup, so the widget only
- * needs the monospace grid its column alignment assumes. */
+/* ── The three label rows ──
+ * media-control, the calendar reader and swaync-sysmon each supply their own
+ * colours as Pango markup, so the CSS here is only spacing. SwayNC turns the
+ * `#suffix` in a widget's name into a CSS class, which is what separates them.
+ *
+ * All three stay monospace: the readings need it for their two columns, and
+ * matching the bar and the Rofi menus is worth more than the couple of
+ * characters a proportional font would save on a track title. */
 
 .widget-label {
     padding: 5px 8px;
@@ -247,6 +226,15 @@ scale slider:hover {
     font-family: "JetBrains Mono Nerd Font", monospace;
     font-size: 12px;
     line-height: 1.45;
+}
+
+.widget-label.media > label,
+.widget-label.ycal > label {
+    line-height: 1.35;
+}
+
+.widget-label.sysmon > label {
+    line-height: 1.5;
 }
 
 /* ── Notifications ── */

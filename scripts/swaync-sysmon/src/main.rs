@@ -239,7 +239,7 @@ fn cpu_row(config: &Config, current: &State) -> Option<Row> {
             .as_deref()
             .and_then(parse::cpu_mhz)
         {
-            Some(mhz) => row.detail(format!("{:.2} GHz", mhz / 1000.0)),
+            Some(mhz) => row.detail(format!("{:.2}GHz", mhz / 1000.0)),
             None => row,
         },
     )
@@ -395,7 +395,7 @@ fn disk_row(config: &Config) -> Option<Row> {
             icon::DISK,
             format!("{} free", format::bytes(disk.available)),
         )
-        .detail(format!("{percent:.0}% used"))
+        .detail(format!("{percent:.0}%"))
         .level(Level::from_thresholds(percent, 80.0, 90.0)),
     )
 }
@@ -420,7 +420,10 @@ fn network_row(current: &State, interface: Option<&str>) -> Option<Row> {
                 format::rate(current.tx_rate)
             ),
         )
-        .detail(interface.to_owned()),
+        // The wired/wireless/tunnel glyph already says which link this is, and
+        // a cell that also spells out the interface name does not fit beside a
+        // second column.
+        .level(Level::Normal),
     )
 }
 
