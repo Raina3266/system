@@ -58,8 +58,8 @@ environment:
   SWAYNC_SYSMON_PROC           /proc replacement (default: /proc)
   SWAYNC_SYSMON_SYS            /sys replacement (default: /sys)
   SWAYNC_SYSMON_DF             df executable (default: df)
-  SWAYNC_SYSMON_DISK           filesystem to report (default: /)
   SWAYNC_SYSMON_THERMAL_ZONE   thermal zone index or sensor path (default: auto)
+  SWAYNC_SYSMON_DISK           filesystem to report (default: /)
   SWAYNC_SYSMON_INTERFACE      network interface (default: the default route's)
   SWAYNC_SYSMON_STATE          counter state file
 ";
@@ -102,8 +102,8 @@ impl Config {
             proc_root: path_from_environment("SWAYNC_SYSMON_PROC", "/proc"),
             sys_root: path_from_environment("SWAYNC_SYSMON_SYS", "/sys"),
             df: env::var_os("SWAYNC_SYSMON_DF").unwrap_or_else(|| OsString::from("df")),
-            disk_path: env::var_os("SWAYNC_SYSMON_DISK").unwrap_or_else(|| OsString::from("/")),
             thermal_zone: non_empty("SWAYNC_SYSMON_THERMAL_ZONE"),
+            disk_path: env::var_os("SWAYNC_SYSMON_DISK").unwrap_or_else(|| OsString::from("/")),
             interface: non_empty("SWAYNC_SYSMON_INTERFACE"),
             state_path: state_path(),
         }
