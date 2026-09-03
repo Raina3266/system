@@ -2,6 +2,20 @@
   pkgs,
   ...
 }:
+let
+  # The same values ../../themes/default.nix hands KDE, GTK and VS Code. btop
+  # reads one flat list of colours rather than a theme package, so they are
+  # repeated here instead of being patched out of an upstream file.
+  daemonRed = "#D52C35";
+  daemonPink = "#D656C7";
+  daemonDimPink = "#5A254D";
+  daemonYellow = "#FCEE0A";
+  daemonSeparator = "#6B6670";
+  daemonMutedText = "#7A9B9F";
+  daemonText = "#5DF4FE";
+  daemonAlternateBackground = "#210E15";
+  daemonBackground = "#180A10";
+in
 {
   # ── Terminal emulators ───────────────────────────────────────────────────
   programs.ghostty = {
@@ -17,7 +31,7 @@
   
   # ── btop ──────────────────────────────────────────────────────────────────
   # Stands in for the sensor pages System Monitor had: qps covers processes,
-  # this covers the graphs. ../../themes/default.nix supplies the palette.
+  # this covers the graphs.
   programs.btop = {
     enable = true;
 
@@ -72,6 +86,9 @@
       proc_sorting = "cpu lazy";
       proc_cpu_graphs = true;
       proc_mem_bytes = true;
+      # The name takes its colour from the process gradient below, and the pid
+      # and command line fade with distance down the list.
+      proc_colors = true;
       proc_gradient = true;
       proc_filter_kernel = false;
 
@@ -80,6 +97,70 @@
       show_battery_watts = true;
       clock_format = "%X";
     };
+
+    # Yellow frames the boxes and nothing else, as it frames menus and popups
+    # across the rest of the desktop. Text is cyan, headings pink, shortcut
+    # keys red; meters and graphs run cool to hot, cyan through pink to red.
+    #
+    # btop draws a process name from one colour and its pid and command line
+    # from another, so the pid cannot differ from the path: both take the
+    # greyscale ramp below, which fades with distance down the list.
+    themes."Daemon-2.0" = ''
+      theme[main_bg]="${daemonBackground}"
+      theme[main_fg]="${daemonText}"
+      theme[title]="${daemonPink}"
+      theme[hi_fg]="${daemonRed}"
+      theme[selected_bg]="${daemonDimPink}"
+      theme[selected_fg]="${daemonText}"
+      theme[inactive_fg]="${daemonSeparator}"
+      theme[graph_text]="${daemonMutedText}"
+      theme[meter_bg]="${daemonAlternateBackground}"
+      theme[proc_misc]="${daemonPink}"
+
+      theme[cpu_box]="${daemonYellow}"
+      theme[mem_box]="${daemonYellow}"
+      theme[net_box]="${daemonYellow}"
+      theme[proc_box]="${daemonYellow}"
+      theme[div_line]="${daemonSeparator}"
+
+      theme[temp_start]="${daemonText}"
+      theme[temp_mid]="${daemonPink}"
+      theme[temp_end]="${daemonRed}"
+
+      theme[cpu_start]="${daemonText}"
+      theme[cpu_mid]="${daemonPink}"
+      theme[cpu_end]="${daemonRed}"
+
+      theme[used_start]="${daemonText}"
+      theme[used_mid]="${daemonPink}"
+      theme[used_end]="${daemonRed}"
+
+      theme[free_start]="${daemonSeparator}"
+      theme[free_mid]="${daemonMutedText}"
+      theme[free_end]="${daemonText}"
+
+      theme[cached_start]="${daemonDimPink}"
+      theme[cached_mid]="${daemonPink}"
+      theme[cached_end]="${daemonText}"
+
+      theme[available_start]="${daemonSeparator}"
+      theme[available_mid]="${daemonText}"
+      theme[available_end]="${daemonPink}"
+
+      theme[download_start]="${daemonMutedText}"
+      theme[download_mid]="${daemonText}"
+      theme[download_end]="${daemonPink}"
+
+      theme[upload_start]="${daemonDimPink}"
+      theme[upload_mid]="${daemonPink}"
+      theme[upload_end]="${daemonRed}"
+
+      # Colours a process name by its own CPU use: cyan at rest, pink and then
+      # red as it climbs.
+      theme[process_start]="${daemonText}"
+      theme[process_mid]="${daemonPink}"
+      theme[process_end]="${daemonRed}"
+    '';
   };
 
   # ── tmux ──────────────────────────────────────────────────────────────────

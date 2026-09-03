@@ -45,9 +45,6 @@ let
   daemonDimPink = "#5A254D";
   daemonYellow = "#FCEE0A";
   daemonTableSeparator = "#6B6670";
-  # Mirrors DAEMON_MUTED_TEXT in patch-daemon.py, which the KDE and GTK passes
-  # use for text that has to recede without disappearing.
-  daemonMutedText = "#7A9B9F";
   daemonText = "#5DF4FE";
   daemonAlternateBackground = "#210E15";
   daemonBackground = "#180A10";
@@ -264,65 +261,6 @@ in
   # resulting combined theme is installed. ../home/vscode.nix selects it.
   programs.vscode.profiles.default.extensions = [ daemonVscodeTheme ];
 
-  # btop draws everything from one flat list of colours, so the palette is
-  # applied here rather than patched out of an upstream theme. Frames take the
-  # structural colour like every other menu and popup; meters and graphs run
-  # cool to hot, cyan through the pink accent, and peak on structural yellow.
-  # ../home/shell/terminal.nix selects it with color_theme.
-  programs.btop.themes."Daemon-2.0" = ''
-    theme[main_bg]="${daemonBackground}"
-    theme[main_fg]="${daemonText}"
-    theme[title]="${daemonYellow}"
-    theme[hi_fg]="${daemonPink}"
-    theme[selected_bg]="${daemonDimPink}"
-    theme[selected_fg]="${daemonText}"
-    theme[inactive_fg]="${daemonTableSeparator}"
-    theme[graph_text]="${daemonMutedText}"
-    theme[meter_bg]="${daemonAlternateBackground}"
-    theme[proc_misc]="${daemonPink}"
-
-    theme[cpu_box]="${daemonYellow}"
-    theme[mem_box]="${daemonYellow}"
-    theme[net_box]="${daemonYellow}"
-    theme[proc_box]="${daemonYellow}"
-    theme[div_line]="${daemonTableSeparator}"
-
-    theme[temp_start]="${daemonText}"
-    theme[temp_mid]="${daemonYellow}"
-    theme[temp_end]="${daemonRed}"
-
-    theme[cpu_start]="${daemonText}"
-    theme[cpu_mid]="${daemonPink}"
-    theme[cpu_end]="${daemonRed}"
-
-    theme[used_start]="${daemonText}"
-    theme[used_mid]="${daemonPink}"
-    theme[used_end]="${daemonRed}"
-
-    theme[free_start]="${daemonTableSeparator}"
-    theme[free_mid]="${daemonMutedText}"
-    theme[free_end]="${daemonText}"
-
-    theme[cached_start]="${daemonDimPink}"
-    theme[cached_mid]="${daemonPink}"
-    theme[cached_end]="${daemonYellow}"
-
-    theme[available_start]="${daemonTableSeparator}"
-    theme[available_mid]="${daemonText}"
-    theme[available_end]="${daemonPink}"
-
-    theme[download_start]="${daemonMutedText}"
-    theme[download_mid]="${daemonText}"
-    theme[download_end]="${daemonYellow}"
-
-    theme[upload_start]="${daemonDimPink}"
-    theme[upload_mid]="${daemonPink}"
-    theme[upload_end]="${daemonYellow}"
-
-    theme[process_start]="${daemonMutedText}"
-    theme[process_mid]="${daemonPink}"
-    theme[process_end]="${daemonRed}"
-  '';
 
   # Kvantum is the application style used by Daemon. The theme directory and
   # its selection file are both managed so System Settings cannot leave an old
