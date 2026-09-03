@@ -72,11 +72,6 @@ in
     kdePackages.plasma-integration
     kdePackages.print-manager
     kdePackages.skanpage
-    kdePackages.plasma-systemmonitor
-
-    # System Monitor is QML, so Kvantum cannot paint it and it only ever
-    # follows the colour scheme. qps is Qt Widgets and is styled like Dolphin.
-    lxqt.qps
 
     # media
     vlc

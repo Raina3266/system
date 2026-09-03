@@ -14,7 +14,37 @@
       background = "#180A10";
     };
   };
+  
+  # ── btop ──────────────────────────────────────────────────────────────────
+  programs.btop = {
+    enable = true;
 
+    settings = {
+      theme_background = false;
+      truecolor = true;
+      rounded_corners = true;
+      graph_symbol = "braille";
+
+      vim_keys = true;
+      update_ms = 1000;
+
+      shown_boxes = "cpu mem net proc";
+      mem_below_net = true;
+      presets = "net:0:default cpu:0:default,proc:0:default";
+
+      net_auto = true;
+      net_sync = true;
+      net_iface = "";
+
+      proc_tree = true;
+      proc_sorting = "cpu lazy";
+
+      show_uptime = true;
+      show_swap = true;
+      temp_scale = "celsius";
+    };
+  };
+  
   # ── tmux ──────────────────────────────────────────────────────────────────
   programs.tmux = {
     enable = true;

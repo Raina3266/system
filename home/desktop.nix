@@ -175,9 +175,14 @@ in
   # Desktop entries
   # ──────────────────────────────────────────────────────────────────────
 
-  # Rofi's wrapper prepends its package to XDG_DATA_DIRS. Put these overrides
-  # in XDG_DATA_HOME/applications, which wins over every XDG_DATA_DIRS entry,
-  # instead of the user profile where xdg.desktopEntries installs them.
+  xdg.desktopEntries.btop = {
+    name = "btop";
+    exec = "ghostty -e btop";
+    icon = "utilities-system-monitor";
+    terminal = false;
+  };
+
+  # Rofi's wrapper prepends its package to XDG_DATA_DIRS. 
   xdg.dataFile."applications/rofi.desktop".text = ''
     [Desktop Entry]
     Type=Application
