@@ -11,12 +11,23 @@
   nixpkgs.overlays = [
     (final: prev: {
       swaynotificationcenter = prev.swaynotificationcenter.overrideAttrs (oldAttrs: {
-        # Upstream's `label` widget shows a fixed string. The patch gives it an
-        # `exec`/`interval`/`pango-markup` triple so the widget can display a
-        # command's output, which is what the media, calendar and system rows
-        # all need; without `exec` the widget behaves exactly as it does
-        # upstream. Checked against v0.12.5, v0.12.6 and upstream main.
-        patches = (oldAttrs.patches or [ ]) ++ [ ./label-exec.patch ];
+        # Two additions, both driven by a command so that everything which
+        # knows about players, calendars or sensors stays in this repository's
+        # own programs rather than moving into Vala:
+        #
+        #   label-exec    gives the stock `label` widget an
+        #                 `exec`/`interval`/`pango-markup` triple. Without
+        #                 `exec` it behaves exactly as it does upstream.
+        #   media-widget  adds a `media` widget: a list of rows built from a
+        #                 command's output, each with a play/pause button, a
+        #                 progress bar and a volume slider that call back into
+        #                 that command.
+        #
+        # Both are checked against v0.12.5, v0.12.6 and upstream main.
+        patches = (oldAttrs.patches or [ ]) ++ [
+          ./label-exec.patch
+          ./media-widget.patch
+        ];
       });
     })
   ];
@@ -31,6 +42,7 @@
       }:
       let
         swaync = "${pkgs.swaynotificationcenter}/bin/swaync-client";
+        mediaControl = "${repoPackages.mediaControl}/bin/media-control";
 
         # SwayNC hands a toggle button's new state to its command in the
         # environment, so set that state rather than toggling blind and hoping
@@ -111,7 +123,7 @@
             control-center-positionX = "right";
             control-center-positionY = "top";
             control-center-width = 380;
-            control-center-height = 620;
+            control-center-height = 680;
             control-center-margin-top = 6;
             control-center-margin-right = 6;
             control-center-margin-bottom = 6;
@@ -135,16 +147,16 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # A header of pill buttons, the volume slider, then the three
-            # `label` rows that each render one program's output, then the list.
-            # Brightness and the session's power actions are deliberately not
-            # here: brightness stays on the function keys, and a power menu on a
-            # panel that opens under the pointer is a mis-click waiting to
-            # happen.
+            # A header of pill buttons, the system volume, the media list,
+            # then the two `label` rows that render a program's output, then the
+            # notifications. Brightness and the session's power actions are
+            # deliberately not here: brightness stays on the function keys, and
+            # a power menu on a panel that opens under the pointer is a
+            # mis-click waiting to happen.
             widgets = [
               "menubar#header"
               "volume"
-              "label#media"
+              "media"
               "label#ycal"
               "label#sysmon"
               "notifications"
@@ -171,26 +183,26 @@
                 };
               };
 
+              # The system's own output level. Per-application volume is not
+              # listed here any more: the media rows below carry a slider each,
+              # which is the same control against the thing you were looking
+              # for when you opened the panel.
               volume = {
                 label = "󰕾";
-                show-per-app = true;
-                show-per-app-icon = true;
-                show-per-app-label = true;
-                expand-per-app = false;
-                empty-list-label = "Nothing is playing";
-                expand-button-label = "󰅀";
-                collapse-button-label = "󰅃";
+                show-per-app = false;
               };
 
-              # The same snapshot the bar button shows, rendered by the same
-              # program, so "the current player" means one thing in both places.
-              # Playback controls stay on the button and in its Rofi menu.
-              "label#media" = {
-                text = "Reading players…";
-                max-lines = 2;
-                exec = "${repoPackages.mediaControl}/bin/media-control panel";
-                interval = 3;
-                pango-markup = true;
+              # Every player that is playing or paused, each with a play/pause
+              # button, a progress bar and its own volume. media-control renders
+              # the rows and receives the button and slider back, so "the
+              # current player" means one thing here, on the bar button, and in
+              # the Rofi menu.
+              media = {
+                exec = "${mediaControl} players";
+                toggle-command = "${mediaControl} play-pause \"$id\"";
+                volume-command = "${mediaControl} volume \"$id\" \"$value\"";
+                interval = 1;
+                empty-text = "Nothing is playing";
               };
 
               # Today's events and tasks, from waybar-ycal's own cache. Clicking

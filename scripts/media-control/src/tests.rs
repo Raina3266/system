@@ -1,9 +1,11 @@
-use crate::model::{PlaybackStatus, Player, compare_players, media_label, row_text, volume_label};
+use crate::model::{
+    PlaybackStatus, Player, clock, compare_players, media_label, row_text, volume_label,
+};
 use crate::mpris::{
     display_source, is_excluded_player, is_publishable_web_media_url, should_include_player,
 };
 use crate::notifications::{Notifications, parse};
-use crate::panel;
+use crate::players;
 use crate::text::{hex_decode, hex_encode, json_escape, truncate_display};
 use crate::ui::{bar_text, bar_tooltip, rofi_row_state, waybar_json, waybar_toggle_action};
 
@@ -51,6 +53,8 @@ fn visible_media_labels_include_the_artist_when_available() {
         artist: "SZA".to_owned(),
         status: PlaybackStatus::Playing,
         volume: None,
+        position: None,
+        length: None,
         pinned: false,
         activity: 0,
     };
@@ -69,6 +73,8 @@ fn visible_media_labels_fall_back_to_the_title_without_an_artist() {
         artist: String::new(),
         status: PlaybackStatus::Paused,
         volume: None,
+        position: None,
+        length: None,
         pinned: false,
         activity: 0,
     };
@@ -86,6 +92,8 @@ fn pinned_players_sort_first() {
         artist: String::new(),
         status,
         volume: None,
+        position: None,
+        length: None,
         pinned,
         activity,
     };
@@ -108,6 +116,8 @@ fn pinned_rofi_style_takes_priority_over_playback_status() {
         artist: String::new(),
         status,
         volume: None,
+        position: None,
+        length: None,
         pinned,
         activity: 0,
     };
@@ -132,6 +142,8 @@ fn waybar_click_toggles_the_displayed_player_even_when_paused() {
         artist: String::new(),
         status: PlaybackStatus::Paused,
         volume: None,
+        position: None,
+        length: None,
         pinned: false,
         activity: 1,
     };
@@ -273,29 +285,59 @@ fn a_long_track_is_truncated_rather_than_pushing_the_bar_wide() {
 }
 
 #[test]
-fn the_panel_row_names_the_track_then_the_player() {
-    let player = playing_player();
-    let markup = panel::markup(Some(&player));
-    let lines: Vec<&str> = markup.lines().collect();
-    assert_eq!(lines.len(), 2, "{markup}");
-    assert!(lines[0].contains("Delulu \u{2014} SZA"), "{markup}");
-    assert!(lines[1].contains("Chrome"), "{markup}");
-    assert!(lines[1].contains("45%"), "{markup}");
-}
-
-#[test]
-fn the_panel_row_says_so_when_nothing_is_playing() {
-    assert!(panel::markup(None).contains("No active media"));
-    assert_eq!(panel::markup(None).lines().count(), 1);
-}
-
-#[test]
-fn the_panel_row_escapes_a_track_title_that_looks_like_markup() {
+fn a_widget_row_carries_every_field_the_widget_draws() {
     let mut player = playing_player();
-    player.title = "Rock & <Roll>".to_owned();
-    player.artist = String::new();
-    let markup = panel::markup(Some(&player));
-    assert!(markup.contains("Rock &amp; &lt;Roll&gt;"), "{markup}");
+    player.position = Some(83.0);
+    player.length = Some(296.0);
+
+    let row = players::row(&player);
+    let fields: Vec<&str> = row.split('\t').collect();
+    assert_eq!(fields.len(), 7, "{fields:?}");
+    assert_eq!(fields[0], "youtube-music");
+    assert_eq!(fields[1], "playing");
+    assert_eq!(fields[2], "45");
+    assert_eq!(fields[3], "83");
+    assert_eq!(fields[4], "296");
+    assert_eq!(fields[5], "Delulu \u{2014} SZA");
+    assert_eq!(fields[6], "Chrome  \u{b7}  1:23 / 4:56");
+}
+
+#[test]
+fn a_row_marks_the_fields_mpris_leaves_out() {
+    let mut player = playing_player();
+    player.volume = None;
+    player.position = None;
+    player.length = None;
+
+    let row = players::row(&player);
+    let fields: Vec<&str> = row.split('\t').collect();
+    assert_eq!([fields[2], fields[3], fields[4]], ["-", "-", "-"]);
+    assert_eq!(
+        fields[6], "Chrome",
+        "no timing means no timing in the subtitle"
+    );
+}
+
+#[test]
+fn a_row_without_a_length_still_reports_how_far_in_it_is() {
+    let mut player = playing_player();
+    player.position = Some(3_671.0);
+    player.length = None;
+
+    let row = players::row(&player);
+    let fields: Vec<&str> = row.split('\t').collect();
+    assert_eq!(fields[3], "3671");
+    assert_eq!(fields[4], "-");
+    assert_eq!(fields[6], "Chrome  \u{b7}  1:01:11");
+}
+
+#[test]
+fn a_clock_grows_an_hours_field_only_when_it_needs_one() {
+    assert_eq!(clock(0.0), "0:00");
+    assert_eq!(clock(9.4), "0:09");
+    assert_eq!(clock(83.0), "1:23");
+    assert_eq!(clock(3_599.0), "59:59");
+    assert_eq!(clock(3_600.0), "1:00:00");
 }
 
 #[test]
@@ -324,7 +366,7 @@ fn a_line_without_a_count_is_not_a_subscribe_line() {
     assert_eq!(parse(""), None);
 }
 
-/// A player the bar and panel assertions above can share.
+/// A player the bar and row assertions above can share.
 fn playing_player() -> Player {
     Player {
         id: "youtube-music".to_owned(),
@@ -333,6 +375,8 @@ fn playing_player() -> Player {
         artist: "SZA".to_owned(),
         status: PlaybackStatus::Playing,
         volume: Some(45),
+        position: None,
+        length: None,
         pinned: false,
         activity: 0,
     }

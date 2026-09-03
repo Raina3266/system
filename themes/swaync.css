@@ -209,14 +209,104 @@ scale slider:hover {
     -gtk-icon-size: 16px;
 }
 
-/* ── The three label rows ──
- * media-control, the calendar reader and swaync-sysmon each supply their own
- * colours as Pango markup, so the CSS here is only spacing. SwayNC turns the
- * `#suffix` in a widget's name into a CSS class, which is what separates them.
+/* ── The media list ──
+ * One row per player: a play/pause pill and the title, the track's progress,
+ * and that player's own volume. The rows are built by the widget rather than
+ * drawn as text, so unlike the label rows below they need real styling. */
+
+.widget-media {
+    padding: 4px 6px;
+}
+
+.widget-media-row {
+    padding: 4px 2px;
+}
+
+/* Rows after the first are separated by a rule rather than a gap, which keeps
+   two or three players readable without making the card tall. */
+.widget-media-row:not(:first-child) {
+    border-top: 1px solid var(--cyber-line);
+    margin-top: 2px;
+}
+
+.widget-media-toggle {
+    background: rgba(122, 252, 255, 0.06);
+    color: var(--cyber-cyan);
+    border: 1px solid var(--cyber-line-cyan);
+    border-radius: 100%;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+.widget-media-toggle:hover {
+    background: var(--cyber-wash);
+    border-color: var(--cyber-pink);
+    color: var(--cyber-pink);
+}
+
+.widget-media-row.playing .widget-media-toggle {
+    color: var(--cyber-pink);
+    border-color: var(--cyber-line-strong);
+}
+
+.widget-media-title {
+    color: var(--cyber-fg);
+    font-size: 12px;
+}
+
+.widget-media-row.paused .widget-media-title {
+    color: var(--cyber-dim);
+}
+
+.widget-media-subtitle {
+    color: var(--cyber-dim);
+    font-size: 11px;
+    margin-left: 28px;
+}
+
+.widget-media-progress {
+    margin: 2px 0 2px 28px;
+}
+
+.widget-media-progress trough {
+    background: rgba(122, 252, 255, 0.12);
+    border: none;
+    border-radius: 9px;
+    min-height: 3px;
+}
+
+.widget-media-progress progress {
+    background: linear-gradient(to right, var(--cyber-cyan), var(--cyber-pink));
+    border-radius: 9px;
+    min-height: 3px;
+}
+
+.widget-media-volume {
+    margin-left: 28px;
+}
+
+.widget-media-volume-icon {
+    color: var(--cyber-pink);
+    font-size: 12px;
+}
+
+.widget-media-empty {
+    color: var(--cyber-dim);
+    font-size: 12px;
+    padding: 2px 2px;
+}
+
+/* ── The two label rows ──
+ * The calendar reader and swaync-sysmon each supply their own colours as Pango
+ * markup, so the CSS here is only spacing. SwayNC turns the `#suffix` in a
+ * widget's name into a CSS class, which is what separates them.
  *
- * All three stay monospace: the readings need it for their two columns, and
- * matching the bar and the Rofi menus is worth more than the couple of
- * characters a proportional font would save on a track title. */
+ * Both stay monospace: the readings need it for their two columns, and matching
+ * the bar and the Rofi menus is worth more than the couple of characters a
+ * proportional font would save. */
 
 .widget-label {
     padding: 5px 8px;
@@ -228,7 +318,6 @@ scale slider:hover {
     line-height: 1.45;
 }
 
-.widget-label.media > label,
 .widget-label.ycal > label {
     line-height: 1.35;
 }

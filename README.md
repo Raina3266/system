@@ -63,19 +63,27 @@ Left-click is the panel rather than playback because the button is the only way
 into the notification centre, and because the panel is where the rest of the
 media detail lives.
 
-### The panel row
+### The panel list
 
-`media-control panel` prints the same snapshot as Pango markup for SwayNC's
-`label#media` widget: the track on one line, then who is playing it and how
-loudly.
+`media-control players` prints one tab-separated line per player for SwayNC's
+`media` widget, which turns each into a row with a play/pause button, a progress
+bar and a volume slider:
 
 ```text
-󰐊  Delulu — SZA
-   Chrome  ·  45%
+<id>	<status>	<volume>	<position>	<length>	<title>	<subtitle>
+spotify	playing	45	83	296	Delulu — SZA	Spotify  ·  1:23 / 4:56
 ```
 
-Track titles are escaped before they reach Pango, so a song called
-`Rock & <Roll>` renders as its name rather than breaking the widget.
+Volume, position and length are all optional in MPRIS — browser-tab bridges
+routinely omit them — and a field the player does not report is a single `-`.
+The widget hides the slider or the bar for a row rather than drawing an empty
+one. `clean_text` collapses every run of whitespace, tabs included, so no field
+can contain the separator.
+
+The widget calls back with `media-control play-pause <player>` when a row's
+button is pressed and `media-control volume <player> <percent>` when its slider
+moves, so the list stays a view of this program rather than a second
+implementation of it.
 
 ### The Rofi menu
 
@@ -88,11 +96,16 @@ are also unchanged.
 ```text
 media-control menu
 media-control waybar --watch [--interval-ms 750]
-media-control panel
+media-control players
+media-control play-pause <player>
+media-control volume <player> <percent>
 media-control toggle
 media-control pause-all
 media-control list
 ```
+
+`toggle` acts on the most relevant player, which is what the bar button's middle
+click wants; `play-pause` names one, which is what a row in the list wants.
 
 ### Environment variables
 
@@ -116,8 +129,8 @@ cargo clippy --manifest-path scripts/Cargo.toml --package media-control --locked
 
 Tests cover the badge for each daemon state, the badge and track sharing one
 label, truncation of a long title, the class array including `cc-open`, the
-panel row's two lines and its markup escaping, and the `--subscribe` line
-scanner.
+seven fields of a widget row including the ones MPRIS leaves out, the clock
+formatting either side of an hour, and the `--subscribe` line scanner.
 
 ---
 
@@ -666,9 +679,9 @@ that opens it.
 
 | Was | Is now |
 | --- | --- |
-| `pulseaudio` in `group/system` | The control center's `volume` slider, with per-application volumes |
+| `pulseaudio` in `group/system` | The control center's `volume` slider for the system level, and a slider on each row of its [media list](#the-media-list) |
 | `temperature`, `memory`, `cpu`, `disk`, `network` in `group/hardware` | One live [`swaync-sysmon`](#swaync-sysmon) block, two readings to a line |
-| `custom/media` in the centre | Still there, but now also the notification badge and the panel's opener; the same snapshot is a [panel row](#the-panel-row) as well |
+| `custom/media` in the centre | Still there, but now also the notification badge and the panel's opener; the same snapshot is the panel's [media list](#the-media-list) as well |
 | `custom/ycal` on the left | Still there; today's events and tasks also appear as a panel row |
 | `backlight` in `group/system` | Gone. Brightness stays on `XF86MonBrightness*` and `F5`/`F6` |
 | `custom/battery` in `group/system` | Unchanged, but now the first module on the bar |
@@ -692,8 +705,8 @@ rows in a 380px-wide popup.
 | Row | Widget | Source |
 | --- | --- | --- |
 | Header | `menubar#header` | A Do Not Disturb toggle pill and a Clear button |
-| Volume | `volume` | PulseAudio, with each playing application listed under it |
-| Media | `label#media` | [`media-control panel`](#the-panel-row) |
+| Volume | `volume` | The system's own output level |
+| Media | `media` | [`media-control players`](#the-panel-list) |
 | Calendar | `label#ycal` | waybar-ycal's cache, read directly |
 | Readings | `label#sysmon` | [`swaync-sysmon`](#swaync-sysmon) |
 | Notifications | `notifications` | The daemon itself |
@@ -701,13 +714,40 @@ rows in a 380px-wide popup.
 There is no title row and no separate Do Not Disturb row: both collapse into the
 header, which is most of what keeps the panel short.
 
-Three of the six rows are the same widget — SwayNC's `label`, taught to run a
-command by [the patch below](#the-upstream-patch). Each renders one program's
-Pango markup, and SwayNC turns the `#suffix` in a widget's name into a CSS class,
-which is how `themes/swaync.css` tells `media` from `ycal` from `sysmon`.
+Four of the six rows are driven by a command rather than by SwayNC itself, which
+is what [the patches below](#the-upstream-patches) are for. Two of them are
+`label` rows rendering Pango markup; SwayNC turns the `#suffix` in a widget's
+name into a CSS class, which is how `themes/swaync.css` tells `ycal` from
+`sysmon`.
 
-Volume shows each playing application as well as the default sink, so a single
-loud tab can be turned down without touching everything else.
+### The media list
+
+Every player that is playing or paused gets a row: a play/pause button beside
+its title, the track's progress, and that player's own volume.
+
+```text
+󰏤  Delulu — SZA
+    Spotify  ·  1:23 / 4:56
+    ▓▓▓▓▓░░░░░░░░░░░░░░░
+    󰕾 ────────●───────────
+```
+
+Per-application volume is no longer listed under the system slider. It is the
+same control either way, and a slider attached to the track you can see is
+easier to aim at than one attached to a process name. The `volume` widget above
+keeps the system's own output level.
+
+The widget itself knows nothing about MPRIS: it renders whatever
+`media-control players` reports and calls that program back when a button or a
+slider is used. A row whose player does not report a volume or a length — which
+is common for browser tabs — simply gets no slider or no bar, rather than an
+empty one.
+
+A refresh landing while you are dragging a slider would otherwise yank it back
+to the value already in flight, so a row ignores incoming volumes for two
+seconds after you move its slider, and updates rows in place instead of
+rebuilding the list. The one-second refresh only runs while the panel is
+actually open.
 
 ### What is deliberately not in the panel
 
@@ -752,11 +792,18 @@ The centre button is `custom/media`, and its label, classes and click actions
 are all described under [media-control](#the-bar-button). `Mod+N` toggles the
 panel and `F8` toggles Do Not Disturb, both through `swaync-client`.
 
-### The upstream patch
+### The upstream patches
 
-SwayNC's `label` widget shows a fixed string, so there is no built-in way to put
-a program's output in the panel — which is what the media, calendar and readings
-rows all are. `niri/swaync/label-exec.patch` adds three optional keys to it:
+Two patches, applied by the overlay at the top of `niri/swaync/default.nix` —
+the same pattern used for Rofi in `niri/rofi/default.nix`. Both exist so that
+everything which knows about players, calendars or sensors stays in this
+repository's own programs rather than moving into Vala, and both carry matching
+`configSchema.json` and man-page entries. Each applies cleanly to v0.12.5,
+v0.12.6 and upstream `main`.
+
+**`label-exec.patch`.** SwayNC's `label` widget shows a fixed string, so there
+is no built-in way to put a program's output in the panel. The patch adds three
+optional keys:
 
 | Key | Meaning |
 | --- | --- |
@@ -764,11 +811,23 @@ rows all are. `niri/swaync/label-exec.patch` adds three optional keys to it:
 | `interval` | How often, in seconds, to re-run it. `0` re-runs it only when the control center opens |
 | `pango-markup` | Whether that output is parsed as Pango markup |
 
-Without `exec` the widget behaves exactly as it does upstream, and the patch
-carries the matching `configSchema.json` and man-page entries. It applies cleanly
-to v0.12.5, v0.12.6 and upstream `main`; the overlay that applies it is at the
-top of `niri/swaync/default.nix`, next to the same pattern used for Rofi in
-`niri/rofi/default.nix`.
+Without `exec` the widget behaves exactly as it does upstream.
+
+**`media-widget.patch`.** A label cannot hold a slider, and SwayNC's own `mpris`
+widget is a carousel with neither volume nor progress, so the media list needed
+a widget of its own. The patch adds `media`: a list of rows built from a
+command's output, each with a play/pause button, a progress bar and a volume
+slider.
+
+| Key | Meaning |
+| --- | --- |
+| `exec` | A command printing one tab-separated line per player: id, status, volume, position, length, title, subtitle |
+| `interval` | How often, in seconds, to re-run it while the panel is open |
+| `toggle-command` | Run when a row's button is pressed, with `$id` substituted |
+| `volume-command` | Run when a row's slider moves, with `$id` and `$value` substituted |
+| `empty-text` | Shown when no player is reported |
+
+The widget holds no MPRIS code at all; it is a renderer with a callback.
 
 ### Theming
 
@@ -779,10 +838,11 @@ one second at the same priority, so the file overrides rather than replaces
 upstream: most of it is the palette shared with `themes/waybar.css` and the Rofi
 `.rasi` themes, expressed through SwayNC's own CSS variables.
 
-All three `label` rows supply their own colours as Pango markup, so their CSS is
-only spacing. They stay monospace: the readings need it for their two columns,
-and matching the bar and the Rofi menus is worth more than the couple of
-characters a proportional font would save on a track title.
+Both `label` rows supply their own colours as Pango markup, so their CSS is only
+spacing, and both stay monospace: the readings need it for their two columns.
+The media rows are real widgets rather than text, so they are styled properly —
+`widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
+all listed in the man-page entry the patch adds.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
 slider track with a 10px handle, and 11-13px text. If the panel ever wants to

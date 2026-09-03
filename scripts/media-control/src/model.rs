@@ -38,8 +38,23 @@ pub(crate) struct Player {
     pub(crate) artist: String,
     pub(crate) status: PlaybackStatus,
     pub(crate) volume: Option<u8>,
+    /// How far into the track playback is, in seconds. MPRIS makes both this
+    /// and the length optional, and browser-tab bridges often omit them.
+    pub(crate) position: Option<f64>,
+    pub(crate) length: Option<f64>,
     pub(crate) pinned: bool,
     pub(crate) activity: u128,
+}
+
+/// `1:23` below an hour, `1:02:03` above it.
+pub(crate) fn clock(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    let (hours, minutes, seconds) = (total / 3600, (total % 3600) / 60, total % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
 }
 
 #[derive(Clone, Debug, Default)]

@@ -222,6 +222,15 @@ pub(crate) fn snapshot() -> Vec<Player> {
         let volume = player_property(&id, &["volume"])
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8);
+        // playerctl reports the position in seconds and the length in the
+        // microseconds MPRIS stores it as.
+        let position = player_property(&id, &["position"])
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0);
+        let length = player_property(&id, &["metadata", "mpris:length"])
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .map(|micros| micros / 1_000_000.0);
         let source = display_source(&id, &source);
 
         players.push(Player {
@@ -231,6 +240,8 @@ pub(crate) fn snapshot() -> Vec<Player> {
             artist: clean_text(&artist),
             status,
             volume,
+            position,
+            length,
             pinned: entry.pinned,
             activity: entry.activity,
         });
@@ -259,6 +270,19 @@ fn command_result(output: Output) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
     }
+}
+
+/// Set a player's volume to an absolute percentage.
+///
+/// Volume is optional in MPRIS, so a player that does not report one is left
+/// alone rather than being told to change something it does not have.
+pub(crate) fn set_volume(player: &str, percent: f64) -> Result<(), String> {
+    if player_property(player, &["volume"]).is_none() {
+        return Ok(());
+    }
+    let value = format!("{:.2}", (percent / 100.0).clamp(0.0, 1.0));
+    let output = playerctl(["-p", player, "volume", &value]).map_err(|error| error.to_string())?;
+    command_result(output)
 }
 
 pub(crate) fn change_volume(player: &str, delta: f64) -> Result<(), String> {

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 mod model;
 mod mpris;
 mod notifications;
-mod panel;
+mod players;
 mod state;
 mod text;
 mod ui;
@@ -15,7 +15,9 @@ fn main() -> ExitCode {
         Some("menu") => ui::launch_menu(),
         Some("rofi") => ui::rofi_mode(),
         Some("waybar") => ui::waybar(&args[1..]),
-        Some("panel") => panel::render(),
+        Some("players") => players::print_players(),
+        Some("volume") => players::volume(&args[1..]),
+        Some("play-pause") => players::play_pause(&args[1..]),
         Some("toggle") => ui::toggle(),
         Some("pause-all") => mpris::pause_all(),
         Some("list") => mpris::print_list(),
@@ -41,7 +43,9 @@ fn print_help() {
          Usage:\n\
            media-control menu\n\
            media-control waybar --watch [--interval-ms 750]\n\
-           media-control panel\n\
+           media-control players\n\
+           media-control volume <player> <percent>\n\
+           media-control play-pause <player>\n\
            media-control toggle\n\
            media-control pause-all\n\
            media-control list"
