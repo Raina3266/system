@@ -152,10 +152,11 @@ in
       theme[used_end]="${daemonRed}"
 
       # A process name, its thread count, its memory and its cpu share all
-      # come from this one ramp, so a name is white while the process is idle
-      # and reddens as it works.
-      theme[process_start]="${white}"
-      theme[process_mid]="${daemonPink}"
+      # come from this one ramp, and a name has to read red, so the ramp is
+      # held there: those three columns are red with it rather than running
+      # white to red like every other value.
+      theme[process_start]="${daemonRed}"
+      theme[process_mid]="${daemonRed}"
       theme[process_end]="${daemonRed}"
 
       theme[free_start]="${daemonRed}"
