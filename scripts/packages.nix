@@ -251,7 +251,7 @@ rec {
           mkdir -p $out/share/waybar-ycal $out/bin
           cp ${src}/bar.py ${src}/popup.py ${src}/toggle.sh $out/share/waybar-ycal/
           chmod +x $out/share/waybar-ycal/{bar.py,popup.py,toggle.sh}
-          chmod u+w $out/share/waybar-ycal/popup.py
+          chmod u+w $out/share/waybar-ycal/{bar.py,popup.py}
 
           python - <<PY
           import re
