@@ -118,6 +118,17 @@ in
       theme[hi_fg]="${daemonRed}"
       theme[selected_bg]="${daemonDimPink}"
       theme[selected_fg]="${white}"
+
+      # A followed process and the banner announcing it are blue by default,
+      # the one colour nothing else here uses. The row takes the pink accent
+      # and the banner with it; pausing the list is the state worth noticing,
+      # so that banner is red.
+      theme[followed_bg]="${daemonPink}"
+      theme[followed_fg]="${white}"
+      theme[proc_follow_bg]="${daemonPink}"
+      theme[proc_pause_bg]="${daemonRed}"
+      theme[proc_banner_bg]="${daemonDimPink}"
+      theme[proc_banner_fg]="${white}"
       theme[graph_text]="${daemonMutedText}"
       theme[meter_bg]="${daemonAlternateBackground}"
       theme[proc_misc]="${daemonPink}"
