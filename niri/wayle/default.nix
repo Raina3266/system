@@ -62,8 +62,8 @@
               "background-opacity" = 0;
               "button-opacity" = 0;
               "button-bg-opacity" = 0;
-              "button-icon-padding" = 0.0;
-              "button-label-padding" = 0.0;
+              "button-icon-padding" = 0.25;
+              "button-label-padding" = 0.25;
               "dropdown-opacity" = 100;
               "dropdown-autohide" = true;
               layout = [
@@ -72,7 +72,7 @@
                   show = false;
                   left = [ ];
                   center = [ ];
-                  right = [ "notifications" ];
+                  right = [ ];
                 }
               ];
             };

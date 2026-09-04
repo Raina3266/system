@@ -190,7 +190,7 @@ index 4a0fbdf..8abd3c0 100644
      fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
          let mut cache = self.cache.borrow_mut();
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..c50d5d6 100644
+index 5b5cf1c..b63ef34 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -199,7 +199,15 @@ index 5b5cf1c..c50d5d6 100644
  mod factory;
  pub(crate) mod icons;
  mod methods;
-@@ -43,6 +43,7 @@ pub(crate) enum BarCmd {
+@@ -25,6 +25,7 @@ pub(crate) struct Bar {
+     layout: BarLayout,
+     css_provider: gtk::CssProvider,
+     last_css: String,
++    external_anchor: gtk::Box,
+ 
+     left: FactoryVecDeque<BarItemFactory>,
+     center: FactoryVecDeque<BarItemFactory>,
+@@ -43,6 +44,7 @@ pub(crate) enum BarCmd {
      DropdownAutohideChanged(bool),
      ExclusiveChanged(bool),
      LayerChanged,
@@ -207,7 +215,16 @@ index 5b5cf1c..c50d5d6 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -156,6 +157,14 @@ impl Component for Bar {
+@@ -147,6 +149,8 @@ impl Component for Bar {
+             .detach();
+ 
+         let css_provider = gtk::CssProvider::new();
++        let external_anchor = gtk::Box::default();
++        external_anchor.set_size_request(1, 1);
+ 
+         #[allow(deprecated)]
+         root.style_context()
+@@ -156,6 +160,14 @@ impl Component for Bar {
          watchers::dropdowns::spawn(&sender, &init.services.config);
          watchers::exclusive::spawn(&sender, &init.services.config);
          watchers::layer::spawn(&sender, &init.services.config);
@@ -222,13 +239,29 @@ index 5b5cf1c..c50d5d6 100644
  
          let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
          dropdowns.warm_all();
-@@ -230,6 +239,22 @@ impl Component for Bar {
+@@ -174,6 +186,7 @@ impl Component for Bar {
+             },
+             css_provider,
+             last_css: String::new(),
++            external_anchor,
+             left,
+             center,
+             right,
+@@ -200,6 +213,7 @@ impl Component for Bar {
+         widgets.left_box.append(model.left.widget());
+         widgets.middle_box.append(model.center.widget());
+         widgets.right_box.append(model.right.widget());
++        widgets.right_box.append(&model.external_anchor);
+ 
+         if visible_on_startup {
+             root.present();
+@@ -230,6 +244,21 @@ impl Component for Bar {
                  let configured = self.services.config.config().bar.layer.get();
                  apply_layer(root, configured, &self.services.config);
              }
 +            BarCmd::ToggleDropdown(name) => {
 +                root.present();
-+                let anchor = self.right.widget().clone();
++                let anchor = self.external_anchor.clone();
 +                let dropdowns = Rc::clone(&self.dropdowns);
 +                let root = root.clone();
 +
@@ -236,7 +269,6 @@ index 5b5cf1c..c50d5d6 100644
 +                // completed mapping. `present()` only schedules that work, so
 +                // defer the popup until GTK returns to the main loop.
 +                gtk::glib::idle_add_local_once(move || {
-+                    anchor.set_size_request(1, 1);
 +                    if !dropdowns.toggle_external(&name, &anchor, &root) {
 +                        root.set_visible(false);
 +                    }
