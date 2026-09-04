@@ -127,7 +127,7 @@ fn update_at(path: &Path, content: &InfoContent, serial: u64) -> AppResult<()> {
         Some(payload) => match qr_png(payload) {
             Ok(png) => png,
             Err(error) => {
-                eprintln!("rofi-network-manager: generate QR code: {error}");
+                eprintln!("rofi-network: generate QR code: {error}");
                 Vec::new()
             }
         },

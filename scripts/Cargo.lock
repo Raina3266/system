@@ -1334,7 +1334,7 @@ name = "rofi-filesearch"
 version = "0.1.0"
 
 [[package]]
-name = "rofi-network-manager"
+name = "rofi-network"
 version = "0.1.0"
 dependencies = [
  "nmrs",

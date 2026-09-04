@@ -113,10 +113,10 @@ rec {
     '';
   };
 
-  rofiNetworkManager = mkWorkspacePackage "rofi-network-manager" {
+  rofiNetwork = mkWorkspacePackage "rofi-network" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
-      wrapProgram "$out/bin/rofi-network-manager" \
+      wrapProgram "$out/bin/rofi-network" \
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
         --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \

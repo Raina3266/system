@@ -15,7 +15,7 @@ pub type AppResult<T> = Result<T, AppError>;
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("rofi-network-manager: {error}");
+        eprintln!("rofi-network: {error}");
         std::process::exit(2);
     }
 }
@@ -72,8 +72,8 @@ async fn run() -> AppResult<()> {
         }
         Some("help" | "--help" | "-h") => {
             print!(
-                "rofi-network-manager\n\n\
-                 Usage:\n  rofi-network-manager\n  rofi-network-manager status\n"
+                "rofi-network\n\n\
+                 Usage:\n  rofi-network\n  rofi-network status\n"
             );
             Ok(())
         }

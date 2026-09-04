@@ -6,7 +6,7 @@ This repository contains eight Rust utilities used by the desktop configuration:
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
-- `rofi-network-manager` — Wi-Fi and Ethernet controls with a Rofi interface
+- `rofi-network` — Wi-Fi and Ethernet controls with a Rofi interface
 - [`swaync-panel`](#swaync-panel) — the readings, calendar and Do Not Disturb rows of the notification centre
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor

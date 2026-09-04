@@ -6,7 +6,7 @@ members = [
   "rofi-audio",
   "rofi-clipboard",
   "rofi-filesearch",
-  "rofi-network-manager",
+  "rofi-network",
   "swaync-panel",
   "waybar-timer",
   "webcam-crop",
