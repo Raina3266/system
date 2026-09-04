@@ -545,11 +545,22 @@ Waybar remains the visible top and bottom bar. Configuration lives in
 `niri/wayle/default.nix`.
 
 Upstream Wayle only opens dropdowns from its own bar. The local
-`waybar-dropdown.patch` adds `wayle panel dropdown <name> [monitor]` and keeps a
-transparent Wayle anchor bar hidden on every output. The anchor appears only
-while the requested dropdown is open, so it does not replace or overlap Waybar
-during normal use. With no monitor argument, Wayle chooses the first connected
-output; an explicit connector such as `DP-7` can still be supplied.
+`waybar-dropdown.patch` adds `wayle panel dropdown <name> [monitor]` and keeps
+one Wayle bar per output as the GTK anchor for the dropdown. That bar stays
+mapped for the whole session: a GTK popover can only be presented from a
+surface the compositor has already mapped, and mapping a layer surface costs a
+configure round-trip and a frame, so a bar mapped at click time is never ready
+when the popover needs it. The patch hides the bar without unmapping it
+instead — background, borders, shadow, padding and sections all go away, and an
+empty input region lets clicks through — so it neither shows nor intercepts
+anything above Waybar. With no monitor argument, Wayle chooses the first
+connected output; an explicit connector such as `DP-7` can still be supplied.
+
+The dropdown does not autohide. A GTK autohide popover asks the compositor for
+a popup grab, which is only granted against the serial of an input event the
+client itself received; the click belongs to Waybar, so Wayle has no such
+serial and the compositor would dismiss the dropdown as it opened. Clicking the
+Waybar button again closes it.
 
 The same patch adds `wayle notify status --watch`, which is the streaming JSON
 source used by `media-control` for the Waybar bell, notification count, and DND
