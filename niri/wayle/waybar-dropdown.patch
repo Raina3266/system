@@ -65,19 +65,6 @@ index 4483872..400a1ab 100644
      /// Currently hidden monitor connectors.
      #[zbus(property)]
      pub async fn bar_hidden(&self) -> Vec<String> {
-diff --git a/crates/wayle-shell/src/services/shell_ipc/mod.rs b/crates/wayle-shell/src/services/shell_ipc/mod.rs
-index d84dd97..1754be9 100644
---- a/crates/wayle-shell/src/services/shell_ipc/mod.rs
-+++ b/crates/wayle-shell/src/services/shell_ipc/mod.rs
-@@ -10,7 +10,7 @@ mod error;
- mod state;
- 
- pub use error::Error;
--pub use state::ShellIpcState;
-+pub use state::{DropdownRequest, ShellIpcState};
- use tracing::info;
- use wayle_ipc::shell_ipc::{SERVICE_NAME, SERVICE_PATH};
- use zbus::Connection;
 diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
 index 9fdaf9f..a4f4358 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/state.rs
@@ -292,6 +279,16 @@ index c900f59..c506130 100644
 +pub(crate) mod external_dropdown;
  pub(crate) mod layer;
  pub(crate) mod layout;
+diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
+index a2e1a66..56f7914 100644
+--- a/crates/wayle-shell/src/shell/mod.rs
++++ b/crates/wayle-shell/src/shell/mod.rs
+@@ -1,4 +1,4 @@
+-mod bar;
++pub(crate) mod bar;
+ mod helpers;
+ mod notification_popup;
+ mod osd;
 diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
 index abe3e41..d2bdeb4 100644
 --- a/crates/wayle-shell/src/watchers/notification.rs
