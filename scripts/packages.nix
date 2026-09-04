@@ -273,6 +273,11 @@ rec {
             "Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 4)\n        Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.LEFT, 4)\n",
           )
           p.write_text(s)
+
+          p = Path('$out/share/waybar-ycal/bar.py')
+          s = p.read_text()
+          s = s.replace("%A %H:%M", "%A %-d %b %H:%M")
+          p.write_text(s)
           PY
 
           cp ${popupWrapper}/bin/waybar-ycal-popup $out/bin/waybar-ycal-popup

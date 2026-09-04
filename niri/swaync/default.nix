@@ -93,8 +93,8 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # A header of pill buttons, the media list, the two `label` rows
-            # that render a program's output, then the notifications. Three
+            # A header of pill buttons, notifications, the media list, then the
+            # two `label` rows that render a program's output. Three
             # things are deliberately absent: a system volume slider, because
             # every media row carries the one that matters; brightness, which
             # stays on the function keys; and the session's power actions,
@@ -102,13 +102,15 @@
             # waiting to happen.
             widgets = [
               "menubar#header"
+              "notifications"
               "media"
               "label#calendar"
               "label#sysmon"
-              "notifications"
             ];
 
             widget-config = {
+              notifications.vexpand = false;
+
               # Quick toggles, the way a quick-settings shade draws them.
               "menubar#header" = {
                 "buttons#quick" = {

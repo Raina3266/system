@@ -131,8 +131,8 @@ pub(crate) fn collect_with_clock(config: &Config, clock: impl Fn() -> f64) -> Ve
 
     let mut rows = Vec::new();
     rows.extend(cpu_row(config, &current));
-    rows.extend(memory_rows(config));
     rows.extend(temperature_row(config));
+    rows.extend(memory_rows(config));
     rows.extend(disk_row(config));
     if route.is_some() || interface.is_some() {
         rows.extend(network_row(&current, interface.as_deref()));

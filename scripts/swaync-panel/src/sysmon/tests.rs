@@ -140,8 +140,8 @@ fn every_reading_becomes_a_row() {
         icons(&fixture.config()),
         [
             icon::CPU,
-            icon::MEMORY,
             icon::TEMPERATURE,
+            icon::MEMORY,
             icon::DISK,
             icon::WIRELESS
         ],
@@ -203,8 +203,8 @@ fn memory_reports_what_is_unavailable_rather_than_what_is_unfree() {
     fixture.seed_state(2.0);
     let rows = plain_rows(&fixture.config());
     // 32.0G total, 24.0G available.
-    assert!(rows[1].contains("8.0G/32.0G"), "{}", rows[1]);
-    assert!(rows[1].ends_with("25%"), "{}", rows[1]);
+    assert!(rows[2].contains("8.0G/32.0G"), "{}", rows[2]);
+    assert!(rows[2].ends_with("25%"), "{}", rows[2]);
 }
 
 #[test]
@@ -217,8 +217,8 @@ fn swap_appears_only_once_something_is_in_it() {
     );
     fixture.seed_state(2.0);
     let rows = plain_rows(&fixture.config());
-    assert!(rows[2].starts_with(icon::SWAP), "{rows:#?}");
-    assert!(rows[2].contains("5.0G/25.0G"), "{}", rows[2]);
+    assert!(rows[3].starts_with(icon::SWAP), "{rows:#?}");
+    assert!(rows[3].contains("5.0G/25.0G"), "{}", rows[3]);
 }
 
 #[test]
@@ -227,9 +227,9 @@ fn the_package_sensor_outranks_the_chassis_one() {
     fixture.seed_state(2.0);
     let rows = plain_rows(&fixture.config());
     assert!(
-        rows[2].contains("47°C"),
+        rows[1].contains("47°C"),
         "x86_pkg_temp, not acpitz's 39°C: {}",
-        rows[2]
+        rows[1]
     );
 }
 
@@ -240,7 +240,7 @@ fn an_explicit_thermal_zone_wins() {
     let mut config = fixture.config();
     config.thermal_zone = Some("0".to_owned());
     let rows = plain_rows(&config);
-    assert!(rows[2].contains("39°C"), "{}", rows[2]);
+    assert!(rows[1].contains("39°C"), "{}", rows[1]);
 }
 
 #[test]

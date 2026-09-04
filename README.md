@@ -547,8 +547,8 @@ palette as the rest of the desktop. `--plain` prints the same cells without the
 markup:
 
 ```text
-󰻠  12% 2.41GHz       󰍛  7.5G/32.0G 24%
-󰄏  47°C              󰋊  412G free 58%
+󰻠  12% 2.41GHz       󰄏  47°C
+󰍛  7.5G/32.0G 24%    󰋊  412G free 58%
 󰖩  ↓1.2K/s ↑512B/s
 ```
 
@@ -616,6 +616,8 @@ panel.
 
 Clicking `custom/ycal` in the bar still opens waybar-ycal's own popup, which is
 where the full month and the task checkboxes live.
+The bar label itself includes the weekday, date, month and time (for example,
+`Friday 4 Sep 09:30`).
 
 
 ### The Do Not Disturb command
@@ -761,10 +763,10 @@ rows in a 380px-wide popup.
 | Row | Widget | Source |
 | --- | --- | --- |
 | Header | `menubar#header` | A Do Not Disturb toggle pill and a Clear button |
+| Notifications | `notifications` | The daemon itself |
 | Media | `media` | [`media-control players`](#the-panel-list) |
 | Calendar | `label#calendar` | [`swaync-panel calendar`](#the-calendar-row) |
 | Readings | `label#sysmon` | [`swaync-panel sysmon`](#the-readings-row) |
-| Notifications | `notifications` | The daemon itself |
 
 There is no title row and no separate Do Not Disturb row: both collapse into the
 header, which is most of what keeps the panel short.
@@ -890,8 +892,8 @@ spacing, and both stay monospace: the readings need it for their two columns.
 The media rows are real widgets rather than text, so they are styled properly —
 `widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
 all listed in the man-page entry the patch adds. The progress bar is a scale so
-it can be dragged, and is styled back down into looking like a bar: a thinner
-track than the volume slider, and a handle that only appears on hover.
+its whole track can be clicked or dragged, and is styled back down into looking
+like a bar: a thinner track and smaller handle than the volume slider.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
 slider track with a 10px handle, and 11-13px text. If the panel ever wants to

@@ -238,9 +238,9 @@ scale slider:hover {
     margin-left: 28px;
 }
 
-/* The progress bar is a scale so it can be dragged, but it should read as a
-   bar: a thinner track than the volume slider, and a handle that only appears
-   once the pointer is on it. */
+/* The progress bar is a scale so the whole track can be clicked and the handle
+   can be dragged. Keep the handle visible enough to make that affordance clear
+   without making the track as heavy as the volume slider. */
 .widget-media-progress {
     margin: 0 0 0 28px;
     min-height: 12px;
@@ -255,11 +255,11 @@ scale slider:hover {
 }
 
 .widget-media-progress slider {
-    background: transparent;
-    border-color: transparent;
-    min-width: 10px;
-    min-height: 10px;
-    margin: -5px;
+    background: var(--cyber-dim);
+    border-color: var(--cyber-pink);
+    min-width: 12px;
+    min-height: 12px;
+    margin: -6px;
 }
 
 .widget-media-progress:hover slider {

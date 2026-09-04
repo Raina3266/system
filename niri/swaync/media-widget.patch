@@ -126,7 +126,7 @@ new file mode 100644
 index 0000000..bd43fd7
 --- /dev/null
 +++ b/src/controlCenter/widgets/media/media.vala
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,424 @@
 +namespace SwayNotificationCenter.Widgets {
 +    /**
 +     * One player: a play/pause button beside its title, the track's progress,
@@ -143,6 +143,8 @@ index 0000000..bd43fd7
 +        private Gtk.Label subtitle_label;
 +        private Gtk.Scale progress_scale;
 +        private ulong progress_handler;
++        private Gtk.GestureDrag progress_drag;
++        private double progress_drag_start_x;
 +        private Gtk.Box volume_box;
 +        private Gtk.Scale volume_scale;
 +        private ulong volume_handler;
@@ -210,6 +212,24 @@ index 0000000..bd43fd7
 +            progress_scale.set_draw_value (false);
 +            progress_scale.set_hexpand (true);
 +            progress_scale.add_css_class ("widget-media-progress");
++
++            // Gtk.Scale only guarantees dragging when the pointer catches its
++            // small handle. Treat the entire track as the seek surface: a
++            // press jumps there, and subsequent pointer motion drags from it.
++            progress_drag = new Gtk.GestureDrag ();
++            progress_drag.touch_only = false;
++            progress_drag.exclusive = true;
++            progress_drag.button = Gdk.BUTTON_PRIMARY;
++            progress_drag.propagation_phase = Gtk.PropagationPhase.CAPTURE;
++            progress_drag.drag_begin.connect ((x, y) => {
++                progress_drag_start_x = x;
++                seek_to_x (x);
++            });
++            progress_drag.drag_update.connect ((offset_x, offset_y) => {
++                seek_to_x (progress_drag_start_x + offset_x);
++            });
++            progress_scale.add_controller (progress_drag);
++
 +            progress_handler = progress_scale.value_changed.connect (() => {
 +                progress_held_until = GLib.get_monotonic_time () + HOLD;
 +                seek_pending = progress_scale.get_value ();
@@ -246,6 +266,19 @@ index 0000000..bd43fd7
 +            volume_box.append (volume_icon);
 +            volume_box.append (volume_scale);
 +            append (volume_box);
++        }
++
++        /** Move the scale to a pointer coordinate across its whole width. */
++        private void seek_to_x (double x) {
++            int width = progress_scale.get_width ();
++            if (width <= 0) {
++                return;
++            }
++            Gtk.Adjustment adjustment = progress_scale.get_adjustment ();
++            double fraction = (x / width).clamp (0.0, 1.0);
++            double value = adjustment.lower
++                         + fraction * (adjustment.upper - adjustment.lower);
++            progress_scale.set_value (value);
 +        }
 +
 +        /**
