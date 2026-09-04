@@ -917,23 +917,20 @@ spacing, and both stay monospace: the readings need it for their two columns.
 The media rows are real widgets rather than text, so they are styled properly —
 `widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
 all listed in the man-page entry the patch adds. The progress bar is a scale so
-its whole track can be clicked or dragged, and is styled back down into looking
-like a bar: a thinner track than the volume slider, and a handle that is dimmer
-until the pointer is on the row.
+its whole track can be clicked or dragged, but it paints only a 2px track and
+an 8px handle. Volume is a shorter, dimmed 3px sub-row beneath it and brightens
+when the pointer is on that media row.
 
-Neither handle uses the usual negative-margin trick for a thin slider — a
-handle bigger than the trough, pulled back so it does not make the row tall.
-GTK adds a widget's margins to its minimum size, so a 12px handle pulled back
-by 6px on each side is allocated 12 - 12 = 0 pixels: it draws nothing, and
-there is nothing left to grab. That is what made the progress bar refuse to be
-dragged. The scales are made tall enough to hold their handles instead, and the
-space above and below the track is hit area.
+Neither handle uses the usual negative-margin trick for a thin slider: GTK can
+subtract those margins from the allocation until nothing remains to grab. The
+8px handles instead sit inside 10-12px scale widgets, so the unpainted space
+above and below each thin track remains usable hit area.
 
-The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
-slider track (4px for a progress bar) with a 12px handle, 32px notification
-icons, and 11-13px text. If the panel ever wants to breathe, those are the
-numbers to raise, along with `control-center-width` and
-`control-center-height` in `niri/swaync/default.nix`.
+The same file sets the panel's density: 5-7px of card padding, 9px radii, a 2px
+progress track, a 3px volume track, 8px media handles, 32px notification icons,
+and 11-13px text. If the panel ever wants to breathe, those are the numbers to
+raise, along with `control-center-width` and `control-center-height` in
+`niri/swaync/default.nix`.
 
 ### GNOME
 
