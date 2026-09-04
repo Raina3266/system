@@ -7,6 +7,9 @@ let
   # scrollbars everywhere else.
   daemonYellow = "#FCEE0A";
   daemonRed = "#D52C35";
+  # Red carried two thirds of the way toward the background, for the middle of
+  # a ramp that has to sit between white and red without reading as either.
+  daemonDimRed = "#932028";
   daemonPink = "#D656C7";
   daemonDimPink = "#5A254D";
   daemonText = "#5DF4FE";
@@ -102,9 +105,12 @@ in
     # drawn from main_fg fading to inactive_fg - headings pink, and the
     # shortcut letter in a menu label red.
     #
-    # Every number btop colours by value follows one rule: white while the
-    # reading is unremarkable, pink as it climbs, red once it is worth
-    # looking at. The process list is the exception, below. Memory that is free or available reads the same way
+    # Every number btop colours by value runs the same three stops: white
+    # where the reading wants no attention, dim red on the way, red at the end
+    # that matters. Load, temperature, memory in use and a process climb from
+    # white to red; memory free or available, cached memory and network
+    # throughput run it the other way, since for those it is the low end that
+    # is worth seeing. Memory that is free or available reads the same way
     # inverted, since there running out is the warning. Cached memory and
     # network throughput are neither good nor bad, so they stay on their own
     # hue - cyan down, pink up - and never turn red.
@@ -126,42 +132,42 @@ in
       theme[div_line]="${daemonDimText}"
 
       theme[cpu_start]="${white}"
-      theme[cpu_mid]="${daemonPink}"
+      theme[cpu_mid]="${daemonDimRed}"
       theme[cpu_end]="${daemonRed}"
 
       theme[temp_start]="${white}"
-      theme[temp_mid]="${daemonPink}"
+      theme[temp_mid]="${daemonDimRed}"
       theme[temp_end]="${daemonRed}"
 
       theme[used_start]="${white}"
-      theme[used_mid]="${daemonPink}"
+      theme[used_mid]="${daemonDimRed}"
       theme[used_end]="${daemonRed}"
 
-      # A process name, its thread count, its memory and its cpu share are
-      # all drawn from this one ramp, so holding it at red makes the name red
-      # and takes those three columns with it.
-      theme[process_start]="${daemonRed}"
-      theme[process_mid]="${daemonRed}"
+      # A process name, its thread count, its memory and its cpu share all
+      # come from this one ramp, so a name is white while the process is idle
+      # and reddens as it works.
+      theme[process_start]="${white}"
+      theme[process_mid]="${daemonDimRed}"
       theme[process_end]="${daemonRed}"
 
       theme[free_start]="${daemonRed}"
-      theme[free_mid]="${daemonPink}"
+      theme[free_mid]="${daemonDimRed}"
       theme[free_end]="${white}"
 
       theme[available_start]="${daemonRed}"
-      theme[available_mid]="${daemonPink}"
+      theme[available_mid]="${daemonDimRed}"
       theme[available_end]="${white}"
 
-      theme[cached_start]="${daemonDimText}"
-      theme[cached_mid]="${daemonText}"
+      theme[cached_start]="${daemonRed}"
+      theme[cached_mid]="${daemonDimRed}"
       theme[cached_end]="${white}"
 
-      theme[download_start]="${daemonDimText}"
-      theme[download_mid]="${daemonText}"
+      theme[download_start]="${daemonRed}"
+      theme[download_mid]="${daemonDimRed}"
       theme[download_end]="${white}"
 
-      theme[upload_start]="${daemonDimPink}"
-      theme[upload_mid]="${daemonPink}"
+      theme[upload_start]="${daemonRed}"
+      theme[upload_mid]="${daemonDimRed}"
       theme[upload_end]="${white}"
     '';
   };
