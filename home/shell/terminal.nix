@@ -99,20 +99,20 @@ in
     #
     # Frames are yellow, as menus, popups and scrollbars are everywhere else.
     # Text is cyan - which is what colours a pid and its command line, both
-    # drawn from main_fg fading to inactive_fg - headings red, and the
-    # shortcut letter in a menu label pink.
+    # drawn from main_fg fading to inactive_fg - headings pink, and the
+    # shortcut letter in a menu label red.
     #
     # Every number btop colours by value follows one rule: white while the
     # reading is unremarkable, pink as it climbs, red once it is worth
-    # looking at. Memory that is free or available reads the same way
+    # looking at. The process list is the exception, below. Memory that is free or available reads the same way
     # inverted, since there running out is the warning. Cached memory and
     # network throughput are neither good nor bad, so they stay on their own
     # hue - cyan down, pink up - and never turn red.
     themes."Daemon-2.0" = ''
       theme[main_fg]="${daemonText}"
       theme[inactive_fg]="${daemonDimText}"
-      theme[title]="${daemonRed}"
-      theme[hi_fg]="${daemonPink}"
+      theme[title]="${daemonPink}"
+      theme[hi_fg]="${daemonRed}"
       theme[selected_bg]="${daemonDimPink}"
       theme[selected_fg]="${white}"
       theme[graph_text]="${daemonMutedText}"
@@ -137,8 +137,11 @@ in
       theme[used_mid]="${daemonPink}"
       theme[used_end]="${daemonRed}"
 
-      theme[process_start]="${white}"
-      theme[process_mid]="${daemonPink}"
+      # A process name, its thread count, its memory and its cpu share are
+      # all drawn from this one ramp, so holding it at red makes the name red
+      # and takes those three columns with it.
+      theme[process_start]="${daemonRed}"
+      theme[process_mid]="${daemonRed}"
       theme[process_end]="${daemonRed}"
 
       theme[free_start]="${daemonRed}"
