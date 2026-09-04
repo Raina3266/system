@@ -785,6 +785,12 @@ which is how `themes/swaync.css` tells `calendar` from `sysmon`.
 Every player that is playing or paused gets a row: a play/pause button beside
 its title, the track's progress, and that player's own volume.
 
+Browser progress comes through mprisence. Its upstream stale-timing guard used
+to reject every large backward jump, including replaying a finished video or
+dragging the seek bar backwards. `mprisence-position.patch` keeps that guard for
+updates with a broken duration, but accepts a real restart or backward seek when
+the duration remains stable.
+
 ```text
 󰏤  Delulu — SZA
     Spotify  ·  1:23 / 4:56
@@ -901,8 +907,8 @@ spacing, and both stay monospace: the readings need it for their two columns.
 The media rows are real widgets rather than text, so they are styled properly —
 `widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
 all listed in the man-page entry the patch adds. The progress bar is a scale so
-its whole track can be clicked or dragged, but uses a solid pink elapsed section,
-a dark remaining section and a smaller handle to distinguish it from volume.
+its whole track can be clicked or dragged, and is styled back down into looking
+like a bar: a thinner track and smaller handle than the volume slider.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
 slider track with a 10px handle, 32px notification icons, and 11-13px text. If

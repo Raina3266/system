@@ -249,21 +249,19 @@ scale slider:hover {
 }
 
 .widget-media-progress trough {
-    background: rgba(122, 252, 255, 0.12);
     min-height: 3px;
 }
 
 .widget-media-progress trough highlight {
-    background: var(--cyber-pink);
     min-height: 3px;
 }
 
 .widget-media-progress slider {
-    background: var(--cyber-fg);
+    background: var(--cyber-dim);
     border-color: var(--cyber-pink);
-    min-width: 8px;
-    min-height: 8px;
-    margin: -4px;
+    min-width: 12px;
+    min-height: 12px;
+    margin: -6px;
 }
 
 .widget-media-progress:hover slider {

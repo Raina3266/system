@@ -18,6 +18,14 @@
 
   nixpkgs.overlays = [
     (final: prev: {
+      # mprisence 1.8.4 mistakes a real replay/backward seek for stale browser
+      # timing and continually replaces zero with the previous end position.
+      # The patch is Rust and keeps its glitch guard only when the duration in
+      # the same update is also broken.
+      mprisence = prev.mprisence.overrideAttrs (oldAttrs: {
+        patches = (oldAttrs.patches or [ ]) ++ [ ./mprisence-position.patch ];
+      });
+
       swaynotificationcenter = prev.swaynotificationcenter.overrideAttrs (oldAttrs: {
         # Three small additions. The command-driven widgets keep everything
         # which knows about players, calendars or sensors in this repository's
