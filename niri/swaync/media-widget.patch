@@ -123,10 +123,10 @@ index 7f4b9d9..7e3765e 100644
                  break;
 diff --git a/src/controlCenter/widgets/media/media.vala b/src/controlCenter/widgets/media/media.vala
 new file mode 100644
-index 0000000..bd43fd7
+index 0000000..c933fae
 --- /dev/null
 +++ b/src/controlCenter/widgets/media/media.vala
-@@ -0,0 +1,424 @@
+@@ -0,0 +1,431 @@
 +namespace SwayNotificationCenter.Widgets {
 +    /**
 +     * One player: a play/pause button beside its title, the track's progress,
@@ -211,6 +211,11 @@ index 0000000..bd43fd7
 +            progress_scale = new Gtk.Scale.with_range (Gtk.Orientation.HORIZONTAL, 0, 1, 1);
 +            progress_scale.set_draw_value (false);
 +            progress_scale.set_hexpand (true);
++            progress_scale.set_round_digits (0);
++            // Five seconds to the arrow keys, half a minute to the scroll
++            // wheel and Page Up/Down. A scale with no increments answers
++            // neither, which leaves dragging as the only way to seek.
++            progress_scale.set_increments (5, 30);
 +            progress_scale.add_css_class ("widget-media-progress");
 +
 +            // Gtk.Scale only guarantees dragging when the pointer catches its
@@ -246,6 +251,8 @@ index 0000000..bd43fd7
 +            volume_scale = new Gtk.Scale.with_range (Gtk.Orientation.HORIZONTAL, 0, 100, 1);
 +            volume_scale.set_draw_value (false);
 +            volume_scale.set_hexpand (true);
++            volume_scale.set_round_digits (0);
++            volume_scale.set_increments (1, 5);
 +            volume_handler = volume_scale.value_changed.connect (() => {
 +                volume_held_until = GLib.get_monotonic_time () + HOLD;
 +                volume_pending = volume_scale.get_value ();

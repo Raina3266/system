@@ -798,8 +798,11 @@ the duration remains stable.
     󰕾 ────────●───────────
 ```
 
-The progress bar can be dragged to seek, and the volume slider is the only
-volume control in the panel: there is no system slider above it any more. It is
+The progress bar can be dragged anywhere along its track to seek — a press
+jumps there rather than needing the handle caught first — or nudged with the
+scroll wheel, five seconds at a time, and with the arrow and Page keys once it
+has focus. The volume slider is the only volume control in the panel: there is
+no system slider above it any more. It is
 the same control either way, and a slider attached to the track you can hear is
 easier to aim at than one attached to a process name.
 
@@ -817,6 +820,13 @@ per motion event, each of which would otherwise be a process, so the latest
 value is sent once the drag has been still for 150ms — a drag across the row
 costs a handful of commands rather than a hundred. The one-second refresh only
 runs while the panel is actually open.
+
+Seeking is the one control a player can refuse: MPRIS makes position optional,
+and moving it needs `CanSeek` and a track id, which browser-tab bridges often
+lack. A player that reports no position is left alone; one that reports a
+position and then refuses to move says so on stderr, which SwayNC puts in its
+journal (`journalctl --user -u swaync`), rather than letting the handle spring
+back with no explanation.
 
 ### What is deliberately not in the panel
 
@@ -908,12 +918,22 @@ The media rows are real widgets rather than text, so they are styled properly �
 `widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
 all listed in the man-page entry the patch adds. The progress bar is a scale so
 its whole track can be clicked or dragged, and is styled back down into looking
-like a bar: a thinner track and smaller handle than the volume slider.
+like a bar: a thinner track than the volume slider, and a handle that is dimmer
+until the pointer is on the row.
+
+Neither handle uses the usual negative-margin trick for a thin slider — a
+handle bigger than the trough, pulled back so it does not make the row tall.
+GTK adds a widget's margins to its minimum size, so a 12px handle pulled back
+by 6px on each side is allocated 12 - 12 = 0 pixels: it draws nothing, and
+there is nothing left to grab. That is what made the progress bar refuse to be
+dragged. The scales are made tall enough to hold their handles instead, and the
+space above and below the track is hit area.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
-slider track with a 10px handle, 32px notification icons, and 11-13px text. If
-the panel ever wants to breathe, those are the numbers to raise, along with
-`control-center-width` and `control-center-height` in `niri/swaync/default.nix`.
+slider track (4px for a progress bar) with a 12px handle, 32px notification
+icons, and 11-13px text. If the panel ever wants to breathe, those are the
+numbers to raise, along with `control-center-width` and
+`control-center-height` in `niri/swaync/default.nix`.
 
 ### GNOME
 

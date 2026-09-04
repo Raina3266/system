@@ -150,7 +150,16 @@
 
 /* ── Sliders ──
  * A thin track with a small handle, the shape both GNOME and macOS use. Every
- * slider in the panel is a media row's: its volume, or its progress. */
+ * slider in the panel is a media row's: its volume, or its progress.
+ *
+ * Neither handle uses the usual negative-margin trick for a thin slider — a
+ * handle bigger than the trough, pulled back so it does not make the row tall.
+ * GTK adds a widget's margins to its minimum size, so a 12px handle pulled
+ * back by 6px on each side is allocated 12 - 12 = 0 pixels: it draws nothing,
+ * and there is nothing left to grab, which is what made the progress bar
+ * refuse to be dragged. The scales are made tall enough to hold their handles
+ * instead; the trough stays thin, and the space above and below it is hit
+ * area. */
 
 scale {
     min-height: 18px;
@@ -173,12 +182,13 @@ scale slider {
     background: var(--cyber-fg);
     border: 1px solid var(--cyber-pink);
     border-radius: 100%;
-    min-width: 10px;
-    min-height: 10px;
-    margin: -5px;
+    min-width: 12px;
+    min-height: 12px;
+    margin: 0;
 }
 
-scale slider:hover {
+scale slider:hover,
+scale slider:active {
     background: var(--cyber-pink);
 }
 
@@ -245,28 +255,25 @@ scale slider:hover {
    without making the track as heavy as the volume slider. */
 .widget-media-progress {
     margin: 0 0 0 28px;
-    min-height: 12px;
 }
 
 .widget-media-progress trough {
-    min-height: 3px;
+    min-height: 4px;
 }
 
 .widget-media-progress trough highlight {
-    min-height: 3px;
+    min-height: 4px;
 }
 
+/* Dimmer than the volume handle at rest, so the two rows still read
+   differently, but the same size: it has to be grabbable. */
 .widget-media-progress slider {
     background: var(--cyber-dim);
-    border-color: var(--cyber-pink);
-    min-width: 12px;
-    min-height: 12px;
-    margin: -6px;
 }
 
-.widget-media-progress:hover slider {
+.widget-media-progress:hover slider,
+.widget-media-progress slider:active {
     background: var(--cyber-fg);
-    border-color: var(--cyber-pink);
 }
 
 .widget-media-volume {
