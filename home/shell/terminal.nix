@@ -7,9 +7,6 @@ let
   # scrollbars everywhere else.
   daemonYellow = "#FCEE0A";
   daemonRed = "#D52C35";
-  # Red carried two thirds of the way toward the background, for the middle of
-  # a ramp that has to sit between white and red without reading as either.
-  daemonDimRed = "#932028";
   daemonPink = "#D656C7";
   daemonDimPink = "#5A254D";
   daemonText = "#5DF4FE";
@@ -106,7 +103,7 @@ in
     # shortcut letter in a menu label red.
     #
     # Every number btop colours by value runs the same three stops: white
-    # where the reading wants no attention, dim red on the way, red at the end
+    # where the reading wants no attention, pink on the way, red at the end
     # that matters. Load, temperature, memory in use and a process climb from
     # white to red; memory free or available, cached memory and network
     # throughput run it the other way, since for those it is the low end that
@@ -132,43 +129,43 @@ in
       theme[div_line]="${daemonDimText}"
 
       theme[cpu_start]="${white}"
-      theme[cpu_mid]="${daemonDimRed}"
+      theme[cpu_mid]="${daemonPink}"
       theme[cpu_end]="${daemonRed}"
 
       theme[temp_start]="${white}"
-      theme[temp_mid]="${daemonDimRed}"
+      theme[temp_mid]="${daemonPink}"
       theme[temp_end]="${daemonRed}"
 
       theme[used_start]="${white}"
-      theme[used_mid]="${daemonDimRed}"
+      theme[used_mid]="${daemonPink}"
       theme[used_end]="${daemonRed}"
 
       # A process name, its thread count, its memory and its cpu share all
       # come from this one ramp, so a name is white while the process is idle
       # and reddens as it works.
       theme[process_start]="${white}"
-      theme[process_mid]="${daemonDimRed}"
+      theme[process_mid]="${daemonPink}"
       theme[process_end]="${daemonRed}"
 
       theme[free_start]="${daemonRed}"
-      theme[free_mid]="${daemonDimRed}"
+      theme[free_mid]="${daemonPink}"
       theme[free_end]="${white}"
 
       theme[available_start]="${daemonRed}"
-      theme[available_mid]="${daemonDimRed}"
+      theme[available_mid]="${daemonPink}"
       theme[available_end]="${white}"
 
-      theme[cached_start]="${daemonRed}"
-      theme[cached_mid]="${daemonDimRed}"
-      theme[cached_end]="${white}"
+      theme[cached_start]="${white}"
+      theme[cached_mid]="${daemonPink}"
+      theme[cached_end]="${daemonRed}"
 
-      theme[download_start]="${daemonRed}"
-      theme[download_mid]="${daemonDimRed}"
-      theme[download_end]="${white}"
+      theme[download_start]="${white}"
+      theme[download_mid]="${daemonPink}"
+      theme[download_end]="${daemonRed}"
 
-      theme[upload_start]="${daemonRed}"
-      theme[upload_mid]="${daemonDimRed}"
-      theme[upload_end]="${white}"
+      theme[upload_start]="${white}"
+      theme[upload_mid]="${daemonPink}"
+      theme[upload_end]="${daemonRed}"
     '';
   };
 
