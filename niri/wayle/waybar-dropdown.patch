@@ -12,7 +12,7 @@ index 28431c2..bb93799 100644
      fn bar_hidden(&self) -> Result<Vec<String>>;
  
 diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
-index 4483872..400a1ab 100644
+index 4483872..f21899c 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 @@ -2,7 +2,10 @@
@@ -27,24 +27,32 @@ index 4483872..400a1ab 100644
  
  /// D-Bus daemon that dispatches shell commands to domain handlers.
  pub(crate) struct ShellIpcDaemon {
-@@ -36,6 +39,37 @@ impl ShellIpcDaemon {
+@@ -36,6 +39,45 @@ impl ShellIpcDaemon {
          self.bar.toggle(monitor)
      }
  
 +    /// Toggles a dropdown on a monitor for integration with external bars.
 +    pub async fn dropdown_toggle(&self, name: &str, monitor: &str) -> fdo::Result<()> {
 +        if !crate::shell::bar::dropdowns::DROPDOWN_NAMES.contains(&name) {
-+            return Err(fdo::Error::InvalidArgs(format!(
-+                "unknown dropdown: {name}"
-+            )));
++            return Err(fdo::Error::InvalidArgs(format!("unknown dropdown: {name}")));
 +        }
 +
 +        let mut connectors = self.state.connectors.get();
 +        connectors.sort();
-+        let monitor = if monitor.is_empty() {
-+            connectors.first().map(String::as_str).unwrap_or_default()
-+        } else {
++
++        // An external bar cannot name a monitor, so an empty argument means
++        // "wherever the user is". Fall back to the first connector only when
++        // no compositor reports focus, which at least stays deterministic.
++        let focused = self.state.focused_connector.get();
++        let monitor = if !monitor.is_empty() {
 +            monitor
++        } else if let Some(connector) = focused
++            .as_deref()
++            .filter(|connector| connectors.iter().any(|item| item == connector))
++        {
++            connector
++        } else {
++            connectors.first().map(String::as_str).unwrap_or_default()
 +        };
 +
 +        if !connectors.iter().any(|item| item == monitor) {
@@ -66,7 +74,7 @@ index 4483872..400a1ab 100644
      #[zbus(property)]
      pub async fn bar_hidden(&self) -> Vec<String> {
 diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
-index 9fdaf9f..a4f4358 100644
+index 9fdaf9f..c6445b0 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/state.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
 @@ -4,6 +4,17 @@ use std::collections::HashSet;
@@ -87,21 +95,26 @@ index 9fdaf9f..a4f4358 100644
  /// Shared reactive state exposed to shell components via `ShellIpcService`.
  ///
  /// Bar watchers subscribe to these properties to react to IPC commands.
-@@ -15,6 +26,9 @@ pub struct ShellIpcState {
+@@ -15,6 +26,13 @@ pub struct ShellIpcState {
      /// All active monitor connectors. Updated by the shell when bars are
      /// created or destroyed.
      pub connectors: Property<Vec<String>>,
 +
 +    /// Most recent request to toggle a dropdown from an external bar.
 +    pub dropdown_request: Property<DropdownRequest>,
++
++    /// Connector holding compositor focus, when a compositor reports one.
++    /// Used to route dropdown requests that name no monitor.
++    pub focused_connector: Property<Option<String>>,
  }
  
  impl ShellIpcState {
-@@ -22,6 +36,7 @@ impl ShellIpcState {
+@@ -22,6 +40,8 @@ impl ShellIpcState {
          Self {
              hidden_bars: Property::new(HashSet::new()),
              connectors: Property::new(Vec::new()),
 +            dropdown_request: Property::new(DropdownRequest::default()),
++            focused_connector: Property::new(None),
          }
      }
  }
@@ -463,6 +476,76 @@ index a2e1a66..56f7914 100644
  mod helpers;
  mod notification_popup;
  mod osd;
+diff --git a/crates/wayle-shell/src/watchers/focused_output.rs b/crates/wayle-shell/src/watchers/focused_output.rs
+new file mode 100644
+index 0000000..b782e14
+--- /dev/null
++++ b/crates/wayle-shell/src/watchers/focused_output.rs
+@@ -0,0 +1,45 @@
++//! Tracks which output holds compositor focus.
++//!
++//! IPC callers that toggle a dropdown from an external bar cannot name a
++//! monitor: a bar such as Waybar knows nothing about Wayle's connectors, and
++//! Wayland gives a client no way to ask where the pointer is. Publishing the
++//! focused connector lets the shell IPC daemon route those requests to the
++//! screen the user is on instead of whichever connector happens to sort first.
++
++use futures::StreamExt;
++use wayle_niri::NiriService;
++
++use crate::shell::ShellServices;
++
++/// Publishes the focused connector for as long as a compositor reports one.
++///
++/// Only niri is wired up; under any other compositor the property stays
++/// `None` and the daemon keeps its previous first-connector behaviour.
++pub(crate) fn spawn(services: &ShellServices) {
++    let Some(niri) = services.niri.clone() else {
++        return;
++    };
++
++    let focused = services.shell_ipc.state().focused_connector;
++    focused.set(focused_output(&niri));
++
++    tokio::spawn(async move {
++        let mut events = niri.events();
++
++        // Focus lives in a `Property` on each workspace rather than on the
++        // workspace map, so the map alone does not report focus moving. Every
++        // event is a cheap rescan, which keeps this independent of which
++        // event variants niri uses to describe a focus change.
++        while events.next().await.is_some() {
++            focused.set(focused_output(&niri));
++        }
++    });
++}
++
++fn focused_output(niri: &NiriService) -> Option<String> {
++    niri.workspaces
++        .get()
++        .values()
++        .find(|workspace| workspace.is_focused.get())
++        .and_then(|workspace| workspace.output.get())
++}
+diff --git a/crates/wayle-shell/src/watchers/mod.rs b/crates/wayle-shell/src/watchers/mod.rs
+index 33cbe85..392bb8f 100644
+--- a/crates/wayle-shell/src/watchers/mod.rs
++++ b/crates/wayle-shell/src/watchers/mod.rs
+@@ -1,5 +1,6 @@
+ mod color_extractor;
+ mod css;
++mod focused_output;
+ mod location;
+ mod monitors;
+ mod notification;
+@@ -23,6 +24,7 @@ pub(crate) fn init(sender: &ComponentSender<Shell>, services: &ShellServices) {
+     monitors::spawn(sender);
+     osd::spawn(sender, services);
+     color_extractor::spawn(services);
++    focused_output::spawn(services);
+     notification::spawn(services);
+     sysinfo::spawn(services);
+     user_style::spawn(sender, services.config.clone(), ShellCmd::CssRecompiled);
 diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
 index abe3e41..d2bdeb4 100644
 --- a/crates/wayle-shell/src/watchers/notification.rs

@@ -553,8 +553,14 @@ configure round-trip and a frame, so a bar mapped at click time is never ready
 when the popover needs it. The patch hides the bar without unmapping it
 instead — background, borders, shadow, padding and sections all go away, and an
 empty input region lets clicks through — so it neither shows nor intercepts
-anything above Waybar. With no monitor argument, Wayle chooses the first
-connected output; an explicit connector such as `DP-7` can still be supplied.
+anything above Waybar.
+
+With no monitor argument the dropdown opens on the output holding compositor
+focus. Waybar cannot tell Wayle which screen was clicked, and Wayland gives a
+client no way to ask where the pointer is, so the patch tracks niri's focused
+workspace and publishes its output for the IPC handler to route by. Under any
+other compositor, or before niri reports a focus, it falls back to the first
+connector by name. An explicit connector such as `DP-7` still overrides both.
 
 The dropdown does not autohide. A GTK autohide popover asks the compositor for
 a popup grab, which is only granted against the serial of an input event the
