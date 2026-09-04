@@ -106,7 +106,7 @@ index 9fdaf9f..a4f4358 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 4a0fbdf..804674f 100644
+index 4a0fbdf..8abd3c0 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 @@ -42,11 +42,13 @@ pub(crate) struct DropdownInstance {
@@ -166,7 +166,7 @@ index 4a0fbdf..804674f 100644
      fn show_for_widget(&self, style: DropdownStyle) {
          self.apply_position();
          self.apply_margins(style.margins);
-@@ -378,6 +396,19 @@ impl DropdownRegistry {
+@@ -378,6 +396,22 @@ impl DropdownRegistry {
          }
      }
  
@@ -177,9 +177,12 @@ index 4a0fbdf..804674f 100644
 +        name: &str,
 +        widget: &impl IsA<gtk::Widget>,
 +        window: &gtk::Window,
-+    ) {
++    ) -> bool {
 +        if let Some(dropdown) = self.get_or_create(name) {
 +            dropdown.toggle_external(widget, window, dropdown_style(self));
++            true
++        } else {
++            false
 +        }
 +    }
 +
@@ -187,7 +190,7 @@ index 4a0fbdf..804674f 100644
      fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
          let mut cache = self.cache.borrow_mut();
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..7437e6d 100644
+index 5b5cf1c..c50d5d6 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -219,15 +222,25 @@ index 5b5cf1c..7437e6d 100644
  
          let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
          dropdowns.warm_all();
-@@ -230,6 +239,12 @@ impl Component for Bar {
+@@ -230,6 +239,22 @@ impl Component for Bar {
                  let configured = self.services.config.config().bar.layer.get();
                  apply_layer(root, configured, &self.services.config);
              }
 +            BarCmd::ToggleDropdown(name) => {
 +                root.present();
-+                let anchor = self.right.widget();
-+                anchor.set_size_request(1, 1);
-+                self.dropdowns.toggle_external(&name, anchor, root);
++                let anchor = self.right.widget().clone();
++                let dropdowns = Rc::clone(&self.dropdowns);
++                let root = root.clone();
++
++                // A popover cannot be presented until its anchor window has
++                // completed mapping. `present()` only schedules that work, so
++                // defer the popup until GTK returns to the main loop.
++                gtk::glib::idle_add_local_once(move || {
++                    anchor.set_size_request(1, 1);
++                    if !dropdowns.toggle_external(&name, &anchor, &root) {
++                        root.set_visible(false);
++                    }
++                });
 +            }
          }
      }

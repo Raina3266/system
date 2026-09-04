@@ -102,10 +102,15 @@
 
         # GNOME owns org.freedesktop.Notifications in its own session.
         systemd.user.services.wayle = {
-          Unit.ConditionEnvironment = lib.mkForce [
-            "WAYLAND_DISPLAY"
-            "XDG_CURRENT_DESKTOP=niri"
-          ];
+          Unit = {
+            ConditionEnvironment = lib.mkForce [
+              "WAYLAND_DISPLAY"
+              "XDG_CURRENT_DESKTOP=niri"
+            ];
+            # Stop a service left running by the previous Home Manager
+            # generation before Wayle claims org.freedesktop.Notifications.
+            Conflicts = [ "swaync.service" ];
+          };
           Service.RestartSec = 3;
         };
       }
