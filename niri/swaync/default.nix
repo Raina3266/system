@@ -10,12 +10,18 @@
 # Home Manager here uses global pkgs.
 { ... }:
 {
+  # Keep Chrome on org.freedesktop.Notifications. Its web notifications carry
+  # the transient hint, so the retention patch and matching rule below also
+  # make them remain in SwayNC's control-center history after the popup closes.
+  environment.etc."opt/chrome/policies/managed/swaync-notifications.json".text =
+    builtins.toJSON { AllowSystemNotifications = true; };
+
   nixpkgs.overlays = [
     (final: prev: {
       swaynotificationcenter = prev.swaynotificationcenter.overrideAttrs (oldAttrs: {
-        # Two additions, both driven by a command so that everything which
-        # knows about players, calendars or sensors stays in this repository's
-        # own programs rather than moving into Vala:
+        # Three small additions. The command-driven widgets keep everything
+        # which knows about players, calendars or sensors in this repository's
+        # own programs rather than moving it into Vala:
         #
         #   label-exec    gives the stock `label` widget an
         #                 `exec`/`interval`/`pango-markup` triple. Without
@@ -24,11 +30,15 @@
         #                 command's output, each with a play/pause button, a
         #                 progress bar and a volume slider that call back into
         #                 that command.
+        #   retain-       lets an explicit `notification-visibility` rule with
+        #   transient     state `enabled` retain a sender's transient popups in
+        #                 the control center as well as showing them.
         #
-        # Both are checked against v0.12.5, v0.12.6 and upstream main.
+        # All three are checked against v0.12.5, v0.12.6 and upstream main.
         patches = (oldAttrs.patches or [ ]) ++ [
           ./label-exec.patch
           ./media-widget.patch
+          ./retain-transient.patch
         ];
       });
     })
@@ -85,6 +95,14 @@
             image-visibility = "when-available";
             relative-timestamps = true;
 
+            # Chrome marks web notifications transient. Match its desktop ID
+            # and explicitly enable them; retain-transient.patch interprets
+            # that explicit rule as "popup and keep in the control center".
+            notification-visibility.retain-chrome = {
+              state = "enabled";
+              desktop-entry = "^(google-chrome|chromium|chromium-browser|chrome-.*)$";
+            };
+
             timeout = 8;
             timeout-low = 4;
             timeout-critical = 0;
@@ -93,8 +111,8 @@
             hide-on-action = true;
             keyboard-shortcuts = true;
 
-            # A header of pill buttons, notifications, the media list, then the
-            # two `label` rows that render a program's output. Three
+            # A header of pill buttons, the calendar, notifications, the media
+            # list, then the system readings. Three
             # things are deliberately absent: a system volume slider, because
             # every media row carries the one that matters; brightness, which
             # stays on the function keys; and the session's power actions,
@@ -102,9 +120,9 @@
             # waiting to happen.
             widgets = [
               "menubar#header"
+              "label#calendar"
               "notifications"
               "media"
-              "label#calendar"
               "label#sysmon"
             ];
 

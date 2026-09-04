@@ -547,17 +547,14 @@ palette as the rest of the desktop. `--plain` prints the same cells without the
 markup:
 
 ```text
-󰻠  12% 2.41GHz       󰄏  47°C
-󰍛  7.5G/32.0G 24%    󰋊  412G free 58%
-󰖩  ↓1.2K/s ↑512B/s
+CPU  12% 2.41GHz          Temperature  47°C
+Memory  7.5G/32.0G 24%   Disk  412G free 58%
+Network  ↓1.2K/s ↑512B/s
 ```
 
-Two readings share a line, and there is no name column. The glyphs are
-distinct enough to carry the meaning on their own, and a single labelled
-column left the block narrow and tall beside everything else in the panel.
-Each cell pads its text to a shared width so the second column starts in the
-same place on every line; a cell wider than that column is not truncated, it
-just pushes its neighbour along.
+Two labelled readings share a line. Each cell pads its text to a shared width
+so the second column starts in the same place on every line; a cell wider than
+that column is not truncated, it just pushes its neighbour along.
 
 A reading the machine cannot supply is left out rather than shown as a
 placeholder: a desktop with no battery-class thermal sensor gets no `Temp` row,
@@ -728,6 +725,11 @@ SwayNC (`SwayNotificationCenter`) is this desktop's notification daemon and the
 one popup behind the bar's centre button. Configuration lives in
 `niri/swaync/default.nix`; the stylesheet is `themes/swaync.css`.
 
+Chrome is pinned to Linux system notifications, and its transient web
+notifications are explicitly retained in the control center instead of
+disappearing with their popup. After rebuilding, fully quit and reopen Chrome
+so existing browser processes pick up the system policy.
+
 ### What moved
 
 The top bar used to carry two hover drawers, `group/system` and
@@ -763,9 +765,9 @@ rows in a 380px-wide popup.
 | Row | Widget | Source |
 | --- | --- | --- |
 | Header | `menubar#header` | A Do Not Disturb toggle pill and a Clear button |
+| Calendar | `label#calendar` | [`swaync-panel calendar`](#the-calendar-row) |
 | Notifications | `notifications` | The daemon itself |
 | Media | `media` | [`media-control players`](#the-panel-list) |
-| Calendar | `label#calendar` | [`swaync-panel calendar`](#the-calendar-row) |
 | Readings | `label#sysmon` | [`swaync-panel sysmon`](#the-readings-row) |
 
 There is no title row and no separate Do Not Disturb row: both collapse into the
@@ -842,12 +844,12 @@ panel and `F8` toggles Do Not Disturb, both through `swaync-client`.
 
 ### The upstream patches
 
-Two patches, applied by the overlay at the top of `niri/swaync/default.nix` —
-the same pattern used for Rofi in `niri/rofi/default.nix`. Both exist so that
-everything which knows about players, calendars or sensors stays in this
-repository's own programs rather than moving into Vala, and both carry matching
-`configSchema.json` and man-page entries. Each applies cleanly to v0.12.5,
-v0.12.6 and upstream `main`.
+Three patches are applied by the overlay at the top of
+`niri/swaync/default.nix`, the same pattern used for Rofi in
+`niri/rofi/default.nix`. The two widget patches keep everything which knows
+about players, calendars or sensors in this repository's own programs rather
+than moving into Vala, and they carry matching `configSchema.json` and man-page
+entries. All three apply cleanly to v0.12.5, v0.12.6 and upstream `main`.
 
 **`label-exec.patch`.** SwayNC's `label` widget shows a fixed string, so there
 is no built-in way to put a program's output in the panel. The patch adds three
@@ -878,6 +880,13 @@ volume slider.
 
 The widget holds no MPRIS code at all; it is a renderer with a callback.
 
+**`retain-transient.patch`.** Chrome marks web notifications transient, which
+normally makes SwayNC show only the floating popup and omit the notification
+from control-center history. This patch lets an explicit matching
+`notification-visibility` rule with state `enabled` retain it without muting
+the popup; the configuration applies that rule only to Chrome/Chromium desktop
+IDs.
+
 ### Theming
 
 `themes/swaync.css` is linked to `~/.config/swaync/style.css` by
@@ -892,13 +901,13 @@ spacing, and both stay monospace: the readings need it for their two columns.
 The media rows are real widgets rather than text, so they are styled properly —
 `widget-media-row`, `-title`, `-subtitle`, `-progress`, `-volume` and `-toggle`,
 all listed in the man-page entry the patch adds. The progress bar is a scale so
-its whole track can be clicked or dragged, and is styled back down into looking
-like a bar: a thinner track and smaller handle than the volume slider.
+its whole track can be clicked or dragged, but uses a solid pink elapsed section,
+a dark remaining section and a smaller handle to distinguish it from volume.
 
 The same file sets the panel's density: 5-7px of card padding, 9px radii, a 6px
-slider track with a 10px handle, and 11-13px text. If the panel ever wants to
-breathe, those are the numbers to raise, along with `control-center-width` and
-`control-center-height` in `niri/swaync/default.nix`.
+slider track with a 10px handle, 32px notification icons, and 11-13px text. If
+the panel ever wants to breathe, those are the numbers to raise, along with
+`control-center-width` and `control-center-height` in `niri/swaync/default.nix`.
 
 ### GNOME
 

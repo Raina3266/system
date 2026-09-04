@@ -48,6 +48,8 @@
     --border: 1px solid var(--cyber-line);
     --border-radius: 9px;
     --notification-shadow: 0 1px 6px 1px rgba(0, 0, 0, 0.5);
+    --notification-icon-size: 32px;
+    --notification-app-icon-size: 11px;
     --font-size-body: 12px;
     --font-size-summary: 13px;
 }
@@ -247,19 +249,21 @@ scale slider:hover {
 }
 
 .widget-media-progress trough {
+    background: rgba(122, 252, 255, 0.12);
     min-height: 3px;
 }
 
 .widget-media-progress trough highlight {
+    background: var(--cyber-pink);
     min-height: 3px;
 }
 
 .widget-media-progress slider {
-    background: var(--cyber-dim);
+    background: var(--cyber-fg);
     border-color: var(--cyber-pink);
-    min-width: 12px;
-    min-height: 12px;
-    margin: -6px;
+    min-width: 8px;
+    min-height: 8px;
+    margin: -4px;
 }
 
 .widget-media-progress:hover slider {

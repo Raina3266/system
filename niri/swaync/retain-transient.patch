@@ -1,0 +1,31 @@
+diff --git a/src/notiModel/notiModel.vala b/src/notiModel/notiModel.vala
+index 3e08937..701715f 100644
+--- a/src/notiModel/notiModel.vala
++++ b/src/notiModel/notiModel.vala
+@@ -168,6 +168,8 @@ namespace SwayNotificationCenter {
+ 
+         public NotificationStatusEnum status_state { get; private set; }
+ 
++        private bool visibility_matched { get; set; default = false; }
++
+         public NotifyParams (uint32 applied_id,
+                              string app_name,
+                              uint32 replaces_id,
+@@ -235,6 +237,7 @@ namespace SwayNotificationCenter {
+                 if (!vis.matches_notification (this)) {
+                     continue;
+                 }
++                visibility_matched = true;
+                 status_state = vis.state;
+                 if (vis.override_urgency != UNSET) {
+                     debug ("override urgency to %s\n", vis.override_urgency.to_string ());
+@@ -419,7 +422,8 @@ namespace SwayNotificationCenter {
+         public bool ignore_cc () {
+             return status_state == NotificationStatusEnum.IGNORED
+                    || status_state == NotificationStatusEnum.TRANSIENT
+-                   || (transient && status_state != NotificationStatusEnum.MUTED);
++                   || (transient && !visibility_matched
++                       && status_state != NotificationStatusEnum.MUTED);
+         }
+ 
+         public string to_string () {

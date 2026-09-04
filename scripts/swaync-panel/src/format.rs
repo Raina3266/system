@@ -92,13 +92,12 @@ pub fn gibibytes(kibibytes: u64) -> String {
     format!("{:.1}G", kibibytes as f64 / (1024.0 * 1024.0))
 }
 
-/// How wide each cell's text is, counted from the icon's trailing space.
+/// How wide each complete cell is, including its label.
 ///
-/// Two cells share a 380px panel, so this is the widest the longest reading
-/// ("↓302B/s ↑220B/s") can be and still leave the second column room. Every
-/// cell holds exactly one icon, so padding the text alone keeps the second
-/// column aligned regardless of what the glyph's real advance width is.
-const CELL_WIDTH: usize = 18;
+/// Labels are words rather than equally wide glyphs, so the complete cell is
+/// padded. Twenty-five monospace cells accommodate the memory row while two
+/// columns still fit the 380px panel.
+const CELL_WIDTH: usize = 25;
 
 /// What separates the two columns.
 const COLUMN_GAP: &str = "  ";
@@ -106,23 +105,19 @@ const COLUMN_GAP: &str = "  ";
 /// How many readings share a line.
 const COLUMNS: usize = 2;
 
-/// One line of the widget: an icon, a value, and optional dimmed detail.
-///
-/// There is no name column. The icons are distinct enough to carry the meaning
-/// on their own, and dropping six words of dim text is most of what makes the
-/// block read like a control-center panel rather than a table.
+/// One line of the widget: a parameter label, value, and optional dimmed detail.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
-    pub icon: &'static str,
+    pub label: &'static str,
     pub value: String,
     pub detail: Option<String>,
     pub level: Level,
 }
 
 impl Row {
-    pub fn new(icon: &'static str, value: String) -> Self {
+    pub fn new(label: &'static str, value: String) -> Self {
         Row {
-            icon,
+            label,
             value,
             detail: None,
             level: Level::Normal,
@@ -139,7 +134,7 @@ impl Row {
 
     /// The spaces that carry the next column out to its own start.
     fn padding(&self) -> String {
-        " ".repeat(CELL_WIDTH.saturating_sub(self.text().chars().count()))
+        " ".repeat(CELL_WIDTH.saturating_sub(self.plain().chars().count()))
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
@@ -156,7 +151,7 @@ impl Row {
     pub fn markup(&self) -> String {
         let mut cell = format!(
             "{}  {}",
-            span(colour::ICON, self.icon),
+            span(colour::ICON, self.label),
             span(self.level.colour(), &self.value),
         );
         if let Some(detail) = &self.detail {
@@ -168,7 +163,7 @@ impl Row {
 
     /// The cell as plain text, for `--plain` and for the tests.
     pub fn plain(&self) -> String {
-        format!("{}  {}", self.icon, self.text())
+        format!("{}  {}", self.label, self.text())
     }
 }
 

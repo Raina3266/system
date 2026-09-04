@@ -1,4 +1,4 @@
-//! The system readings row: CPU, memory, temperature, disk and network.
+//! The system readings row: CPU, temperature, memory, disk and network.
 //!
 //! The readings that used to live in the Waybar `group/hardware` drawer, as one
 //! Pango markup block for SwayNC's patched `label` widget.
@@ -29,18 +29,14 @@ const SEED_DELAY: Duration = Duration::from_millis(250);
 /// derived rates are repeated instead of dividing by a near-zero interval.
 const MIN_INTERVAL_SECONDS: f64 = 0.25;
 
-/// The glyph that names each row, now that the rows carry no words.
-mod icon {
-    pub const CPU: &str = "󰻠";
-    pub const MEMORY: &str = "󰍛";
-    pub const SWAP: &str = "󰓡";
-    pub const TEMPERATURE: &str = "󰄏";
-    pub const TEMPERATURE_HOT: &str = "󰄅";
-    pub const DISK: &str = "󰋊";
-    pub const WIRELESS: &str = "󰖩";
-    pub const WIRED: &str = "󰈀";
-    pub const TUNNEL: &str = "󰛳";
-    pub const DISCONNECTED: &str = "󰖪";
+/// The text label that identifies each system parameter.
+mod label {
+    pub const CPU: &str = "CPU";
+    pub const MEMORY: &str = "Memory";
+    pub const SWAP: &str = "Swap";
+    pub const TEMPERATURE: &str = "Temperature";
+    pub const DISK: &str = "Disk";
+    pub const NETWORK: &str = "Network";
 }
 
 /// Print the block, as Pango markup unless `markup` is false.
@@ -185,7 +181,7 @@ fn cpu_row(config: &Config, current: &State) -> Option<Row> {
         return None;
     }
     let percent = current.cpu_percent.clamp(0.0, 100.0);
-    let row = Row::new(icon::CPU, format!("{percent:.0}%"))
+    let row = Row::new(label::CPU, format!("{percent:.0}%"))
         .level(Level::from_thresholds(percent, 80.0, 95.0));
     Some(
         match config
@@ -216,7 +212,7 @@ fn memory_rows(config: &Config) -> Vec<Row> {
     let percent = (used as f64 / memory.total as f64) * 100.0;
     let mut rows = vec![
         Row::new(
-            icon::MEMORY,
+            label::MEMORY,
             format!(
                 "{}/{}",
                 format::gibibytes(used),
@@ -232,7 +228,7 @@ fn memory_rows(config: &Config) -> Vec<Row> {
         let swap_percent = (swap_used as f64 / memory.swap_total as f64) * 100.0;
         rows.push(
             Row::new(
-                icon::SWAP,
+                label::SWAP,
                 format!(
                     "{}/{}",
                     format::gibibytes(swap_used),
@@ -253,12 +249,7 @@ fn temperature_row(config: &Config) -> Option<Row> {
         .and_then(parse::millidegrees)?;
     // The same thresholds the Waybar `temperature` module used.
     let level = Level::from_thresholds(celsius, 55.0, 80.0);
-    let glyph = if level == Level::Critical {
-        icon::TEMPERATURE_HOT
-    } else {
-        icon::TEMPERATURE
-    };
-    Some(Row::new(glyph, format!("{celsius:.0}°C")).level(level))
+    Some(Row::new(label::TEMPERATURE, format!("{celsius:.0}°C")).level(level))
 }
 
 /// Resolve which sensor to read.
@@ -346,7 +337,7 @@ fn disk_row(config: &Config) -> Option<Row> {
     let percent = (disk.used as f64 / disk.total as f64) * 100.0;
     Some(
         Row::new(
-            icon::DISK,
+            label::DISK,
             format!("{} free", format::bytes(disk.available)),
         )
         .detail(format!("{percent:.0}%"))
@@ -355,28 +346,22 @@ fn disk_row(config: &Config) -> Option<Row> {
 }
 
 pub(crate) fn network_row(current: &State, interface: Option<&str>) -> Option<Row> {
-    let Some(interface) = interface else {
-        return Some(Row::new(icon::DISCONNECTED, "Disconnected".to_owned()).level(Level::Warning));
-    };
-    let glyph = if interface.starts_with("wl") {
-        icon::WIRELESS
-    } else if interface.starts_with("en") || interface.starts_with("eth") {
-        icon::WIRED
-    } else {
-        icon::TUNNEL
-    };
+    if interface.is_none() {
+        return Some(
+            Row::new(label::NETWORK, "Disconnected".to_owned()).level(Level::Warning),
+        );
+    }
     Some(
         Row::new(
-            glyph,
+            label::NETWORK,
             format!(
                 "↓{} ↑{}",
                 format::rate(current.rx_rate),
                 format::rate(current.tx_rate)
             ),
         )
-        // The wired/wireless/tunnel glyph already says which link this is, and
-        // a cell that also spells out the interface name does not fit beside a
-        // second column.
+        // The interface name does not fit beside a second column; "Network"
+        // identifies the parameter while the rates remain the useful detail.
         .level(Level::Normal),
     )
 }

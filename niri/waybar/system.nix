@@ -27,9 +27,6 @@ in
     ];
     programs.google-chrome = {
       commandLineArgs = [
-        # Force web notifications through org.freedesktop.Notifications so
-        # SwayNC owns both their popup and their control-center history.
-        "--enable-features=SystemNotifications"
         "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
       ];
       nativeMessagingHosts = [ mprisenceNativeHost ];

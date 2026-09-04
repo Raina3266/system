@@ -122,11 +122,11 @@ fn plain_rows(config: &Config) -> Vec<String> {
         .collect()
 }
 
-/// The rows a config produces, named by the glyph that leads each one.
-fn icons(config: &Config) -> Vec<&'static str> {
+/// The rows a config produces, named by the label that leads each one.
+fn labels(config: &Config) -> Vec<&'static str> {
     collect_with_clock(config, || SAMPLE_TIME)
         .iter()
-        .map(|row| row.icon)
+        .map(|row| row.label)
         .collect()
 }
 
@@ -137,13 +137,13 @@ fn every_reading_becomes_a_row() {
     let rows = plain_rows(&fixture.config());
 
     assert_eq!(
-        icons(&fixture.config()),
+        labels(&fixture.config()),
         [
-            icon::CPU,
-            icon::TEMPERATURE,
-            icon::MEMORY,
-            icon::DISK,
-            icon::WIRELESS
+            label::CPU,
+            label::TEMPERATURE,
+            label::MEMORY,
+            label::DISK,
+            label::NETWORK
         ],
         "swap is absent because none is in use: {rows:#?}"
     );
@@ -217,7 +217,7 @@ fn swap_appears_only_once_something_is_in_it() {
     );
     fixture.seed_state(2.0);
     let rows = plain_rows(&fixture.config());
-    assert!(rows[3].starts_with(icon::SWAP), "{rows:#?}");
+    assert!(rows[3].starts_with(label::SWAP), "{rows:#?}");
     assert!(rows[3].contains("5.0G/25.0G"), "{}", rows[3]);
 }
 
@@ -250,7 +250,7 @@ fn a_hot_package_is_marked_critical() {
     fixture.seed_state(2.0);
     let row = collect_with_clock(&fixture.config(), || SAMPLE_TIME)
         .into_iter()
-        .find(|row| row.icon == icon::TEMPERATURE_HOT)
+        .find(|row| row.label == label::TEMPERATURE)
         .expect("a temperature row");
     assert_eq!(row.level, Level::Critical);
 }
@@ -261,7 +261,7 @@ fn a_machine_without_sensors_simply_omits_the_row() {
     fs::remove_dir_all(fixture.root.join("sys/class/thermal")).expect("remove sensors");
     fixture.seed_state(2.0);
     assert!(
-        !icons(&fixture.config()).contains(&icon::TEMPERATURE),
+        !labels(&fixture.config()).contains(&label::TEMPERATURE),
         "a machine with no sensors gets no temperature row"
     );
 }
@@ -294,11 +294,11 @@ fn an_unreadable_proc_produces_the_placeholder_block() {
 }
 
 #[test]
-fn the_interface_decides_the_network_icon() {
+fn every_connected_interface_uses_the_network_label() {
     let wired = network_row(&State::default(), Some("enp0s31f6")).expect("a row");
     let wireless = network_row(&State::default(), Some("wlp0s20f3")).expect("a row");
     let other = network_row(&State::default(), Some("tun0")).expect("a row");
-    assert_eq!(wired.icon, icon::WIRED);
-    assert_eq!(wireless.icon, icon::WIRELESS);
-    assert_eq!(other.icon, icon::TUNNEL);
+    assert_eq!(wired.label, label::NETWORK);
+    assert_eq!(wireless.label, label::NETWORK);
+    assert_eq!(other.label, label::NETWORK);
 }

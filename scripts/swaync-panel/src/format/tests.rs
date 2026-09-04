@@ -58,8 +58,8 @@ fn levels_are_classified_against_ascending_thresholds() {
 
 #[test]
 fn cells_pad_to_a_shared_width_so_the_second_column_lines_up() {
-    let short = Row::new("󰄏", "69°C".to_owned());
-    let long = Row::new("󰍛", "13.1G/31.1G".to_owned()).detail("42%");
+    let short = Row::new("Temperature", "69°C".to_owned());
+    let long = Row::new("Memory", "13.1G/31.1G".to_owned()).detail("42%");
     assert_eq!(
         short.plain().chars().count() + short.padding().len(),
         long.plain().chars().count() + long.padding().len(),
@@ -69,21 +69,21 @@ fn cells_pad_to_a_shared_width_so_the_second_column_lines_up() {
 
 #[test]
 fn a_cell_wider_than_its_column_is_not_truncated() {
-    let wide = Row::new("󰍛", "1234.5G/1234.5G".to_owned()).detail("100%");
+    let wide = Row::new("Memory", "1234.5G/1234.5G".to_owned()).detail("100%");
     assert!(wide.padding().is_empty());
     assert!(wide.plain().contains("1234.5G/1234.5G 100%"));
 }
 
 #[test]
 fn a_row_colours_its_value_by_level() {
-    let row = Row::new("󰄏", "91°C".to_owned()).level(Level::Critical);
+    let row = Row::new("Temperature", "91°C".to_owned()).level(Level::Critical);
     assert!(row.markup().contains(colour::CRITICAL));
     assert!(row.markup().contains(colour::ICON));
 }
 
 #[test]
 fn a_detail_is_appended_in_the_dim_colour() {
-    let row = Row::new("󰻠", "12%".to_owned()).detail("2.41 GHz");
+    let row = Row::new("CPU", "12%".to_owned()).detail("2.41 GHz");
     assert!(row.plain().ends_with("2.41 GHz"));
     assert_eq!(row.markup().matches(colour::NAME).count(), 1);
 }
@@ -91,9 +91,9 @@ fn a_detail_is_appended_in_the_dim_colour() {
 #[test]
 fn a_block_pairs_rows_two_to_a_line() {
     let rows = [
-        Row::new("󰻠", "12%".to_owned()),
-        Row::new("󰍛", "7.5G/32.0G".to_owned()),
-        Row::new("󰄏", "47°C".to_owned()),
+        Row::new("CPU", "12%".to_owned()),
+        Row::new("Memory", "7.5G/32.0G".to_owned()),
+        Row::new("Temperature", "47°C".to_owned()),
     ];
     assert_eq!(block(&rows[..2], false).lines().count(), 1);
     assert_eq!(block(&rows, false).lines().count(), 2, "the odd cell wraps");
