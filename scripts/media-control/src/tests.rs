@@ -13,7 +13,6 @@ use crate::ui::{bar_text, bar_tooltip, rofi_row_state, waybar_json, waybar_toggl
 const QUIET: Notifications = Notifications {
     count: 0,
     dnd: false,
-    visible: false,
 };
 
 #[test]
@@ -234,7 +233,6 @@ fn the_bar_button_counts_waiting_notifications() {
     let waiting = Notifications {
         count: 3,
         dnd: false,
-        visible: false,
     };
     assert_eq!(bar_text(None, waiting), "󰂚 3");
     assert!(bar_tooltip(None, waiting).starts_with("3 notifications"));
@@ -246,7 +244,6 @@ fn do_not_disturb_silences_the_bell_and_keeps_the_count_out_of_the_label() {
     let silenced = Notifications {
         count: 3,
         dnd: true,
-        visible: false,
     };
     assert_eq!(bar_text(None, silenced), "󰂛");
     assert!(bar_tooltip(None, silenced).contains("Do Not Disturb is on"));
@@ -261,7 +258,6 @@ fn the_bar_button_carries_the_badge_and_the_track_together() {
         Notifications {
             count: 2,
             dnd: false,
-            visible: false,
         },
     );
     assert!(text.starts_with("󰂚 2"), "{text}");
@@ -341,28 +337,26 @@ fn a_clock_grows_an_hours_field_only_when_it_needs_one() {
 }
 
 #[test]
-fn a_subscribe_line_yields_the_count_and_the_dnd_flag() {
+fn a_wayle_status_line_yields_the_count_and_the_dnd_flag() {
     assert_eq!(
-        parse("{ \"count\": 3, \"dnd\": false, \"visible\": false, \"inhibited\": false }"),
+        parse("{\"count\":3,\"dnd\":false}"),
         Some(Notifications {
             count: 3,
-            dnd: false,
-            visible: false
+            dnd: false
         })
     );
     assert_eq!(
-        parse("{ \"count\": 0, \"dnd\": true, \"visible\": true, \"inhibited\": false }"),
+        parse("{\"count\":0,\"dnd\":true}"),
         Some(Notifications {
             count: 0,
-            dnd: true,
-            visible: true
+            dnd: true
         })
     );
 }
 
 #[test]
-fn a_line_without_a_count_is_not_a_subscribe_line() {
-    assert_eq!(parse("waiting for swaync..."), None);
+fn a_line_without_a_count_is_not_a_wayle_status_line() {
+    assert_eq!(parse("Wayle is starting..."), None);
     assert_eq!(parse(""), None);
 }
 
@@ -380,18 +374,4 @@ fn playing_player() -> Player {
         pinned: false,
         activity: 0,
     }
-}
-
-#[test]
-fn an_open_control_center_adds_its_own_class() {
-    let open = Notifications {
-        count: 0,
-        dnd: false,
-        visible: true,
-    };
-    let json = waybar_json(None, open);
-    assert!(
-        json.contains("\"class\":[\"quiet\",\"empty\",\"cc-open\"]"),
-        "{json}"
-    );
 }

@@ -1,10 +1,8 @@
-//! The SwayNC notification count that shares the bar button with the media
-//! label.
+//! Wayle's notification count, shared with the media label in Waybar.
 //!
-//! `swaync-client --subscribe` prints one JSON line per change and flushes it,
-//! so following that stream costs one long-lived child rather than a D-Bus
-//! round trip on every bar tick. The subscriber runs on its own thread and the
-//! bar loop reads whatever it last saw.
+//! The locally patched `wayle notify status --watch` prints one JSON line per
+//! snapshot and flushes it. Following that stream costs one long-lived child
+//! rather than a new D-Bus round trip and process on every Waybar tick.
 
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -23,8 +21,6 @@ const RETRY_DELAY: Duration = Duration::from_secs(3);
 pub(crate) struct Notifications {
     pub(crate) count: u32,
     pub(crate) dnd: bool,
-    /// Whether the control center is open, so the button can show that it is.
-    pub(crate) visible: bool,
 }
 
 /// A live view of the daemon's state.
@@ -59,8 +55,7 @@ fn store(state: &Mutex<Notifications>, value: Notifications) {
 
 /// Read the subscription until it ends, then start it again.
 ///
-/// `swaync-client --subscribe` blocks until the daemon is up, so a failure to
-/// spawn means the client itself is missing — which waiting will not fix.
+/// Follow Wayle until it restarts, then reconnect.
 fn follow(state: &Mutex<Notifications>) {
     loop {
         let Some(mut child) = spawn_client() else {
@@ -82,12 +77,10 @@ fn follow(state: &Mutex<Notifications>) {
 }
 
 fn spawn_client() -> Option<Child> {
-    let client = executable("MEDIA_CONTROL_SWAYNC_CLIENT", "swaync-client");
+    let client = executable("MEDIA_CONTROL_WAYLE", "wayle");
 
-    // The subscriber only writes when a notification changes, so a stray one
-    // could idle for a long time before its dead stdout told it to stop. Run it
-    // behind the repository's parent-death guard, the same way Waybar runs this
-    // program, so it goes when this process does.
+    // Run the subscriber behind the repository's parent-death guard, the same
+    // way Waybar runs this program, so it goes when this process does.
     let mut command = match env::var("MEDIA_CONTROL_WITH_PARENT_DEATH")
         .ok()
         .filter(|guard| !guard.is_empty())
@@ -101,7 +94,7 @@ fn spawn_client() -> Option<Child> {
     };
 
     command
-        .arg("--subscribe")
+        .args(["notify", "status", "--watch"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -109,16 +102,15 @@ fn spawn_client() -> Option<Child> {
         .ok()
 }
 
-/// Read one `--subscribe` line.
+/// Read one `wayle notify status --watch` line.
 ///
-/// The line is small and its shape fixed — `{ "count": 3, "dnd": false,
-/// "visible": false, "inhibited": false }` — so it is scanned directly rather
-/// than through a JSON dependency this program does not otherwise need.
+/// The line is small and its shape fixed — `{ "count": 3, "dnd": false }` —
+/// so it is scanned directly rather than through a JSON dependency this
+/// program does not otherwise need.
 pub(crate) fn parse(line: &str) -> Option<Notifications> {
     Some(Notifications {
         count: number_after(line, "\"count\"")?,
         dnd: flag_after(line, "\"dnd\"").unwrap_or(false),
-        visible: flag_after(line, "\"visible\"").unwrap_or(false),
     })
 }
 

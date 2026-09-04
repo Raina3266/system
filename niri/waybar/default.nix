@@ -35,9 +35,8 @@ let
       position = "top";
       expand-center = true;
       # Battery at the far left, and `custom/media` in the middle: one button
-      # carrying the notification count and the current track, and the only way
-      # into the control center, where the volume slider, the media overview,
-      # today's calendar and the hardware readings all live.
+      # carrying Wayle's notification count and the current track. Wayle stays
+      # hidden until this button opens its notification history.
       modules-left = [
         "custom/battery"
         "tray"

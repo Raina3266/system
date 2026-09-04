@@ -1,0 +1,532 @@
+diff --git a/crates/wayle-ipc/src/shell_ipc.rs b/crates/wayle-ipc/src/shell_ipc.rs
+index 28431c2..bb93799 100644
+--- a/crates/wayle-ipc/src/shell_ipc.rs
++++ b/crates/wayle-ipc/src/shell_ipc.rs
+@@ -22,6 +22,8 @@ pub trait ShellIpc {
+ 
+     async fn bar_toggle(&self, monitor: &str) -> Result<()>;
+ 
++    async fn dropdown_toggle(&self, name: &str, monitor: &str) -> Result<()>;
++
+     #[zbus(property)]
+     fn bar_hidden(&self) -> Result<Vec<String>>;
+ 
+diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
+index 4483872..400a1ab 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
+@@ -2,7 +2,10 @@
+ 
+ use zbus::{fdo, interface};
+ 
+-use super::{bar::BarVisibility, state::ShellIpcState};
++use super::{
++    bar::BarVisibility,
++    state::{DropdownRequest, ShellIpcState},
++};
+ 
+ /// D-Bus daemon that dispatches shell commands to domain handlers.
+ pub(crate) struct ShellIpcDaemon {
+@@ -36,6 +39,37 @@ impl ShellIpcDaemon {
+         self.bar.toggle(monitor)
+     }
+ 
++    /// Toggles a dropdown on a monitor for integration with external bars.
++    pub async fn dropdown_toggle(&self, name: &str, monitor: &str) -> fdo::Result<()> {
++        if !crate::shell::bar::dropdowns::DROPDOWN_NAMES.contains(&name) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown dropdown: {name}"
++            )));
++        }
++
++        let mut connectors = self.state.connectors.get();
++        connectors.sort();
++        let monitor = if monitor.is_empty() {
++            connectors.first().map(String::as_str).unwrap_or_default()
++        } else {
++            monitor
++        };
++
++        if !connectors.iter().any(|item| item == monitor) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown monitor: {monitor}"
++            )));
++        }
++
++        let serial = self.state.dropdown_request.get().serial.wrapping_add(1);
++        self.state.dropdown_request.set(DropdownRequest {
++            serial,
++            name: name.to_owned(),
++            monitor: monitor.to_owned(),
++        });
++        Ok(())
++    }
++
+     /// Currently hidden monitor connectors.
+     #[zbus(property)]
+     pub async fn bar_hidden(&self) -> Vec<String> {
+diff --git a/crates/wayle-shell/src/services/shell_ipc/mod.rs b/crates/wayle-shell/src/services/shell_ipc/mod.rs
+index d84dd97..1754be9 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/mod.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/mod.rs
+@@ -10,7 +10,7 @@ mod error;
+ mod state;
+ 
+ pub use error::Error;
+-pub use state::ShellIpcState;
++pub use state::{DropdownRequest, ShellIpcState};
+ use tracing::info;
+ use wayle_ipc::shell_ipc::{SERVICE_NAME, SERVICE_PATH};
+ use zbus::Connection;
+diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
+index 9fdaf9f..a4f4358 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/state.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
+@@ -4,6 +4,17 @@ use std::collections::HashSet;
+ 
+ use wayle_core::Property;
+ 
++/// A request from an external bar to toggle one of Wayle's dropdowns.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct DropdownRequest {
++    /// Monotonically increasing value so identical requests stay observable.
++    pub serial: u64,
++    /// Registered dropdown name, for example `notification`.
++    pub name: String,
++    /// Monitor connector on which the dropdown should open.
++    pub monitor: String,
++}
++
+ /// Shared reactive state exposed to shell components via `ShellIpcService`.
+ ///
+ /// Bar watchers subscribe to these properties to react to IPC commands.
+@@ -15,6 +26,9 @@ pub struct ShellIpcState {
+     /// All active monitor connectors. Updated by the shell when bars are
+     /// created or destroyed.
+     pub connectors: Property<Vec<String>>,
++
++    /// Most recent request to toggle a dropdown from an external bar.
++    pub dropdown_request: Property<DropdownRequest>,
+ }
+ 
+ impl ShellIpcState {
+@@ -22,6 +36,7 @@ impl ShellIpcState {
+         Self {
+             hidden_bars: Property::new(HashSet::new()),
+             connectors: Property::new(Vec::new()),
++            dropdown_request: Property::new(DropdownRequest::default()),
+         }
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 4a0fbdf..804674f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -42,11 +42,13 @@ pub(crate) struct DropdownInstance {
+     popover: gtk::Popover,
+     _controller: Box<dyn Any>,
+     thaw_target: Rc<Cell<Option<relm4::Sender<BarButtonInput>>>>,
++    hide_window_on_close: Rc<RefCell<Option<gtk::Window>>>,
+ }
+ 
+ impl DropdownInstance {
+     pub(crate) fn new(popover: gtk::Popover, controller: Box<dyn Any>) -> Self {
+         let thaw_target: Rc<Cell<Option<relm4::Sender<BarButtonInput>>>> = Rc::default();
++        let hide_window_on_close: Rc<RefCell<Option<gtk::Window>>> = Rc::default();
+ 
+         popover.connect_map(|popover| {
+             debug!(
+@@ -59,6 +61,7 @@ impl DropdownInstance {
+         });
+ 
+         let thaw = thaw_target.clone();
++        let hide_window = hide_window_on_close.clone();
+         popover.connect_closed(move |popover| {
+             debug!(
+                 width = popover.width(),
+@@ -80,12 +83,17 @@ impl DropdownInstance {
+             }
+ 
+             set_bar_keyboard_mode(popover, KeyboardMode::None);
++
++            if let Some(window) = hide_window.borrow_mut().take() {
++                window.set_visible(false);
++            }
+         });
+ 
+         Self {
+             popover,
+             _controller: controller,
+             thaw_target,
++            hide_window_on_close,
+         }
+     }
+ 
+@@ -139,6 +147,16 @@ impl DropdownInstance {
+         self.show_for_widget(style);
+     }
+ 
++    fn toggle_external(
++        &self,
++        widget: &impl IsA<gtk::Widget>,
++        window: &gtk::Window,
++        style: DropdownStyle,
++    ) {
++        self.hide_window_on_close.replace(Some(window.clone()));
++        self.toggle_for_widget(widget, style);
++    }
++
+     fn show_for_widget(&self, style: DropdownStyle) {
+         self.apply_position();
+         self.apply_margins(style.margins);
+@@ -378,6 +396,19 @@ impl DropdownRegistry {
+         }
+     }
+ 
++    /// Toggles a dropdown from an external bar and hides Wayle's transparent
++    /// anchor window again when the dropdown closes.
++    pub(crate) fn toggle_external(
++        &self,
++        name: &str,
++        widget: &impl IsA<gtk::Widget>,
++        window: &gtk::Window,
++    ) {
++        if let Some(dropdown) = self.get_or_create(name) {
++            dropdown.toggle_external(widget, window, dropdown_style(self));
++        }
++    }
++
+     #[allow(clippy::cognitive_complexity)]
+     fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
+         let mut cache = self.cache.borrow_mut();
+diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index 5b5cf1c..7437e6d 100644
+--- a/crates/wayle-shell/src/shell/bar/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/mod.rs
+@@ -1,4 +1,4 @@
+-mod dropdowns;
++pub(crate) mod dropdowns;
+ mod factory;
+ pub(crate) mod icons;
+ mod methods;
+@@ -43,6 +43,7 @@ pub(crate) enum BarCmd {
+     DropdownAutohideChanged(bool),
+     ExclusiveChanged(bool),
+     LayerChanged,
++    ToggleDropdown(String),
+ }
+ 
+ #[relm4::component(pub(crate))]
+@@ -156,6 +157,14 @@ impl Component for Bar {
+         watchers::dropdowns::spawn(&sender, &init.services.config);
+         watchers::exclusive::spawn(&sender, &init.services.config);
+         watchers::layer::spawn(&sender, &init.services.config);
++        watchers::external_dropdown::spawn(
++            &sender,
++            &ipc_state,
++            settings
++                .monitor_name
++                .clone()
++                .unwrap_or_else(|| String::from("unknown")),
++        );
+ 
+         let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
+         dropdowns.warm_all();
+@@ -230,6 +239,12 @@ impl Component for Bar {
+                 let configured = self.services.config.config().bar.layer.get();
+                 apply_layer(root, configured, &self.services.config);
+             }
++            BarCmd::ToggleDropdown(name) => {
++                root.present();
++                let anchor = self.right.widget();
++                anchor.set_size_request(1, 1);
++                self.dropdowns.toggle_external(&name, anchor, root);
++            }
+         }
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+new file mode 100644
+index 0000000..8954308
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+@@ -0,0 +1,30 @@
++//! External dropdown requests delivered by the shell IPC service.
++
++use futures::StreamExt;
++use relm4::ComponentSender;
++
++use crate::{
++    services::shell_ipc::ShellIpcState,
++    shell::bar::{Bar, BarCmd},
++};
++
++pub(crate) fn spawn(sender: &ComponentSender<Bar>, ipc: &ShellIpcState, connector: String) {
++    let request = ipc.dropdown_request.clone();
++    let mut requests = request.watch();
++
++    sender.command(move |out, shutdown| async move {
++        let shutdown_fut = shutdown.wait();
++        tokio::pin!(shutdown_fut);
++
++        loop {
++            tokio::select! {
++                () = &mut shutdown_fut => break,
++                Some(current) = requests.next() => {
++                    if current.serial != 0 && current.monitor == connector {
++                        let _ = out.send(BarCmd::ToggleDropdown(current.name));
++                    }
++                }
++            }
++        }
++    });
++}
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/mod.rs b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+index c900f59..c506130 100644
+--- a/crates/wayle-shell/src/shell/bar/watchers/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+@@ -2,5 +2,6 @@
+ 
+ pub(crate) mod dropdowns;
+ pub(crate) mod exclusive;
++pub(crate) mod external_dropdown;
+ pub(crate) mod layer;
+ pub(crate) mod layout;
+diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
+index abe3e41..d2bdeb4 100644
+--- a/crates/wayle-shell/src/watchers/notification.rs
++++ b/crates/wayle-shell/src/watchers/notification.rs
+@@ -3,7 +3,7 @@
+ use std::sync::Arc;
+ 
+ use futures::StreamExt;
+-use wayle_notification::NotificationService;
++use wayle_notification::{core::notification::Notification, NotificationService};
+ 
+ use crate::shell::ShellServices;
+ 
+@@ -15,6 +15,63 @@ pub fn spawn(services: &ShellServices) {
+ 
+     let config = services.config.config();
+     spawn_blocklist_watcher(&config.modules.notifications, notification);
++    spawn_chrome_history_watcher(notification);
++}
++
++/// Chrome marks web notifications transient. Wayle correctly displays those
++/// as popups but normally omits them from history; retain Chrome's entries so
++/// an external notification-center button can still reopen them.
++fn spawn_chrome_history_watcher(service: &Arc<NotificationService>) {
++    let popups = service.popups.clone();
++    let history = service.notifications.clone();
++    let mut stream = popups.watch();
++
++    tokio::spawn(async move {
++        while stream.next().await.is_some() {
++            let mut current = history.get();
++            let mut changed = false;
++
++            for popup in popups
++                .get()
++                .iter()
++                .filter(|item| retain_transient(item.as_ref()))
++            {
++                if current.iter().any(|item| item.id == popup.id) {
++                    continue;
++                }
++                current.insert(0, popup.clone());
++                changed = true;
++            }
++
++            if changed {
++                history.set(current);
++            }
++        }
++    });
++}
++
++fn retain_transient(notification: &Notification) -> bool {
++    if !notification.is_transient.get() {
++        return false;
++    }
++
++    let desktop_entry = notification
++        .desktop_entry
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let app_name = notification
++        .app_name
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++
++    desktop_entry == "google-chrome"
++        || desktop_entry == "chromium"
++        || desktop_entry == "chromium-browser"
++        || desktop_entry.starts_with("chrome-")
++        || app_name.contains("chrome")
++        || app_name.contains("chromium")
+ }
+ 
+ fn spawn_blocklist_watcher(
+diff --git a/wayle/src/cli/notify/commands.rs b/wayle/src/cli/notify/commands.rs
+index 783e2b7..e70bda7 100644
+--- a/wayle/src/cli/notify/commands.rs
++++ b/wayle/src/cli/notify/commands.rs
+@@ -20,5 +20,9 @@ pub enum NotifyCommands {
+     Dnd,
+ 
+     /// Show notification status
+-    Status,
++    Status {
++        /// Keep printing machine-readable status updates.
++        #[arg(long)]
++        watch: bool,
++    },
+ }
+diff --git a/wayle/src/cli/notify/mod.rs b/wayle/src/cli/notify/mod.rs
+index 012d689..553d830 100644
+--- a/wayle/src/cli/notify/mod.rs
++++ b/wayle/src/cli/notify/mod.rs
+@@ -26,6 +26,6 @@ pub async fn execute(command: NotifyCommands) -> CliAction {
+         NotifyCommands::Dismiss { id } => dismiss::execute(id).await,
+         NotifyCommands::DismissAll => dismiss_all::execute().await,
+         NotifyCommands::Dnd => dnd::execute().await,
+-        NotifyCommands::Status => status::execute().await,
++        NotifyCommands::Status { watch } => status::execute(watch).await,
+     }
+ }
+diff --git a/wayle/src/cli/notify/status.rs b/wayle/src/cli/notify/status.rs
+index e8452c8..426e2fc 100644
+--- a/wayle/src/cli/notify/status.rs
++++ b/wayle/src/cli/notify/status.rs
+@@ -1,13 +1,52 @@
++use std::{
++    io::{self, Write},
++    time::Duration,
++};
++
++use wayle_notification::WayleNotificationsProxy;
++
+ use super::proxy::{connect, format_error};
+ use crate::cli::CliAction;
+ 
++struct Status {
++    count: u32,
++    popup_count: u32,
++    dnd: bool,
++    popup_duration: u32,
++}
++
+ /// Executes the status command.
+ ///
+ /// # Errors
+ /// Returns error if D-Bus communication fails.
+-pub async fn execute() -> CliAction {
++pub async fn execute(watch: bool) -> CliAction {
+     let (_connection, proxy) = connect().await?;
+ 
++    if watch {
++        loop {
++            let status = read_status(&proxy).await?;
++            println!(
++                "{{\"count\":{},\"dnd\":{}}}",
++                status.count, status.dnd
++            );
++            io::stdout()
++                .flush()
++                .map_err(|error| format!("Failed to flush notification status: {error}"))?;
++            tokio::time::sleep(Duration::from_millis(750)).await;
++        }
++    }
++
++    let status = read_status(&proxy).await?;
++    let dnd_status = if status.dnd { "enabled" } else { "disabled" };
++    println!("Notifications: {}", status.count);
++    println!("Active popups: {}", status.popup_count);
++    println!("Do Not Disturb: {dnd_status}");
++    println!("Popup duration: {}ms", status.popup_duration);
++
++    Ok(())
++}
++
++async fn read_status(proxy: &WayleNotificationsProxy<'_>) -> Result<Status, String> {
+     let count = proxy
+         .count()
+         .await
+@@ -28,11 +67,10 @@ pub async fn execute() -> CliAction {
+         .await
+         .map_err(|e| format_error("get popup duration", e))?;
+ 
+-    let dnd_status = if dnd { "enabled" } else { "disabled" };
+-    println!("Notifications: {count}");
+-    println!("Active popups: {popup_count}");
+-    println!("Do Not Disturb: {dnd_status}");
+-    println!("Popup duration: {popup_duration}ms");
+-
+-    Ok(())
++    Ok(Status {
++        count,
++        popup_count,
++        dnd,
++        popup_duration,
++    })
+ }
+diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
+index 651dd1f..de392ce 100644
+--- a/wayle/src/cli/panel/commands.rs
++++ b/wayle/src/cli/panel/commands.rs
+@@ -38,4 +38,12 @@ pub enum PanelCommands {
+         /// Monitor connector name (e.g., "DP-1"). Omit to toggle all.
+         monitor: Option<String>,
+     },
++
++    /// Toggle a dropdown for integration with an external bar
++    Dropdown {
++        /// Dropdown name, for example `notification`.
++        name: String,
++        /// Monitor connector on which to open it. Omit to use the first output.
++        monitor: Option<String>,
++    },
+ }
+diff --git a/wayle/src/cli/panel/dropdown.rs b/wayle/src/cli/panel/dropdown.rs
+new file mode 100644
+index 0000000..143ef4d
+--- /dev/null
++++ b/wayle/src/cli/panel/dropdown.rs
+@@ -0,0 +1,16 @@
++//! External dropdown integration.
++
++use super::proxy::{format_ipc_error, shell_ipc_proxy};
++use crate::cli::CliAction;
++
++pub async fn execute(name: String, monitor: Option<String>) -> CliAction {
++    let (_connection, proxy) = shell_ipc_proxy().await?;
++    let monitor = monitor.unwrap_or_default();
++
++    proxy
++        .dropdown_toggle(&name, &monitor)
++        .await
++        .map_err(|err| format_ipc_error("toggle dropdown", err))?;
++
++    Ok(())
++}
+diff --git a/wayle/src/cli/panel/mod.rs b/wayle/src/cli/panel/mod.rs
+index 55c8176..74f7827 100644
+--- a/wayle/src/cli/panel/mod.rs
++++ b/wayle/src/cli/panel/mod.rs
+@@ -3,6 +3,7 @@
+ /// Panel command definitions.
+ pub mod commands;
+ mod hide;
++mod dropdown;
+ mod inspect;
+ mod proxy;
+ /// Restart command.
+@@ -38,5 +39,6 @@ pub async fn execute(command: PanelCommands) -> CliAction {
+         PanelCommands::Hide { monitor } => hide::execute(monitor).await,
+         PanelCommands::Show { monitor } => show::execute(monitor).await,
+         PanelCommands::Toggle { monitor } => toggle::execute(monitor).await,
++        PanelCommands::Dropdown { name, monitor } => dropdown::execute(name, monitor).await,
+     }
+ }

@@ -134,7 +134,7 @@ binds {
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
     Mod+D hotkey-overlay-title="Open Dolphin" { spawn "dolphin"; }
     Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }
-    Mod+N hotkey-overlay-title="Notification Center: swaync" { spawn "swaync-client" "-t" "-sw"; }
+    Mod+N hotkey-overlay-title="Notification Center: Wayle" { spawn "wayle" "panel" "dropdown" "notification"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
@@ -161,7 +161,7 @@ binds {
     F5 hotkey-overlay-title="Brightness Down" { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
     F6 hotkey-overlay-title="Brightness Up"   { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
     F7 hotkey-overlay-title="Switch Window"   { focus-window-down; }
-    F8 hotkey-overlay-title="Do Not Disturb"   { spawn "swaync-client" "-d" "-sw"; }
+    F8 hotkey-overlay-title="Do Not Disturb"   { spawn "wayle" "notify" "dnd"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }

@@ -239,10 +239,7 @@ pub(crate) fn bar_tooltip(player: Option<&Player>, notifications: Notifications)
 pub(crate) fn waybar_json(player: Option<&Player>, notifications: Notifications) -> String {
     let (_, notification_class) = notification_badge(notifications);
     let media_class = player.map_or("empty", |player| player.status.class());
-    let mut classes = vec![notification_class, media_class];
-    if notifications.visible {
-        classes.push("cc-open");
-    }
+    let classes = vec![notification_class, media_class];
     let classes: Vec<String> = classes.iter().map(|class| format!("\"{class}\"")).collect();
     format!(
         "{{\"text\":\"{}\",\"tooltip\":\"{}\",\"class\":[{}],\"alt\":\"{}\"}}",

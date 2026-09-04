@@ -170,7 +170,7 @@ tooltip label {
 
 /* The centre button carries two classes at once, one per half of its label:
    the notification state, then the playback state. Pink with something
-   waiting, dimmed under Do Not Disturb, and washed while the panel is open. */
+   waiting and dimmed under Do Not Disturb. */
 
 #custom-media.notification {
     color: #ff7edb;
@@ -179,11 +179,6 @@ tooltip label {
 
 #custom-media.dnd {
     color: #5c6776;
-}
-
-#custom-media.cc-open {
-    background-color: rgba(255, 126, 219, 0.2);
-    border-color: rgba(255, 126, 219, 0.6);
 }
 
 /* A paused track dims the label, but not when the badge has something of its

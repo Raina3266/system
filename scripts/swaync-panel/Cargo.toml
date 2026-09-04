@@ -1,8 +1,0 @@
-[package]
-name = "swaync-panel"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-serde_json = "1"

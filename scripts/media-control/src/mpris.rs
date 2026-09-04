@@ -292,8 +292,7 @@ pub(crate) fn set_volume(player: &str, percent: f64) -> Result<(), String> {
 /// report a position may still refuse to be moved — seeking needs `CanSeek`
 /// and a track id, and browser-tab bridges often have neither — and that
 /// refusal is returned rather than swallowed: a handle that springs back is
-/// otherwise a silent mystery, and the widget runs this with SwayNC's stderr,
-/// so the reason lands in its journal.
+/// otherwise a silent mystery, so callers receive the reason directly.
 pub(crate) fn set_position(player: &str, seconds: f64) -> Result<(), String> {
     if player_property(player, &["position"]).is_none() {
         return Err(format!("{player} does not report a position"));

@@ -1,10 +1,9 @@
-//! The rows behind SwayNC's `media` widget.
+//! Compact player rows for integrations outside the Waybar button.
 //!
-//! The widget itself is a dumb renderer (see `niri/swaync/media-widget.patch`):
-//! it runs `media-control players`, turns each line into a row with a
-//! play/pause button, a progress bar and a volume slider, and calls back into
-//! this program when one of those is used. Everything that knows what a player
-//! is stays here.
+//! Integrations can run `media-control players`, turn each line into a row with
+//! a play/pause button, a progress bar and a volume slider, and call back into
+//! this program when one is used. Everything that knows what a player is stays
+//! here.
 
 use std::io::{self, Write};
 

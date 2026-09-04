@@ -24,7 +24,6 @@ let
     "rofi/rofi-clipboard.rasi" = "themes/rofi-clipboard.rasi";
     "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
     "rofi/rofi-network.rasi" = "themes/rofi-network.rasi";
-    "swaync/style.css" = "themes/swaync.css";
     "waybar/style.css" = "themes/waybar.css";
   };
 
