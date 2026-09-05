@@ -313,7 +313,7 @@ index 5b5cf1c..578649e 100644
          root.set_monitor(Some(&init.monitor));
          Self::apply_anchors(&root, location);
          Self::apply_css_classes(&root, &init.monitor, location, is_floating);
-@@ -147,6 +158,29 @@ impl Component for Bar {
+@@ -147,6 +158,33 @@ impl Component for Bar {
              .detach();
  
          let css_provider = gtk::CssProvider::new();
@@ -328,6 +328,10 @@ index 5b5cf1c..578649e 100644
 +        // The alpha stays clear of 1/255, below which GSK treats a colour as
 +        // fully clear and drops the node, putting the scene back to empty.
 +        external_anchor.add_css_class(EXTERNAL_ANCHOR_CLASS);
++        #[allow(deprecated)]
++        external_anchor
++            .style_context()
++            .add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
 +
 +        // The bar window doubles as the GTK anchor for dropdowns opened from an
 +        // external bar, so it stays mapped even when the layout hides it: a
@@ -429,7 +433,7 @@ index 409a9f7..5c1f6a8 100644
 +            --bar-padding-px: 0; \
 +            --bar-padding-ends-px: 0; \
 +            }} \
-+            .bar .external-anchor {{ \
++            .external-anchor {{ \
 +            background-color: rgba(255, 255, 255, 0.02); \
              }}"
          )
