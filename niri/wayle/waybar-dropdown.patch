@@ -1,5 +1,5 @@
 diff --git a/crates/wayle-ipc/src/shell_ipc.rs b/crates/wayle-ipc/src/shell_ipc.rs
-index 28431c2..bb93799 100644
+index 28431c262c4a5678c371ed37abfbdcff51ec7c70..bb93799320526334bcfb574d29027d78a6cd156c 100644
 --- a/crates/wayle-ipc/src/shell_ipc.rs
 +++ b/crates/wayle-ipc/src/shell_ipc.rs
 @@ -22,6 +22,8 @@ pub trait ShellIpc {
@@ -12,7 +12,7 @@ index 28431c2..bb93799 100644
      fn bar_hidden(&self) -> Result<Vec<String>>;
  
 diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
-index 4483872..f21899c 100644
+index 4483872108556ed3dab6de572bf2f8b3656f077d..f21899cc21a8b2904bb053810bb4d05852795e6d 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 @@ -2,7 +2,10 @@
@@ -74,7 +74,7 @@ index 4483872..f21899c 100644
      #[zbus(property)]
      pub async fn bar_hidden(&self) -> Vec<String> {
 diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
-index 9fdaf9f..c6445b0 100644
+index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..c6445b0cced98579cec4c4d6a8b8890be0cc0d18 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/state.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
 @@ -4,6 +4,17 @@ use std::collections::HashSet;
@@ -119,7 +119,7 @@ index 9fdaf9f..c6445b0 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 4a0fbdf..955e95b 100644
+index 4a0fbdf670c410cb53980a1189f1dd81aeeff2fa..955e95be391d6ef64256a9568990650b52e74688 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 @@ -378,6 +378,30 @@ impl DropdownRegistry {
@@ -154,7 +154,7 @@ index 4a0fbdf..955e95b 100644
      fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
          let mut cache = self.cache.borrow_mut();
 diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
-index ccca8d3..f84fc7b 100644
+index ccca8d302a902d3f06adddd4ae0fe6780f862e80..81f33bb6c2dcf976774dc0b515506de07926ddc2 100644
 --- a/crates/wayle-shell/src/shell/bar/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/methods.rs
 @@ -10,7 +10,7 @@ use wayle_config::schemas::bar::{BarItem, BarLayout, Location};
@@ -166,7 +166,7 @@ index ccca8d3..f84fc7b 100644
      dropdowns::DropdownRegistry,
      factory::{BarItemFactory, BarItemFactoryInit},
  };
-@@ -45,6 +45,64 @@ impl Bar {
+@@ -45,6 +45,69 @@ impl Bar {
          }
      }
  
@@ -176,10 +176,10 @@ index ccca8d3..f84fc7b 100644
 +    /// Unmapping is what upstream does for `show = false`, but a GTK popover
 +    /// can only be presented from a surface the compositor has already mapped,
 +    /// and mapping a layer surface costs a configure round-trip plus a frame.
-+    /// Anchor-only mode keeps the window mapped and makes it invisible
-+    /// instead: the sections are hidden, the CSS below drops the background,
-+    /// borders, shadow and padding, the exclusive zone is released, and an
-+    /// empty input region lets clicks through to whatever is underneath.
++    /// Anchor-only mode keeps a one-pixel-thick surface mapped instead: the
++    /// sections are hidden, the CSS removes borders, shadow and padding, the
++    /// exclusive zone is released, and an empty input region lets clicks
++    /// through to whatever is underneath.
 +    pub(super) fn apply_anchor_only(
 +        window: &gtk::Window,
 +        right_factory: &gtk::Box,
@@ -187,9 +187,14 @@ index ccca8d3..f84fc7b 100644
 +        exclusive: bool,
 +    ) {
 +        if anchor_only {
++            // An empty GTK window defaults to 200px. One pixel is enough to
++            // keep a buffer-backed layer surface available as a popup parent.
++            // The stretched axis is still controlled by the layer anchors.
++            window.set_default_size(1, 1);
 +            window.add_css_class(ANCHOR_ONLY_CLASS);
 +            window.set_exclusive_zone(0);
 +        } else {
++            window.set_default_size(-1, -1);
 +            window.remove_css_class(ANCHOR_ONLY_CLASS);
 +            Self::apply_exclusive_zone(window, exclusive);
 +        }
@@ -231,7 +236,7 @@ index ccca8d3..f84fc7b 100644
      pub(super) fn apply_css_classes(
          window: &gtk::Window,
          monitor: &gdk::Monitor,
-@@ -117,7 +175,13 @@ impl Bar {
+@@ -117,7 +180,13 @@ impl Bar {
          }
  
          if self.layout.show != new_layout.show {
@@ -247,7 +252,7 @@ index ccca8d3..f84fc7b 100644
  
          let settings = &self.settings;
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..578649e 100644
+index 5b5cf1c2b15c5b7979ce61444029395725c90af4..732e4c92e927908a4ff58e99114570c06f465e58 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -265,20 +270,17 @@ index 5b5cf1c..578649e 100644
  
  use factory::*;
  use gtk::prelude::*;
-@@ -18,6 +18,12 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
+@@ -18,6 +18,9 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
  use self::dropdowns::DropdownRegistry;
  use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
  
 +/// Marks a bar window that stays mapped only to anchor external dropdowns.
 +pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
 +
-+/// Marks the widget external dropdowns are anchored to.
-+const EXTERNAL_ANCHOR_CLASS: &str = "external-anchor";
-+
  pub(crate) struct Bar {
      settings: BarSettings,
      services: ShellServices,
-@@ -25,6 +31,8 @@ pub(crate) struct Bar {
+@@ -25,6 +28,8 @@ pub(crate) struct Bar {
      layout: BarLayout,
      css_provider: gtk::CssProvider,
      last_css: String,
@@ -287,7 +289,7 @@ index 5b5cf1c..578649e 100644
  
      left: FactoryVecDeque<BarItemFactory>,
      center: FactoryVecDeque<BarItemFactory>,
-@@ -43,6 +51,7 @@ pub(crate) enum BarCmd {
+@@ -43,6 +48,7 @@ pub(crate) enum BarCmd {
      DropdownAutohideChanged(bool),
      ExclusiveChanged(bool),
      LayerChanged,
@@ -295,7 +297,7 @@ index 5b5cf1c..578649e 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -100,6 +109,8 @@ impl Component for Bar {
+@@ -100,6 +106,8 @@ impl Component for Bar {
  
          let ipc_state = init.services.shell_ipc.state();
  
@@ -304,7 +306,7 @@ index 5b5cf1c..578649e 100644
          let visible_on_startup = {
              let connector = monitor_name.as_deref().unwrap_or("unknown");
              let layouts = config.bar.layout.get();
-@@ -123,7 +134,7 @@ impl Component for Bar {
+@@ -123,7 +131,7 @@ impl Component for Bar {
          root.init_layer_shell();
          apply_layer(&root, config.bar.layer.get(), &init.services.config);
          root.set_keyboard_mode(KeyboardMode::None);
@@ -313,31 +315,18 @@ index 5b5cf1c..578649e 100644
          root.set_monitor(Some(&init.monitor));
          Self::apply_anchors(&root, location);
          Self::apply_css_classes(&root, &init.monitor, location, is_floating);
-@@ -147,6 +158,33 @@ impl Component for Bar {
+@@ -147,6 +155,20 @@ impl Component for Bar {
              .detach();
  
          let css_provider = gtk::CssProvider::new();
 +        let external_anchor = gtk::Box::default();
 +        external_anchor.set_size_request(1, 1);
-+        // Carries a single near-transparent pixel from the CSS below. An
-+        // anchor-only bar has nothing else to draw, and a window whose scene
-+        // is empty never attaches a buffer -- which leaves its layer surface
-+        // unmapped, and a compositor does not render the popups of an
-+        // unmapped surface. One pixel is enough to keep the surface mapped.
-+        //
-+        // The alpha stays clear of 1/255, below which GSK treats a colour as
-+        // fully clear and drops the node, putting the scene back to empty.
-+        external_anchor.add_css_class(EXTERNAL_ANCHOR_CLASS);
-+        #[allow(deprecated)]
-+        external_anchor
-+            .style_context()
-+            .add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
 +
 +        // The bar window doubles as the GTK anchor for dropdowns opened from an
 +        // external bar, so it stays mapped even when the layout hides it: a
 +        // popover can only be presented from a surface the compositor has
 +        // already mapped, and `present()` followed by `popup()` in the same
-+        // main-loop turn is not that. Hidden means transparent, empty and
++        // main-loop turn is not that. Hidden means one pixel thick and
 +        // click-through instead of unmapped.
 +        let anchor_only = Rc::new(Cell::new(!visible_on_startup));
 +        let anchor_only_on_map = Rc::clone(&anchor_only);
@@ -347,7 +336,7 @@ index 5b5cf1c..578649e 100644
  
          #[allow(deprecated)]
          root.style_context()
-@@ -156,6 +190,14 @@ impl Component for Bar {
+@@ -156,6 +178,14 @@ impl Component for Bar {
          watchers::dropdowns::spawn(&sender, &init.services.config);
          watchers::exclusive::spawn(&sender, &init.services.config);
          watchers::layer::spawn(&sender, &init.services.config);
@@ -362,7 +351,7 @@ index 5b5cf1c..578649e 100644
  
          let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
          dropdowns.warm_all();
-@@ -174,6 +216,8 @@ impl Component for Bar {
+@@ -174,6 +204,8 @@ impl Component for Bar {
              },
              css_provider,
              last_css: String::new(),
@@ -371,7 +360,7 @@ index 5b5cf1c..578649e 100644
              left,
              center,
              right,
-@@ -200,10 +244,10 @@ impl Component for Bar {
+@@ -200,10 +232,10 @@ impl Component for Bar {
          widgets.left_box.append(model.left.widget());
          widgets.middle_box.append(model.center.widget());
          widgets.right_box.append(model.right.widget());
@@ -385,7 +374,7 @@ index 5b5cf1c..578649e 100644
  
          ComponentParts { model, widgets }
      }
-@@ -224,12 +268,24 @@ impl Component for Bar {
+@@ -224,12 +256,24 @@ impl Component for Bar {
                  self.dropdowns.set_all_autohide(autohide);
              }
              BarCmd::ExclusiveChanged(exclusive) => {
@@ -412,16 +401,16 @@ index 5b5cf1c..578649e 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
-index 409a9f7..5c1f6a8 100644
+index 409a9f73761b2a0c9f1c95797dc998ef485cf20b..db2923954270443152fc02dd9814f4d6ca382beb 100644
 --- a/crates/wayle-shell/src/shell/bar/styling.rs
 +++ b/crates/wayle-shell/src/shell/bar/styling.rs
-@@ -175,6 +175,22 @@ impl InlineStyling for Bar {
+@@ -175,6 +175,19 @@ impl InlineStyling for Bar {
              --bar-group-border-right: {group_border_right}; \
              --bar-shadow: {shadow}; \
              --bar-shadow-margin: {shadow_margin}; \
 +            }} \
 +            .bar.anchor-only {{ \
-+            --bar-opacity: 0%; \
++            background-color: var(--bar-bg); \
 +            --bar-border-top: 0; \
 +            --bar-border-bottom: 0; \
 +            --bar-border-left: 0; \
@@ -432,15 +421,12 @@ index 409a9f7..5c1f6a8 100644
 +            --bar-inset-ends-px: 0; \
 +            --bar-padding-px: 0; \
 +            --bar-padding-ends-px: 0; \
-+            }} \
-+            .external-anchor {{ \
-+            background-color: rgba(255, 255, 255, 0.02); \
              }}"
          )
      }
 diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
 new file mode 100644
-index 0000000..8954308
+index 0000000000000000000000000000000000000000..895430871b4d5f1d264f411b53c40684e20649df
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
 @@ -0,0 +1,30 @@
@@ -475,7 +461,7 @@ index 0000000..8954308
 +    });
 +}
 diff --git a/crates/wayle-shell/src/shell/bar/watchers/mod.rs b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
-index c900f59..c506130 100644
+index c900f591edec7705ec356f022c67f7bedd666122..c5061305ca258f0d5657a7ae28ec3c7717beebef 100644
 --- a/crates/wayle-shell/src/shell/bar/watchers/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
 @@ -2,5 +2,6 @@
@@ -486,7 +472,7 @@ index c900f59..c506130 100644
  pub(crate) mod layer;
  pub(crate) mod layout;
 diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
-index a2e1a66..56f7914 100644
+index a2e1a666b945dfe131625da6cfdedef1435168b0..56f791446ea0c577a6ed92c089fc11eda9d54bcd 100644
 --- a/crates/wayle-shell/src/shell/mod.rs
 +++ b/crates/wayle-shell/src/shell/mod.rs
 @@ -1,4 +1,4 @@
@@ -497,7 +483,7 @@ index a2e1a66..56f7914 100644
  mod osd;
 diff --git a/crates/wayle-shell/src/watchers/focused_output.rs b/crates/wayle-shell/src/watchers/focused_output.rs
 new file mode 100644
-index 0000000..b782e14
+index 0000000000000000000000000000000000000000..b782e14f6b96525fe645c9ee937e2b0ebe260e9f
 --- /dev/null
 +++ b/crates/wayle-shell/src/watchers/focused_output.rs
 @@ -0,0 +1,45 @@
@@ -547,7 +533,7 @@ index 0000000..b782e14
 +        .and_then(|workspace| workspace.output.get())
 +}
 diff --git a/crates/wayle-shell/src/watchers/mod.rs b/crates/wayle-shell/src/watchers/mod.rs
-index 33cbe85..392bb8f 100644
+index 33cbe85ac15ada2022bf0bef0c3e01eb2d525cc8..392bb8f882469ffb1c1571ca22feb57b8fec17bf 100644
 --- a/crates/wayle-shell/src/watchers/mod.rs
 +++ b/crates/wayle-shell/src/watchers/mod.rs
 @@ -1,5 +1,6 @@
@@ -566,7 +552,7 @@ index 33cbe85..392bb8f 100644
      sysinfo::spawn(services);
      user_style::spawn(sender, services.config.clone(), ShellCmd::CssRecompiled);
 diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
-index abe3e41..d2bdeb4 100644
+index abe3e4162f228d018ba2c3a5896a35d7d3c4c46a..d2bdeb4a5ddd51cca05d92c51ad4386c7758a620 100644
 --- a/crates/wayle-shell/src/watchers/notification.rs
 +++ b/crates/wayle-shell/src/watchers/notification.rs
 @@ -3,7 +3,7 @@
@@ -643,7 +629,7 @@ index abe3e41..d2bdeb4 100644
  
  fn spawn_blocklist_watcher(
 diff --git a/wayle/src/cli/notify/commands.rs b/wayle/src/cli/notify/commands.rs
-index 783e2b7..e70bda7 100644
+index 783e2b78a9d9df5f3d179ff307865137015ad6ba..e70bda79573b8275f5a9cb384de3739718faff15 100644
 --- a/wayle/src/cli/notify/commands.rs
 +++ b/wayle/src/cli/notify/commands.rs
 @@ -20,5 +20,9 @@ pub enum NotifyCommands {
@@ -658,7 +644,7 @@ index 783e2b7..e70bda7 100644
 +    },
  }
 diff --git a/wayle/src/cli/notify/mod.rs b/wayle/src/cli/notify/mod.rs
-index 012d689..553d830 100644
+index 012d689283abc970a570cfc254bb16e42727065d..553d830057f1a952f8839899c2bf5874cbb005c8 100644
 --- a/wayle/src/cli/notify/mod.rs
 +++ b/wayle/src/cli/notify/mod.rs
 @@ -26,6 +26,6 @@ pub async fn execute(command: NotifyCommands) -> CliAction {
@@ -670,7 +656,7 @@ index 012d689..553d830 100644
      }
  }
 diff --git a/wayle/src/cli/notify/status.rs b/wayle/src/cli/notify/status.rs
-index e8452c8..426e2fc 100644
+index e8452c862bf29529a520eb8e3014130ca0be8383..426e2fc7e3f2db049a62848bb819213e7feae2aa 100644
 --- a/wayle/src/cli/notify/status.rs
 +++ b/wayle/src/cli/notify/status.rs
 @@ -1,13 +1,52 @@
@@ -746,7 +732,7 @@ index e8452c8..426e2fc 100644
 +    })
  }
 diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
-index 651dd1f..de392ce 100644
+index 651dd1f9be105d528905201a626f9a011b72f138..de392ce259d684ee8774d65f7f93eb2d1b841a90 100644
 --- a/wayle/src/cli/panel/commands.rs
 +++ b/wayle/src/cli/panel/commands.rs
 @@ -38,4 +38,12 @@ pub enum PanelCommands {
@@ -764,7 +750,7 @@ index 651dd1f..de392ce 100644
  }
 diff --git a/wayle/src/cli/panel/dropdown.rs b/wayle/src/cli/panel/dropdown.rs
 new file mode 100644
-index 0000000..143ef4d
+index 0000000000000000000000000000000000000000..143ef4d0b12d35062167004a3f1abae4ef2766a7
 --- /dev/null
 +++ b/wayle/src/cli/panel/dropdown.rs
 @@ -0,0 +1,16 @@
@@ -785,7 +771,7 @@ index 0000000..143ef4d
 +    Ok(())
 +}
 diff --git a/wayle/src/cli/panel/mod.rs b/wayle/src/cli/panel/mod.rs
-index 55c8176..74f7827 100644
+index 55c8176d94d7bed1b033a6eae0f3ba6ee8cf030c..74f7827328e86220ca24066f8c806fc5e4843920 100644
 --- a/wayle/src/cli/panel/mod.rs
 +++ b/wayle/src/cli/panel/mod.rs
 @@ -3,6 +3,7 @@
