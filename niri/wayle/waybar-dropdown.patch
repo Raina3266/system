@@ -247,7 +247,7 @@ index ccca8d3..f84fc7b 100644
  
          let settings = &self.settings;
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..ac224fe 100644
+index 5b5cf1c..94d07b7 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -265,17 +265,20 @@ index 5b5cf1c..ac224fe 100644
  
  use factory::*;
  use gtk::prelude::*;
-@@ -18,6 +18,9 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
+@@ -18,6 +18,12 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
  use self::dropdowns::DropdownRegistry;
  use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
  
 +/// Marks a bar window that stays mapped only to anchor external dropdowns.
 +pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
 +
++/// Marks the widget external dropdowns are anchored to.
++const EXTERNAL_ANCHOR_CLASS: &str = "external-anchor";
++
  pub(crate) struct Bar {
      settings: BarSettings,
      services: ShellServices,
-@@ -25,6 +28,8 @@ pub(crate) struct Bar {
+@@ -25,6 +31,8 @@ pub(crate) struct Bar {
      layout: BarLayout,
      css_provider: gtk::CssProvider,
      last_css: String,
@@ -284,7 +287,7 @@ index 5b5cf1c..ac224fe 100644
  
      left: FactoryVecDeque<BarItemFactory>,
      center: FactoryVecDeque<BarItemFactory>,
-@@ -43,6 +48,7 @@ pub(crate) enum BarCmd {
+@@ -43,6 +51,7 @@ pub(crate) enum BarCmd {
      DropdownAutohideChanged(bool),
      ExclusiveChanged(bool),
      LayerChanged,
@@ -292,7 +295,7 @@ index 5b5cf1c..ac224fe 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -100,6 +106,8 @@ impl Component for Bar {
+@@ -100,6 +109,8 @@ impl Component for Bar {
  
          let ipc_state = init.services.shell_ipc.state();
  
@@ -301,7 +304,7 @@ index 5b5cf1c..ac224fe 100644
          let visible_on_startup = {
              let connector = monitor_name.as_deref().unwrap_or("unknown");
              let layouts = config.bar.layout.get();
-@@ -123,7 +131,7 @@ impl Component for Bar {
+@@ -123,7 +134,7 @@ impl Component for Bar {
          root.init_layer_shell();
          apply_layer(&root, config.bar.layer.get(), &init.services.config);
          root.set_keyboard_mode(KeyboardMode::None);
@@ -310,12 +313,18 @@ index 5b5cf1c..ac224fe 100644
          root.set_monitor(Some(&init.monitor));
          Self::apply_anchors(&root, location);
          Self::apply_css_classes(&root, &init.monitor, location, is_floating);
-@@ -147,6 +155,20 @@ impl Component for Bar {
+@@ -147,6 +158,26 @@ impl Component for Bar {
              .detach();
  
          let css_provider = gtk::CssProvider::new();
 +        let external_anchor = gtk::Box::default();
 +        external_anchor.set_size_request(1, 1);
++        // Carries a single near-transparent pixel from the CSS below. An
++        // anchor-only bar has nothing else to draw, and a window whose scene
++        // is empty never attaches a buffer -- which leaves its layer surface
++        // unmapped, and a compositor does not render the popups of an
++        // unmapped surface. One pixel is enough to keep the surface mapped.
++        external_anchor.add_css_class(EXTERNAL_ANCHOR_CLASS);
 +
 +        // The bar window doubles as the GTK anchor for dropdowns opened from an
 +        // external bar, so it stays mapped even when the layout hides it: a
@@ -331,7 +340,7 @@ index 5b5cf1c..ac224fe 100644
  
          #[allow(deprecated)]
          root.style_context()
-@@ -156,6 +178,14 @@ impl Component for Bar {
+@@ -156,6 +187,14 @@ impl Component for Bar {
          watchers::dropdowns::spawn(&sender, &init.services.config);
          watchers::exclusive::spawn(&sender, &init.services.config);
          watchers::layer::spawn(&sender, &init.services.config);
@@ -346,7 +355,7 @@ index 5b5cf1c..ac224fe 100644
  
          let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
          dropdowns.warm_all();
-@@ -174,6 +204,8 @@ impl Component for Bar {
+@@ -174,6 +213,8 @@ impl Component for Bar {
              },
              css_provider,
              last_css: String::new(),
@@ -355,7 +364,7 @@ index 5b5cf1c..ac224fe 100644
              left,
              center,
              right,
-@@ -200,10 +232,10 @@ impl Component for Bar {
+@@ -200,10 +241,10 @@ impl Component for Bar {
          widgets.left_box.append(model.left.widget());
          widgets.middle_box.append(model.center.widget());
          widgets.right_box.append(model.right.widget());
@@ -369,7 +378,7 @@ index 5b5cf1c..ac224fe 100644
  
          ComponentParts { model, widgets }
      }
-@@ -224,12 +256,24 @@ impl Component for Bar {
+@@ -224,12 +265,24 @@ impl Component for Bar {
                  self.dropdowns.set_all_autohide(autohide);
              }
              BarCmd::ExclusiveChanged(exclusive) => {
@@ -396,10 +405,10 @@ index 5b5cf1c..ac224fe 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
-index 409a9f7..c398de7 100644
+index 409a9f7..28e166a 100644
 --- a/crates/wayle-shell/src/shell/bar/styling.rs
 +++ b/crates/wayle-shell/src/shell/bar/styling.rs
-@@ -175,6 +175,19 @@ impl InlineStyling for Bar {
+@@ -175,6 +175,22 @@ impl InlineStyling for Bar {
              --bar-group-border-right: {group_border_right}; \
              --bar-shadow: {shadow}; \
              --bar-shadow-margin: {shadow_margin}; \
@@ -416,6 +425,9 @@ index 409a9f7..c398de7 100644
 +            --bar-inset-ends-px: 0; \
 +            --bar-padding-px: 0; \
 +            --bar-padding-ends-px: 0; \
++            }} \
++            .bar .external-anchor {{ \
++            background-color: rgba(255, 255, 255, 0.004); \
              }}"
          )
      }

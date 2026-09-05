@@ -553,7 +553,10 @@ configure round-trip and a frame, so a bar mapped at click time is never ready
 when the popover needs it. The patch hides the bar without unmapping it
 instead — background, borders, shadow, padding and sections all go away, and an
 empty input region lets clicks through — so it neither shows nor intercepts
-anything above Waybar.
+anything above Waybar. The anchor widget keeps one near-transparent pixel:
+a window with nothing at all to draw never attaches a buffer, its layer
+surface is then never mapped, and a compositor does not render the popups of
+an unmapped surface.
 
 With no monitor argument the dropdown opens on the output holding compositor
 focus. Waybar cannot tell Wayle which screen was clicked, and Wayland gives a
