@@ -114,7 +114,8 @@ in
       escape = true;
       "restart-interval" = 2;
       "exec-on-event" = false;
-      on-click = "${pkgs.wayle}/bin/wayle panel dropdown notification";
+      # Place Wayle immediately below this 40-pixel Waybar.
+      on-click = "${pkgs.wayle}/bin/wayle panel dropdown notification --offset 40";
       on-click-middle = "${packages.mediaControl}/bin/media-control toggle";
       on-click-right = "${packages.mediaControl}/bin/media-control menu";
     };

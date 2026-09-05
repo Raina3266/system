@@ -1,11 +1,7 @@
 # Wayle supplies notification popups and history while the existing Waybar
 # remains the visible desktop bar. Upstream only opens dropdowns from its own
-# bar, so the local patch adds a small D-Bus/CLI bridge. Wayle keeps one
-# one-pixel-thick bar per output as the GTK anchor for that dropdown. The patch
-# paints that surface with the configured bar colour so GTK attaches a buffer
-# and the compositor maps a valid popup parent. Its modules stay hidden, its
-# exclusive zone is zero, and its input region is empty, so Waybar remains
-# visible and receives clicks underneath.
+# bar, so the local patch adds a D-Bus/CLI bridge and hosts each dropdown in its
+# own layer-shell window. Wayle's own bar stays fully disabled.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
@@ -56,24 +52,10 @@
             };
 
             bar = {
+              # The external window uses these; the bar itself stays hidden.
               location = "top";
               layer = "overlay";
-              exclusive = false;
-              padding = 0.0;
-              "padding-ends" = 0.0;
-              "module-gap" = 0.0;
-              "background-opacity" = 0;
-              "button-opacity" = 0;
-              "button-bg-opacity" = 0;
-              "button-icon-padding" = 0.25;
-              "button-label-padding" = 0.25;
               "dropdown-opacity" = 100;
-              # An autohide popover asks the compositor for a popup grab, which
-              # is only granted against the serial of an input event Wayle
-              # itself received. The click comes from Waybar, so there is no
-              # such serial and the grab would dismiss the dropdown instantly.
-              # Clicking the Waybar button again closes it.
-              "dropdown-autohide" = false;
               layout = [
                 {
                   monitor = "*";

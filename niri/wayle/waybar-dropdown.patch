@@ -1,18 +1,18 @@
 diff --git a/crates/wayle-ipc/src/shell_ipc.rs b/crates/wayle-ipc/src/shell_ipc.rs
-index 28431c262c4a5678c371ed37abfbdcff51ec7c70..bb93799320526334bcfb574d29027d78a6cd156c 100644
+index 28431c262c4a5678c371ed37abfbdcff51ec7c70..f503077ff814c972d35ac6b83d001cb6ae91f54b 100644
 --- a/crates/wayle-ipc/src/shell_ipc.rs
 +++ b/crates/wayle-ipc/src/shell_ipc.rs
 @@ -22,6 +22,8 @@ pub trait ShellIpc {
  
      async fn bar_toggle(&self, monitor: &str) -> Result<()>;
  
-+    async fn dropdown_toggle(&self, name: &str, monitor: &str) -> Result<()>;
++    async fn dropdown_toggle(&self, name: &str, monitor: &str, offset: i32) -> Result<()>;
 +
      #[zbus(property)]
      fn bar_hidden(&self) -> Result<Vec<String>>;
  
 diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
-index 4483872108556ed3dab6de572bf2f8b3656f077d..f21899cc21a8b2904bb053810bb4d05852795e6d 100644
+index 4483872108556ed3dab6de572bf2f8b3656f077d..b4560efdb7eaa632f1260c2b14b86b35abf2d746 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 @@ -2,7 +2,10 @@
@@ -27,12 +27,12 @@ index 4483872108556ed3dab6de572bf2f8b3656f077d..f21899cc21a8b2904bb053810bb4d058
  
  /// D-Bus daemon that dispatches shell commands to domain handlers.
  pub(crate) struct ShellIpcDaemon {
-@@ -36,6 +39,45 @@ impl ShellIpcDaemon {
+@@ -36,6 +39,46 @@ impl ShellIpcDaemon {
          self.bar.toggle(monitor)
      }
  
 +    /// Toggles a dropdown on a monitor for integration with external bars.
-+    pub async fn dropdown_toggle(&self, name: &str, monitor: &str) -> fdo::Result<()> {
++    pub async fn dropdown_toggle(&self, name: &str, monitor: &str, offset: i32) -> fdo::Result<()> {
 +        if !crate::shell::bar::dropdowns::DROPDOWN_NAMES.contains(&name) {
 +            return Err(fdo::Error::InvalidArgs(format!("unknown dropdown: {name}")));
 +        }
@@ -66,6 +66,7 @@ index 4483872108556ed3dab6de572bf2f8b3656f077d..f21899cc21a8b2904bb053810bb4d058
 +            serial,
 +            name: name.to_owned(),
 +            monitor: monitor.to_owned(),
++            offset: offset.max(0),
 +        });
 +        Ok(())
 +    }
@@ -74,10 +75,10 @@ index 4483872108556ed3dab6de572bf2f8b3656f077d..f21899cc21a8b2904bb053810bb4d058
      #[zbus(property)]
      pub async fn bar_hidden(&self) -> Vec<String> {
 diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
-index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..c6445b0cced98579cec4c4d6a8b8890be0cc0d18 100644
+index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..aff856519b01803eba66608e74980f2f5c439e6b 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/state.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
-@@ -4,6 +4,17 @@ use std::collections::HashSet;
+@@ -4,6 +4,19 @@ use std::collections::HashSet;
  
  use wayle_core::Property;
  
@@ -90,12 +91,14 @@ index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..c6445b0cced98579cec4c4d6a8b8890b
 +    pub name: String,
 +    /// Monitor connector on which the dropdown should open.
 +    pub monitor: String,
++    /// Distance in logical pixels from the configured screen edge.
++    pub offset: i32,
 +}
 +
  /// Shared reactive state exposed to shell components via `ShellIpcService`.
  ///
  /// Bar watchers subscribe to these properties to react to IPC commands.
-@@ -15,6 +26,13 @@ pub struct ShellIpcState {
+@@ -15,6 +28,13 @@ pub struct ShellIpcState {
      /// All active monitor connectors. Updated by the shell when bars are
      /// created or destroyed.
      pub connectors: Property<Vec<String>>,
@@ -109,7 +112,7 @@ index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..c6445b0cced98579cec4c4d6a8b8890b
  }
  
  impl ShellIpcState {
-@@ -22,6 +40,8 @@ impl ShellIpcState {
+@@ -22,6 +42,8 @@ impl ShellIpcState {
          Self {
              hidden_bars: Property::new(HashSet::new()),
              connectors: Property::new(Vec::new()),
@@ -119,140 +122,283 @@ index 9fdaf9fa1fa19980e9ca2db78b483a064c365446..c6445b0cced98579cec4c4d6a8b8890b
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 4a0fbdf670c410cb53980a1189f1dd81aeeff2fa..955e95be391d6ef64256a9568990650b52e74688 100644
+index 4a0fbdf670c410cb53980a1189f1dd81aeeff2fa..c32996a1f816cbe8435af5f168af2f13d298e957 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -378,6 +378,30 @@ impl DropdownRegistry {
+@@ -6,13 +6,19 @@ use std::{
+ };
+ 
+ use gtk::prelude::*;
+-use gtk4_layer_shell::{KeyboardMode, LayerShell};
+-use relm4::{gtk, prelude::*};
++use gtk4_layer_shell::{Edge, KeyboardMode, LayerShell};
++use relm4::{gtk, gtk::gdk, prelude::*};
+ use tracing::{debug, warn};
+ use wayle_config::{ClickAction, schemas::bar::Location};
+ use wayle_widgets::prelude::{BarButton, BarButtonInput};
+ 
+-use crate::{process, shell::services::ShellServices};
++use crate::{
++    process,
++    shell::{
++        helpers::layer_shell::{apply_layer, reset_anchors},
++        services::ShellServices,
++    },
++};
+ 
+ /// Returns `value` unchanged, logging at debug if it is `None`.
+ ///
+@@ -278,6 +284,174 @@ impl Drop for DropdownInstance {
+     }
+ }
+ 
++/// A dropdown rendered as its own layer-shell surface for external bars.
++///
++/// `GtkPopover` is an `xdg_popup` and must belong to a mapped surface in the
++/// same process. Waybar cannot provide that parent to Wayle, so external
++/// requests use a real layer surface and reuse only the dropdown's content.
++struct ExternalDropdownInstance {
++    window: gtk::Window,
++    content: gtk::Widget,
++    _source: Rc<DropdownInstance>,
++}
++
++impl ExternalDropdownInstance {
++    fn new(name: &str, source: Rc<DropdownInstance>, monitor: &gdk::Monitor) -> Option<Self> {
++        let Some(content) = source.popover.child() else {
++            warn!(
++                dropdown = name,
++                "dropdown has no content to host externally"
++            );
++            return None;
++        };
++        source.popover.set_child(None::<&gtk::Widget>);
++
++        // The component updates size requests on its original popover root.
++        // Mirror those properties onto the detached content so scale changes
++        // continue to resize the standalone surface.
++        content.set_width_request(source.popover.width_request());
++        content.set_height_request(source.popover.height_request());
++
++        let weak_content = content.downgrade();
++        source.popover.connect_width_request_notify(move |popover| {
++            if let Some(content) = weak_content.upgrade() {
++                content.set_width_request(popover.width_request());
++            }
++        });
++
++        let weak_content = content.downgrade();
++        source
++            .popover
++            .connect_height_request_notify(move |popover| {
++                if let Some(content) = weak_content.upgrade() {
++                    content.set_height_request(popover.height_request());
++                }
++            });
++
++        // Module-specific selectors such as `.notification-dropdown` used to
++        // live on the popover root. Preserve them on the standalone content.
++        for class in source.popover.css_classes() {
++            content.add_css_class(class.as_str());
++        }
++
++        let window = gtk::Window::builder()
++            .decorated(false)
++            .resizable(false)
++            .build();
++        window.add_css_class("external-dropdown-window");
++        window.init_layer_shell();
++        window.set_namespace(Some(&format!("wayle-external-{name}")));
++        // Ignore other exclusive zones and use the explicit external-bar
++        // offset. This keeps placement deterministic even when Waybar and
++        // Wayle use different layer-shell layers.
++        window.set_exclusive_zone(-1);
++        window.set_keyboard_mode(KeyboardMode::None);
++        window.set_monitor(Some(monitor));
++        window.set_child(Some(&content));
++
++        window.connect_map(|window| {
++            debug!(
++                width = window.width(),
++                height = window.height(),
++                "external dropdown mapped"
++            );
++        });
++
++        let weak_window = window.downgrade();
++        let keys = gtk::EventControllerKey::new();
++        keys.connect_key_pressed(move |_, key, _, _| {
++            if key != gdk::Key::Escape {
++                return gtk::glib::Propagation::Proceed;
++            }
++
++            if let Some(window) = weak_window.upgrade() {
++                window.set_keyboard_mode(KeyboardMode::None);
++                window.set_visible(false);
++            }
++            gtk::glib::Propagation::Stop
++        });
++        window.add_controller(keys);
++
++        Some(Self {
++            window,
++            content,
++            _source: source,
++        })
++    }
++
++    fn show(&self, style: DropdownStyle, location: Location, offset: i32) {
++        reset_anchors(&self.window);
++
++        let position_class = match location {
++            Location::Top => {
++                self.window.set_anchor(Edge::Top, true);
++                self.window.set_anchor(Edge::Right, true);
++                self.window.set_margin(Edge::Top, offset);
++                "position-bottom"
++            }
++            Location::Bottom => {
++                self.window.set_anchor(Edge::Bottom, true);
++                self.window.set_anchor(Edge::Right, true);
++                self.window.set_margin(Edge::Bottom, offset);
++                "position-top"
++            }
++            Location::Left => {
++                self.window.set_anchor(Edge::Top, true);
++                self.window.set_anchor(Edge::Left, true);
++                self.window.set_margin(Edge::Left, offset);
++                "position-right"
++            }
++            Location::Right => {
++                self.window.set_anchor(Edge::Top, true);
++                self.window.set_anchor(Edge::Right, true);
++                self.window.set_margin(Edge::Right, offset);
++                "position-left"
++            }
++        };
++
++        for class in [
++            "position-top",
++            "position-bottom",
++            "position-left",
++            "position-right",
++        ] {
++            self.window.remove_css_class(class);
++        }
++        self.window.add_css_class(position_class);
++
++        self.content.set_margin_top(style.margins.top);
++        self.content.set_margin_bottom(style.margins.bottom);
++        self.content.set_margin_start(style.margins.start);
++        self.content.set_margin_end(style.margins.end);
++        self.window.set_opacity(style.opacity);
++
++        if style.shadow_enabled {
++            self.window.add_css_class("shadow");
++        } else {
++            self.window.remove_css_class("shadow");
++        }
++
++        self.window.set_keyboard_mode(KeyboardMode::OnDemand);
++        debug!(
++            offset,
++            position = position_class,
++            "opening external dropdown layer surface"
++        );
++        self.window.present();
++    }
++
++    fn hide(&self) {
++        self.window.set_keyboard_mode(KeyboardMode::None);
++        self.window.set_visible(false);
++    }
++}
++
++impl Drop for ExternalDropdownInstance {
++    fn drop(&mut self) {
++        self.window.destroy();
++    }
++}
++
+ struct DropdownStyle {
+     margins: DropdownMargins,
+     opacity: f64,
+@@ -354,14 +528,18 @@ pub(crate) trait DropdownFactory {
+ /// interactions resolve to the same logical dropdown instance.
+ pub(crate) struct DropdownRegistry {
+     services: ShellServices,
++    monitor: gdk::Monitor,
+     cache: RefCell<HashMap<String, Rc<DropdownInstance>>>,
++    external_cache: RefCell<HashMap<String, Rc<ExternalDropdownInstance>>>,
+ }
+ 
+ impl DropdownRegistry {
+-    pub(crate) fn new(services: &ShellServices) -> Self {
++    pub(crate) fn new(services: &ShellServices, monitor: &gdk::Monitor) -> Self {
+         Self {
+             services: services.clone(),
++            monitor: monitor.clone(),
+             cache: RefCell::default(),
++            external_cache: RefCell::default(),
          }
      }
  
-+    /// Toggles a dropdown on behalf of an external bar, anchored to `widget`.
+@@ -378,6 +556,53 @@ impl DropdownRegistry {
+         }
+     }
+ 
++    /// Toggles a standalone dropdown layer surface for an external bar.
 +    ///
 +    /// Returns `false` when the dropdown has no instance, which happens when
 +    /// the service it needs is unavailable.
 +    ///
-+    /// Autohide is forced off regardless of configuration. An autohide popover
-+    /// asks the compositor for an `xdg_popup` grab, and a grab is only granted
-+    /// against the serial of an input event this client received. The click
-+    /// that triggers this path belongs to the external bar, so Wayle has no
-+    /// such serial and the compositor dismisses the popup the moment it opens.
-+    /// Without the grab the dropdown stays put and the external bar's button
-+    /// closes it on the next click.
-+    pub(crate) fn toggle_external(&self, name: &str, widget: &impl IsA<gtk::Widget>) -> bool {
-+        let Some(dropdown) = self.get_or_create(name) else {
++    /// This deliberately does not use `GtkPopover`: Waybar and Wayle are
++    /// separate clients, so they cannot share the parent surface an xdg-popup
++    /// requires. Clicking the external bar button again (or Escape) closes it.
++    pub(crate) fn toggle_external(&self, name: &str, offset: i32) -> bool {
++        let Some(dropdown) = self.get_or_create_external(name) else {
 +            return false;
 +        };
 +
-+        let mut style = dropdown_style(self);
-+        style.autohide = false;
++        if dropdown.window.is_visible() {
++            dropdown.hide();
++            return true;
++        }
 +
-+        dropdown.toggle_for_widget(widget, style);
++        for other in self.external_cache.borrow().values() {
++            if !Rc::ptr_eq(other, &dropdown) {
++                other.hide();
++            }
++        }
++
++        let (location, layer) = {
++            let config = self.services.config.config();
++            (config.bar.location.get(), config.bar.layer.get())
++        };
++        apply_layer(&dropdown.window, layer, &self.services.config);
++        dropdown.show(dropdown_style(self), location, offset.max(0));
 +        true
++    }
++
++    fn get_or_create_external(&self, name: &str) -> Option<Rc<ExternalDropdownInstance>> {
++        let mut cache = self.external_cache.borrow_mut();
++        if let Some(instance) = cache.get(name) {
++            debug!(dropdown = name, "external dropdown cache hit");
++            return Some(instance.clone());
++        }
++
++        debug!(dropdown = name, "creating external dropdown layer surface");
++        let source = Rc::new(super::create(name, &self.services)?);
++        let instance = Rc::new(ExternalDropdownInstance::new(name, source, &self.monitor)?);
++        cache.insert(name.to_owned(), instance.clone());
++        Some(instance)
 +    }
 +
      #[allow(clippy::cognitive_complexity)]
      fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
          let mut cache = self.cache.borrow_mut();
-diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
-index ccca8d302a902d3f06adddd4ae0fe6780f862e80..81f33bb6c2dcf976774dc0b515506de07926ddc2 100644
---- a/crates/wayle-shell/src/shell/bar/methods.rs
-+++ b/crates/wayle-shell/src/shell/bar/methods.rs
-@@ -10,7 +10,7 @@ use wayle_config::schemas::bar::{BarItem, BarLayout, Location};
- use wayle_widgets::prelude::BarSettings;
- 
- use super::{
--    Bar,
-+    ANCHOR_ONLY_CLASS, Bar,
-     dropdowns::DropdownRegistry,
-     factory::{BarItemFactory, BarItemFactoryInit},
- };
-@@ -45,6 +45,69 @@ impl Bar {
-         }
-     }
- 
-+    /// Hides the bar without unmapping it, so it stays usable as the GTK
-+    /// anchor for dropdowns opened from an external bar.
-+    ///
-+    /// Unmapping is what upstream does for `show = false`, but a GTK popover
-+    /// can only be presented from a surface the compositor has already mapped,
-+    /// and mapping a layer surface costs a configure round-trip plus a frame.
-+    /// Anchor-only mode keeps a one-pixel-thick surface mapped instead: the
-+    /// sections are hidden, the CSS removes borders, shadow and padding, the
-+    /// exclusive zone is released, and an empty input region lets clicks
-+    /// through to whatever is underneath.
-+    pub(super) fn apply_anchor_only(
-+        window: &gtk::Window,
-+        right_factory: &gtk::Box,
-+        anchor_only: bool,
-+        exclusive: bool,
-+    ) {
-+        if anchor_only {
-+            // An empty GTK window defaults to 200px. One pixel is enough to
-+            // keep a buffer-backed layer surface available as a popup parent.
-+            // The stretched axis is still controlled by the layer anchors.
-+            window.set_default_size(1, 1);
-+            window.add_css_class(ANCHOR_ONLY_CLASS);
-+            window.set_exclusive_zone(0);
-+        } else {
-+            window.set_default_size(-1, -1);
-+            window.remove_css_class(ANCHOR_ONLY_CLASS);
-+            Self::apply_exclusive_zone(window, exclusive);
-+        }
-+
-+        // The right section keeps its own visibility so the anchor widget
-+        // appended after it stays mapped; only the factory content is hidden.
-+        if let Some(center_box) = window
-+            .child()
-+            .and_then(|child| child.downcast::<gtk::CenterBox>().ok())
-+        {
-+            if let Some(start) = center_box.start_widget() {
-+                start.set_visible(!anchor_only);
-+            }
-+            if let Some(center) = center_box.center_widget() {
-+                center.set_visible(!anchor_only);
-+            }
-+        }
-+        right_factory.set_visible(!anchor_only);
-+
-+        Self::apply_input_region(window, anchor_only);
-+    }
-+
-+    /// Makes the window click-through while it is only an anchor.
-+    ///
-+    /// Re-applied from the window's `map` handler because the surface does not
-+    /// exist before the window is realized.
-+    pub(super) fn apply_input_region(window: &gtk::Window, anchor_only: bool) {
-+        let Some(surface) = window.surface() else {
-+            return;
-+        };
-+
-+        if anchor_only {
-+            surface.set_input_region(Some(&gtk::cairo::Region::create()));
-+        } else {
-+            surface.set_input_region(None);
-+        }
-+    }
-+
-     pub(super) fn apply_css_classes(
-         window: &gtk::Window,
-         monitor: &gdk::Monitor,
-@@ -117,7 +180,13 @@ impl Bar {
-         }
- 
-         if self.layout.show != new_layout.show {
--            root.set_visible(new_layout.show);
-+            self.anchor_only.set(!new_layout.show);
-+            Self::apply_anchor_only(
-+                root,
-+                self.right.widget(),
-+                !new_layout.show,
-+                self.services.config.config().bar.exclusive.get(),
-+            );
-         }
- 
-         let settings = &self.settings;
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c2b15c5b7979ce61444029395725c90af4..732e4c92e927908a4ff58e99114570c06f465e58 100644
+index 5b5cf1c2b15c5b7979ce61444029395725c90af4..e0cb0537d439a36f04c5d8b200997ad92c564293 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -261,82 +407,23 @@ index 5b5cf1c2b15c5b7979ce61444029395725c90af4..732e4c92e927908a4ff58e99114570c0
  mod factory;
  pub(crate) mod icons;
  mod methods;
-@@ -6,7 +6,7 @@ mod modules;
- mod styling;
- mod watchers;
- 
--use std::rc::Rc;
-+use std::{cell::Cell, rc::Rc};
- 
- use factory::*;
- use gtk::prelude::*;
-@@ -18,6 +18,9 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
- use self::dropdowns::DropdownRegistry;
- use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
- 
-+/// Marks a bar window that stays mapped only to anchor external dropdowns.
-+pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
-+
- pub(crate) struct Bar {
-     settings: BarSettings,
-     services: ShellServices,
-@@ -25,6 +28,8 @@ pub(crate) struct Bar {
+@@ -25,7 +25,6 @@ pub(crate) struct Bar {
      layout: BarLayout,
      css_provider: gtk::CssProvider,
      last_css: String,
-+    external_anchor: gtk::Box,
-+    anchor_only: Rc<Cell<bool>>,
- 
+-
      left: FactoryVecDeque<BarItemFactory>,
      center: FactoryVecDeque<BarItemFactory>,
-@@ -43,6 +48,7 @@ pub(crate) enum BarCmd {
+     right: FactoryVecDeque<BarItemFactory>,
+@@ -43,6 +42,7 @@ pub(crate) enum BarCmd {
      DropdownAutohideChanged(bool),
      ExclusiveChanged(bool),
      LayerChanged,
-+    ToggleDropdown(String),
++    ToggleDropdown { name: String, offset: i32 },
  }
  
  #[relm4::component(pub(crate))]
-@@ -100,6 +106,8 @@ impl Component for Bar {
- 
-         let ipc_state = init.services.shell_ipc.state();
- 
-+        let exclusive = config.bar.exclusive.get();
-+
-         let visible_on_startup = {
-             let connector = monitor_name.as_deref().unwrap_or("unknown");
-             let layouts = config.bar.layout.get();
-@@ -123,7 +131,7 @@ impl Component for Bar {
-         root.init_layer_shell();
-         apply_layer(&root, config.bar.layer.get(), &init.services.config);
-         root.set_keyboard_mode(KeyboardMode::None);
--        Self::apply_exclusive_zone(&root, config.bar.exclusive.get());
-+        Self::apply_exclusive_zone(&root, exclusive);
-         root.set_monitor(Some(&init.monitor));
-         Self::apply_anchors(&root, location);
-         Self::apply_css_classes(&root, &init.monitor, location, is_floating);
-@@ -147,6 +155,20 @@ impl Component for Bar {
-             .detach();
- 
-         let css_provider = gtk::CssProvider::new();
-+        let external_anchor = gtk::Box::default();
-+        external_anchor.set_size_request(1, 1);
-+
-+        // The bar window doubles as the GTK anchor for dropdowns opened from an
-+        // external bar, so it stays mapped even when the layout hides it: a
-+        // popover can only be presented from a surface the compositor has
-+        // already mapped, and `present()` followed by `popup()` in the same
-+        // main-loop turn is not that. Hidden means one pixel thick and
-+        // click-through instead of unmapped.
-+        let anchor_only = Rc::new(Cell::new(!visible_on_startup));
-+        let anchor_only_on_map = Rc::clone(&anchor_only);
-+        root.connect_map(move |window| {
-+            Self::apply_input_region(window, anchor_only_on_map.get());
-+        });
- 
-         #[allow(deprecated)]
-         root.style_context()
-@@ -156,6 +178,14 @@ impl Component for Bar {
+@@ -156,9 +156,16 @@ impl Component for Bar {
          watchers::dropdowns::spawn(&sender, &init.services.config);
          watchers::exclusive::spawn(&sender, &init.services.config);
          watchers::layer::spawn(&sender, &init.services.config);
@@ -349,48 +436,18 @@ index 5b5cf1c2b15c5b7979ce61444029395725c90af4..732e4c92e927908a4ff58e99114570c0
 +                .unwrap_or_else(|| String::from("unknown")),
 +        );
  
-         let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
-         dropdowns.warm_all();
-@@ -174,6 +204,8 @@ impl Component for Bar {
-             },
-             css_provider,
-             last_css: String::new(),
-+            external_anchor,
-+            anchor_only,
-             left,
-             center,
-             right,
-@@ -200,10 +232,10 @@ impl Component for Bar {
-         widgets.left_box.append(model.left.widget());
-         widgets.middle_box.append(model.center.widget());
-         widgets.right_box.append(model.right.widget());
-+        widgets.right_box.append(&model.external_anchor);
+-        let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
+-        dropdowns.warm_all();
++        let dropdowns = Rc::new(DropdownRegistry::new(&init.services, &init.monitor));
  
--        if visible_on_startup {
--            root.present();
--        }
-+        Self::apply_anchor_only(&root, model.right.widget(), !visible_on_startup, exclusive);
-+        root.present();
- 
-         ComponentParts { model, widgets }
-     }
-@@ -224,12 +256,24 @@ impl Component for Bar {
-                 self.dropdowns.set_all_autohide(autohide);
-             }
-             BarCmd::ExclusiveChanged(exclusive) => {
--                Self::apply_exclusive_zone(root, exclusive);
-+                // An anchor-only window reserves no space; the configured zone
-+                // is restored when the layout shows the bar again.
-+                if !self.anchor_only.get() {
-+                    Self::apply_exclusive_zone(root, exclusive);
-+                }
-             }
-             BarCmd::LayerChanged => {
+         let mut model = Self {
+             settings,
+@@ -230,6 +237,14 @@ impl Component for Bar {
                  let configured = self.services.config.config().bar.layer.get();
                  apply_layer(root, configured, &self.services.config);
              }
-+            BarCmd::ToggleDropdown(name) => {
-+                if !self.dropdowns.toggle_external(&name, &self.external_anchor) {
++            BarCmd::ToggleDropdown { name, offset } => {
++                if !self.dropdowns.toggle_external(&name, offset) {
 +                    tracing::warn!(
 +                        dropdown = %name,
 +                        "external bar asked for a dropdown that has no instance"
@@ -400,36 +457,12 @@ index 5b5cf1c2b15c5b7979ce61444029395725c90af4..732e4c92e927908a4ff58e99114570c0
          }
      }
  }
-diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
-index 409a9f73761b2a0c9f1c95797dc998ef485cf20b..db2923954270443152fc02dd9814f4d6ca382beb 100644
---- a/crates/wayle-shell/src/shell/bar/styling.rs
-+++ b/crates/wayle-shell/src/shell/bar/styling.rs
-@@ -175,6 +175,19 @@ impl InlineStyling for Bar {
-             --bar-group-border-right: {group_border_right}; \
-             --bar-shadow: {shadow}; \
-             --bar-shadow-margin: {shadow_margin}; \
-+            }} \
-+            .bar.anchor-only {{ \
-+            background-color: var(--bar-bg); \
-+            --bar-border-top: 0; \
-+            --bar-border-bottom: 0; \
-+            --bar-border-left: 0; \
-+            --bar-border-right: 0; \
-+            --bar-shadow: none; \
-+            --bar-shadow-margin: 0; \
-+            --bar-inset-edge-px: 0; \
-+            --bar-inset-ends-px: 0; \
-+            --bar-padding-px: 0; \
-+            --bar-padding-ends-px: 0; \
-             }}"
-         )
-     }
 diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..895430871b4d5f1d264f411b53c40684e20649df
+index 0000000000000000000000000000000000000000..ed33ca428a5946b833855b4a1db374dc85eff0b8
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,33 @@
 +//! External dropdown requests delivered by the shell IPC service.
 +
 +use futures::StreamExt;
@@ -453,7 +486,10 @@ index 0000000000000000000000000000000000000000..895430871b4d5f1d264f411b53c40684
 +                () = &mut shutdown_fut => break,
 +                Some(current) = requests.next() => {
 +                    if current.serial != 0 && current.monitor == connector {
-+                        let _ = out.send(BarCmd::ToggleDropdown(current.name));
++                        let _ = out.send(BarCmd::ToggleDropdown {
++                            name: current.name,
++                            offset: current.offset,
++                        });
 +                    }
 +                }
 +            }
@@ -552,7 +588,7 @@ index 33cbe85ac15ada2022bf0bef0c3e01eb2d525cc8..392bb8f882469ffb1c1571ca22feb57b
      sysinfo::spawn(services);
      user_style::spawn(sender, services.config.clone(), ShellCmd::CssRecompiled);
 diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
-index abe3e4162f228d018ba2c3a5896a35d7d3c4c46a..d2bdeb4a5ddd51cca05d92c51ad4386c7758a620 100644
+index abe3e4162f228d018ba2c3a5896a35d7d3c4c46a..6b78a1d6e8f41791bfbfa8ed94a8038f70f1dc77 100644
 --- a/crates/wayle-shell/src/watchers/notification.rs
 +++ b/crates/wayle-shell/src/watchers/notification.rs
 @@ -3,7 +3,7 @@
@@ -560,7 +596,7 @@ index abe3e4162f228d018ba2c3a5896a35d7d3c4c46a..d2bdeb4a5ddd51cca05d92c51ad4386c
  
  use futures::StreamExt;
 -use wayle_notification::NotificationService;
-+use wayle_notification::{core::notification::Notification, NotificationService};
++use wayle_notification::{NotificationService, core::notification::Notification};
  
  use crate::shell::ShellServices;
  
@@ -628,6 +664,54 @@ index abe3e4162f228d018ba2c3a5896a35d7d3c4c46a..d2bdeb4a5ddd51cca05d92c51ad4386c
  }
  
  fn spawn_blocklist_watcher(
+diff --git a/crates/wayle-styling/scss/primitives/dropdown/_index.scss b/crates/wayle-styling/scss/primitives/dropdown/_index.scss
+index d4bc642ece2be3192bca6999abf6371251fc8305..7efe9e102e8e9b1cde4d91e1b13b010163de55b7 100644
+--- a/crates/wayle-styling/scss/primitives/dropdown/_index.scss
++++ b/crates/wayle-styling/scss/primitives/dropdown/_index.scss
+@@ -34,6 +34,43 @@ popover.shadow.position-right > contents .dropdown {
+         0 0 0 1px rgba(255, 255, 255, 0.04);
+ }
+ 
++// Dropdowns opened by another bar cannot be GtkPopovers because Wayland does
++// not allow an xdg-popup to use a parent surface from a different client.
++// Their content is hosted in a transparent layer-shell window instead.
++window.external-dropdown-window {
++    background: transparent;
++    border: none;
++    box-shadow: none;
++}
++
++window.external-dropdown-window.shadow .dropdown {
++    box-shadow:
++        0 0px 5px rgba(0, 0, 0, 0.3),
++        0 4px 10px rgba(0, 0, 0, 0.3),
++        0 0 0 1px rgba(255, 255, 255, 0.04);
++}
++
++window.external-dropdown-window.shadow.position-top .dropdown {
++    box-shadow:
++        0 0px 5px rgba(0, 0, 0, 0.3),
++        0 -4px 10px rgba(0, 0, 0, 0.3),
++        0 0 0 1px rgba(255, 255, 255, 0.04);
++}
++
++window.external-dropdown-window.shadow.position-left .dropdown {
++    box-shadow:
++        0px 0 5px rgba(0, 0, 0, 0.3),
++        -4px 0 10px rgba(0, 0, 0, 0.3),
++        0 0 0 1px rgba(255, 255, 255, 0.04);
++}
++
++window.external-dropdown-window.shadow.position-right .dropdown {
++    box-shadow:
++        0px 0 5px rgba(0, 0, 0, 0.3),
++        4px 0 10px rgba(0, 0, 0, 0.3),
++        0 0 0 1px rgba(255, 255, 255, 0.04);
++}
++
+ popover.dropdown {
+     background: transparent;
+     border: none;
 diff --git a/wayle/src/cli/notify/commands.rs b/wayle/src/cli/notify/commands.rs
 index 783e2b78a9d9df5f3d179ff307865137015ad6ba..e70bda79573b8275f5a9cb384de3739718faff15 100644
 --- a/wayle/src/cli/notify/commands.rs
@@ -656,10 +740,10 @@ index 012d689283abc970a570cfc254bb16e42727065d..553d830057f1a952f8839899c2bf5874
      }
  }
 diff --git a/wayle/src/cli/notify/status.rs b/wayle/src/cli/notify/status.rs
-index e8452c862bf29529a520eb8e3014130ca0be8383..426e2fc7e3f2db049a62848bb819213e7feae2aa 100644
+index e8452c862bf29529a520eb8e3014130ca0be8383..ef58a5c11e44455dac35793ba3b64dfe97a9a114 100644
 --- a/wayle/src/cli/notify/status.rs
 +++ b/wayle/src/cli/notify/status.rs
-@@ -1,13 +1,52 @@
+@@ -1,13 +1,49 @@
 +use std::{
 +    io::{self, Write},
 +    time::Duration,
@@ -688,10 +772,7 @@ index e8452c862bf29529a520eb8e3014130ca0be8383..426e2fc7e3f2db049a62848bb819213e
 +    if watch {
 +        loop {
 +            let status = read_status(&proxy).await?;
-+            println!(
-+                "{{\"count\":{},\"dnd\":{}}}",
-+                status.count, status.dnd
-+            );
++            println!("{{\"count\":{},\"dnd\":{}}}", status.count, status.dnd);
 +            io::stdout()
 +                .flush()
 +                .map_err(|error| format!("Failed to flush notification status: {error}"))?;
@@ -713,7 +794,7 @@ index e8452c862bf29529a520eb8e3014130ca0be8383..426e2fc7e3f2db049a62848bb819213e
      let count = proxy
          .count()
          .await
-@@ -28,11 +67,10 @@ pub async fn execute() -> CliAction {
+@@ -28,11 +64,10 @@ pub async fn execute() -> CliAction {
          .await
          .map_err(|e| format_error("get popup duration", e))?;
  
@@ -732,10 +813,10 @@ index e8452c862bf29529a520eb8e3014130ca0be8383..426e2fc7e3f2db049a62848bb819213e
 +    })
  }
 diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
-index 651dd1f9be105d528905201a626f9a011b72f138..de392ce259d684ee8774d65f7f93eb2d1b841a90 100644
+index 651dd1f9be105d528905201a626f9a011b72f138..4d46373b4365408e0e04d4c84ebb099eff1e755a 100644
 --- a/wayle/src/cli/panel/commands.rs
 +++ b/wayle/src/cli/panel/commands.rs
-@@ -38,4 +38,12 @@ pub enum PanelCommands {
+@@ -38,4 +38,15 @@ pub enum PanelCommands {
          /// Monitor connector name (e.g., "DP-1"). Omit to toggle all.
          monitor: Option<String>,
      },
@@ -744,13 +825,16 @@ index 651dd1f9be105d528905201a626f9a011b72f138..de392ce259d684ee8774d65f7f93eb2d
 +    Dropdown {
 +        /// Dropdown name, for example `notification`.
 +        name: String,
-+        /// Monitor connector on which to open it. Omit to use the first output.
++        /// Monitor connector on which to open it. Omit to use the focused output.
 +        monitor: Option<String>,
++        /// Distance in logical pixels from the configured screen edge.
++        #[arg(long, default_value_t = 40)]
++        offset: i32,
 +    },
  }
 diff --git a/wayle/src/cli/panel/dropdown.rs b/wayle/src/cli/panel/dropdown.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..143ef4d0b12d35062167004a3f1abae4ef2766a7
+index 0000000000000000000000000000000000000000..e76ef2ad1b6c1642a88f58d676354b62864ebfc3
 --- /dev/null
 +++ b/wayle/src/cli/panel/dropdown.rs
 @@ -0,0 +1,16 @@
@@ -759,33 +843,37 @@ index 0000000000000000000000000000000000000000..143ef4d0b12d35062167004a3f1abae4
 +use super::proxy::{format_ipc_error, shell_ipc_proxy};
 +use crate::cli::CliAction;
 +
-+pub async fn execute(name: String, monitor: Option<String>) -> CliAction {
++pub async fn execute(name: String, monitor: Option<String>, offset: i32) -> CliAction {
 +    let (_connection, proxy) = shell_ipc_proxy().await?;
 +    let monitor = monitor.unwrap_or_default();
 +
 +    proxy
-+        .dropdown_toggle(&name, &monitor)
++        .dropdown_toggle(&name, &monitor, offset)
 +        .await
 +        .map_err(|err| format_ipc_error("toggle dropdown", err))?;
 +
 +    Ok(())
 +}
 diff --git a/wayle/src/cli/panel/mod.rs b/wayle/src/cli/panel/mod.rs
-index 55c8176d94d7bed1b033a6eae0f3ba6ee8cf030c..74f7827328e86220ca24066f8c806fc5e4843920 100644
+index 55c8176d94d7bed1b033a6eae0f3ba6ee8cf030c..f62869df75c4564aeea3ce5e5bad99c5b6bbef6a 100644
 --- a/wayle/src/cli/panel/mod.rs
 +++ b/wayle/src/cli/panel/mod.rs
-@@ -3,6 +3,7 @@
+@@ -2,6 +2,7 @@
+ 
  /// Panel command definitions.
  pub mod commands;
- mod hide;
 +mod dropdown;
+ mod hide;
  mod inspect;
  mod proxy;
- /// Restart command.
-@@ -38,5 +39,6 @@ pub async fn execute(command: PanelCommands) -> CliAction {
+@@ -38,5 +39,10 @@ pub async fn execute(command: PanelCommands) -> CliAction {
          PanelCommands::Hide { monitor } => hide::execute(monitor).await,
          PanelCommands::Show { monitor } => show::execute(monitor).await,
          PanelCommands::Toggle { monitor } => toggle::execute(monitor).await,
-+        PanelCommands::Dropdown { name, monitor } => dropdown::execute(name, monitor).await,
++        PanelCommands::Dropdown {
++            name,
++            monitor,
++            offset,
++        } => dropdown::execute(name, monitor, offset).await,
      }
  }
