@@ -247,7 +247,7 @@ index ccca8d3..f84fc7b 100644
  
          let settings = &self.settings;
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..94d07b7 100644
+index 5b5cf1c..578649e 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -313,7 +313,7 @@ index 5b5cf1c..94d07b7 100644
          root.set_monitor(Some(&init.monitor));
          Self::apply_anchors(&root, location);
          Self::apply_css_classes(&root, &init.monitor, location, is_floating);
-@@ -147,6 +158,26 @@ impl Component for Bar {
+@@ -147,6 +158,29 @@ impl Component for Bar {
              .detach();
  
          let css_provider = gtk::CssProvider::new();
@@ -324,6 +324,9 @@ index 5b5cf1c..94d07b7 100644
 +        // is empty never attaches a buffer -- which leaves its layer surface
 +        // unmapped, and a compositor does not render the popups of an
 +        // unmapped surface. One pixel is enough to keep the surface mapped.
++        //
++        // The alpha stays clear of 1/255, below which GSK treats a colour as
++        // fully clear and drops the node, putting the scene back to empty.
 +        external_anchor.add_css_class(EXTERNAL_ANCHOR_CLASS);
 +
 +        // The bar window doubles as the GTK anchor for dropdowns opened from an
@@ -340,7 +343,7 @@ index 5b5cf1c..94d07b7 100644
  
          #[allow(deprecated)]
          root.style_context()
-@@ -156,6 +187,14 @@ impl Component for Bar {
+@@ -156,6 +190,14 @@ impl Component for Bar {
          watchers::dropdowns::spawn(&sender, &init.services.config);
          watchers::exclusive::spawn(&sender, &init.services.config);
          watchers::layer::spawn(&sender, &init.services.config);
@@ -355,7 +358,7 @@ index 5b5cf1c..94d07b7 100644
  
          let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
          dropdowns.warm_all();
-@@ -174,6 +213,8 @@ impl Component for Bar {
+@@ -174,6 +216,8 @@ impl Component for Bar {
              },
              css_provider,
              last_css: String::new(),
@@ -364,7 +367,7 @@ index 5b5cf1c..94d07b7 100644
              left,
              center,
              right,
-@@ -200,10 +241,10 @@ impl Component for Bar {
+@@ -200,10 +244,10 @@ impl Component for Bar {
          widgets.left_box.append(model.left.widget());
          widgets.middle_box.append(model.center.widget());
          widgets.right_box.append(model.right.widget());
@@ -378,7 +381,7 @@ index 5b5cf1c..94d07b7 100644
  
          ComponentParts { model, widgets }
      }
-@@ -224,12 +265,24 @@ impl Component for Bar {
+@@ -224,12 +268,24 @@ impl Component for Bar {
                  self.dropdowns.set_all_autohide(autohide);
              }
              BarCmd::ExclusiveChanged(exclusive) => {
@@ -405,7 +408,7 @@ index 5b5cf1c..94d07b7 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
-index 409a9f7..28e166a 100644
+index 409a9f7..5c1f6a8 100644
 --- a/crates/wayle-shell/src/shell/bar/styling.rs
 +++ b/crates/wayle-shell/src/shell/bar/styling.rs
 @@ -175,6 +175,22 @@ impl InlineStyling for Bar {
@@ -427,7 +430,7 @@ index 409a9f7..28e166a 100644
 +            --bar-padding-ends-px: 0; \
 +            }} \
 +            .bar .external-anchor {{ \
-+            background-color: rgba(255, 255, 255, 0.004); \
++            background-color: rgba(255, 255, 255, 0.02); \
              }}"
          )
      }
