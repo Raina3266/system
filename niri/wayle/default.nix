@@ -1,13 +1,11 @@
 # Wayle supplies notification popups and history while the existing Waybar
 # remains the visible desktop bar. Upstream only opens dropdowns from its own
-# bar, so the local patch adds a small D-Bus/CLI bridge. Wayle keeps one bar
-# per output as the GTK anchor for that dropdown. The bar stays mapped even
-# though nothing on it is visible: a GTK popover can only be presented from a
-# surface the compositor has already mapped, and mapping a layer surface costs
-# a configure round-trip, so a bar mapped on demand is never ready in time. The
-# patch hides it instead by dropping its background, hiding its sections and
-# giving it an empty input region, so it is invisible and clicks pass straight
-# through to Waybar underneath.
+# bar, so the local patch adds a small D-Bus/CLI bridge. Wayle keeps one
+# one-pixel-thick bar per output as the GTK anchor for that dropdown. The patch
+# paints that surface with the configured bar colour so GTK attaches a buffer
+# and the compositor maps a valid popup parent. Its modules stay hidden, its
+# exclusive zone is zero, and its input region is empty, so Waybar remains
+# visible and receives clicks underneath.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
