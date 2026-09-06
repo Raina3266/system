@@ -99,10 +99,10 @@ index c3f3b1d..be2110d 100644
              cpu_ring,
              mem_ring,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-index 7b86d96..493f5aa 100644
+index ae4cfcd..7bfb27a 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-@@ -309,6 +309,10 @@ impl Component for NotificationDropdown {
+@@ -303,6 +303,10 @@ impl Component for NotificationDropdown {
          let system_stats = SystemStatsSection::builder()
              .launch(SystemStatsInit {
                  sysinfo: init.sysinfo.clone(),

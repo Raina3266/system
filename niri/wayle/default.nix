@@ -22,7 +22,6 @@
           ./waybar-dropdown.patch
           ./control-center-layout.patch
           ./media-progress.patch
-          ./network-stats.patch
           ./system-stats-compact.patch
           ./click-outside.patch
         ];
