@@ -1,25 +1,24 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+index 82a1302..c03b594 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-@@ -1,15 +1,13 @@
-                                 gtk::Box {
-                                     add_css_class: "control-center-column",
+@@ -268,15 +268,13 @@ impl Component for NotificationDropdown {
                                      set_orientation: gtk::Orientation::Vertical,
  
--                                    #[local_ref]
+                                     #[local_ref]
 -                                    media_widget -> gtk::Box {},
 -                                },
--
++                                    system_stats_widget -> gtk::Box {},
+ 
 -                                gtk::Box {
 -                                    add_css_class: "control-center-column",
 -                                    set_orientation: gtk::Orientation::Vertical,
--
-                                     #[local_ref]
-                                     system_stats_widget -> gtk::Box {},
-+
 +                                    #[local_ref]
 +                                    network_stats_widget -> gtk::Box {},
-+
-+                                    #[local_ref]
+ 
+                                     #[local_ref]
+-                                    system_stats_widget -> gtk::Box {},
 +                                    media_widget -> gtk::Box {},
                                  },
+                             },
+                         },

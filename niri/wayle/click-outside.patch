@@ -1,8 +1,15 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 578215c..d3578a4 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -180,7 +180,28 @@
+@@ -366,7 +366,35 @@ impl ExternalDropdownInstance {
+         window.set_exclusive_zone(-1);
+         window.set_keyboard_mode(KeyboardMode::None);
+         window.set_monitor(Some(monitor));
 -        window.set_child(Some(&content));
++
++        // The surface spans the whole monitor so a transparent backdrop behind
++        // the content can catch clicks outside it and dismiss the dropdown.
 +        let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
 +        backdrop.set_hexpand(true);
 +        backdrop.set_vexpand(true);
@@ -32,13 +39,13 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
  
          let visibility_source = source.clone();
          window.connect_visible_notify(move |window| {
-@@ -220,6 +241,15 @@
+@@ -429,6 +457,18 @@ impl ExternalDropdownInstance {
              }
          };
  
-+        // The external control centre uses a full-monitor layer surface so
-+        // clicks outside the centred content can be caught by the backdrop.
-+        // Keep the content centred regardless of the source bar location.
++        // The backdrop needs the full monitor, so the location-specific anchor
++        // above only picks the CSS class; the surface itself always covers the
++        // output and the content stays centred inside it.
 +        self.window.set_anchor(Edge::Top, true);
 +        self.window.set_anchor(Edge::Bottom, true);
 +        self.window.set_anchor(Edge::Left, true);
@@ -49,3 +56,5 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
 +        self.window.set_margin(Edge::Right, 0);
 +
          for class in [
+             "position-top",
+             "position-bottom",
