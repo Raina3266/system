@@ -1,0 +1,297 @@
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+@@ -1,6 +1,7 @@
+ mod factory;
+ mod helpers;
+ mod media_list;
++mod network_stats;
+ mod messages;
+ mod methods;
+ mod notification_group;
+@@ -1,3 +1,4 @@
+ use self::{
+     media_list::{MediaListInit, MediaListInput, MediaListSection},
++    network_stats::{NetworkStatsInit, NetworkStatsSection},
+     messages::{NotificationDropdownCmd, NotificationDropdownInit, NotificationDropdownMsg},
+@@ -1,4 +1,5 @@
+     groups: FactoryVecDeque<NotificationGroup>,
+     media: Controller<MediaListSection>,
+     system_stats: Controller<SystemStatsSection>,
++    network_stats: Controller<NetworkStatsSection>,
+ }
+@@ -1,15 +1,13 @@
+                                 gtk::Box {
+                                     add_css_class: "control-center-column",
+                                     set_orientation: gtk::Orientation::Vertical,
+ 
+-                                    #[local_ref]
+-                                    media_widget -> gtk::Box {},
+-                                },
+-
+-                                gtk::Box {
+-                                    add_css_class: "control-center-column",
+-                                    set_orientation: gtk::Orientation::Vertical,
+-
+                                     #[local_ref]
+                                     system_stats_widget -> gtk::Box {},
++
++                                    #[local_ref]
++                                    network_stats_widget -> gtk::Box {},
++
++                                    #[local_ref]
++                                    media_widget -> gtk::Box {},
+                                 },
+@@ -1,8 +1,14 @@
+         let system_stats = SystemStatsSection::builder()
+             .launch(SystemStatsInit {
+                 sysinfo: init.sysinfo.clone(),
+             })
+             .detach();
+         system_stats.widget().add_css_class("control-center-system");
++
++        let network_stats = NetworkStatsSection::builder()
++            .launch(NetworkStatsInit {
++                sysinfo: init.sysinfo.clone(),
++            })
++            .detach();
+ 
+         let mut model = Self {
+@@ -1,4 +1,5 @@
+             groups,
+             media,
+             system_stats,
++            network_stats,
+         };
+@@ -1,4 +1,5 @@
+         let groups_widget = model.groups.widget();
+         let media_widget = model.media.widget();
+         let system_stats_widget = model.system_stats.widget();
++        let network_stats_widget = model.network_stats.widget();
+         let widgets = view_output!();
+*** Add File: crates/wayle-shell/src/shell/bar/dropdowns/notification/network_stats.rs
++use std::sync::Arc;
++
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use wayle_sysinfo::{types::NetworkData, SysinfoService};
++use wayle_widgets::watch;
++
++pub(super) struct NetworkStatsInit {
++    pub sysinfo: Arc<SysinfoService>,
++}
++
++#[derive(Debug)]
++enum NetworkStatsMsg {
++    Refresh,
++}
++
++pub(super) struct NetworkStatsSection {
++    sysinfo: Arc<SysinfoService>,
++    interface: String,
++    download_speed: String,
++    upload_speed: String,
++    total_download: String,
++    total_upload: String,
++}
++
++#[relm4::component(pub(super))]
++impl Component for NetworkStatsSection {
++    type Init = NetworkStatsInit;
++    type Input = NetworkStatsMsg;
++    type Output = ();
++    type CommandOutput = ();
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "control-center-system"],
++            set_orientation: gtk::Orientation::Vertical,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++
++                    gtk::Image {
++                        set_icon_name: Some("ld-network-symbolic"),
++                    },
++
++                    gtk::Label {
++                        set_label: "Network",
++                    },
++                },
++
++                gtk::Label {
++                    add_css_class: "control-center-calendar-date",
++                    set_hexpand: true,
++                    set_halign: gtk::Align::End,
++                    #[watch]
++                    set_label: &model.interface,
++                },
++            },
++
++            gtk::Box {
++                set_orientation: gtk::Orientation::Vertical,
++
++                gtk::Box {
++                    add_css_class: "stat-row",
++
++                    gtk::Label {
++                        add_css_class: "stat-label",
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Start,
++                        set_label: "Download",
++                    },
++
++                    gtk::Label {
++                        add_css_class: "ring-text",
++                        #[watch]
++                        set_label: &model.download_speed,
++                    },
++                },
++
++                gtk::Box {
++                    add_css_class: "stat-row",
++
++                    gtk::Label {
++                        add_css_class: "stat-label",
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Start,
++                        set_label: "Upload",
++                    },
++
++                    gtk::Label {
++                        add_css_class: "ring-text",
++                        #[watch]
++                        set_label: &model.upload_speed,
++                    },
++                },
++
++                gtk::Box {
++                    add_css_class: "stat-row",
++
++                    gtk::Label {
++                        add_css_class: "stat-label",
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Start,
++                        set_label: "Downloaded",
++                    },
++
++                    gtk::Label {
++                        add_css_class: "ring-text",
++                        #[watch]
++                        set_label: &model.total_download,
++                    },
++                },
++
++                gtk::Box {
++                    add_css_class: "stat-row",
++
++                    gtk::Label {
++                        add_css_class: "stat-label",
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Start,
++                        set_label: "Uploaded",
++                    },
++
++                    gtk::Label {
++                        add_css_class: "ring-text",
++                        #[watch]
++                        set_label: &model.total_upload,
++                    },
++                },
++            },
++        }
++    }
++
++    fn init(
++        init: Self::Init,
++        _root: Self::Root,
++        sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let network = init.sysinfo.network.clone();
++        watch!(sender, [network.watch()], |out| {
++            let _ = out.send(NetworkStatsMsg::Refresh);
++        });
++
++        let (interface, download_speed, upload_speed, total_download, total_upload) =
++            format_network(&network.get());
++
++        let model = Self {
++            sysinfo: init.sysinfo,
++            interface,
++            download_speed,
++            upload_speed,
++            total_download,
++            total_upload,
++        };
++
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            NetworkStatsMsg::Refresh => {
++                let (interface, download_speed, upload_speed, total_download, total_upload) =
++                    format_network(&self.sysinfo.network.get());
++                self.interface = interface;
++                self.download_speed = download_speed;
++                self.upload_speed = upload_speed;
++                self.total_download = total_download;
++                self.total_upload = total_upload;
++            }
++        }
++    }
++}
++
++fn format_network(networks: &[NetworkData]) -> (String, String, String, String, String) {
++    let Some(network) = networks
++        .iter()
++        .filter(|network| !network.interface.starts_with("lo"))
++        .max_by_key(|network| network.rx_bytes_per_sec + network.tx_bytes_per_sec)
++    else {
++        return (
++            String::from("--"),
++            String::from("0 B/s"),
++            String::from("0 B/s"),
++            String::from("0 B"),
++            String::from("0 B"),
++        );
++    };
++
++    (
++        network.interface.clone(),
++        format_rate(network.rx_bytes_per_sec),
++        format_rate(network.tx_bytes_per_sec),
++        format_bytes(network.rx_bytes),
++        format_bytes(network.tx_bytes),
++    )
++}
++
++fn format_rate(bytes: u64) -> String {
++    format!("{}/s", format_bytes(bytes))
++}
++
++fn format_bytes(bytes: u64) -> String {
++    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
++    let mut value = bytes as f64;
++    let mut unit = 0;
++
++    while value >= 1024.0 && unit < UNITS.len() - 1 {
++        value /= 1024.0;
++        unit += 1;
++    }
++
++    if unit == 0 {
++        format!("{value:.0} {}", UNITS[unit])
++    } else if value >= 100.0 {
++        format!("{value:.0} {}", UNITS[unit])
++    } else if value >= 10.0 {
++        format!("{value:.1} {}", UNITS[unit])
++    } else {
++        format!("{value:.2} {}", UNITS[unit])
++    }
++}
