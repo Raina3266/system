@@ -371,19 +371,19 @@ index a5b8edd..47f46fe 100644
          let controller = NotificationDropdown::builder().launch(init).detach();
  
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
-index 6a2f6b9..66e9ee5 100644
+index 6a2f6b9..11169c2 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
 @@ -1,6 +1,36 @@
 -use std::{cmp::Reverse, collections::HashMap, sync::Arc};
 +use std::{cmp::Reverse, collections::HashMap, fs, path::PathBuf, sync::Arc};
  
-+use chrono::Local;
-+use serde_json::Value;
++use chrono::{Duration, Local};
++use serde_json::{Map, Value};
  use wayle_notification::core::notification::Notification;
 +use wayle_sysinfo::SysinfoService;
 +
-+const CALENDAR_ENTRY_LIMIT: usize = 3;
++const CALENDAR_DAYS: i64 = 7;
 +const BYTES_PER_KIBIBYTE: f64 = 1024.0;
 +const BYTES_PER_GIBIBYTE: f64 = 1024.0 * 1024.0 * 1024.0;
 +
@@ -412,34 +412,49 @@ index 6a2f6b9..66e9ee5 100644
  
  pub(super) struct NotificationGroupData {
      pub app_name: Option<String>,
-@@ -44,3 +74,162 @@ pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<Notificat
+@@ -44,3 +74,174 @@ pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<Notificat
  
      result
  }
 +
 +pub(super) fn calendar_summary() -> CalendarSummary {
-+    let now = Local::now();
-+    let today = now.format("%Y-%m-%d").to_string();
-+    let date = now.format("%A, %-d %B").to_string();
++    let start = Local::now().date_naive();
++    let end = start + Duration::days(CALENDAR_DAYS - 1);
++    let date = format!("{} – {}", start.format("%-d %b"), end.format("%-d %b"));
 +    let cache = fs::read_to_string(calendar_cache_path()).unwrap_or_default();
++    let parsed = serde_json::from_str::<Value>(&cache).unwrap_or(Value::Null);
++    let days = parsed.as_object();
 +
-+    let entries = calendar_entries(&cache, &today);
-+    if entries.is_empty() {
-+        return CalendarSummary {
-+            date,
-+            entries: String::from("Nothing scheduled today"),
-+            has_entries: false,
-+        };
++    let mut lines = Vec::new();
++    for offset in 0..CALENDAR_DAYS {
++        let day = start + Duration::days(offset);
++        let key = day.format("%Y-%m-%d").to_string();
++        let entries = days.map_or_else(Vec::new, |days| calendar_entries(days, &key));
++        if entries.is_empty() {
++            continue;
++        }
++
++        if !lines.is_empty() {
++            lines.push(String::new());
++        }
++        lines.push(if offset == 0 {
++            String::from("Today")
++        } else {
++            day.format("%A %-d %b").to_string()
++        });
++        lines.extend(
++            entries
++                .iter()
++                .map(|entry| format!("{}  {}", entry.icon, entry.title)),
++        );
 +    }
 +
-+    let mut lines = entries
-+        .iter()
-+        .take(CALENDAR_ENTRY_LIMIT)
-+        .map(|entry| format!("{}  {}", entry.icon, entry.title))
-+        .collect::<Vec<_>>();
-+
-+    if entries.len() > CALENDAR_ENTRY_LIMIT {
-+        lines.push(format!("+ {} more", entries.len() - CALENDAR_ENTRY_LIMIT));
++    if lines.is_empty() {
++        return CalendarSummary {
++            date,
++            entries: String::from("Nothing scheduled in the next 7 days"),
++            has_entries: false,
++        };
 +    }
 +
 +    CalendarSummary {
@@ -523,11 +538,8 @@ index 6a2f6b9..66e9ee5 100644
 +        .join(".cache/waybar-ycal/events.json")
 +}
 +
-+fn calendar_entries(cache: &str, today: &str) -> Vec<CalendarEntry> {
-+    let Ok(Value::Object(days)) = serde_json::from_str::<Value>(cache) else {
-+        return Vec::new();
-+    };
-+    let Some(Value::Array(items)) = days.get(today) else {
++fn calendar_entries(days: &Map<String, Value>, date: &str) -> Vec<CalendarEntry> {
++    let Some(Value::Array(items)) = days.get(date) else {
 +        return Vec::new();
 +    };
 +
