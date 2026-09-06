@@ -18,6 +18,7 @@
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
         patches = (oldAttrs.patches or [ ]) ++ [
           ./waybar-dropdown.patch
+          ./network-stats.patch
           ./control-center-layout.patch
           ./click-outside.patch
         ];
