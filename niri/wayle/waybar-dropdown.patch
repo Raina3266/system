@@ -122,15 +122,10 @@ index 9fdaf9f..aff8565 100644
      }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-index 7e38a69..9019174 100644
+index 7e38a69..f6010f6 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-@@ -1,11 +1,11 @@
- mod battery_section;
- mod controls;
- mod factory;
--mod media_section;
-+pub(crate) mod media_section;
+@@ -5,7 +5,7 @@ mod media_section;
  mod messages;
  mod network_section;
  mod quick_actions;
@@ -295,6 +290,423 @@ index 6a2f6b9..e762c27 100644
 +    entries.sort_by_key(|entry| entry.order);
 +    entries
 +}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
+new file mode 100644
+index 0000000..de10983
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
+@@ -0,0 +1,411 @@
++use std::sync::Arc;
++
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use wayle_media::{
++    MediaService,
++    core::player::Player,
++    types::{PlaybackState, PlayerId},
++};
++use wayle_widgets::{WatcherToken, watch, watch_cancellable};
++
++use crate::shell::bar::icons;
++
++pub(super) struct MediaListInit {
++    pub media: Option<Arc<MediaService>>,
++}
++
++#[derive(Debug)]
++pub(super) enum MediaListInput {
++    SetActive(bool),
++    Previous(PlayerId),
++    PlayPause(PlayerId),
++    Next(PlayerId),
++}
++
++#[derive(Debug)]
++pub(super) enum MediaListCmd {
++    PlayersChanged(Vec<Arc<Player>>),
++    PlayerChanged,
++}
++
++pub(super) struct MediaListSection {
++    media: Option<Arc<MediaService>>,
++    players: Vec<Arc<Player>>,
++    active: bool,
++    player_watchers: WatcherToken,
++    rows: gtk::Box,
++}
++
++#[relm4::component(pub(super))]
++impl Component for MediaListSection {
++    type Init = MediaListInit;
++    type Input = MediaListInput;
++    type Output = ();
++    type CommandOutput = MediaListCmd;
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &[
++                "card",
++                "dashboard-card",
++                "control-center-media",
++            ],
++            set_orientation: gtk::Orientation::Vertical,
++            set_vexpand: true,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++
++                    gtk::Image {
++                        set_icon_name: Some("ld-disc-3-symbolic"),
++                    },
++
++                    gtk::Label {
++                        set_label: "Media players",
++                    },
++                },
++            },
++
++            gtk::ScrolledWindow {
++                add_css_class: "control-center-media-scroll",
++                set_vexpand: true,
++                set_hscrollbar_policy: gtk::PolicyType::Never,
++
++                #[local_ref]
++                rows_widget -> gtk::Box {},
++            },
++        }
++    }
++
++    fn init(
++        init: Self::Init,
++        _root: Self::Root,
++        sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        rows.add_css_class("control-center-media-list");
++
++        let players = init
++            .media
++            .as_ref()
++            .map_or_else(Vec::new, |media| media.player_list.get());
++
++        if let Some(media) = &init.media {
++            let player_list = media.player_list.clone();
++            watch!(sender, [player_list.watch()], |out| {
++                let _ = out.send(MediaListCmd::PlayersChanged(player_list.get()));
++            });
++        }
++
++        let model = Self {
++            media: init.media,
++            players,
++            active: false,
++            player_watchers: WatcherToken::new(),
++            rows,
++        };
++
++        model.rebuild_rows(&sender);
++
++        let rows_widget = &model.rows;
++        let widgets = view_output!();
++
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            MediaListInput::SetActive(active) => {
++                if self.active == active {
++                    return;
++                }
++
++                self.active = active;
++                if active {
++                    if let Some(media) = &self.media {
++                        self.players = media.player_list.get();
++                    }
++                    self.restart_player_watchers(&sender);
++                    self.rebuild_rows(&sender);
++                } else {
++                    self.player_watchers = WatcherToken::new();
++                }
++            }
++
++            MediaListInput::Previous(id) => {
++                let Some(player) = self.player(&id) else {
++                    return;
++                };
++                sender.oneshot_command(async move {
++                    if let Err(error) = player.previous().await {
++                        tracing::warn!(%error, "previous media command failed");
++                    }
++                    MediaListCmd::PlayerChanged
++                });
++            }
++
++            MediaListInput::PlayPause(id) => {
++                let Some(player) = self.player(&id) else {
++                    return;
++                };
++                sender.oneshot_command(async move {
++                    if let Err(error) = player.play_pause().await {
++                        tracing::warn!(%error, "play/pause media command failed");
++                    }
++                    MediaListCmd::PlayerChanged
++                });
++            }
++
++            MediaListInput::Next(id) => {
++                let Some(player) = self.player(&id) else {
++                    return;
++                };
++                sender.oneshot_command(async move {
++                    if let Err(error) = player.next().await {
++                        tracing::warn!(%error, "next media command failed");
++                    }
++                    MediaListCmd::PlayerChanged
++                });
++            }
++        }
++    }
++
++    fn update_cmd(
++        &mut self,
++        msg: Self::CommandOutput,
++        sender: ComponentSender<Self>,
++        _root: &Self::Root,
++    ) {
++        match msg {
++            MediaListCmd::PlayersChanged(players) => {
++                self.players = players;
++                if self.active {
++                    self.restart_player_watchers(&sender);
++                }
++                self.rebuild_rows(&sender);
++            }
++
++            MediaListCmd::PlayerChanged => {
++                self.rebuild_rows(&sender);
++            }
++        }
++    }
++}
++
++impl MediaListSection {
++    fn player(&self, id: &PlayerId) -> Option<Arc<Player>> {
++        self.players.iter().find(|player| &player.id == id).cloned()
++    }
++
++    fn restart_player_watchers(&mut self, sender: &ComponentSender<Self>) {
++        let token = self.player_watchers.reset();
++
++        for player in &self.players {
++            let metadata = player.metadata.clone();
++            let identity = player.identity.clone();
++            let desktop_entry = player.desktop_entry.clone();
++            let playback_state = player.playback_state.clone();
++            let can_control = player.can_control.clone();
++            let can_go_previous = player.can_go_previous.clone();
++            let can_go_next = player.can_go_next.clone();
++
++            watch_cancellable!(
++                sender,
++                token.clone(),
++                [
++                    metadata.watch(),
++                    identity.watch(),
++                    desktop_entry.watch(),
++                    playback_state.watch(),
++                    can_control.watch(),
++                    can_go_previous.watch(),
++                    can_go_next.watch(),
++                ],
++                |out| {
++                    let _ = out.send(MediaListCmd::PlayerChanged);
++                }
++            );
++        }
++    }
++
++    fn rebuild_rows(&self, sender: &ComponentSender<Self>) {
++        while let Some(child) = self.rows.first_child() {
++            self.rows.remove(&child);
++        }
++
++        if self.players.is_empty() {
++            let empty = gtk::Box::new(gtk::Orientation::Vertical, 0);
++            empty.add_css_class("control-center-media-empty");
++            empty.set_vexpand(true);
++            empty.set_valign(gtk::Align::Center);
++
++            let icon = gtk::Image::from_icon_name("ld-music-symbolic");
++            icon.add_css_class("control-center-media-empty-icon");
++            empty.append(&icon);
++
++            let title = gtk::Label::new(Some("Nothing is playing"));
++            title.add_css_class("control-center-media-empty-title");
++            empty.append(&title);
++
++            let description = gtk::Label::new(Some("Open a player that supports MPRIS"));
++            description.add_css_class("control-center-media-empty-description");
++            empty.append(&description);
++
++            self.rows.append(&empty);
++            return;
++        }
++
++        let mut players = self.players.iter().collect::<Vec<_>>();
++        players.sort_by_key(|player| match player.playback_state.get() {
++            PlaybackState::Playing => 0,
++            PlaybackState::Paused => 1,
++            PlaybackState::Stopped => 2,
++        });
++
++        for player in players {
++            self.rows.append(&self.build_row(player, sender));
++        }
++    }
++
++    fn build_row(&self, player: &Arc<Player>, sender: &ComponentSender<Self>) -> gtk::Box {
++        let playback_state = player.playback_state.get();
++        let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
++        row.set_css_classes(&[
++            "control-center-media-row",
++            match playback_state {
++                PlaybackState::Playing => "playing",
++                PlaybackState::Paused => "paused",
++                PlaybackState::Stopped => "stopped",
++            },
++        ]);
++
++        let source = gtk::Box::new(gtk::Orientation::Horizontal, 0);
++        source.add_css_class("control-center-media-source");
++        source.set_valign(gtk::Align::Center);
++
++        let source_icon = gtk::Image::from_icon_name(&resolve_source_icon(player));
++        source_icon.add_css_class("control-center-media-source-icon");
++        source.append(&source_icon);
++
++        let identity = player.identity.get();
++        let identity = if identity.trim().is_empty() {
++            player.id.bus_name().to_owned()
++        } else {
++            identity
++        };
++        let source_name = gtk::Label::new(Some(&identity));
++        source_name.add_css_class("control-center-media-source-name");
++        source_name.set_ellipsize(gtk::pango::EllipsizeMode::End);
++        source_name.set_max_width_chars(14);
++        source_name.set_xalign(0.0);
++        source.append(&source_name);
++        row.append(&source);
++
++        let metadata = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        metadata.add_css_class("control-center-media-metadata");
++        metadata.set_hexpand(true);
++        metadata.set_valign(gtk::Align::Center);
++
++        let title = gtk::Label::new(Some(&player.metadata.title.get()));
++        title.add_css_class("control-center-media-track");
++        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
++        title.set_max_width_chars(1);
++        title.set_xalign(0.0);
++        metadata.append(&title);
++
++        let artist = gtk::Label::new(Some(&player.metadata.artist.get()));
++        artist.add_css_class("control-center-media-artist");
++        artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
++        artist.set_max_width_chars(1);
++        artist.set_xalign(0.0);
++        metadata.append(&artist);
++        row.append(&metadata);
++
++        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
++        controls.add_css_class("control-center-media-controls");
++        controls.set_valign(gtk::Align::Center);
++
++        let previous = media_button(
++            "ld-skip-back-symbolic",
++            "Previous",
++            player.can_go_previous.get(),
++            false,
++        );
++        let id = player.id.clone();
++        let input = sender.input_sender().clone();
++        previous.connect_clicked(move |_| {
++            input.emit(MediaListInput::Previous(id.clone()));
++        });
++        controls.append(&previous);
++
++        let play_pause = media_button(
++            if playback_state == PlaybackState::Playing {
++                "ld-pause-symbolic"
++            } else {
++                "ld-play-symbolic"
++            },
++            "Play or pause",
++            player.can_control.get(),
++            true,
++        );
++        let id = player.id.clone();
++        let input = sender.input_sender().clone();
++        play_pause.connect_clicked(move |_| {
++            input.emit(MediaListInput::PlayPause(id.clone()));
++        });
++        controls.append(&play_pause);
++
++        let next = media_button(
++            "ld-skip-forward-symbolic",
++            "Next",
++            player.can_go_next.get(),
++            false,
++        );
++        let id = player.id.clone();
++        let input = sender.input_sender().clone();
++        next.connect_clicked(move |_| {
++            input.emit(MediaListInput::Next(id.clone()));
++        });
++        controls.append(&next);
++
++        row.append(&controls);
++        row
++    }
++}
++
++fn media_button(icon: &str, tooltip: &str, sensitive: bool, primary: bool) -> gtk::Button {
++    let image = gtk::Image::from_icon_name(icon);
++    let button = gtk::Button::builder().child(&image).build();
++    button.add_css_class("control-center-media-button");
++    if primary {
++        button.add_css_class("primary");
++    }
++    button.set_cursor_from_name(Some("pointer"));
++    button.set_tooltip_text(Some(tooltip));
++    button.set_sensitive(sensitive);
++    button
++}
++
++fn resolve_source_icon(player: &Player) -> String {
++    let identity = player.identity.get();
++    if let Some(icon) = icons::lookup_app_icon(&identity) {
++        return icon.to_owned();
++    }
++
++    if let Some(icon) = icons::lookup_app_icon(player.id.bus_name()) {
++        return icon.to_owned();
++    }
++
++    let Some(desktop_entry) = player.desktop_entry.get() else {
++        return String::from("ld-music-symbolic");
++    };
++
++    icons::lookup_app_icon(&desktop_entry)
++        .map(|icon| icon.to_owned())
++        .unwrap_or_else(|| format!("{desktop_entry}-symbolic"))
++}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs
 index b9ed110..2263d40 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs
@@ -324,10 +736,24 @@ index b9ed110..2263d40 100644
  
  #[derive(Debug)]
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-index 85f1f5d..b0a3687 100644
+index 85f1f5d..0343428 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-@@ -22,7 +22,16 @@ use self::{
+@@ -1,5 +1,6 @@
+ mod factory;
+ mod helpers;
++mod media_list;
+ mod messages;
+ mod methods;
+ mod notification_group;
+@@ -16,15 +17,22 @@ use wayle_widgets::prelude::*;
+ 
+ pub(super) use self::factory::Factory;
+ use self::{
++    media_list::{MediaListInit, MediaListInput, MediaListSection},
+     messages::{NotificationDropdownCmd, NotificationDropdownInit, NotificationDropdownMsg},
+     notification_group::{
+         NotificationGroup,
          messages::{NotificationGroupInput, NotificationGroupOutput},
      },
  };
@@ -335,29 +761,29 @@ index 85f1f5d..b0a3687 100644
 +use crate::{
 +    i18n::t,
 +    shell::bar::dropdowns::{
-+        dashboard::{
-+            media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
-+            system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
-+        },
++        dashboard::system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
 +        scaled_dimension,
 +    },
 +};
  
- const BASE_WIDTH: f32 = 425.0;
+-const BASE_WIDTH: f32 = 425.0;
++const BASE_WIDTH: f32 = 1275.0;
  const BASE_HEIGHT: f32 = 725.0;
-@@ -36,8 +45,11 @@ pub(crate) struct NotificationDropdown {
+ 
+ pub(crate) struct NotificationDropdown {
+@@ -36,8 +44,11 @@ pub(crate) struct NotificationDropdown {
  
      dnd: bool,
      has_notifications: bool,
 +    calendar: helpers::CalendarSummary,
  
      groups: FactoryVecDeque<NotificationGroup>,
-+    media: Controller<MediaSection>,
++    media: Controller<MediaListSection>,
 +    system_stats: Controller<SystemStatsSection>,
  }
  
  #[relm4::component(pub(crate))]
-@@ -50,7 +62,7 @@ impl Component for NotificationDropdown {
+@@ -50,7 +61,7 @@ impl Component for NotificationDropdown {
      view! {
          #[root]
          gtk::Popover {
@@ -366,27 +792,20 @@ index 85f1f5d..b0a3687 100644
              set_has_arrow: false,
              #[watch]
              set_width_request: model.scaled_width,
-@@ -97,69 +109,139 @@ impl Component for NotificationDropdown {
+@@ -97,69 +108,174 @@ impl Component for NotificationDropdown {
                      },
                  },
  
 -                gtk::Box {
 -                    add_css_class: "notification-dropdown-dnd-row",
-+                gtk::ScrolledWindow {
-+                    add_css_class: "control-center-scroll",
-+                    set_vexpand: true,
-+                    set_hscrollbar_policy: gtk::PolicyType::Never,
- 
+-
 -                    gtk::Label {
 -                        add_css_class: "notification-dropdown-dnd-label",
 -                        set_hexpand: true,
 -                        set_halign: gtk::Align::Start,
 -                        set_label: &t!("notification-dropdown-dnd-label"),
 -                    },
-+                    gtk::Box {
-+                        add_css_class: "control-center-body",
-+                        set_orientation: gtk::Orientation::Vertical,
- 
+-
 -                    #[template]
 -                    Switch {
 -                        #[watch]
@@ -399,19 +818,11 @@ index 85f1f5d..b0a3687 100644
 -                        } @dnd_toggle,
 -                    },
 -                },
-+                        gtk::Box {
-+                            add_css_class: "notification-dropdown-dnd-row",
- 
+-
 -                #[template]
 -                DropdownContent {
 -                    add_css_class: "notification-dropdown-content",
-+                            gtk::Label {
-+                                add_css_class: "notification-dropdown-dnd-label",
-+                                set_hexpand: true,
-+                                set_halign: gtk::Align::Start,
-+                                set_label: &t!("notification-dropdown-dnd-label"),
-+                            },
- 
+-
 -                    #[template]
 -                    EmptyState {
 -                        #[watch]
@@ -434,19 +845,12 @@ index 85f1f5d..b0a3687 100644
 -                        #[template_child]
 -                        description {
 -                            set_label: &t!("notification-dropdown-empty-description"),
-+                            #[template]
-+                            Switch {
-+                                #[watch]
-+                                #[block_signal(dnd_toggle)]
-+                                set_active: model.dnd,
-+                                connect_state_set[sender] => move |switch, active| {
-+                                    sender.input(NotificationDropdownMsg::DndToggled(active));
-+                                    switch.set_state(active);
-+                                    gtk::glib::Propagation::Stop
-+                                } @dnd_toggle,
-+                            },
-                         },
+-                        },
 -                    },
++                gtk::ScrolledWindow {
++                    add_css_class: "control-center-scroll",
++                    set_vexpand: true,
++                    set_hscrollbar_policy: gtk::PolicyType::Never,
  
 -                    gtk::ScrolledWindow {
 -                        add_css_class: "notification-dropdown-scroll",
@@ -454,124 +858,185 @@ index 85f1f5d..b0a3687 100644
 -                        set_hscrollbar_policy: gtk::PolicyType::Never,
 -                        #[watch]
 -                        set_visible: model.has_notifications,
-+                        #[template]
-+                        DropdownContent {
-+                            add_css_class: "notification-dropdown-content",
-+
-+                            gtk::Box {
-+                                set_css_classes: &["card", "dashboard-card", "control-center-calendar"],
-+                                set_orientation: gtk::Orientation::Vertical,
-+
-+                                gtk::Box {
-+                                    add_css_class: "card-header",
-+
-+                                    gtk::Box {
-+                                        add_css_class: "card-title",
-+
-+                                        gtk::Label {
-+                                            set_label: "Calendar",
-+                                        },
-+                                    },
-+
-+                                    gtk::Label {
-+                                        add_css_class: "control-center-calendar-date",
-+                                        set_hexpand: true,
-+                                        set_halign: gtk::Align::End,
-+                                        #[watch]
-+                                        set_label: &model.calendar.date,
-+                                    },
-+                                },
-+
-+                                gtk::Label {
-+                                    add_css_class: "control-center-calendar-events",
-+                                    #[watch]
-+                                    set_class_active: ("empty", !model.calendar.has_entries),
-+                                    set_halign: gtk::Align::Fill,
-+                                    set_xalign: 0.0,
-+                                    set_wrap: true,
-+                                    set_wrap_mode: gtk::pango::WrapMode::WordChar,
-+                                    #[watch]
-+                                    set_label: &model.calendar.entries,
-+                                },
-+                            },
-+
-+                            gtk::Box {
-+                                add_css_class: "control-center-notifications",
-+                                set_orientation: gtk::Orientation::Vertical,
-+
-+                                gtk::Label {
-+                                    add_css_class: "control-center-section-title",
-+                                    set_halign: gtk::Align::Start,
-+                                    set_label: "Notifications",
-+                                },
-+
-+                                #[template]
-+                                EmptyState {
-+                                    set_vexpand: false,
-+                                    set_height_request: 120,
-+                                    #[watch]
-+                                    set_visible: !model.has_notifications,
-+                                    #[template_child]
-+                                    icon {
-+                                        #[watch]
-+                                        set_icon_name: Some(
-+                                            if model.dnd {
-+                                                "ld-bell-off-symbolic"
-+                                            } else {
-+                                                "ld-bell-symbolic"
-+                                            }
-+                                        ),
-+                                    },
-+                                    #[template_child]
-+                                    title {
-+                                        set_label: &t!("notification-dropdown-empty-title"),
-+                                    },
-+                                    #[template_child]
-+                                    description {
-+                                        set_label: &t!("notification-dropdown-empty-description"),
-+                                    },
-+                                },
-+
-+                                gtk::ScrolledWindow {
-+                                    add_css_class: "notification-dropdown-scroll",
-+                                    set_vexpand: false,
-+                                    set_min_content_height: 160,
-+                                    set_max_content_height: 260,
-+                                    set_propagate_natural_height: true,
-+                                    set_hscrollbar_policy: gtk::PolicyType::Never,
-+                                    #[watch]
-+                                    set_visible: model.has_notifications,
-+
-+                                    #[local_ref]
-+                                    groups_widget -> gtk::Box {
-+                                        add_css_class: "notification-dropdown-groups",
-+                                        set_orientation: gtk::Orientation::Vertical,
-+                                    },
-+                                },
-+                            },
-+
-+                            #[local_ref]
-+                            media_widget -> gtk::Box {},
++                    gtk::Box {
++                        add_css_class: "control-center-body",
++                        set_orientation: gtk::Orientation::Vertical,
  
 -                        #[local_ref]
 -                        groups_widget -> gtk::Box {
 -                            add_css_class: "notification-dropdown-groups",
 -                            set_orientation: gtk::Orientation::Vertical,
-+                            #[local_ref]
-+                            system_stats_widget -> gtk::Box {},
++                        #[template]
++                        DropdownContent {
++                            add_css_class: "notification-dropdown-content",
++
++                            gtk::Box {
++                                add_css_class: "control-center-columns",
++                                set_orientation: gtk::Orientation::Horizontal,
++                                set_homogeneous: true,
++                                set_vexpand: true,
++
++                                gtk::Box {
++                                    add_css_class: "control-center-column",
++                                    set_orientation: gtk::Orientation::Vertical,
++
++                                    gtk::Box {
++                                        set_css_classes: &[
++                                            "card",
++                                            "dashboard-card",
++                                            "control-center-calendar",
++                                        ],
++                                        set_orientation: gtk::Orientation::Vertical,
++
++                                        gtk::Box {
++                                            add_css_class: "card-header",
++
++                                            gtk::Box {
++                                                add_css_class: "card-title",
++
++                                                gtk::Label {
++                                                    set_label: "Calendar",
++                                                },
++                                            },
++
++                                            gtk::Label {
++                                                add_css_class: "control-center-calendar-date",
++                                                set_hexpand: true,
++                                                set_halign: gtk::Align::End,
++                                                #[watch]
++                                                set_label: &model.calendar.date,
++                                            },
++                                        },
++
++                                        gtk::Label {
++                                            add_css_class: "control-center-calendar-events",
++                                            #[watch]
++                                            set_class_active: ("empty", !model.calendar.has_entries),
++                                            set_halign: gtk::Align::Fill,
++                                            set_xalign: 0.0,
++                                            set_wrap: true,
++                                            set_wrap_mode: gtk::pango::WrapMode::WordChar,
++                                            #[watch]
++                                            set_label: &model.calendar.entries,
++                                        },
++                                    },
++
++                                    gtk::Box {
++                                        set_css_classes: &[
++                                            "card",
++                                            "dashboard-card",
++                                            "control-center-notifications",
++                                        ],
++                                        set_orientation: gtk::Orientation::Vertical,
++                                        set_vexpand: true,
++
++                                        gtk::Box {
++                                            add_css_class: "card-header",
++
++                                            gtk::Label {
++                                                add_css_class: "control-center-section-title",
++                                                set_hexpand: true,
++                                                set_halign: gtk::Align::Start,
++                                                set_label: "Notifications",
++                                            },
++
++                                            gtk::Box {
++                                                add_css_class: "notification-dropdown-dnd-inline",
++                                                set_valign: gtk::Align::Center,
++
++                                                gtk::Label {
++                                                    add_css_class: "notification-dropdown-dnd-label",
++                                                    set_label: &t!("notification-dropdown-dnd-label"),
++                                                },
++
++                                                #[template]
++                                                Switch {
++                                                    #[watch]
++                                                    #[block_signal(dnd_toggle)]
++                                                    set_active: model.dnd,
++                                                    connect_state_set[sender] => move |switch, active| {
++                                                        sender.input(
++                                                            NotificationDropdownMsg::DndToggled(active)
++                                                        );
++                                                        switch.set_state(active);
++                                                        gtk::glib::Propagation::Stop
++                                                    } @dnd_toggle,
++                                                },
++                                            },
++                                        },
++
++                                        #[template]
++                                        EmptyState {
++                                            set_vexpand: true,
++                                            set_height_request: 120,
++                                            #[watch]
++                                            set_visible: !model.has_notifications,
++                                            #[template_child]
++                                            icon {
++                                                #[watch]
++                                                set_icon_name: Some(
++                                                    if model.dnd {
++                                                        "ld-bell-off-symbolic"
++                                                    } else {
++                                                        "ld-bell-symbolic"
++                                                    }
++                                                ),
++                                            },
++                                            #[template_child]
++                                            title {
++                                                set_label: &t!("notification-dropdown-empty-title"),
++                                            },
++                                            #[template_child]
++                                            description {
++                                                set_label: &t!("notification-dropdown-empty-description"),
++                                            },
++                                        },
++
++                                        gtk::ScrolledWindow {
++                                            add_css_class: "notification-dropdown-scroll",
++                                            set_vexpand: true,
++                                            set_min_content_height: 160,
++                                            set_hscrollbar_policy: gtk::PolicyType::Never,
++                                            #[watch]
++                                            set_visible: model.has_notifications,
++
++                                            #[local_ref]
++                                            groups_widget -> gtk::Box {
++                                                add_css_class: "notification-dropdown-groups",
++                                                set_orientation: gtk::Orientation::Vertical,
++                                            },
++                                        },
++                                    },
++                                },
++
++                                gtk::Box {
++                                    add_css_class: "control-center-column",
++                                    set_orientation: gtk::Orientation::Vertical,
++
++                                    #[local_ref]
++                                    media_widget -> gtk::Box {},
++                                },
++
++                                gtk::Box {
++                                    add_css_class: "control-center-column",
++                                    set_orientation: gtk::Orientation::Vertical,
++
++                                    #[local_ref]
++                                    system_stats_widget -> gtk::Box {},
++                                },
++                            },
                          },
                      },
                  },
-@@ -183,6 +265,20 @@ impl Component for NotificationDropdown {
+@@ -183,6 +299,19 @@ impl Component for NotificationDropdown {
                  }
              });
  
-+        let media = MediaSection::builder()
-+            .launch(MediaSectionInit {
++        let media = MediaListSection::builder()
++            .launch(MediaListInit {
 +                media: init.media.clone(),
 +            })
 +            .detach();
-+        media.widget().add_css_class("control-center-media");
 +
 +        let system_stats = SystemStatsSection::builder()
 +            .launch(SystemStatsInit {
@@ -583,7 +1048,7 @@ index 85f1f5d..b0a3687 100644
          let mut model = Self {
              notification: init.notification.clone(),
              config: init.config.clone(),
-@@ -190,7 +286,10 @@ impl Component for NotificationDropdown {
+@@ -190,7 +319,10 @@ impl Component for NotificationDropdown {
              scaled_height: scaled_dimension(BASE_HEIGHT, scale),
              dnd,
              has_notifications: false,
@@ -594,7 +1059,7 @@ index 85f1f5d..b0a3687 100644
          };
  
          model.rebuild_groups();
-@@ -198,6 +297,8 @@ impl Component for NotificationDropdown {
+@@ -198,6 +330,8 @@ impl Component for NotificationDropdown {
          watchers::spawn(&sender, &init.notification, &init.config);
  
          let groups_widget = model.groups.widget();
@@ -603,19 +1068,19 @@ index 85f1f5d..b0a3687 100644
          let widgets = view_output!();
  
          ComponentParts { model, widgets }
-@@ -217,6 +318,11 @@ impl Component for NotificationDropdown {
+@@ -217,6 +351,11 @@ impl Component for NotificationDropdown {
              }
  
              NotificationDropdownMsg::NotificationDismissed => {}
 +
 +            NotificationDropdownMsg::VisibilityChanged(visible) => {
-+                self.media.emit(MediaSectionInput::SetActive(visible));
++                self.media.emit(MediaListInput::SetActive(visible));
 +                self.system_stats.emit(SystemStatsInput::SetActive(visible));
 +            }
          }
      }
  
-@@ -248,6 +354,7 @@ impl Component for NotificationDropdown {
+@@ -248,6 +387,7 @@ impl Component for NotificationDropdown {
                  for idx in 0..self.groups.len() {
                      self.groups.send(idx, NotificationGroupInput::RefreshTime);
                  }
@@ -1202,10 +1667,10 @@ index abe3e41..6b78a1d 100644
  fn spawn_blocklist_watcher(
 diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
 new file mode 100644
-index 0000000..ac21510
+index 0000000..a9cd270
 --- /dev/null
 +++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,337 @@
 +.notification-dropdown {
 +    background: #0e0616;
 +    border-color: rgba(255, 126, 219, 0.55);
@@ -1224,7 +1689,8 @@ index 0000000..ac21510
 +        }
 +    }
 +
-+    .control-center-scroll {
++    .control-center-scroll,
++    .control-center-media-scroll {
 +        background: transparent;
 +
 +        undershoot,
@@ -1240,11 +1706,19 @@ index 0000000..ac21510
 +    .notification-dropdown-content {
 +        min-height: 0;
 +        padding: var(--space-sm);
++    }
++
++    .control-center-columns,
++    .control-center-column {
 +        border-spacing: var(--space-sm);
 +    }
 +
-+    .notification-dropdown-dnd-row,
++    .control-center-column {
++        min-width: 0;
++    }
++
 +    .control-center-calendar,
++    .control-center-notifications,
 +    .control-center-media,
 +    .control-center-system,
 +    .notification-dropdown-group {
@@ -1253,32 +1727,8 @@ index 0000000..ac21510
 +        box-shadow: inset 0 0 0 1px rgba(122, 252, 255, 0.025);
 +    }
 +
-+    .notification-dropdown-dnd-row {
-+        margin-bottom: var(--space-xs);
-+
-+        switch {
-+            background: #210e15;
-+            border: 1px solid rgba(122, 252, 255, 0.32);
-+
-+            &:checked {
-+                background: #ff7edb;
-+                border-color: #ff7edb;
-+            }
-+
-+            slider {
-+                background: #cbe3e7;
-+            }
-+        }
-+    }
-+
-+    .notification-dropdown-dnd-label,
-+    .media-track,
-+    .notification-dropdown-group-name,
-+    .notification-dropdown-item-title {
-+        color: #cbe3e7;
-+    }
-+
 +    .control-center-calendar,
++    .control-center-notifications,
 +    .control-center-media,
 +    .control-center-system {
 +        border-radius: var(--rounding-element);
@@ -1307,6 +1757,11 @@ index 0000000..ac21510
 +
 +    .control-center-notifications {
 +        min-height: 0;
++
++        .notification-dropdown-groups {
++            margin-left: 0;
++            margin-right: 0;
++        }
 +    }
 +
 +    .control-center-section-title,
@@ -1317,13 +1772,36 @@ index 0000000..ac21510
 +    }
 +
 +    .control-center-section-title {
-+        margin: var(--space-xs) var(--space-sm) 0;
 +        font-size: var(--text-2xs);
 +        font-weight: var(--weight-semibold);
 +    }
 +
 +    .card-title image {
 +        color: #7afcff;
++    }
++
++    .notification-dropdown-dnd-inline {
++        border-spacing: var(--space-sm);
++
++        switch {
++            background: #210e15;
++            border: 1px solid rgba(122, 252, 255, 0.32);
++
++            &:checked {
++                background: #ff7edb;
++                border-color: #ff7edb;
++            }
++
++            slider {
++                background: #cbe3e7;
++            }
++        }
++    }
++
++    .notification-dropdown-dnd-label {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-semibold);
++        color: #8b8794;
 +    }
 +
 +    .notification-dropdown-scroll {
@@ -1335,9 +1813,13 @@ index 0000000..ac21510
 +        background: rgba(255, 126, 219, 0.09);
 +    }
 +
++    .notification-dropdown-group-name,
++    .notification-dropdown-item-title {
++        color: #cbe3e7;
++    }
++
 +    .notification-dropdown-group-preview,
 +    .notification-dropdown-item-body,
-+    label.media-artist,
 +    .stat-label {
 +        color: #8b8794;
 +    }
@@ -1358,32 +1840,131 @@ index 0000000..ac21510
 +        color: #ff7edb;
 +    }
 +
-+    .dashboard-media-art {
-+        background-color: #210e15;
-+        border: 1px solid rgba(122, 252, 255, 0.28);
++    .control-center-media {
++        min-height: 0;
++        border-color: rgba(122, 252, 255, 0.38);
 +    }
 +
-+    button.media-btn.play {
-+        background: #ff7edb;
++    .control-center-media-list {
++        border-spacing: var(--space-sm);
++    }
 +
-+        > image {
-+            color: #0e0616;
++    .control-center-media-row {
++        min-width: 0;
++        padding: var(--space-sm);
++        border: 1px solid rgba(255, 126, 219, 0.22);
++        border-radius: var(--rounding-element);
++        background: #210e15;
++        transition: background var(--duration-fast);
++
++        &:not(:first-child) {
++            margin-top: var(--space-sm);
 +        }
 +
 +        &:hover {
-+            background: #7afcff;
++            background: rgba(255, 126, 219, 0.09);
++            border-color: rgba(255, 126, 219, 0.48);
++        }
++
++        &.playing {
++            border-left: 3px solid #7afcff;
++        }
++
++        &.paused {
++            border-left: 3px solid #ff7edb;
++        }
++
++        &.stopped {
++            opacity: 0.72;
 +        }
 +    }
 +
-+    scale.media-seek-slider {
-+        trough,
-+        trough highlight {
-+            min-height: calc(0.2rem * var(--global-scale));
++    .control-center-media-source {
++        min-width: calc(7.5rem * var(--global-scale));
++        margin-right: var(--space-md);
++        border-spacing: var(--space-sm);
++    }
++
++    .control-center-media-source-icon {
++        -gtk-icon-size: var(--icon-md);
++        color: #7afcff;
++    }
++
++    .control-center-media-source-name {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-semibold);
++        color: #ff7edb;
++    }
++
++    .control-center-media-metadata {
++        min-width: 0;
++    }
++
++    .control-center-media-track {
++        font-size: var(--text-md);
++        font-weight: var(--weight-bold);
++        color: #cbe3e7;
++    }
++
++    .control-center-media-artist {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-medium);
++        color: #8b8794;
++    }
++
++    .control-center-media-controls {
++        margin-left: var(--space-md);
++        border-spacing: var(--space-xs);
++    }
++
++    button.control-center-media-button {
++        all: unset;
++        padding: var(--space-sm);
++        border-radius: var(--rounding-element);
++        color: #8b8794;
++
++        image {
++            -gtk-icon-size: var(--icon-sm);
 +        }
 +
-+        trough highlight {
-+            background: #7afcff;
++        &:hover {
++            background: rgba(122, 252, 255, 0.12);
++            color: #7afcff;
 +        }
++
++        &:disabled {
++            opacity: 0.32;
++        }
++
++        &.primary {
++            background: #ff7edb;
++            color: #0e0616;
++
++            &:hover {
++                background: #7afcff;
++            }
++        }
++    }
++
++    .control-center-media-empty {
++        padding: var(--space-xl);
++        border-spacing: var(--space-sm);
++    }
++
++    .control-center-media-empty-icon {
++        -gtk-icon-size: var(--icon-xl);
++        color: #7afcff;
++    }
++
++    .control-center-media-empty-title {
++        font-size: var(--text-md);
++        font-weight: var(--weight-bold);
++        color: #cbe3e7;
++    }
++
++    .control-center-media-empty-description {
++        font-size: var(--text-sm);
++        color: #5c6776;
 +    }
 +
 +    .control-center-system {
