@@ -1,7 +1,8 @@
-# Wayle supplies notification popups and history while the existing Waybar
-# remains the visible desktop bar. Upstream only opens dropdowns from its own
-# bar, so the local patch adds a D-Bus/CLI bridge and hosts each dropdown in its
-# own layer-shell window. Wayle's own bar stays fully disabled.
+# Wayle supplies notification popups and the control centre while the existing
+# Waybar remains the visible desktop bar. The local patch adds a D-Bus/CLI
+# bridge, hosts the control centre in its own layer-shell window, and combines
+# calendar events, media controls, notification history and system parameters.
+# Wayle's own bar stays fully disabled.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
