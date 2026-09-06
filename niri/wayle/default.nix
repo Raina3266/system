@@ -16,7 +16,10 @@
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        patches = (oldAttrs.patches or [ ]) ++ [ ./waybar-dropdown.patch ];
+        patches = (oldAttrs.patches or [ ]) ++ [
+          ./waybar-dropdown.patch
+          ./control-center-layout.patch
+        ];
       });
     })
   ];
