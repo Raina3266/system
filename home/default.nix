@@ -1,5 +1,6 @@
 {
   pkgs,
+  inputs,
   ...
 }:
 let
@@ -83,5 +84,6 @@ in
     spotdl
     yt-dlp
     waylyrics
+    inputs.sonora.packages.${pkgs.system}.default
   ];
 }

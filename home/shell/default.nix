@@ -66,6 +66,7 @@
 
       # Python
       uv
+      python314Packages.ytmusicapi
 
       # Typst
       typst
