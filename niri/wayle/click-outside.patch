@@ -1,15 +1,42 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 578215c..d3578a4 100644
+index 578215c..623f976 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -366,7 +366,35 @@ impl ExternalDropdownInstance {
+@@ -14,10 +14,7 @@ use wayle_widgets::prelude::{BarButton, BarButtonInput};
+ 
+ use crate::{
+     process,
+-    shell::{
+-        helpers::layer_shell::{apply_layer, reset_anchors},
+-        services::ShellServices,
+-    },
++    shell::{helpers::layer_shell::apply_layer, services::ShellServices},
+ };
+ 
+ /// Returns `value` unchanged, logging at debug if it is `None`.
+@@ -353,9 +350,12 @@ impl ExternalDropdownInstance {
+             content.add_css_class(class.as_str());
+         }
+ 
++        // Resizable so the compositor's full-output configure is honoured;
++        // a fixed-size window would keep the surface at its natural size and
++        // the backdrop below would never span the monitor.
+         let window = gtk::Window::builder()
+             .decorated(false)
+-            .resizable(false)
++            .resizable(true)
+             .build();
+         window.add_css_class("external-dropdown-window");
+         window.init_layer_shell();
+@@ -366,7 +366,42 @@ impl ExternalDropdownInstance {
          window.set_exclusive_zone(-1);
          window.set_keyboard_mode(KeyboardMode::None);
          window.set_monitor(Some(monitor));
 -        window.set_child(Some(&content));
 +
-+        // The surface spans the whole monitor so a transparent backdrop behind
-+        // the content can catch clicks outside it and dismiss the dropdown.
++        // The surface covers the whole output so a transparent backdrop behind
++        // the content can catch clicks beside it and dismiss the dropdown.
++        // `show` then places the content within that surface.
 +        let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
 +        backdrop.set_hexpand(true);
 +        backdrop.set_vexpand(true);
@@ -27,34 +54,109 @@ index 578215c..d3578a4 100644
 +
 +        let root = gtk::Overlay::new();
 +        root.set_child(Some(&backdrop));
-+        content.set_halign(gtk::Align::Center);
-+        content.set_valign(gtk::Align::Center);
 +        root.add_overlay(&content);
++        // GtkOverlay ignores overlay children when measuring, and the backdrop
++        // asks for nothing, so without this the window would request a zero
++        // size and clip the content away.
++        root.set_measure_overlay(&content, true);
 +
 +        window.set_anchor(Edge::Top, true);
 +        window.set_anchor(Edge::Bottom, true);
 +        window.set_anchor(Edge::Left, true);
 +        window.set_anchor(Edge::Right, true);
++        window.set_margin(Edge::Top, 0);
++        window.set_margin(Edge::Bottom, 0);
++        window.set_margin(Edge::Left, 0);
++        window.set_margin(Edge::Right, 0);
 +        window.set_child(Some(&root));
  
          let visibility_source = source.clone();
          window.connect_visible_notify(move |window| {
-@@ -429,6 +457,18 @@ impl ExternalDropdownInstance {
-             }
+@@ -404,31 +439,20 @@ impl ExternalDropdownInstance {
+     }
+ 
+     fn show(&self, style: DropdownStyle, location: Location, offset: i32) {
+-        reset_anchors(&self.window);
+-
+-        let position_class = match location {
+-            Location::Top => {
+-                self.window.set_anchor(Edge::Top, true);
+-                self.window.set_margin(Edge::Top, offset);
+-                "position-bottom"
+-            }
+-            Location::Bottom => {
+-                self.window.set_anchor(Edge::Bottom, true);
+-                self.window.set_margin(Edge::Bottom, offset);
+-                "position-top"
+-            }
+-            Location::Left => {
+-                self.window.set_anchor(Edge::Left, true);
+-                self.window.set_margin(Edge::Left, offset);
+-                "position-right"
+-            }
+-            Location::Right => {
+-                self.window.set_anchor(Edge::Right, true);
+-                self.window.set_margin(Edge::Right, offset);
+-                "position-left"
+-            }
++        // The surface stays pinned to every edge so the backdrop keeps covering
++        // the output. Placement is therefore a question of where the content
++        // sits inside the surface: it hugs the edge the source bar is on, and
++        // centres along the other axis the way a single-edge anchor used to.
++        let (position_class, halign, valign) = match location {
++            Location::Top => ("position-bottom", gtk::Align::Center, gtk::Align::Start),
++            Location::Bottom => ("position-top", gtk::Align::Center, gtk::Align::End),
++            Location::Left => ("position-right", gtk::Align::Start, gtk::Align::Center),
++            Location::Right => ("position-left", gtk::Align::End, gtk::Align::Center),
          };
  
-+        // The backdrop needs the full monitor, so the location-specific anchor
-+        // above only picks the CSS class; the surface itself always covers the
-+        // output and the content stays centred inside it.
-+        self.window.set_anchor(Edge::Top, true);
-+        self.window.set_anchor(Edge::Bottom, true);
-+        self.window.set_anchor(Edge::Left, true);
-+        self.window.set_anchor(Edge::Right, true);
-+        self.window.set_margin(Edge::Top, 0);
-+        self.window.set_margin(Edge::Bottom, 0);
-+        self.window.set_margin(Edge::Left, 0);
-+        self.window.set_margin(Edge::Right, 0);
++        self.content.set_halign(halign);
++        self.content.set_valign(valign);
 +
          for class in [
              "position-top",
              "position-bottom",
+@@ -439,10 +463,39 @@ impl ExternalDropdownInstance {
+         }
+         self.window.add_css_class(position_class);
+ 
+-        self.content.set_margin_top(style.margins.top);
+-        self.content.set_margin_bottom(style.margins.bottom);
+-        self.content.set_margin_start(style.margins.start);
+-        self.content.set_margin_end(style.margins.end);
++        // The bar offset used to be a layer-shell margin on the anchored edge.
++        // With the surface covering the output it becomes a content margin.
++        let (top, bottom, start, end) = match location {
++            Location::Top => (
++                style.margins.top + offset,
++                style.margins.bottom,
++                style.margins.start,
++                style.margins.end,
++            ),
++            Location::Bottom => (
++                style.margins.top,
++                style.margins.bottom + offset,
++                style.margins.start,
++                style.margins.end,
++            ),
++            Location::Left => (
++                style.margins.top,
++                style.margins.bottom,
++                style.margins.start + offset,
++                style.margins.end,
++            ),
++            Location::Right => (
++                style.margins.top,
++                style.margins.bottom,
++                style.margins.start,
++                style.margins.end + offset,
++            ),
++        };
++
++        self.content.set_margin_top(top);
++        self.content.set_margin_bottom(bottom);
++        self.content.set_margin_start(start);
++        self.content.set_margin_end(end);
+         self.window.set_opacity(style.opacity);
+ 
+         if style.shadow_enabled {
