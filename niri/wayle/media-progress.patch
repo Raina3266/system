@@ -1,5 +1,5 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
-index de10983..4154d2c 100644
+index de10983..d433956 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
 @@ -1,16 +1,20 @@
@@ -201,14 +201,10 @@ index de10983..4154d2c 100644
          row.set_css_classes(&[
              "control-center-media-row",
              match playback_state {
-@@ -284,27 +361,37 @@ impl MediaListSection {
+@@ -284,47 +361,55 @@ impl MediaListSection {
              },
          ]);
  
-+        // The row stacks the player's identity and controls over its seek bar.
-+        let head = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-+        head.add_css_class("control-center-media-head");
-+
 +        let identity = player.identity.get();
 +        let identity = if identity.trim().is_empty() {
 +            player.id.bus_name().to_owned()
@@ -216,10 +212,23 @@ index de10983..4154d2c 100644
 +            identity
 +        };
 +
-+        // The source names the player and the title names the track; both are
-+        // worth reading, so the name stays visible next to the icon. It is
-+        // ellipsised and held to a narrow column instead of the fixed 7.5rem
-+        // the dashboard uses, which is what crowded the title out of the row.
++        // Three lines: the title, then who is playing it and the transport
++        // controls, then the seek bar. Sharing one line with the source name
++        // and three buttons left the title a few characters wide, so it gets a
++        // line of its own and everything else moves below it.
++        let track_title = player.metadata.title.get();
++        let title = gtk::Label::new(Some(&track_title));
++        title.add_css_class("control-center-media-track");
++        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
++        title.set_max_width_chars(1);
++        title.set_hexpand(true);
++        title.set_xalign(0.0);
++        title.set_tooltip_text(Some(&track_title));
++        row.append(&title);
++
++        let meta = gtk::Box::new(gtk::Orientation::Horizontal, 0);
++        meta.add_css_class("control-center-media-meta");
++
          let source = gtk::Box::new(gtk::Orientation::Horizontal, 0);
          source.add_css_class("control-center-media-source");
          source.set_valign(gtk::Align::Center);
@@ -243,27 +252,41 @@ index de10983..4154d2c 100644
          source_name.set_xalign(0.0);
          source.append(&source_name);
 -        row.append(&source);
-+        head.append(&source);
+-
+-        let metadata = gtk::Box::new(gtk::Orientation::Vertical, 0);
+-        metadata.add_css_class("control-center-media-metadata");
+-        metadata.set_hexpand(true);
+-        metadata.set_valign(gtk::Align::Center);
+-
+-        let title = gtk::Label::new(Some(&player.metadata.title.get()));
+-        title.add_css_class("control-center-media-track");
+-        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+-        title.set_max_width_chars(1);
+-        title.set_xalign(0.0);
+-        metadata.append(&title);
++        meta.append(&source);
  
-         let metadata = gtk::Box::new(gtk::Orientation::Vertical, 0);
-         metadata.add_css_class("control-center-media-metadata");
-@@ -324,7 +411,7 @@ impl MediaListSection {
+         let artist = gtk::Label::new(Some(&player.metadata.artist.get()));
+         artist.add_css_class("control-center-media-artist");
+         artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
          artist.set_max_width_chars(1);
++        artist.set_hexpand(true);
++        artist.set_valign(gtk::Align::Center);
          artist.set_xalign(0.0);
-         metadata.append(&artist);
+-        metadata.append(&artist);
 -        row.append(&metadata);
-+        head.append(&metadata);
++        meta.append(&artist);
  
          let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
          controls.add_css_class("control-center-media-controls");
-@@ -373,11 +460,82 @@ impl MediaListSection {
+@@ -373,11 +458,82 @@ impl MediaListSection {
          });
          controls.append(&next);
  
 -        row.append(&controls);
 -        row
-+        head.append(&controls);
-+        row.append(&head);
++        meta.append(&controls);
++        row.append(&meta);
 +
 +        let length = player.metadata.length.get();
 +        let position = player.position.get();
@@ -317,9 +340,9 @@ index de10983..4154d2c 100644
 +        };
 +
 +        (row, entry)
-     }
- }
- 
++    }
++}
++
 +/// Position as a percentage of the track length, for the seek slider's 0-100
 +/// range. A player with no length reported sits at zero rather than jumping.
 +fn progress_percentage(position: Duration, length: Option<Duration>) -> f64 {
@@ -328,9 +351,9 @@ index de10983..4154d2c 100644
 +            * PERCENTAGE_SCALE)
 +            .clamp(0.0, PERCENTAGE_SCALE),
 +        _ => 0.0,
-+    }
-+}
-+
+     }
+ }
+ 
 +fn format_duration(duration: Duration) -> String {
 +    let total_secs = duration.as_secs();
 +    let minutes = total_secs / SECONDS_PER_MINUTE;
@@ -342,15 +365,19 @@ index de10983..4154d2c 100644
      let image = gtk::Image::from_icon_name(icon);
      let button = gtk::Button::builder().child(&image).build();
 diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-index a9cd270..8d3b71e 100644
+index a9cd270..66ecb2f 100644
 --- a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
 +++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-@@ -206,9 +206,32 @@
+@@ -206,9 +206,36 @@
          }
      }
  
-+    .control-center-media-head {
++    // The row runs title / source + controls / seek bar down the card. Only
++    // the title line is free to take the full width; this one carries the
++    // source name, the artist and the three buttons.
++    .control-center-media-meta {
 +        min-width: 0;
++        margin-top: var(--space-xs);
 +    }
 +
 +    // The global .media-progress inset assumes a card of its own; inside an
@@ -380,6 +407,17 @@ index a9cd270..8d3b71e 100644
          border-spacing: var(--space-sm);
      }
  
+@@ -223,10 +250,6 @@
+         color: #ff7edb;
+     }
+ 
+-    .control-center-media-metadata {
+-        min-width: 0;
+-    }
+-
+     .control-center-media-track {
+         font-size: var(--text-md);
+         font-weight: var(--weight-bold);
 @@ -240,8 +263,12 @@
      }
  
