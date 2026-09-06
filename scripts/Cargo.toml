@@ -16,7 +16,12 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
+# These crates are rofi launchers, waybar modules and one-shot CLI tools: they
+# spend their lives blocked on a subprocess or a D-Bus round trip, so whole-program
+# optimisation buys nothing measurable at runtime. It costs plenty at build time
+# though — on rofi-clipboard, the smallest crate here that has dependencies,
+# `lto = true` with `codegen-units = 1` took 27s to build the binary and its test
+# harness against 9s on the defaults, and the gap widens on preview-panel (gtk4)
+# and rofi-audio (bluer). Keep strip so the closure stays small.
 [profile.release]
-lto = true
-codegen-units = 1
 strip = true

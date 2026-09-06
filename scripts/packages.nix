@@ -4,12 +4,61 @@
   kernelPackages ? pkgs.linuxPackages_latest,
 }:
 let
-  mkWorkspacePackage = pname: extra:
+  inherit (pkgs) lib;
+
+  # Kept in sync with [workspace].members in ./Cargo.toml.
+  workspaceMembers = [
+    "media-control"
+    "ocr-screenshot"
+    "preview-panel"
+    "rofi-audio"
+    "rofi-clipboard"
+    "rofi-filesearch"
+    "rofi-network"
+    "waybar-timer"
+    "webcam-crop"
+  ];
+
+  # The source one member is built from: the workspace manifests, that member's
+  # own tree, and the siblings' manifests (cargo will not load a workspace whose
+  # members are missing from disk).
+  #
+  # Passing the whole of scripts/ as src meant every derivation's input hash
+  # covered all nine crates *and* this file, so touching any one of them — or
+  # editing a wrapper below — rebuilt all nine, gtk4 and bluer trees included.
+  # Sibling manifests are still an input, but they only change when a crate
+  # gains or drops a dependency.
+  memberSrc =
+    pname:
+    lib.fileset.toSource {
+      root = ./.;
+      fileset = lib.fileset.unions (
+        [
+          ./Cargo.toml
+          ./Cargo.lock
+          (./. + "/${pname}")
+        ]
+        ++ map (m: ./. + "/${m}/Cargo.toml") (lib.remove pname workspaceMembers)
+      );
+    };
+
+  # Every member manifest cargo loads needs a target to point at, so stand the
+  # siblings back up as empty binaries. --package only walks the requested
+  # member's dependency graph, so the stubs are parsed and never compiled.
+  stubSiblings =
+    pname:
+    lib.concatMapStrings (m: ''
+      mkdir -p ${m}/src
+      : > ${m}/src/main.rs
+    '') (lib.remove pname workspaceMembers);
+
+  mkWorkspacePackage =
+    pname: extra:
     pkgs.rustPlatform.buildRustPackage (
       {
         inherit pname;
         version = "0.1.0";
-        src = ./.;
+        src = memberSrc pname;
         cargoLock.lockFile = ./Cargo.lock;
         cargoBuildFlags = [
           "--package"
@@ -21,6 +70,9 @@ let
         ];
       }
       // extra
+      // {
+        postPatch = stubSiblings pname + (extra.postPatch or "");
+      }
     );
 
   withParentDeath = pkgs.runCommandCC "with-parent-death" {
