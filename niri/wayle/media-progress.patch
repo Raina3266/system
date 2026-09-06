@@ -1,5 +1,5 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
-index de10983..ec1ed22 100644
+index de10983..7c430f7 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/media_list.rs
 @@ -1,16 +1,20 @@
@@ -201,27 +201,51 @@ index de10983..ec1ed22 100644
          row.set_css_classes(&[
              "control-center-media-row",
              match playback_state {
-@@ -284,6 +361,10 @@ impl MediaListSection {
+@@ -284,13 +361,9 @@ impl MediaListSection {
              },
          ]);
  
+-        let source = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+-        source.add_css_class("control-center-media-source");
+-        source.set_valign(gtk::Align::Center);
+-
+-        let source_icon = gtk::Image::from_icon_name(&resolve_source_icon(player));
+-        source_icon.add_css_class("control-center-media-source-icon");
+-        source.append(&source_icon);
 +        // The row stacks the player's identity and controls over its seek bar.
 +        let head = gtk::Box::new(gtk::Orientation::Horizontal, 0);
 +        head.add_css_class("control-center-media-head");
-+
-         let source = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-         source.add_css_class("control-center-media-source");
-         source.set_valign(gtk::Align::Center);
-@@ -304,7 +385,7 @@ impl MediaListSection {
-         source_name.set_max_width_chars(14);
-         source_name.set_xalign(0.0);
-         source.append(&source_name);
+ 
+         let identity = player.identity.get();
+         let identity = if identity.trim().is_empty() {
+@@ -298,13 +371,19 @@ impl MediaListSection {
+         } else {
+             identity
+         };
+-        let source_name = gtk::Label::new(Some(&identity));
+-        source_name.add_css_class("control-center-media-source-name");
+-        source_name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+-        source_name.set_max_width_chars(14);
+-        source_name.set_xalign(0.0);
+-        source.append(&source_name);
 -        row.append(&source);
++
++        // At the control centre's width the player's name and the track title
++        // cannot both fit, and the title is the one worth reading. The name
++        // stays on the icon as a tooltip.
++        let source = gtk::Box::new(gtk::Orientation::Horizontal, 0);
++        source.add_css_class("control-center-media-source");
++        source.set_valign(gtk::Align::Center);
++
++        let source_icon = gtk::Image::from_icon_name(&resolve_source_icon(player));
++        source_icon.add_css_class("control-center-media-source-icon");
++        source_icon.set_tooltip_text(Some(&identity));
++        source.append(&source_icon);
 +        head.append(&source);
  
          let metadata = gtk::Box::new(gtk::Orientation::Vertical, 0);
          metadata.add_css_class("control-center-media-metadata");
-@@ -324,7 +405,7 @@ impl MediaListSection {
+@@ -324,7 +403,7 @@ impl MediaListSection {
          artist.set_max_width_chars(1);
          artist.set_xalign(0.0);
          metadata.append(&artist);
@@ -230,7 +254,7 @@ index de10983..ec1ed22 100644
  
          let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
          controls.add_css_class("control-center-media-controls");
-@@ -373,11 +454,82 @@ impl MediaListSection {
+@@ -373,11 +452,82 @@ impl MediaListSection {
          });
          controls.append(&next);
  
@@ -316,10 +340,10 @@ index de10983..ec1ed22 100644
      let image = gtk::Image::from_icon_name(icon);
      let button = gtk::Button::builder().child(&image).build();
 diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-index a9cd270..2627202 100644
+index a9cd270..7fe681a 100644
 --- a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
 +++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-@@ -206,6 +206,30 @@
+@@ -206,10 +206,32 @@
          }
      }
  
@@ -348,5 +372,38 @@ index a9cd270..2627202 100644
 +    }
 +
      .control-center-media-source {
-         min-width: calc(7.5rem * var(--global-scale));
-         margin-right: var(--space-md);
+-        min-width: calc(7.5rem * var(--global-scale));
+-        margin-right: var(--space-md);
+-        border-spacing: var(--space-sm);
++        margin-right: var(--space-sm);
+     }
+ 
+     .control-center-media-source-icon {
+@@ -217,12 +239,6 @@
+         color: #7afcff;
+     }
+ 
+-    .control-center-media-source-name {
+-        font-size: var(--text-sm);
+-        font-weight: var(--weight-semibold);
+-        color: #ff7edb;
+-    }
+-
+     .control-center-media-metadata {
+         min-width: 0;
+     }
+@@ -240,8 +256,12 @@
+     }
+ 
+     .control-center-media-controls {
+-        margin-left: var(--space-md);
+-        border-spacing: var(--space-xs);
++        margin-left: var(--space-sm);
++        border-spacing: 0;
++    }
++
++    .control-center-media-row button.control-center-media-button {
++        padding: var(--space-xs);
+     }
+ 
+     button.control-center-media-button {

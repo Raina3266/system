@@ -1,0 +1,313 @@
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+index ae4cfcd..7b86d96 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+@@ -3,6 +3,7 @@ mod helpers;
+ mod media_list;
+ mod messages;
+ mod methods;
++mod network_stats;
+ mod notification_group;
+ mod notification_item;
+ mod watchers;
+@@ -19,6 +20,7 @@ pub(super) use self::factory::Factory;
+ use self::{
+     media_list::{MediaListInit, MediaListInput, MediaListSection},
+     messages::{NotificationDropdownCmd, NotificationDropdownInit, NotificationDropdownMsg},
++    network_stats::{NetworkStatsInit, NetworkStatsSection},
+     notification_group::{
+         NotificationGroup,
+         messages::{NotificationGroupInput, NotificationGroupOutput},
+@@ -49,6 +51,7 @@ pub(crate) struct NotificationDropdown {
+     groups: FactoryVecDeque<NotificationGroup>,
+     media: Controller<MediaListSection>,
+     system_stats: Controller<SystemStatsSection>,
++    network_stats: Controller<NetworkStatsSection>,
+ }
+ 
+ #[relm4::component(pub(crate))]
+@@ -267,6 +270,9 @@ impl Component for NotificationDropdown {
+                                     #[local_ref]
+                                     system_stats_widget -> gtk::Box {},
+ 
++                                    #[local_ref]
++                                    network_stats_widget -> gtk::Box {},
++
+                                     #[local_ref]
+                                     media_widget -> gtk::Box {},
+                                 },
+@@ -307,6 +313,12 @@ impl Component for NotificationDropdown {
+             .detach();
+         system_stats.widget().add_css_class("control-center-system");
+ 
++        let network_stats = NetworkStatsSection::builder()
++            .launch(NetworkStatsInit {
++                sysinfo: init.sysinfo.clone(),
++            })
++            .detach();
++
+         let mut model = Self {
+             notification: init.notification.clone(),
+             config: init.config.clone(),
+@@ -318,6 +330,7 @@ impl Component for NotificationDropdown {
+             groups,
+             media,
+             system_stats,
++            network_stats,
+         };
+ 
+         model.rebuild_groups();
+@@ -327,6 +340,7 @@ impl Component for NotificationDropdown {
+         let groups_widget = model.groups.widget();
+         let media_widget = model.media.widget();
+         let system_stats_widget = model.system_stats.widget();
++        let network_stats_widget = model.network_stats.widget();
+         let widgets = view_output!();
+ 
+         ComponentParts { model, widgets }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/network_stats.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/network_stats.rs
+new file mode 100644
+index 0000000..3a3d75f
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/network_stats.rs
+@@ -0,0 +1,181 @@
++use std::sync::Arc;
++
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use wayle_sysinfo::{SysinfoService, types::NetworkData};
++use wayle_widgets::watch;
++
++const DOWN_ARROW: &str = "\u{2193}";
++const UP_ARROW: &str = "\u{2191}";
++
++pub(super) struct NetworkStatsInit {
++    pub sysinfo: Arc<SysinfoService>,
++}
++
++/// One line of figures for the busiest interface, pushed by the sysinfo
++/// watcher so the formatting happens off the widget tree.
++///
++/// The card is a single row, so the session totals do not fit on it; they go
++/// to the tooltip rather than being dropped.
++#[derive(Debug)]
++pub(super) struct NetworkStatsCmd {
++    interface: String,
++    download: String,
++    upload: String,
++    totals: String,
++}
++
++impl NetworkStatsCmd {
++    fn from_data(networks: &[NetworkData]) -> Self {
++        let Some(network) = networks
++            .iter()
++            .filter(|network| !network.interface.starts_with("lo"))
++            .max_by_key(|network| network.rx_bytes_per_sec + network.tx_bytes_per_sec)
++        else {
++            return Self {
++                interface: String::from("--"),
++                download: format_rate(DOWN_ARROW, 0),
++                upload: format_rate(UP_ARROW, 0),
++                totals: format_totals(0, 0),
++            };
++        };
++
++        Self {
++            interface: network.interface.clone(),
++            download: format_rate(DOWN_ARROW, network.rx_bytes_per_sec),
++            upload: format_rate(UP_ARROW, network.tx_bytes_per_sec),
++            totals: format_totals(network.rx_bytes, network.tx_bytes),
++        }
++    }
++}
++
++pub(super) struct NetworkStatsSection {
++    /// Held only to keep the service alive: dropping the last handle cancels
++    /// its polling tasks, which would freeze these figures.
++    _sysinfo: Arc<SysinfoService>,
++    interface: String,
++    download: String,
++    upload: String,
++    totals: String,
++}
++
++#[relm4::component(pub(super))]
++impl Component for NetworkStatsSection {
++    type Init = NetworkStatsInit;
++    type Input = ();
++    type Output = ();
++    type CommandOutput = NetworkStatsCmd;
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "control-center-network"],
++            set_orientation: gtk::Orientation::Horizontal,
++            #[watch]
++            set_tooltip_text: Some(&model.totals),
++
++            gtk::Image {
++                add_css_class: "control-center-network-icon",
++                set_icon_name: Some("ld-network-symbolic"),
++            },
++
++            gtk::Label {
++                add_css_class: "control-center-network-interface",
++                set_ellipsize: gtk::pango::EllipsizeMode::End,
++                set_max_width_chars: 1,
++                set_xalign: 0.0,
++                #[watch]
++                set_label: &model.interface,
++            },
++
++            gtk::Box {
++                add_css_class: "control-center-network-rates",
++                set_hexpand: true,
++                set_halign: gtk::Align::End,
++
++                gtk::Label {
++                    add_css_class: "control-center-network-rate",
++                    #[watch]
++                    set_label: &model.download,
++                },
++
++                gtk::Label {
++                    add_css_class: "control-center-network-rate",
++                    #[watch]
++                    set_label: &model.upload,
++                },
++            },
++        }
++    }
++
++    fn init(
++        init: Self::Init,
++        _root: Self::Root,
++        sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let network = init.sysinfo.network.clone();
++        let initial = NetworkStatsCmd::from_data(&network.get());
++
++        // The sysinfo service only polls interfaces while the property has a
++        // subscriber, so this watcher is what keeps the figures moving.
++        watch!(sender, [network.watch()], |out| {
++            let _ = out.send(NetworkStatsCmd::from_data(&network.get()));
++        });
++
++        let model = Self {
++            _sysinfo: init.sysinfo,
++            interface: initial.interface,
++            download: initial.download,
++            upload: initial.upload,
++            totals: initial.totals,
++        };
++
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update_cmd(
++        &mut self,
++        msg: Self::CommandOutput,
++        _sender: ComponentSender<Self>,
++        _root: &Self::Root,
++    ) {
++        self.interface = msg.interface;
++        self.download = msg.download;
++        self.upload = msg.upload;
++        self.totals = msg.totals;
++    }
++}
++
++fn format_rate(arrow: &str, bytes_per_sec: u64) -> String {
++    format!("{arrow} {}/s", format_bytes(bytes_per_sec))
++}
++
++fn format_totals(rx_bytes: u64, tx_bytes: u64) -> String {
++    format!(
++        "{} down, {} up since Wayle started",
++        format_bytes(rx_bytes),
++        format_bytes(tx_bytes)
++    )
++}
++
++/// Formats a byte count with three significant figures, so the row's width
++/// stays put as the value climbs through the units.
++fn format_bytes(bytes: u64) -> String {
++    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
++
++    let mut value = bytes as f64;
++    let mut unit = 0;
++    while value >= 1024.0 && unit < UNITS.len() - 1 {
++        value /= 1024.0;
++        unit += 1;
++    }
++
++    if unit == 0 || value >= 100.0 {
++        format!("{value:.0} {}", UNITS[unit])
++    } else if value >= 10.0 {
++        format!("{value:.1} {}", UNITS[unit])
++    } else {
++        format!("{value:.2} {}", UNITS[unit])
++    }
++}
+diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
+index 7fe681a..6f13e24 100644
+--- a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
++++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
+@@ -48,6 +48,7 @@
+     .control-center-notifications,
+     .control-center-media,
+     .control-center-system,
++    .control-center-network,
+     .notification-dropdown-group {
+         background: #180a10;
+         border: 1px solid rgba(255, 126, 219, 0.28);
+@@ -57,7 +58,8 @@
+     .control-center-calendar,
+     .control-center-notifications,
+     .control-center-media,
+-    .control-center-system {
++    .control-center-system,
++    .control-center-network {
+         border-radius: var(--rounding-element);
+     }
+ 
+@@ -206,6 +208,36 @@
+         }
+     }
+ 
++    // A single row: an icon, the interface, and both live rates. The session
++    // totals live in the card's tooltip, so nothing here wraps to a second
++    // line and the card stays a quarter of the four-row version's height.
++    .control-center-network {
++        padding: var(--space-xs) var(--space-sm);
++        border-color: rgba(122, 252, 255, 0.38);
++    }
++
++    .control-center-network-icon {
++        -gtk-icon-size: var(--icon-sm);
++        margin-right: var(--space-sm);
++        color: #7afcff;
++    }
++
++    .control-center-network-interface {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-semibold);
++        color: #ff7edb;
++    }
++
++    .control-center-network-rates {
++        border-spacing: var(--space-sm);
++    }
++
++    .control-center-network-rate {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-medium);
++        color: #cbe3e7;
++    }
++
+     .control-center-media-head {
+         min-width: 0;
+     }
