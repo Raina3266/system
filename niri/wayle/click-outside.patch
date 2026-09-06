@@ -1,0 +1,51 @@
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -180,7 +180,28 @@
+-        window.set_child(Some(&content));
++        let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        backdrop.set_hexpand(true);
++        backdrop.set_vexpand(true);
++
++        let weak_window = window.downgrade();
++        let click = gtk::GestureClick::new();
++        click.set_button(0);
++        click.connect_released(move |_, _, _, _| {
++            if let Some(window) = weak_window.upgrade() {
++                window.set_keyboard_mode(KeyboardMode::None);
++                window.set_visible(false);
++            }
++        });
++        backdrop.add_controller(click);
++
++        let root = gtk::Overlay::new();
++        root.set_child(Some(&backdrop));
++        content.set_halign(gtk::Align::Center);
++        content.set_valign(gtk::Align::Center);
++        root.add_overlay(&content);
++
++        window.set_anchor(Edge::Top, true);
++        window.set_anchor(Edge::Bottom, true);
++        window.set_anchor(Edge::Left, true);
++        window.set_anchor(Edge::Right, true);
++        window.set_child(Some(&root));
+ 
+         let visibility_source = source.clone();
+         window.connect_visible_notify(move |window| {
+@@ -220,6 +241,15 @@
+             }
+         };
+ 
++        // The external control centre uses a full-monitor layer surface so
++        // clicks outside the centred content can be caught by the backdrop.
++        // Keep the content centred regardless of the source bar location.
++        self.window.set_anchor(Edge::Top, true);
++        self.window.set_anchor(Edge::Bottom, true);
++        self.window.set_anchor(Edge::Left, true);
++        self.window.set_anchor(Edge::Right, true);
++        self.window.set_margin(Edge::Top, 0);
++        self.window.set_margin(Edge::Bottom, 0);
++        self.window.set_margin(Edge::Left, 0);
++        self.window.set_margin(Edge::Right, 0);
++
+         for class in [
