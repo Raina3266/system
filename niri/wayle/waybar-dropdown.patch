@@ -121,234 +121,11 @@ index 9fdaf9f..aff8565 100644
          }
      }
  }
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/messages.rs
-index 736f8f2..b77229c 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/messages.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/messages.rs
-@@ -1,6 +1,9 @@
- use std::{sync::Arc, time::Duration};
- 
--use wayle_media::{MediaService, types::PlaybackState};
-+use wayle_media::{
-+    MediaService,
-+    types::{PlaybackState, Volume},
-+};
- 
- pub(crate) struct MediaSectionInit {
-     pub media: Option<Arc<MediaService>>,
-@@ -14,6 +17,7 @@ pub(crate) enum MediaSectionInput {
-     NextClicked,
-     SwitchPlayerClicked,
-     SeekCommitted(f64),
-+    VolumeCommitted(f64),
- }
- 
- #[derive(Debug)]
-@@ -28,6 +32,7 @@ pub(crate) enum MediaSectionCmd {
-     },
-     PlaybackStateChanged(PlaybackState),
-     PositionTick(Duration),
-+    VolumeChanged(Volume),
-     CanSeekChanged(bool),
-     Noop,
- }
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/methods.rs
-index 61d2b83..62da40f 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/methods.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/methods.rs
-@@ -37,9 +37,11 @@ impl MediaSection {
-             self.cover_art = None;
-             self.position = Duration::ZERO;
-             self.length = None;
-+            self.volume = Default::default();
-             self.can_seek = false;
-             self.update_artwork_css();
-             self.seek_slider.set_value(0.0);
-+            self.volume_slider.set_value(0.0);
-             let _ = self.player_watcher.reset();
-             return;
-         };
-@@ -49,6 +51,7 @@ impl MediaSection {
-         self.cover_art = player.metadata.cover_art.get();
-         self.length = player.metadata.length.get();
-         self.position = player.position.get();
-+        self.volume = player.volume.get();
- 
-         self.playback_state = player.playback_state.get();
-         self.can_previous = player.can_go_previous.get();
-@@ -59,6 +62,7 @@ impl MediaSection {
-         self.update_artwork_css();
-         self.seek_slider
-             .set_value(self.progress_fraction() * PERCENTAGE_SCALE);
-+        self.volume_slider.set_value(self.volume.as_percentage());
- 
-         let token = self.player_watcher.reset();
- 
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/mod.rs
-index 2b45b4c..372f2da 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/mod.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/mod.rs
-@@ -13,7 +13,11 @@ use std::{
- 
- use gtk::{CssProvider, gdk::Display, glib, prelude::*, style_context_add_provider_for_display};
- use relm4::{gtk, prelude::*};
--use wayle_media::{MediaService, core::player::Player, types::PlaybackState};
-+use wayle_media::{
-+    MediaService,
-+    core::player::Player,
-+    types::{PlaybackState, Volume},
-+};
- use wayle_widgets::{WatcherToken, prelude::*};
- 
- use self::messages::MediaSectionCmd;
-@@ -37,6 +41,7 @@ pub(crate) struct MediaSection {
-     art_css_provider: CssProvider,
-     art_css_class: String,
-     seek_slider: DebouncedSlider,
-+    volume_slider: DebouncedSlider,
- 
-     has_player: bool,
-     has_multiple_players: bool,
-@@ -46,6 +51,7 @@ pub(crate) struct MediaSection {
-     playback_state: PlaybackState,
-     position: Duration,
-     length: Option<Duration>,
-+    volume: Volume,
-     can_previous: bool,
-     can_next: bool,
-     can_seek: bool,
-@@ -246,6 +252,27 @@ impl Component for MediaSection {
-                             },
-                         },
-                     },
-+
-+                    #[name = "volume"]
-+                    gtk::Box {
-+                        add_css_class: "media-volume",
-+
-+                        gtk::Label {
-+                            add_css_class: "media-volume-label",
-+                            set_label: "Volume",
-+                        },
-+
-+                        #[local_ref]
-+                        volume_slider -> DebouncedSlider {
-+                            set_hexpand: true,
-+                        },
-+
-+                        gtk::Label {
-+                            add_css_class: "media-volume-value",
-+                            #[watch]
-+                            set_label: &format!("{:.0}%", model.volume.as_percentage()),
-+                        },
-+                    },
-                 }
-             } else {
-                 #[template]
-@@ -280,10 +307,14 @@ impl Component for MediaSection {
-         style_context_add_provider_for_display(&display, &art_css_provider, COMPONENT_CSS_PRIORITY);
- 
-         let seek_slider = DebouncedSlider::new(0.0);
-+        let volume_slider = DebouncedSlider::new(0.0);
- 
-         if let Some(scale) = seek_slider.scale() {
-             scale.add_css_class("media-seek-slider");
-         }
-+        if let Some(scale) = volume_slider.scale() {
-+            scale.add_css_class("media-volume-slider");
-+        }
- 
-         let commit_sender = sender.input_sender().clone();
-         seek_slider.connect_closure(
-@@ -294,6 +325,15 @@ impl Component for MediaSection {
-             }),
-         );
- 
-+        let volume_sender = sender.input_sender().clone();
-+        volume_slider.connect_closure(
-+            "committed",
-+            false,
-+            glib::closure_local!(move |_slider: DebouncedSlider, percentage: f64| {
-+                volume_sender.emit(MediaSectionInput::VolumeCommitted(percentage));
-+            }),
-+        );
-+
-         watchers::spawn(&sender, &init.media);
- 
-         let model = Self {
-@@ -305,6 +345,7 @@ impl Component for MediaSection {
-             art_css_provider,
-             art_css_class: next_dashboard_art_css_class(),
-             seek_slider: seek_slider.clone(),
-+            volume_slider: volume_slider.clone(),
- 
-             has_player: false,
-             has_multiple_players: false,
-@@ -314,12 +355,14 @@ impl Component for MediaSection {
-             playback_state: PlaybackState::Stopped,
-             position: Duration::ZERO,
-             length: None,
-+            volume: Volume::default(),
-             can_previous: false,
-             can_next: false,
-             can_seek: false,
-         };
- 
-         let seek_slider = &model.seek_slider;
-+        let volume_slider = &model.volume_slider;
-         let widgets = view_output!();
-         ComponentParts { model, widgets }
-     }
-@@ -386,6 +429,15 @@ impl Component for MediaSection {
-                     "seek failed",
-                 );
-             }
-+
-+            MediaSectionInput::VolumeCommitted(percentage) => {
-+                let volume = Volume::new(percentage / PERCENTAGE_SCALE);
-+                self.fire_player_command(
-+                    &sender,
-+                    move |player| async move { player.set_volume(volume).await },
-+                    "volume change failed",
-+                );
-+            }
-         }
-     }
- 
-@@ -425,6 +477,11 @@ impl Component for MediaSection {
-                     .set_value(self.progress_fraction() * PERCENTAGE_SCALE);
-             }
- 
-+            MediaSectionCmd::VolumeChanged(volume) => {
-+                self.volume = volume;
-+                self.volume_slider.set_value(volume.as_percentage());
-+            }
-+
-             MediaSectionCmd::CanSeekChanged(can_seek) => {
-                 self.can_seek = can_seek;
-             }
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/watchers.rs
-index 87a871e..e28e8c8 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/watchers.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/media_section/watchers.rs
-@@ -54,6 +54,12 @@ pub(super) fn spawn_player_watchers(
-         let _ = out.send(MediaSectionCmd::CanSeekChanged(can_seek.get()));
-     });
- 
-+    let volume = player.volume.clone();
-+
-+    watch_cancellable!(sender, token.clone(), [volume.watch()], |out| {
-+        let _ = out.send(MediaSectionCmd::VolumeChanged(volume.get()));
-+    });
-+
-     let position_player = player.clone();
- 
-     sender.command(move |out, shutdown| async move {
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-index 7e38a69..3d5c3c7 100644
+index 7e38a69..9019174 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-@@ -1,7 +1,7 @@
+@@ -1,11 +1,11 @@
  mod battery_section;
  mod controls;
  mod factory;
@@ -357,11 +134,27 @@ index 7e38a69..3d5c3c7 100644
  mod messages;
  mod network_section;
  mod quick_actions;
+-mod system_stats;
++pub(crate) mod system_stats;
+ mod user_session;
+ mod watchers;
+ 
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/factory.rs
-index a5b8edd..47f46fe 100644
+index a5b8edd..7f10a78 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/factory.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/factory.rs
-@@ -20,6 +20,8 @@ impl DropdownFactory for Factory {
+@@ -1,6 +1,9 @@
+ use relm4::prelude::*;
+ 
+-use super::{NotificationDropdown, messages::NotificationDropdownInit};
++use super::{
++    NotificationDropdown,
++    messages::{NotificationDropdownInit, NotificationDropdownMsg},
++};
+ use crate::shell::{
+     bar::dropdowns::{DropdownFactory, DropdownInstance, require_service},
+     services::ShellServices,
+@@ -20,10 +23,19 @@ impl DropdownFactory for Factory {
          let init = NotificationDropdownInit {
              notification,
              config,
@@ -370,22 +163,31 @@ index a5b8edd..47f46fe 100644
          };
          let controller = NotificationDropdown::builder().launch(init).detach();
  
++        let visibility_sender = controller.sender().clone();
+         let popover = controller.widget().clone();
+-        Some(DropdownInstance::new(popover, Box::new(controller)))
++        Some(
++            DropdownInstance::new(popover, Box::new(controller)).with_visibility_handler(
++                move |visible| {
++                    visibility_sender.emit(NotificationDropdownMsg::VisibilityChanged(visible));
++                },
++            ),
++        )
+     }
+ }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
-index 6a2f6b9..11169c2 100644
+index 6a2f6b9..e762c27 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
-@@ -1,6 +1,36 @@
+@@ -1,7 +1,25 @@
 -use std::{cmp::Reverse, collections::HashMap, sync::Arc};
 +use std::{cmp::Reverse, collections::HashMap, fs, path::PathBuf, sync::Arc};
  
 +use chrono::{Duration, Local};
 +use serde_json::{Map, Value};
  use wayle_notification::core::notification::Notification;
-+use wayle_sysinfo::SysinfoService;
-+
+ 
 +const CALENDAR_DAYS: i64 = 7;
-+const BYTES_PER_KIBIBYTE: f64 = 1024.0;
-+const BYTES_PER_GIBIBYTE: f64 = 1024.0 * 1024.0 * 1024.0;
 +
 +#[derive(Clone, Debug, PartialEq, Eq)]
 +pub(super) struct CalendarSummary {
@@ -395,24 +197,16 @@ index 6a2f6b9..11169c2 100644
 +}
 +
 +#[derive(Clone, Debug, PartialEq, Eq)]
-+pub(crate) struct SystemSummary {
-+    pub cpu: String,
-+    pub memory: String,
-+    pub temperature: String,
-+    pub disk: String,
-+    pub network: String,
-+}
-+
-+#[derive(Clone, Debug, PartialEq, Eq)]
 +struct CalendarEntry {
 +    order: u8,
 +    icon: &'static str,
 +    title: String,
 +}
- 
++
  pub(super) struct NotificationGroupData {
      pub app_name: Option<String>,
-@@ -44,3 +74,174 @@ pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<Notificat
+     pub notifications: Vec<Arc<Notification>>,
+@@ -44,3 +62,88 @@ pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<Notificat
  
      result
  }
@@ -464,70 +258,6 @@ index 6a2f6b9..11169c2 100644
 +    }
 +}
 +
-+pub(super) fn system_summary(sysinfo: &SysinfoService) -> SystemSummary {
-+    let cpu = sysinfo.cpu.get();
-+    let memory = sysinfo.memory.get();
-+    let disks = sysinfo.disks.get();
-+    let networks = sysinfo.network.get();
-+
-+    let frequency = cpu.avg_frequency_mhz as f64 / 1000.0;
-+    let cpu_text = if cpu.avg_frequency_mhz == 0 {
-+        format!("{:.0}%", cpu.usage_percent)
-+    } else {
-+        format!("{:.0}%  ·  {frequency:.1} GHz", cpu.usage_percent)
-+    };
-+
-+    let memory_text = format!(
-+        "{} / {}  ·  {:.0}%",
-+        gibibytes(memory.used_bytes),
-+        gibibytes(memory.total_bytes),
-+        memory.usage_percent
-+    );
-+
-+    let temperature = cpu.temperature_celsius.map_or_else(
-+        || String::from("Unavailable"),
-+        |value| format!("{value:.0} °C"),
-+    );
-+
-+    let disk = disks
-+        .iter()
-+        .find(|disk| disk.mount_point.as_os_str() == "/")
-+        .map_or_else(
-+            || String::from("Unavailable"),
-+            |disk| {
-+                format!(
-+                    "{} / {}  ·  {:.0}%",
-+                    gibibytes(disk.used_bytes),
-+                    gibibytes(disk.total_bytes),
-+                    disk.usage_percent
-+                )
-+            },
-+        );
-+
-+    let network = networks
-+        .iter()
-+        .filter(|network| network.interface != "lo")
-+        .max_by_key(|network| network.rx_bytes_per_sec + network.tx_bytes_per_sec)
-+        .map_or_else(
-+            || String::from("↓ 0 B/s    ↑ 0 B/s"),
-+            |network| {
-+                format!(
-+                    "↓ {}    ↑ {}",
-+                    byte_rate(network.rx_bytes_per_sec),
-+                    byte_rate(network.tx_bytes_per_sec)
-+                )
-+            },
-+        );
-+
-+    SystemSummary {
-+        cpu: cpu_text,
-+        memory: memory_text,
-+        temperature,
-+        disk,
-+        network,
-+    }
-+}
-+
 +fn calendar_cache_path() -> PathBuf {
 +    if let Some(path) = std::env::var_os("WAYLE_CALENDAR_CACHE").filter(|value| !value.is_empty()) {
 +        return PathBuf::from(path);
@@ -565,41 +295,17 @@ index 6a2f6b9..11169c2 100644
 +    entries.sort_by_key(|entry| entry.order);
 +    entries
 +}
-+
-+fn gibibytes(bytes: u64) -> String {
-+    format!("{:.1} GiB", bytes as f64 / BYTES_PER_GIBIBYTE)
-+}
-+
-+fn byte_rate(bytes: u64) -> String {
-+    let mut value = bytes as f64;
-+    let mut unit = "B/s";
-+    for candidate in ["KiB/s", "MiB/s", "GiB/s"] {
-+        if value < BYTES_PER_KIBIBYTE {
-+            break;
-+        }
-+        value /= BYTES_PER_KIBIBYTE;
-+        unit = candidate;
-+    }
-+
-+    if value >= 100.0 || unit == "B/s" {
-+        format!("{value:.0} {unit}")
-+    } else {
-+        format!("{value:.1} {unit}")
-+    }
-+}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs
-index b9ed110..09423d2 100644
+index b9ed110..2263d40 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/messages.rs
-@@ -1,11 +1,17 @@
+@@ -1,11 +1,15 @@
  use std::sync::Arc;
  
  use wayle_config::ConfigService;
 +use wayle_media::MediaService;
  use wayle_notification::NotificationService;
 +use wayle_sysinfo::SysinfoService;
-+
-+use super::helpers::SystemSummary;
  
  pub(crate) struct NotificationDropdownInit {
      pub notification: Arc<NotificationService>,
@@ -609,17 +315,19 @@ index b9ed110..09423d2 100644
  }
  
  #[derive(Debug)]
-@@ -22,4 +28,5 @@ pub(crate) enum NotificationDropdownCmd {
-     ScaleChanged(f32),
-     IconSourceChanged,
-     TimeTick,
-+    SystemChanged(SystemSummary),
+@@ -13,6 +17,7 @@ pub(crate) enum NotificationDropdownMsg {
+     DndToggled(bool),
+     ClearAll,
+     NotificationDismissed,
++    VisibilityChanged(bool),
  }
+ 
+ #[derive(Debug)]
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-index 85f1f5d..f17a4e9 100644
+index 85f1f5d..b0a3687 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-@@ -22,7 +22,13 @@ use self::{
+@@ -22,7 +22,16 @@ use self::{
          messages::{NotificationGroupInput, NotificationGroupOutput},
      },
  };
@@ -627,26 +335,29 @@ index 85f1f5d..f17a4e9 100644
 +use crate::{
 +    i18n::t,
 +    shell::bar::dropdowns::{
-+        dashboard::media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
++        dashboard::{
++            media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
++            system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
++        },
 +        scaled_dimension,
 +    },
 +};
  
  const BASE_WIDTH: f32 = 425.0;
  const BASE_HEIGHT: f32 = 725.0;
-@@ -36,8 +42,11 @@ pub(crate) struct NotificationDropdown {
+@@ -36,8 +45,11 @@ pub(crate) struct NotificationDropdown {
  
      dnd: bool,
      has_notifications: bool,
 +    calendar: helpers::CalendarSummary,
-+    system: helpers::SystemSummary,
  
      groups: FactoryVecDeque<NotificationGroup>,
 +    media: Controller<MediaSection>,
++    system_stats: Controller<SystemStatsSection>,
  }
  
  #[relm4::component(pub(crate))]
-@@ -50,7 +59,7 @@ impl Component for NotificationDropdown {
+@@ -50,7 +62,7 @@ impl Component for NotificationDropdown {
      view! {
          #[root]
          gtk::Popover {
@@ -655,7 +366,7 @@ index 85f1f5d..f17a4e9 100644
              set_has_arrow: false,
              #[watch]
              set_width_request: model.scaled_width,
-@@ -97,69 +106,243 @@ impl Component for NotificationDropdown {
+@@ -97,69 +109,139 @@ impl Component for NotificationDropdown {
                      },
                  },
  
@@ -783,11 +494,7 @@ index 85f1f5d..f17a4e9 100644
 +                                    set_label: &model.calendar.entries,
 +                                },
 +                            },
- 
--                        #[local_ref]
--                        groups_widget -> gtk::Box {
--                            add_css_class: "notification-dropdown-groups",
--                            set_orientation: gtk::Orientation::Vertical,
++
 +                            gtk::Box {
 +                                add_css_class: "control-center-notifications",
 +                                set_orientation: gtk::Orientation::Vertical,
@@ -845,117 +552,17 @@ index 85f1f5d..f17a4e9 100644
 +
 +                            #[local_ref]
 +                            media_widget -> gtk::Box {},
-+
-+                            gtk::Box {
-+                                set_css_classes: &["card", "dashboard-card", "control-center-system"],
-+                                set_orientation: gtk::Orientation::Vertical,
-+
-+                                gtk::Box {
-+                                    add_css_class: "card-header",
-+
-+                                    gtk::Box {
-+                                        add_css_class: "card-title",
-+
-+                                        gtk::Label {
-+                                            set_label: "System parameters",
-+                                        },
-+                                    },
-+                                },
-+
-+                                gtk::Box {
-+                                    add_css_class: "control-center-system-grid",
-+                                    set_orientation: gtk::Orientation::Vertical,
-+
-+                                    gtk::Box {
-+                                        add_css_class: "control-center-system-row",
-+
-+                                        gtk::Label {
-+                                            add_css_class: "name",
-+                                            set_label: "CPU",
-+                                        },
-+
-+                                        gtk::Label {
-+                                            add_css_class: "value",
-+                                            set_hexpand: true,
-+                                            set_halign: gtk::Align::End,
-+                                            #[watch]
-+                                            set_label: &model.system.cpu,
-+                                        },
-+                                    },
-+
-+                                    gtk::Box {
-+                                        add_css_class: "control-center-system-row",
-+
-+                                        gtk::Label {
-+                                            add_css_class: "name",
-+                                            set_label: "Memory",
-+                                        },
-+
-+                                        gtk::Label {
-+                                            add_css_class: "value",
-+                                            set_hexpand: true,
-+                                            set_halign: gtk::Align::End,
-+                                            #[watch]
-+                                            set_label: &model.system.memory,
-+                                        },
-+                                    },
-+
-+                                    gtk::Box {
-+                                        add_css_class: "control-center-system-row",
-+
-+                                        gtk::Label {
-+                                            add_css_class: "name",
-+                                            set_label: "Temperature",
-+                                        },
-+
-+                                        gtk::Label {
-+                                            add_css_class: "value",
-+                                            set_hexpand: true,
-+                                            set_halign: gtk::Align::End,
-+                                            #[watch]
-+                                            set_label: &model.system.temperature,
-+                                        },
-+                                    },
-+
-+                                    gtk::Box {
-+                                        add_css_class: "control-center-system-row",
-+
-+                                        gtk::Label {
-+                                            add_css_class: "name",
-+                                            set_label: "Disk",
-+                                        },
-+
-+                                        gtk::Label {
-+                                            add_css_class: "value",
-+                                            set_hexpand: true,
-+                                            set_halign: gtk::Align::End,
-+                                            #[watch]
-+                                            set_label: &model.system.disk,
-+                                        },
-+                                    },
-+
-+                                    gtk::Box {
-+                                        add_css_class: "control-center-system-row",
-+
-+                                        gtk::Label {
-+                                            add_css_class: "name",
-+                                            set_label: "Network",
-+                                        },
-+
-+                                        gtk::Label {
-+                                            add_css_class: "value",
-+                                            set_hexpand: true,
-+                                            set_halign: gtk::Align::End,
-+                                            #[watch]
-+                                            set_label: &model.system.network,
-+                                        },
-+                                    },
-+                                },
-+                            },
+ 
+-                        #[local_ref]
+-                        groups_widget -> gtk::Box {
+-                            add_css_class: "notification-dropdown-groups",
+-                            set_orientation: gtk::Orientation::Vertical,
++                            #[local_ref]
++                            system_stats_widget -> gtk::Box {},
                          },
                      },
                  },
-@@ -183,6 +366,13 @@ impl Component for NotificationDropdown {
+@@ -183,6 +265,20 @@ impl Component for NotificationDropdown {
                  }
              });
  
@@ -964,98 +571,60 @@ index 85f1f5d..f17a4e9 100644
 +                media: init.media.clone(),
 +            })
 +            .detach();
-+        media.emit(MediaSectionInput::SetActive(true));
++        media.widget().add_css_class("control-center-media");
++
++        let system_stats = SystemStatsSection::builder()
++            .launch(SystemStatsInit {
++                sysinfo: init.sysinfo.clone(),
++            })
++            .detach();
++        system_stats.widget().add_css_class("control-center-system");
 +
          let mut model = Self {
              notification: init.notification.clone(),
              config: init.config.clone(),
-@@ -190,14 +380,18 @@ impl Component for NotificationDropdown {
+@@ -190,7 +286,10 @@ impl Component for NotificationDropdown {
              scaled_height: scaled_dimension(BASE_HEIGHT, scale),
              dnd,
              has_notifications: false,
 +            calendar: helpers::calendar_summary(),
-+            system: helpers::system_summary(&init.sysinfo),
              groups,
 +            media,
++            system_stats,
          };
  
          model.rebuild_groups();
- 
--        watchers::spawn(&sender, &init.notification, &init.config);
-+        watchers::spawn(&sender, &init.notification, &init.config, &init.sysinfo);
+@@ -198,6 +297,8 @@ impl Component for NotificationDropdown {
+         watchers::spawn(&sender, &init.notification, &init.config);
  
          let groups_widget = model.groups.widget();
 +        let media_widget = model.media.widget();
++        let system_stats_widget = model.system_stats.widget();
          let widgets = view_output!();
  
          ComponentParts { model, widgets }
-@@ -248,6 +442,11 @@ impl Component for NotificationDropdown {
+@@ -217,6 +318,11 @@ impl Component for NotificationDropdown {
+             }
+ 
+             NotificationDropdownMsg::NotificationDismissed => {}
++
++            NotificationDropdownMsg::VisibilityChanged(visible) => {
++                self.media.emit(MediaSectionInput::SetActive(visible));
++                self.system_stats.emit(SystemStatsInput::SetActive(visible));
++            }
+         }
+     }
+ 
+@@ -248,6 +354,7 @@ impl Component for NotificationDropdown {
                  for idx in 0..self.groups.len() {
                      self.groups.send(idx, NotificationGroupInput::RefreshTime);
                  }
 +                self.calendar = helpers::calendar_summary();
-+            }
-+
-+            NotificationDropdownCmd::SystemChanged(summary) => {
-+                self.system = summary;
              }
          }
      }
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/watchers.rs
-index 080635c..f221ab8 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/watchers.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/watchers.rs
-@@ -3,22 +3,47 @@ use std::{sync::Arc, time::Duration};
- use relm4::ComponentSender;
- use wayle_config::ConfigService;
- use wayle_notification::NotificationService;
-+use wayle_sysinfo::SysinfoService;
- use wayle_widgets::watch;
- 
--use super::{NotificationDropdown, messages::NotificationDropdownCmd};
-+use super::{NotificationDropdown, helpers, messages::NotificationDropdownCmd};
- 
- const TIME_TICK_INTERVAL: Duration = Duration::from_secs(30);
-+const SYSTEM_TICK_INTERVAL: Duration = Duration::from_secs(2);
- 
- pub(super) fn spawn(
-     sender: &ComponentSender<NotificationDropdown>,
-     notification: &Arc<NotificationService>,
-     config: &Arc<ConfigService>,
-+    sysinfo: &Arc<SysinfoService>,
- ) {
-     spawn_notifications_watcher(sender, notification);
-     spawn_dnd_watcher(sender, notification);
-     spawn_scale_watcher(sender, config);
-     spawn_icon_source_watcher(sender, config);
-     spawn_relative_time_refresh(sender);
-+    spawn_system_refresh(sender, sysinfo);
-+}
-+
-+fn spawn_system_refresh(
-+    sender: &ComponentSender<NotificationDropdown>,
-+    sysinfo: &Arc<SysinfoService>,
-+) {
-+    let sysinfo = sysinfo.clone();
-+    sender.command(move |out, shutdown| async move {
-+        let shutdown_fut = shutdown.wait();
-+        tokio::pin!(shutdown_fut);
-+
-+        loop {
-+            tokio::select! {
-+                () = &mut shutdown_fut => break,
-+                () = tokio::time::sleep(SYSTEM_TICK_INTERVAL) => {
-+                    let summary = helpers::system_summary(&sysinfo);
-+                    let _ = out.send(NotificationDropdownCmd::SystemChanged(summary));
-+                }
-+            }
-+        }
-+    });
- }
- 
- fn spawn_relative_time_refresh(sender: &ComponentSender<NotificationDropdown>) {
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 4a0fbdf..c32996a 100644
+index 4a0fbdf..578215c 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 @@ -6,13 +6,19 @@ use std::{
@@ -1081,7 +650,40 @@ index 4a0fbdf..c32996a 100644
  
  /// Returns `value` unchanged, logging at debug if it is `None`.
  ///
-@@ -278,6 +284,174 @@ impl Drop for DropdownInstance {
+@@ -42,6 +48,7 @@ pub(crate) struct DropdownInstance {
+     popover: gtk::Popover,
+     _controller: Box<dyn Any>,
+     thaw_target: Rc<Cell<Option<relm4::Sender<BarButtonInput>>>>,
++    visibility_handler: Option<Rc<dyn Fn(bool)>>,
+ }
+ 
+ impl DropdownInstance {
+@@ -86,6 +93,24 @@ impl DropdownInstance {
+             popover,
+             _controller: controller,
+             thaw_target,
++            visibility_handler: None,
++        }
++    }
++
++    /// Registers lifecycle handling for components that only poll while shown.
++    pub(crate) fn with_visibility_handler(mut self, handler: impl Fn(bool) + 'static) -> Self {
++        let handler: Rc<dyn Fn(bool)> = Rc::new(handler);
++        let popover_handler = handler.clone();
++        self.popover.connect_visible_notify(move |popover| {
++            popover_handler(popover.is_visible());
++        });
++        self.visibility_handler = Some(handler);
++        self
++    }
++
++    fn notify_visibility(&self, visible: bool) {
++        if let Some(handler) = &self.visibility_handler {
++            handler(visible);
+         }
+     }
+ 
+@@ -278,6 +303,175 @@ impl Drop for DropdownInstance {
      }
  }
  
@@ -1150,6 +752,11 @@ index 4a0fbdf..c32996a 100644
 +        window.set_monitor(Some(monitor));
 +        window.set_child(Some(&content));
 +
++        let visibility_source = source.clone();
++        window.connect_visible_notify(move |window| {
++            visibility_source.notify_visibility(window.is_visible());
++        });
++
 +        window.connect_map(|window| {
 +            debug!(
 +                width = window.width(),
@@ -1186,24 +793,20 @@ index 4a0fbdf..c32996a 100644
 +        let position_class = match location {
 +            Location::Top => {
 +                self.window.set_anchor(Edge::Top, true);
-+                self.window.set_anchor(Edge::Right, true);
 +                self.window.set_margin(Edge::Top, offset);
 +                "position-bottom"
 +            }
 +            Location::Bottom => {
 +                self.window.set_anchor(Edge::Bottom, true);
-+                self.window.set_anchor(Edge::Right, true);
 +                self.window.set_margin(Edge::Bottom, offset);
 +                "position-top"
 +            }
 +            Location::Left => {
-+                self.window.set_anchor(Edge::Top, true);
 +                self.window.set_anchor(Edge::Left, true);
 +                self.window.set_margin(Edge::Left, offset);
 +                "position-right"
 +            }
 +            Location::Right => {
-+                self.window.set_anchor(Edge::Top, true);
 +                self.window.set_anchor(Edge::Right, true);
 +                self.window.set_margin(Edge::Right, offset);
 +                "position-left"
@@ -1256,7 +859,7 @@ index 4a0fbdf..c32996a 100644
  struct DropdownStyle {
      margins: DropdownMargins,
      opacity: f64,
-@@ -354,14 +528,18 @@ pub(crate) trait DropdownFactory {
+@@ -354,14 +548,18 @@ pub(crate) trait DropdownFactory {
  /// interactions resolve to the same logical dropdown instance.
  pub(crate) struct DropdownRegistry {
      services: ShellServices,
@@ -1276,7 +879,7 @@ index 4a0fbdf..c32996a 100644
          }
      }
  
-@@ -378,6 +556,53 @@ impl DropdownRegistry {
+@@ -378,6 +576,53 @@ impl DropdownRegistry {
          }
      }
  
@@ -1597,51 +1200,30 @@ index abe3e41..6b78a1d 100644
  }
  
  fn spawn_blocklist_watcher(
-diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_media.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_media.scss
-index f68921f..c36e130 100644
---- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_media.scss
-+++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_media.scss
-@@ -38,6 +38,33 @@
-         padding: 0;
-     }
- 
-+    .media-volume {
-+        margin-top: var(--space-xs);
-+        border-spacing: var(--space-sm);
+diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
+new file mode 100644
+index 0000000..ac21510
+--- /dev/null
++++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
+@@ -0,0 +1,221 @@
++.notification-dropdown {
++    background: #0e0616;
++    border-color: rgba(255, 126, 219, 0.55);
++    color: #cbe3e7;
 +
-+        .media-volume-label,
-+        .media-volume-value {
-+            font-size: var(--text-sm);
-+            font-weight: var(--weight-medium);
-+            color: var(--fg-subtle);
-+        }
++    .dropdown-header {
++        background: #180a10;
++        border-bottom-color: rgba(122, 252, 255, 0.42);
 +
-+        .media-volume-value {
-+            min-width: calc(2.6rem * var(--global-scale));
-+            font-family: var(--font-mono);
-+        }
-+    }
++        .dropdown-title {
++            color: #cbe3e7;
 +
-+    scale.media-volume-slider {
-+        trough {
-+            min-height: calc(0.2rem * var(--global-scale));
-+
-+            highlight {
-+                min-height: calc(0.2rem * var(--global-scale));
++            image {
++                color: #ff7edb;
 +            }
 +        }
 +    }
 +
-     button.ghost-icon.media-btn {
-         margin: var(--space-xs);
- 
-diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-new file mode 100644
-index 0000000..4a05b2e
---- /dev/null
-+++ b/crates/wayle-styling/scss/modules/notification_dropdown/_control_center.scss
-@@ -0,0 +1,77 @@
-+.notification-dropdown {
 +    .control-center-scroll {
 +        background: transparent;
 +
@@ -1661,20 +1243,65 @@ index 0000000..4a05b2e
 +        border-spacing: var(--space-sm);
 +    }
 +
++    .notification-dropdown-dnd-row,
++    .control-center-calendar,
++    .control-center-media,
++    .control-center-system,
++    .notification-dropdown-group {
++        background: #180a10;
++        border: 1px solid rgba(255, 126, 219, 0.28);
++        box-shadow: inset 0 0 0 1px rgba(122, 252, 255, 0.025);
++    }
++
++    .notification-dropdown-dnd-row {
++        margin-bottom: var(--space-xs);
++
++        switch {
++            background: #210e15;
++            border: 1px solid rgba(122, 252, 255, 0.32);
++
++            &:checked {
++                background: #ff7edb;
++                border-color: #ff7edb;
++            }
++
++            slider {
++                background: #cbe3e7;
++            }
++        }
++    }
++
++    .notification-dropdown-dnd-label,
++    .media-track,
++    .notification-dropdown-group-name,
++    .notification-dropdown-item-title {
++        color: #cbe3e7;
++    }
++
++    .control-center-calendar,
++    .control-center-media,
++    .control-center-system {
++        border-radius: var(--rounding-element);
++    }
++
++    .control-center-calendar {
++        border-color: rgba(122, 252, 255, 0.34);
++    }
++
 +    .control-center-calendar-date {
 +        font-size: var(--text-sm);
-+        font-weight: var(--weight-medium);
-+        color: var(--fg-subtle);
++        font-weight: var(--weight-semibold);
++        color: #7afcff;
 +    }
 +
 +    .control-center-calendar-events {
 +        font-size: var(--text-md);
 +        font-weight: var(--weight-medium);
-+        color: var(--fg-default);
++        color: #cbe3e7;
 +        line-height: 1.45;
 +
 +        &.empty {
-+            color: var(--fg-subtle);
++            color: #5c6776;
 +        }
 +    }
 +
@@ -1682,41 +1309,123 @@ index 0000000..4a05b2e
 +        min-height: 0;
 +    }
 +
++    .control-center-section-title,
++    .card-title {
++        color: #ff7edb;
++        text-transform: uppercase;
++        letter-spacing: 0.08em;
++    }
++
 +    .control-center-section-title {
 +        margin: var(--space-xs) var(--space-sm) 0;
 +        font-size: var(--text-2xs);
 +        font-weight: var(--weight-semibold);
-+        color: var(--fg-subtle);
-+        text-transform: uppercase;
-+        letter-spacing: 0.06em;
++    }
++
++    .card-title image {
++        color: #7afcff;
 +    }
 +
 +    .notification-dropdown-scroll {
 +        min-height: 0;
 +    }
 +
-+    scale.media-seek-slider trough,
-+    scale.media-seek-slider trough highlight {
-+        min-height: calc(0.2rem * var(--global-scale));
++    .notification-dropdown-group-header:hover,
++    button.notification-dropdown-item-action-btn:hover {
++        background: rgba(255, 126, 219, 0.09);
 +    }
 +
-+    .control-center-system-grid {
-+        border-spacing: var(--space-xs);
++    .notification-dropdown-group-preview,
++    .notification-dropdown-item-body,
++    label.media-artist,
++    .stat-label {
++        color: #8b8794;
 +    }
 +
-+    .control-center-system-row {
-+        font-size: var(--text-md);
-+        font-weight: var(--weight-medium);
++    .notification-dropdown-group-count,
++    .notification-dropdown-item-time {
++        color: #7afcff;
++    }
 +
-+        .name {
-+            color: var(--fg-subtle);
++    .notification-dropdown-item,
++    .notification-dropdown-item-actions,
++    .notification-dropdown-item-action-row + .notification-dropdown-item-action-row {
++        border-color: rgba(122, 252, 255, 0.14);
++    }
++
++    image.notification-dropdown-item-icon-img,
++    .notification-dropdown-group-more {
++        color: #ff7edb;
++    }
++
++    .dashboard-media-art {
++        background-color: #210e15;
++        border: 1px solid rgba(122, 252, 255, 0.28);
++    }
++
++    button.media-btn.play {
++        background: #ff7edb;
++
++        > image {
++            color: #0e0616;
 +        }
 +
-+        .value {
-+            color: var(--fg-default);
-+            font-family: var(--font-mono);
++        &:hover {
++            background: #7afcff;
 +        }
 +    }
++
++    scale.media-seek-slider {
++        trough,
++        trough highlight {
++            min-height: calc(0.2rem * var(--global-scale));
++        }
++
++        trough highlight {
++            background: #7afcff;
++        }
++    }
++
++    .control-center-system {
++        border-color: rgba(255, 126, 219, 0.38);
++
++        .progress-ring-canvas {
++            color: #7afcff;
++
++            &.warning {
++                color: #fede5d;
++            }
++
++            &.error {
++                color: #ff6e6e;
++            }
++        }
++
++        .ring-text {
++            color: #cbe3e7;
++        }
++    }
++
++    .empty-state {
++        image {
++            color: #7afcff;
++        }
++
++        .title {
++            color: #cbe3e7;
++        }
++
++        .description {
++            color: #5c6776;
++        }
++    }
++}
++
++window.external-dropdown-window.shadow .notification-dropdown {
++    box-shadow:
++        0 0 18px rgba(255, 126, 219, 0.2),
++        0 6px 22px rgba(0, 0, 0, 0.68),
++        0 0 0 1px rgba(122, 252, 255, 0.18);
 +}
 diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_index.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_index.scss
 index 799083e..31ce3c2 100644
