@@ -1,20 +1,27 @@
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-index 82a1302..c03b594 100644
+index 0343428..ae4cfcd 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
-@@ -268,15 +268,13 @@ impl Component for NotificationDropdown {
+@@ -32,7 +32,7 @@ use crate::{
+     },
+ };
+ 
+-const BASE_WIDTH: f32 = 1275.0;
++const BASE_WIDTH: f32 = 637.5;
+ const BASE_HEIGHT: f32 = 725.0;
+ 
+ pub(crate) struct NotificationDropdown {
+@@ -265,15 +265,10 @@ impl Component for NotificationDropdown {
                                      set_orientation: gtk::Orientation::Vertical,
  
                                      #[local_ref]
 -                                    media_widget -> gtk::Box {},
 -                                },
-+                                    system_stats_widget -> gtk::Box {},
- 
+-
 -                                gtk::Box {
 -                                    add_css_class: "control-center-column",
 -                                    set_orientation: gtk::Orientation::Vertical,
-+                                    #[local_ref]
-+                                    network_stats_widget -> gtk::Box {},
++                                    system_stats_widget -> gtk::Box {},
  
                                      #[local_ref]
 -                                    system_stats_widget -> gtk::Box {},
