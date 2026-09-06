@@ -19,6 +19,7 @@
         patches = (oldAttrs.patches or [ ]) ++ [
           ./waybar-dropdown.patch
           ./control-center-layout.patch
+          ./click-outside.patch
         ];
       });
     })
