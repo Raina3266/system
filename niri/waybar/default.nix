@@ -34,11 +34,11 @@ let
     // {
       position = "top";
       expand-center = true;
-      # Battery at the far left. In the middle, `custom/media` carries Wayle's
-      # notification count and opens its history, and `mpris` carries the
-      # current track. Wayle stays hidden until that button opens it.
+      # Wayle's native dashboard is at the far left. In the middle,
+      # `custom/media` opens the larger notification/calendar control centre,
+      # while `mpris` carries the current track.
       modules-left = [
-        "custom/battery"
+        "custom/dashboard"
         "tray"
         "custom/ycal"
       ];
