@@ -55,10 +55,6 @@ trait WayleNotificationsExt {
     /// Every notification in history, newest first.
     fn list(&self) -> zbus::Result<Vec<Entry>>;
 
-    /// Run one of a notification's actions. Only Wayle can: the sending
-    /// application waits on an `ActionInvoked` signal from the daemon.
-    fn invoke(&self, id: u32, action: &str) -> zbus::Result<()>;
-
     /// Dismiss one notification.
     fn dismiss(&self, id: u32) -> zbus::Result<()>;
 
@@ -89,7 +85,9 @@ pub struct Entry {
     pub urgency: u32,
     /// Unix seconds, so a reader can say how long ago it arrived.
     pub timestamp: i64,
-    /// Action id and label, in the order the sender listed them.
+    /// Action id and label, in the order the sender listed them. Read but not
+    /// drawn: running one is the daemon's to do and the panel does not offer
+    /// it, so the field only keeps the wire format matching the patch.
     pub actions: Vec<(String, String)>,
 }
 
@@ -155,10 +153,6 @@ impl Notifications {
 
     pub fn dnd(&self) -> bool {
         self.proxy.dnd().unwrap_or(false)
-    }
-
-    pub fn invoke(&self, id: u32, action: &str) {
-        let _ = self.proxy.invoke(id, action);
     }
 
     pub fn dismiss(&self, id: u32) {

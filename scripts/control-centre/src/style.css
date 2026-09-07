@@ -21,7 +21,7 @@ window.control-centre {
 
 /* Two columns of cards, side by side. */
 .column {
-    min-width: 280px;
+    min-width: 186px;
 }
 
 .column:first-child {
@@ -61,7 +61,6 @@ window.control-centre {
 /* The agenda: a heading per day, then that day's entries under it. */
 .calendar-day {
     color: #ff7edb;
-    font-weight: bold;
     margin-top: 4px;
 }
 
@@ -102,21 +101,32 @@ window.control-centre {
     margin-bottom: 6px;
 }
 
+switch {
+    min-width: 32px;
+    min-height: 18px;
+}
+
+switch slider {
+    min-width: 14px;
+    min-height: 14px;
+}
+
 .dnd-label {
     font-size: 11px;
     color: #8b8794;
 }
 
 .notification-group {
-    margin-bottom: 6px;
+    margin-bottom: 10px;
 }
 
 .notification-group-header {
-    margin-bottom: 2px;
+    margin-top: 6px;
+    margin-bottom: 6px;
 }
 
 .notification-app {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     color: #ff7edb;
 }
@@ -219,6 +229,10 @@ button.notification-action:hover {
     margin-bottom: 0;
 }
 
+.media-controls {
+    margin-top: 2px;
+}
+
 button.media-button {
     background: transparent;
     border: none;
@@ -247,8 +261,9 @@ scale.media-seek highlight {
 
 scale.media-seek slider {
     background: #7afcff;
-    min-width: 10px;
-    min-height: 10px;
+    min-width: 12px;
+    min-height: 12px;
+    margin: -4px;
     border-radius: 50%;
 }
 
@@ -263,13 +278,13 @@ scale.media-seek slider {
 }
 
 .ring-value {
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 600;
     color: #cbe3e7;
 }
 
 .ring-caption {
-    font-size: 10px;
+    font-size: 9px;
     color: #8b8794;
     letter-spacing: 0.06em;
 }

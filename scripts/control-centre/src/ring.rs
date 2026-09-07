@@ -10,9 +10,11 @@ use std::rc::Rc;
 use gtk::cairo::{Context, LineCap};
 use gtk::prelude::*;
 
-/// Outer diameter in logical pixels, and how thick the ring is drawn.
-const DIAMETER: i32 = 54;
-const THICKNESS: f64 = 4.0;
+/// Outer diameter in logical pixels, and how thick the ring is drawn. Four of
+/// these sit across one column, so the diameter is what actually decides how
+/// narrow the panel can be.
+const DIAMETER: i32 = 38;
+const THICKNESS: f64 = 3.0;
 
 /// Where the arc starts: twelve o'clock rather than three.
 const START: f64 = -PI / 2.0;
