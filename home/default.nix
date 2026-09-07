@@ -13,10 +13,10 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
-  music-python = pkgs.runCommand "music-python" { } ''
-    mkdir -p $out/bin
-    ln -s ${pkgs.python3.withPackages (ps: [ ps.ytmusicapi ])}/bin/python3 $out/bin/python3
-  '';
+  music-python = pkgs.python3.withPackages (ps: [
+    ps.spotdl
+    ps.ytmusicapi
+  ]);
 in
 {
   imports = [
@@ -85,9 +85,8 @@ in
     shotcut
     kid3
     gimp
-    # Expose only the Python interpreter so it does not conflict with
-    # spotdl's own ytmusicapi wrapper in the Home Manager build environment.
-    spotdl
+    # Keep spotdl and ytmusicapi in one Python environment so music_organiser
+    # can invoke python3 without creating a second conflicting ytmusicapi wrapper.
     music-python
     yt-dlp
     waylyrics
