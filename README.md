@@ -442,49 +442,51 @@ A minimal custom module configuration looks like this:
 
 ## Control centre
 
-`Mod+N` and the bar's centre button open `control-centre`, a layer-shell panel
-holding the calendar, the media players and the system readings. Wayle keeps
-the notification list beside it: it is the notification daemon, and only the
-daemon holds each entry's icon, actions and urgency, so drawing that list
-anywhere else would lose them.
+`Mod+N` and the bar's centre button open `control-centre`, one layer-shell
+panel in two columns: the calendar and the notification list on the left, the
+system readings and the media players on the right. It covers the output it
+opens on, so a click beside it dismisses it, as does Escape.
 
-The panel covers the output it opens on, so a click beside it dismisses it, and
-it leaves the right-hand margin clear for Wayle's dropdown. Set
-`CONTROL_CENTRE_RIGHT_MARGIN` if that dropdown is a different width.
+Wayle stays the notification daemon. It owns `org.freedesktop.Notifications`,
+draws the popups, keeps the history and decides Do Not Disturb; this panel only
+renders that history and asks Wayle to act on it. Running an action in
+particular has to be Wayle's: the application that sent the notification is
+waiting on an `ActionInvoked` signal from the daemon it talked to, not from a
+panel.
 
 | Card | Source |
 | --- | --- |
 | Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
+| Notifications | `com.wayle.NotificationsExt1`, grouped by app, with each sender's own action buttons |
 | Media players | MPRIS over D-Bus, with a seek bar per player |
 | System | CPU, memory, the root filesystem, and the hottest component |
 
 `control-centre waybar` streams the badge for `custom/media`: a bell, a count,
 or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
-properties. It replaces a `wayle notify status --watch | jq` pipeline, so
-nothing shells out for the bar's notification count.
+properties. Nothing shells out for it.
 
 ### What is still patched
 
-Wayle needs two patches, both against v0.7.0, and neither touches its CLI:
+Two patches, and neither is a widget or a stylesheet:
 
 | Patch | Why it cannot be a program |
 | --- | --- |
-| `waybar-dropdown.patch` | A GtkPopover cannot take a parent surface from another client, so Wayle itself has to host an externally requested dropdown in a layer-shell window. It also adds `DropdownToggle` to `com.wayle.Shell1` and keeps Chrome's transient popups in history. |
-| `click-outside.patch` | Dismissing that dropdown on an outside click happens inside Wayle's own widget tree. |
+| `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to act on one, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
+| `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
-`mprisence-position.patch` is unrelated to Wayle: it stops mprisence clamping a
-browser's position backwards after a replay or a backward seek, which is a fix
-to what it publishes and so cannot be corrected by a reader.
+Both apply to v0.7.0. Neither touches Wayle's CLI, its widgets or its SCSS —
+the parts that move between releases.
 
-### Colours
+### Verifying a change
 
-Wayle compiles `~/.config/wayle/styles/index.scss` after its own stylesheet, so
-colour changes for its notification dropdown belong in `niri/wayle/styles.scss`
-rather than in a patch. It sets the card headings to the palette's red, the
-notification group's app name to pink, and each notification's summary to cyan.
+`cargo test -p control-centre` covers the agenda, the MPRIS model, the readings
+and the badge. One test is ignored by default because it needs a notification
+daemon on the session bus:
 
-Its rules are nested inside `.notification-dropdown` to match the way Wayle
-writes its own: a bare `.control-center-section-title` is the weaker selector
-and would lose. Nesting ties on specificity, and user styles are appended last,
-so they win. `control-centre` carries the same palette in its own
-`src/style.css`, so the two panels read as one surface.
+```sh
+cargo test -p control-centre -- --ignored
+```
+
+It calls List, Invoke, Dismiss, ToggleDnd and DismissAll for real, so a method
+name or signature that drifts from `notification-ipc.patch` fails there rather
+than doing nothing under the pointer.

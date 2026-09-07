@@ -1,8 +1,8 @@
-# Wayle supplies notification popups and the control centre while the existing
-# Waybar remains the visible desktop bar. The local patch adds a D-Bus/CLI
-# bridge, hosts the control centre in its own layer-shell window, and combines
-# calendar events, media controls, notification history and system parameters.
-# Wayle's own bar stays fully disabled.
+# Wayle is the notification daemon: it owns org.freedesktop.Notifications,
+# draws the popups, and keeps the history. Waybar remains the visible bar and
+# scripts/control-centre draws the panel, so the local patch only publishes
+# notification history on the session bus for that panel to render. Wayle's own
+# bar and dropdowns stay fully disabled.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
@@ -16,12 +16,7 @@
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        # Order matters: click-outside.patch is generated against the tree
-        # waybar-dropdown.patch leaves behind.
-        patches = (oldAttrs.patches or [ ]) ++ [
-          ./waybar-dropdown.patch
-          ./click-outside.patch
-        ];
+        patches = (oldAttrs.patches or [ ]) ++ [ ./notification-ipc.patch ];
       });
     })
   ];
@@ -30,10 +25,6 @@
     (
       { lib, ... }:
       {
-        # Wayle compiles ~/.config/wayle/styles/index.scss after its own
-        # stylesheet, so colour changes land here rather than in a patch.
-        xdg.configFile."wayle/styles/index.scss".source = ./styles.scss;
-
         services.wayle = {
           enable = true;
           autoInstallDependencies = false;
