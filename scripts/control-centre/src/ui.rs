@@ -23,9 +23,19 @@ const TOP_MARGIN: i32 = 40;
 /// Distance from the right edge of the screen.
 const RIGHT_MARGIN: i32 = 6;
 
-/// How tall the notification list may grow before it scrolls, so a busy day
-/// does not push the panel off the bottom of the screen.
-const NOTIFICATION_HEIGHT: i32 = 260;
+/// How tall each list may grow before it scrolls. Without these the media card
+/// alone runs to five players' worth of rows and pushes the panel off screen.
+const NOTIFICATION_HEIGHT: i32 = 240;
+const MEDIA_HEIGHT: i32 = 260;
+
+/// Width kept clear on the right of a scrolling list. GTK draws the scrollbar
+/// over the content, so without this it sits on the dismiss buttons.
+const SCROLLBAR_LANE: i32 = 10;
+
+/// How wide a wrapping label may ask to be. A label that wraps still reports
+/// its *unwrapped* width as the width it would like, so without this the
+/// longest calendar entry or notification body decides the panel's width.
+const WRAP_CHARS: i32 = 24;
 
 pub struct Panel {
     window: gtk::Window,
@@ -226,6 +236,7 @@ impl Panel {
             empty.add_css_class("calendar-empty");
             empty.set_xalign(0.0);
             empty.set_wrap(true);
+            empty.set_max_width_chars(WRAP_CHARS);
             self.calendar_body.append(&empty);
             return;
         }
@@ -242,6 +253,7 @@ impl Panel {
                 line.set_xalign(0.0);
                 line.set_wrap(true);
                 line.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                line.set_max_width_chars(WRAP_CHARS);
                 self.calendar_body.append(&line);
             }
         }
@@ -331,6 +343,7 @@ impl Panel {
         summary.set_hexpand(true);
         summary.set_halign(gtk::Align::Start);
         summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        summary.set_max_width_chars(WRAP_CHARS);
 
         let age = gtk::Label::new(Some(&relative_time(entry.timestamp, now)));
         age.add_css_class("notification-age");
@@ -363,40 +376,13 @@ impl Panel {
             body.set_xalign(0.0);
             body.set_wrap(true);
             body.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            body.set_max_width_chars(WRAP_CHARS);
             body.set_lines(3);
             body.set_ellipsize(gtk::pango::EllipsizeMode::End);
             row.append(&body);
         }
 
-        if !entry.actions.is_empty() {
-            row.append(&self.actions_widget(entry));
-        }
         row
-    }
-
-    /// The sender's own buttons. Wayle runs them: the application is waiting
-    /// on a signal from the daemon, not from this panel.
-    fn actions_widget(self: &Rc<Self>, entry: &Entry) -> gtk::Box {
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        actions.add_css_class("notification-actions");
-
-        for (id, label) in &entry.actions {
-            let button = gtk::Button::with_label(label);
-            button.add_css_class("notification-action");
-            button.connect_clicked({
-                let this = Rc::clone(self);
-                let notification = entry.id;
-                let action = id.clone();
-                move |_| {
-                    if let Some(notifications) = this.notifications.as_ref() {
-                        notifications.invoke(notification, &action);
-                    }
-                    this.refresh_notifications();
-                }
-            });
-            actions.append(&button);
-        }
-        actions
     }
 
     fn refresh_live(self: &Rc<Self>) {
@@ -441,6 +427,7 @@ impl Panel {
         title.add_css_class("media-track");
         title.set_xalign(0.0);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        title.set_max_width_chars(WRAP_CHARS);
         row.append(&title);
 
         let meta = if player.artist.is_empty() {
@@ -451,10 +438,19 @@ impl Panel {
         let meta = gtk::Label::new(Some(&meta));
         meta.add_css_class("media-meta");
         meta.set_xalign(0.0);
+        meta.set_hexpand(true);
+        meta.set_halign(gtk::Align::Start);
         meta.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        row.append(&meta);
+        meta.set_max_width_chars(WRAP_CHARS);
 
-        row.append(&self.transport(player));
+        // Who is playing it and the buttons that drive it share a line, which
+        // saves a row per player in a card that holds several.
+        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        controls.add_css_class("media-controls");
+        controls.append(&meta);
+        controls.append(&self.transport(player));
+        row.append(&controls);
+
         if player.has_length() {
             row.append(&self.seek(player));
         }
@@ -560,6 +556,19 @@ fn placeholder(text: &str, class: &str) -> gtk::Label {
     label
 }
 
+/// A list that scrolls once it outgrows `height`, with room on the right for
+/// the scrollbar so it does not sit on top of the content.
+fn scrolling(body: &gtk::Box, height: i32) -> gtk::ScrolledWindow {
+    body.set_margin_end(SCROLLBAR_LANE);
+
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroll.set_max_content_height(height);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_child(Some(body));
+    scroll
+}
+
 fn clear(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -579,7 +588,7 @@ fn range_label(card: gtk::Widget) -> Option<gtk::Label> {
     None
 }
 
-fn card(title: &str, with_range: bool, body: &gtk::Box) -> gtk::Box {
+fn card(title: &str, with_range: bool, body: &impl IsA<gtk::Widget>) -> gtk::Box {
     let heading = gtk::Label::new(Some(title));
     heading.add_css_class("card-title");
     heading.set_xalign(0.0);
@@ -640,12 +649,7 @@ fn notification_card(body: &gtk::Box, dnd: &gtk::Switch, clear_all: &gtk::Button
     dnd_row.append(&dnd_label);
     dnd_row.append(dnd);
 
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.add_css_class("notification-scroll");
-    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroll.set_max_content_height(NOTIFICATION_HEIGHT);
-    scroll.set_propagate_natural_height(true);
-    scroll.set_child(Some(body));
+    let scroll = scrolling(body, NOTIFICATION_HEIGHT);
 
     let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
     card.set_css_classes(&["card", "card-notifications"]);
@@ -656,7 +660,8 @@ fn notification_card(body: &gtk::Box, dnd: &gtk::Switch, clear_all: &gtk::Button
 }
 
 fn media_card(body: &gtk::Box) -> gtk::Box {
-    card("Media players", false, body)
+    let scroll = scrolling(body, MEDIA_HEIGHT);
+    card("Media players", false, &scroll)
 }
 
 fn system_card(rings: &Rings) -> gtk::Box {

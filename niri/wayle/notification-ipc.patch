@@ -1,16 +1,15 @@
 Publish notification history on the session bus, against v0.7.0.
 
-Wayle stays the notification daemon: it owns `org.freedesktop.Notifications`,
-holds the history, and is the only party that may invoke an action, because the
-sending application is waiting on an `ActionInvoked` signal from the name it
-talked to. What upstream does not do is publish enough of a notification for
-anything else to draw one — `com.wayle.Notifications1.List` carries an id and
-three strings, with no icon, image, actions, urgency or timestamp.
+Wayle stays the notification daemon: it owns `org.freedesktop.Notifications`
+and holds the history. What upstream does not do is publish enough of a
+notification for anything else to draw one — `com.wayle.Notifications1.List`
+carries an id and three strings, with no icon, image, actions, urgency or
+timestamp.
 
 This adds `com.wayle.NotificationsExt1`, which carries the whole entry, plus
-Invoke, Dismiss, DismissAll and ToggleDnd, and a Changed signal so a reader
-redraws when something happens instead of polling. Every field it sends is
-already on the in-memory model; nothing here changes how Wayle behaves.
+Dismiss, DismissAll and ToggleDnd, and a Changed signal so a reader redraws
+when something happens instead of polling. Every field it sends is already on
+the in-memory model; nothing here changes how Wayle behaves.
 
 Chrome marks its web notifications transient, which upstream shows as a popup
 and then drops. They are kept in history here so the list has them after the
@@ -76,10 +75,10 @@ index d7c503c..a2528c9 100644
  pub use shell_ipc::ShellIpcService;
 diff --git a/crates/wayle-shell/src/services/notification_ipc/dbus.rs b/crates/wayle-shell/src/services/notification_ipc/dbus.rs
 new file mode 100644
-index 0000000..891c0ec
+index 0000000..b28c0ef
 --- /dev/null
 +++ b/crates/wayle-shell/src/services/notification_ipc/dbus.rs
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,109 @@
 +//! D-Bus surface over the notification service's own model.
 +
 +use std::sync::Arc;
@@ -111,7 +110,9 @@ index 0000000..891c0ec
 +    pub urgency: u32,
 +    /// Unix seconds, so a reader can say how long ago it arrived.
 +    pub timestamp: i64,
-+    /// Action id and label, in the order the sender listed them.
++    /// Action id and label, in the order the sender listed them. Sent so a
++    /// reader can see what a notification offers; running one is not exposed,
++    /// because nothing here draws those buttons.
 +    pub actions: Vec<(String, String)>,
 +}
 +
@@ -145,21 +146,6 @@ index 0000000..891c0ec
 +                    .collect(),
 +            })
 +            .collect()
-+    }
-+
-+    /// Invoke one of a notification's actions, as clicking it in Wayle's own
-+    /// list would. Only the daemon can do this: the sender is waiting on an
-+    /// `ActionInvoked` signal from whoever owns the notification.
-+    async fn invoke(&self, id: u32, action: &str) -> fdo::Result<()> {
-+        let notifications = self.service.notifications.get();
-+        let Some(target) = notifications.iter().find(|item| item.id == id) else {
-+            return Err(fdo::Error::InvalidArgs(format!("unknown notification: {id}")));
-+        };
-+
-+        target
-+            .invoke(action)
-+            .await
-+            .map_err(|err| fdo::Error::Failed(err.to_string()))
 +    }
 +
 +    /// Dismiss one notification.

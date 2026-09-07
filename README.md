@@ -449,15 +449,15 @@ opens on, so a click beside it dismisses it, as does Escape.
 
 Wayle stays the notification daemon. It owns `org.freedesktop.Notifications`,
 draws the popups, keeps the history and decides Do Not Disturb; this panel only
-renders that history and asks Wayle to act on it. Running an action in
-particular has to be Wayle's: the application that sent the notification is
-waiting on an `ActionInvoked` signal from the daemon it talked to, not from a
-panel.
+renders that history and asks Wayle to dismiss or silence it. A notification's
+own action buttons are not drawn: only the daemon can run one, and the
+application that sent the notification has usually stopped listening for the
+`ActionInvoked` signal by the time the button is there to press.
 
 | Card | Source |
 | --- | --- |
 | Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
-| Notifications | `com.wayle.NotificationsExt1`, grouped by app, with each sender's own action buttons |
+| Notifications | `com.wayle.NotificationsExt1`, grouped by app, with urgency, age and per-entry dismissal |
 | Media players | MPRIS over D-Bus, with a seek bar per player |
 | System | CPU, memory, the root filesystem, and the hottest component |
 
@@ -471,7 +471,7 @@ Two patches, and neither is a widget or a stylesheet:
 
 | Patch | Why it cannot be a program |
 | --- | --- |
-| `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to act on one, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
+| `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to dismiss and to silence, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
 Both apply to v0.7.0. Neither touches Wayle's CLI, its widgets or its SCSS —
@@ -487,6 +487,16 @@ daemon on the session bus:
 cargo test -p control-centre -- --ignored
 ```
 
-It calls List, Invoke, Dismiss, ToggleDnd and DismissAll for real, so a method
-name or signature that drifts from `notification-ipc.patch` fails there rather
-than doing nothing under the pointer.
+It calls List, Dismiss, ToggleDnd and DismissAll for real, so a method name or
+signature that drifts from `notification-ipc.patch` fails there rather than
+doing nothing under the pointer.
+
+### Size
+
+Both lists scroll rather than growing the panel, and the columns are narrow on
+purpose. Three constants in `src/ui.rs` decide the shape: `NOTIFICATION_HEIGHT`
+and `MEDIA_HEIGHT` for how tall each list gets before it scrolls, and
+`WRAP_CHARS` for how much width a wrapping label may ask for — a wrapping label
+reports its *unwrapped* width as the width it wants, so without that cap the
+longest calendar entry sets the panel's width. `.column`'s `min-width` in
+`src/style.css` sets the floor.

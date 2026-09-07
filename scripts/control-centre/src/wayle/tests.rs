@@ -118,11 +118,6 @@ fn the_history_client_matches_the_interface_wayle_serves() {
 
     // Every call the panel's buttons make, so a wrong name or signature fails
     // here rather than silently doing nothing under the pointer.
-    let with_actions = entries
-        .iter()
-        .find(|entry| !entry.actions.is_empty())
-        .expect("an entry carrying its actions");
-    notifications.invoke(with_actions.id, &with_actions.actions[0].0);
     notifications.dismiss(first.id);
     notifications.toggle_dnd();
     let _ = notifications.dnd();
