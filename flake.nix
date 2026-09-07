@@ -28,13 +28,15 @@
     in
     {
       nixosConfigurations.raina = nixpkgs.lib.nixosSystem {
-        inherit system;
+        modules = [
+          {
+            nixpkgs.hostPlatform = system;
+          }
+          ./nixos
+        ];
         specialArgs = {
           inherit inputs;
         };
-        modules = [
-          ./nixos
-        ];
       };
 
       # Devshell for the Rust projects under scripts/. Nix builds give each
