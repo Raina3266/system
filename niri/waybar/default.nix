@@ -56,6 +56,22 @@ let
     }
     // modules;
 
+  dashboardOutputs = [
+    "eDP-1"
+    "DP-8"
+    "DP-7"
+  ];
+
+  topBars = builtins.listToAttrs (
+    map (output: {
+      name = "topBar-${output}";
+      value = topBar // {
+        inherit output;
+        "custom/dashboard" = system.dashboardModule output;
+      };
+    }) dashboardOutputs
+  );
+
   # ------------ BottomBar -------------
 
   starredApp = name: icon: cmd: {
@@ -121,9 +137,7 @@ in
         programs.waybar = {
           enable = true;
           systemd.enable = true;
-          settings = {
-            inherit topBar bottomBar;
-          };
+          settings = topBars // { inherit bottomBar; };
         };
 
         systemd.user.services.waybar = {

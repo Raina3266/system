@@ -1,0 +1,344 @@
+Open Wayle's dashboard from an external Waybar in a real layer-shell window.
+
+A GtkPopover is an xdg_popup tied to input received by the Wayle client. The
+click belongs to Waybar, so Niri can reject or immediately dismiss that popup
+even though the D-Bus request succeeds. Reparent the native dashboard content
+into a monitor-local overlay layer surface for external requests instead.
+
+Keep all other dropdowns on their existing popover path. The dashboard window
+uses the configured opacity and shadow, follows the bar edge, activates its
+media/network/system-stat watchers while visible, and closes before opening
+Wayle settings.
+
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+index f31dbd5..6203abf 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+@@ -1,5 +1,6 @@
+ use std::sync::Arc;
+ 
++use relm4::gtk;
+ use wayle_audio::AudioService;
+ use wayle_battery::BatteryService;
+ use wayle_bluetooth::BluetoothService;
+@@ -29,6 +30,7 @@ pub(crate) struct DashboardDropdownInit {
+ #[derive(Debug)]
+ pub(crate) enum DashboardDropdownMsg {
+     VisibilityChanged(bool),
++    SetExternalHost(gtk::Window),
+     OpenSettings,
+ }
+ 
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+index dcef4ce..dfb7d8b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+@@ -17,16 +17,16 @@ use gtk::prelude::*;
+ use relm4::{gtk, prelude::*};
+ use wayle_widgets::prelude::*;
+ 
+-pub(super) use self::factory::Factory;
+ use self::{
+     battery_section::{BatterySection, BatterySectionInit},
+     controls::{ControlsInit, ControlsSection},
+     media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
+-    messages::{DashboardDropdownCmd, DashboardDropdownInit, DashboardDropdownMsg},
++    messages::{DashboardDropdownCmd, DashboardDropdownInit},
+     network_section::{NetworkSection, NetworkSectionInit, NetworkSectionInput},
+     quick_actions::{QuickActionsInit, QuickActionsSection},
+     system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
+ };
++pub(super) use self::{factory::Factory, messages::DashboardDropdownMsg};
+ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+ const BASE_WIDTH: f32 = 380.0;
+@@ -51,6 +51,7 @@ fn spawn_settings_app() {
+ 
+ pub(crate) struct DashboardDropdown {
+     scaled_width: i32,
++    external_host: Option<gtk::Window>,
+ 
+     quick_actions: Controller<QuickActionsSection>,
+     controls: Controller<ControlsSection>,
+@@ -189,6 +190,7 @@ impl Component for DashboardDropdown {
+ 
+         let model = Self {
+             scaled_width: scaled_dimension(BASE_WIDTH, scale),
++            external_host: None,
+ 
+             quick_actions,
+             controls,
+@@ -238,15 +240,31 @@ impl Component for DashboardDropdown {
+         ComponentParts { model, widgets }
+     }
+ 
+-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, root: &Self::Root) {
++    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+         match msg {
+             DashboardDropdownMsg::VisibilityChanged(visible) => {
+                 self.network.emit(NetworkSectionInput::SetActive(visible));
+                 self.system_stats.emit(SystemStatsInput::SetActive(visible));
+                 self.media.emit(MediaSectionInput::SetActive(visible));
+             }
++            DashboardDropdownMsg::SetExternalHost(window) => {
++                let is_visible = window.is_visible();
++                let input_sender = sender.input_sender().clone();
++                window.connect_visible_notify(move |window| {
++                    input_sender.emit(DashboardDropdownMsg::VisibilityChanged(window.is_visible()));
++                });
++                self.external_host = Some(window);
++                self.network
++                    .emit(NetworkSectionInput::SetActive(is_visible));
++                self.system_stats
++                    .emit(SystemStatsInput::SetActive(is_visible));
++                self.media.emit(MediaSectionInput::SetActive(is_visible));
++            }
+             DashboardDropdownMsg::OpenSettings => {
+                 root.popdown();
++                if let Some(window) = &self.external_host {
++                    window.set_visible(false);
++                }
+                 spawn_settings_app();
+             }
+         }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 955e95b..211b931 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -6,13 +6,19 @@ use std::{
+ };
+ 
+ use gtk::prelude::*;
+-use gtk4_layer_shell::{KeyboardMode, LayerShell};
+-use relm4::{gtk, prelude::*};
++use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
++use relm4::{gtk, gtk::gdk, prelude::*};
+ use tracing::{debug, warn};
+ use wayle_config::{ClickAction, schemas::bar::Location};
+ use wayle_widgets::prelude::{BarButton, BarButtonInput};
+ 
+-use crate::{process, shell::services::ShellServices};
++use crate::{
++    process,
++    shell::{
++        bar::dropdowns::dashboard::{DashboardDropdown, DashboardDropdownMsg},
++        services::ShellServices,
++    },
++};
+ 
+ /// Returns `value` unchanged, logging at debug if it is `None`.
+ ///
+@@ -40,7 +46,8 @@ pub(crate) fn require_service<T>(
+ /// dropdown and avoids rebuilding the same component repeatedly.
+ pub(crate) struct DropdownInstance {
+     popover: gtk::Popover,
+-    _controller: Box<dyn Any>,
++    controller: Box<dyn Any>,
++    external_window: RefCell<Option<gtk::Window>>,
+     thaw_target: Rc<Cell<Option<relm4::Sender<BarButtonInput>>>>,
+ }
+ 
+@@ -84,11 +91,101 @@ impl DropdownInstance {
+ 
+         Self {
+             popover,
+-            _controller: controller,
++            controller,
++            external_window: RefCell::new(None),
+             thaw_target,
+         }
+     }
+ 
++    /// Toggles the dashboard in a real layer-shell window.
++    ///
++    /// A request initiated by Waybar cannot safely create a GTK popover: the
++    /// input serial belongs to another client. A normal layer surface has no
++    /// popup grab requirement, so it can be shown reliably from D-Bus.
++    fn toggle_external_window(&self, monitor: &gdk::Monitor, style: DropdownStyle) -> bool {
++        if let Some(window) = self.external_window.borrow().as_ref() {
++            if window.is_visible() {
++                window.set_visible(false);
++            } else {
++                window.set_keyboard_mode(KeyboardMode::OnDemand);
++                window.present();
++            }
++            return true;
++        }
++
++        let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<DashboardDropdown>>()
++        else {
++            warn!("external layer window is only supported by the dashboard dropdown");
++            return false;
++        };
++
++        let Some(content) = self.popover.child() else {
++            warn!("dashboard popover has no content for its external layer window");
++            return false;
++        };
++        self.popover.set_child(Option::<&gtk::Widget>::None);
++
++        let window = gtk::Window::new();
++        window.set_application(Some(&relm4::main_application()));
++        window.set_decorated(false);
++        window.set_resizable(false);
++        window.add_css_class("dashboard-dropdown");
++        window.add_css_class("dashboard-layer-window");
++        window.set_opacity(style.opacity);
++        if style.shadow_enabled {
++            window.add_css_class("shadow");
++        }
++
++        window.init_layer_shell();
++        window.set_namespace(Some("wayle-dashboard"));
++        window.set_layer(Layer::Overlay);
++        window.set_keyboard_mode(KeyboardMode::OnDemand);
++        window.set_exclusive_zone(0);
++        window.set_monitor(Some(monitor));
++        Self::position_external_window(&window, style.location);
++        window.set_child(Some(&content));
++
++        controller.emit(DashboardDropdownMsg::SetExternalHost(window.clone()));
++        window.present();
++        self.external_window.replace(Some(window));
++        true
++    }
++
++    fn position_external_window(window: &gtk::Window, location: Location) {
++        const WAYBAR_SIZE: i32 = 40;
++        const GAP: i32 = 6;
++        const OFFSET: i32 = WAYBAR_SIZE + GAP;
++
++        match location {
++            Location::Top => {
++                window.set_anchor(Edge::Top, true);
++                window.set_anchor(Edge::Left, true);
++                window.set_margin(Edge::Top, OFFSET);
++                window.set_margin(Edge::Left, GAP);
++            }
++            Location::Bottom => {
++                window.set_anchor(Edge::Bottom, true);
++                window.set_anchor(Edge::Left, true);
++                window.set_margin(Edge::Bottom, OFFSET);
++                window.set_margin(Edge::Left, GAP);
++            }
++            Location::Left => {
++                window.set_anchor(Edge::Top, true);
++                window.set_anchor(Edge::Left, true);
++                window.set_margin(Edge::Top, GAP);
++                window.set_margin(Edge::Left, OFFSET);
++            }
++            Location::Right => {
++                window.set_anchor(Edge::Top, true);
++                window.set_anchor(Edge::Right, true);
++                window.set_margin(Edge::Top, GAP);
++                window.set_margin(Edge::Right, OFFSET);
++            }
++        }
++    }
++
+     /// Toggles popover visibility for the given bar button.
+     ///
+     /// If the popover is already open for this button, it closes; otherwise it
+@@ -272,6 +369,9 @@ impl DropdownInstance {
+ 
+ impl Drop for DropdownInstance {
+     fn drop(&mut self) {
++        if let Some(window) = self.external_window.get_mut().take() {
++            window.destroy();
++        }
+         if self.popover.parent().is_some() {
+             self.popover.unparent();
+         }
+@@ -280,6 +380,7 @@ impl Drop for DropdownInstance {
+ 
+ struct DropdownStyle {
+     margins: DropdownMargins,
++    location: Location,
+     opacity: f64,
+     shadow_enabled: bool,
+     autohide: bool,
+@@ -402,6 +503,15 @@ impl DropdownRegistry {
+         true
+     }
+ 
++    /// Toggles a dropdown in a monitor-local layer-shell window.
++    pub(crate) fn toggle_external_window(&self, name: &str, monitor: &gdk::Monitor) -> bool {
++        let Some(dropdown) = self.get_or_create(name) else {
++            return false;
++        };
++
++        dropdown.toggle_external_window(monitor, dropdown_style(self))
++    }
++
+     #[allow(clippy::cognitive_complexity)]
+     fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
+         let mut cache = self.cache.borrow_mut();
+@@ -497,6 +607,7 @@ fn dropdown_style(registry: &DropdownRegistry) -> DropdownStyle {
+     let scale = bar.scale.get().value();
+     DropdownStyle {
+         margins: DropdownMargins::new(scale, bar.location.get()),
++        location: bar.location.get(),
+         opacity: f64::from(bar.dropdown_opacity.get().value()) / 100.0,
+         shadow_enabled: bar.dropdown_shadow.get(),
+         autohide: bar.dropdown_autohide.get(),
+diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index ac224fe..1d7c81b 100644
+--- a/crates/wayle-shell/src/shell/bar/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/mod.rs
+@@ -23,6 +23,7 @@ pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
+ 
+ pub(crate) struct Bar {
+     settings: BarSettings,
++    monitor: gdk::Monitor,
+     services: ShellServices,
+     dropdowns: Rc<DropdownRegistry>,
+     layout: BarLayout,
+@@ -192,6 +193,7 @@ impl Component for Bar {
+ 
+         let mut model = Self {
+             settings,
++            monitor: init.monitor,
+             services: init.services,
+             dropdowns,
+             layout: BarLayout {
+@@ -267,7 +269,13 @@ impl Component for Bar {
+                 apply_layer(root, configured, &self.services.config);
+             }
+             BarCmd::ToggleDropdown(name) => {
+-                if !self.dropdowns.toggle_external(&name, &self.external_anchor) {
++                let toggled = if name == "dashboard" {
++                    self.dropdowns.toggle_external_window(&name, &self.monitor)
++                } else {
++                    self.dropdowns.toggle_external(&name, &self.external_anchor)
++                };
++
++                if !toggled {
+                     tracing::warn!(
+                         dropdown = %name,
+                         "external bar asked for a dropdown that has no instance"
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+index ff0be99..e5e1d1a 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+@@ -36,3 +36,19 @@
+         }
+     }
+ }
++
++window.dashboard-layer-window {
++    background: transparent;
++    box-shadow: none;
++
++    > .dropdown {
++        min-width: 0;
++    }
++
++    &.shadow > .dropdown {
++        box-shadow:
++            0 0 5px rgba(0, 0, 0, 0.3),
++            0 4px 10px rgba(0, 0, 0, 0.3),
++            0 0 0 1px rgba(255, 255, 255, 0.04);
++    }
++}

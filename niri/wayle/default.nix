@@ -1,8 +1,8 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # scripts/control-centre keeps the larger notification/calendar panel. Wayle's
-# own bar is visually hidden but remains mapped as the GTK anchor for the
-# native dashboard opened from Waybar.
+# own bar is visually hidden. The native dashboard opened from Waybar is moved
+# into a real layer-shell window, avoiding GTK popup-grab restrictions.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
@@ -19,6 +19,7 @@
         patches = (oldAttrs.patches or [ ]) ++ [
           ./notification-ipc.patch
           ./dashboard-waybar-host.patch
+          ./dashboard-layer-window.patch
           ./dashboard-power-profile.patch
         ];
       });
@@ -57,9 +58,8 @@
             };
 
             bar = {
-              # `show = false` keeps Wayle's own bar visually hidden. The local
-              # patch keeps that bar mapped, empty and click-through so GTK has
-              # a valid popup parent for dropdowns requested by Waybar.
+              # `show = false` keeps Wayle's own bar visually hidden. External
+              # dashboard requests use a separate monitor-local layer surface.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;

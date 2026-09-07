@@ -17,8 +17,18 @@ let
           "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
         ];
       });
+
+  dashboardModule = monitor: {
+    format = "󰕮";
+    tooltip = true;
+    tooltip-format = "Dashboard";
+    on-click =
+      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ${lib.escapeShellArg monitor}";
+  };
 in
 {
+  inherit dashboardModule;
+
   homeConfig = {
     home.packages = [
       pkgs.mprisence
@@ -47,16 +57,10 @@ in
   };
 
   modules = {
-    # Wayle's native dashboard. Wayle's own bar is visually hidden but remains
-    # mapped as the GTK popup parent; the empty monitor argument asks Wayle to
-    # use its first connected output.
-    "custom/dashboard" = {
-      format = "󰕮";
-      tooltip = true;
-      tooltip-format = "Dashboard";
-      on-click =
-        "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ''";
-    };
+    # Generic fallback for callers that do not create a bar per output. The
+    # actual Niri bars override this with their connector name so Wayle opens
+    # the dashboard on the monitor whose button was clicked.
+    "custom/dashboard" = dashboardModule "";
 
     # The bar's centre button opens the larger calendar/notification control centre.
     # control-centre draws the whole panel — notifications, calendar, media and

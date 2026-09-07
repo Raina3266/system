@@ -465,17 +465,23 @@ application that sent the notification has usually stopped listening for the
 or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
 properties. Nothing shells out for it.
 
+The far-left dashboard button opens Wayle's native dashboard content in a
+monitor-local layer-shell window. Each Waybar instance passes its output name,
+so the dashboard appears below the button on the display that was clicked.
+
 ### What is still patched
 
-Two patches, and neither is a widget or a stylesheet:
+The local patches are:
 
-| Patch | Why it cannot be a program |
+| Patch | Purpose |
 | --- | --- |
 | `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to dismiss and to silence, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
+| `dashboard-waybar-host.patch` | Adds the D-Bus dropdown request used by the external Waybar and removes the dashboard's session power actions. |
+| `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
+| `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
-Both apply to v0.7.0. Neither touches Wayle's CLI, its widgets or its SCSS —
-the parts that move between releases.
+The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
