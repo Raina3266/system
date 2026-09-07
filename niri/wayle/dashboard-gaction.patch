@@ -8,7 +8,7 @@ as `wayle panel inspect`.
 diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
 --- a/crates/wayle-shell/src/shell/mod.rs
 +++ b/crates/wayle-shell/src/shell/mod.rs
-@@ -1,6 +1,7 @@
+@@ -13,6 +13,7 @@
  use gtk4::{CssProvider, glib::idle_add_local_once};
  use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 -use relm4::{gtk, gtk::prelude::*, prelude::*};
@@ -17,12 +17,12 @@ diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/
  pub(crate) use services::ShellServices;
  use tracing::{debug, info};
  use wayle_config::ClickAction;
-@@ -1,3 +1,4 @@
+@@ -125,3 +126,4 @@
          let css_provider = helpers::init_css_provider(&display, &init.services.config);
          let dashboard_dropdowns = Rc::new(DropdownRegistry::new(&init.services));
 +        register_dashboard_action(&dashboard_dropdowns, &dashboard_anchor);
          let bars = helpers::monitors::create_bars(&init.services);
-@@ -1 +1,14 @@
+@@ -240,1 +242,14 @@
 +fn register_dashboard_action(dropdowns: &Rc<DropdownRegistry>, anchor: &gtk::Box) {
 +    let action = gtk::gio::SimpleAction::new("dashboard", None);
 +    let dropdowns = Rc::clone(dropdowns);
@@ -40,7 +40,7 @@ diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/
 diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
 --- a/wayle/src/cli/panel/commands.rs
 +++ b/wayle/src/cli/panel/commands.rs
-@@ -1,4 +1,7 @@
+@@ -20,4 +20,7 @@
      /// Open GTK Inspector for debugging
      Inspect,
  
@@ -51,13 +51,13 @@ diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
 diff --git a/wayle/src/cli/panel/mod.rs b/wayle/src/cli/panel/mod.rs
 --- a/wayle/src/cli/panel/mod.rs
 +++ b/wayle/src/cli/panel/mod.rs
-@@ -1,4 +1,5 @@
+@@ -3,4 +3,5 @@
  pub mod commands;
 +mod dashboard;
  mod hide;
  mod inspect;
  mod proxy;
-@@ -1,3 +1,4 @@
+@@ -31,3 +32,4 @@
          PanelCommands::Settings => settings::execute().await,
          PanelCommands::Inspect => inspect::execute().await,
 +        PanelCommands::Dashboard => dashboard::execute().await,
