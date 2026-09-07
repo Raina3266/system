@@ -1,6 +1,10 @@
 /* The panel's own styling. It deliberately mirrors Wayle's control centre so
    the notification dropdown beside it reads as part of the same surface;
-   the colours are the palette from niri/wayle/default.nix. */
+   the colours are the palette from niri/wayle/default.nix.
+
+   Keep every rule non-empty. GTK stops parsing at the first error and an empty
+   declaration block is one, which costs every rule after it — including the
+   transparent window background, leaving an opaque surface over the output. */
 
 window.control-centre {
     background: transparent;
@@ -13,6 +17,15 @@ window.control-centre {
     padding: 10px;
     color: #cbe3e7;
     font-family: "Noto Sans", sans-serif;
+}
+
+/* Two columns of cards, side by side. */
+.column {
+    min-width: 280px;
+}
+
+.column:first-child {
+    margin-right: 8px;
 }
 
 .card {
@@ -123,6 +136,10 @@ scale.media-seek slider {
 }
 
 /* System dials. */
+.card-system {
+    padding: 6px 8px;
+}
+
 .ring-value {
     font-size: 11px;
     font-weight: 600;

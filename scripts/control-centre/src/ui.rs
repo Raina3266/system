@@ -73,15 +73,29 @@ impl Panel {
             temperature: Ring::new("TEMP", Colour(1.0, 0.431, 0.431)),
         };
 
+        // Two columns, as Wayle's control centre had: the agenda reads as a
+        // tall block, and the readings and players stack beside it.
+        let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        left.add_css_class("column");
+        left.append(&calendar_card(&calendar_body));
+
+        let right = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        right.add_css_class("column");
+        right.append(&system_card(&rings));
+        right.append(&media_card(&media_body));
+
+        let columns = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        columns.add_css_class("columns");
+        columns.append(&left);
+        columns.append(&right);
+
         let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
         panel.add_css_class("panel");
         panel.set_halign(gtk::Align::End);
         panel.set_valign(gtk::Align::Start);
         panel.set_margin_top(TOP_MARGIN);
         panel.set_margin_end(right_margin());
-        panel.append(&calendar_card(&calendar_body));
-        panel.append(&media_card(&media_body));
-        panel.append(&system_card(&rings));
+        panel.append(&columns);
 
         let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
         backdrop.set_hexpand(true);
@@ -429,5 +443,10 @@ fn system_card(rings: &Rings) -> gtk::Box {
     row.append(&rings.memory.widget);
     row.append(&rings.disk.widget);
     row.append(&rings.temperature.widget);
-    card("System", false, &row)
+
+    // The dials name themselves, so this card goes without a heading.
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    card.set_css_classes(&["card", "card-system"]);
+    card.append(&row);
+    card
 }
