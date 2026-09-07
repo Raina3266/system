@@ -1,0 +1,96 @@
+Route the external Waybar dashboard button through Wayle's existing GTK
+application action D-Bus interface instead of the custom Shell1 property relay.
+The action is executed on GTK's main thread and toggles the already-created
+native dashboard popover directly.  A small `wayle panel dashboard` CLI command
+keeps the Waybar configuration simple and uses the same proven action transport
+as `wayle panel inspect`.
+
+diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
+--- a/crates/wayle-shell/src/shell/mod.rs
++++ b/crates/wayle-shell/src/shell/mod.rs
+@@ -1,6 +1,7 @@
+ use gtk4::{CssProvider, glib::idle_add_local_once};
+ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+-use relm4::{gtk, gtk::prelude::*, prelude::*};
++use relm4::{gtk, gtk::prelude::*, main_application, prelude::*};
++use gtk::gio::prelude::ActionMapExt;
+ pub(crate) use services::ShellServices;
+ use tracing::{debug, info};
+ use wayle_config::ClickAction;
+@@ -1,3 +1,4 @@
+         let css_provider = helpers::init_css_provider(&display, &init.services.config);
+         let dashboard_dropdowns = Rc::new(DropdownRegistry::new(&init.services));
++        register_dashboard_action(&dashboard_dropdowns, &dashboard_anchor);
+         let bars = helpers::monitors::create_bars(&init.services);
+@@ -1 +1,14 @@
++fn register_dashboard_action(dropdowns: &Rc<DropdownRegistry>, anchor: &gtk::Box) {
++    let action = gtk::gio::SimpleAction::new("dashboard", None);
++    let dropdowns = Rc::clone(dropdowns);
++    let anchor = anchor.clone();
++
++    action.connect_activate(move |_, _| {
++        let click = ClickAction::Dropdown(String::from("dashboard"));
++        dispatch_click_widget(&click, &dropdowns, &anchor);
++    });
++
++    main_application().add_action(&action);
++}
++
+ fn create_osd(services: &ShellServices) -> Option<Controller<Osd>> {
+diff --git a/wayle/src/cli/panel/commands.rs b/wayle/src/cli/panel/commands.rs
+--- a/wayle/src/cli/panel/commands.rs
++++ b/wayle/src/cli/panel/commands.rs
+@@ -1,4 +1,7 @@
+     /// Open GTK Inspector for debugging
+     Inspect,
+ 
++    /// Toggle the native dashboard
++    Dashboard,
++
+     /// Hide the bar on a monitor
+diff --git a/wayle/src/cli/panel/mod.rs b/wayle/src/cli/panel/mod.rs
+--- a/wayle/src/cli/panel/mod.rs
++++ b/wayle/src/cli/panel/mod.rs
+@@ -1,4 +1,5 @@
+ pub mod commands;
++mod dashboard;
+ mod hide;
+ mod inspect;
+ mod proxy;
+@@ -1,3 +1,4 @@
+         PanelCommands::Settings => settings::execute().await,
+         PanelCommands::Inspect => inspect::execute().await,
++        PanelCommands::Dashboard => dashboard::execute().await,
+         PanelCommands::Hide { monitor } => hide::execute(monitor).await,
+diff --git a/wayle/src/cli/panel/dashboard.rs b/wayle/src/cli/panel/dashboard.rs
+new file mode 100644
+--- /dev/null
++++ b/wayle/src/cli/panel/dashboard.rs
+@@ -0,0 +1,27 @@
++//! Toggle the native Wayle dashboard.
++
++use std::collections::HashMap;
++
++use super::proxy::{actions_proxy, connect, is_running};
++use crate::cli::CliAction;
++
++/// Toggles the native dashboard on the running shell via GTK's action bus.
++///
++/// # Errors
++///
++/// Returns an error if the panel is not running or action activation fails.
++pub async fn execute() -> CliAction {
++    if !is_running().await.unwrap_or(false) {
++        return Err("Panel is not running".to_string());
++    }
++
++    let connection = connect().await?;
++    let proxy = actions_proxy(&connection).await?;
++
++    proxy
++        .activate("dashboard", Vec::new(), HashMap::new())
++        .await
++        .map_err(|e| format!("Failed to toggle dashboard: {e}"))?;
++
++    Ok(())
++}
