@@ -1,11 +1,17 @@
 { inputs, pkgs, ... }:
 let
-  # One Python environment prevents duplicate console-script wrappers in
-  # Home Manager while providing python3, spotdl, and ytmusicapi together.
+  # Provide python3 with ytmusicapi for music-tag-transfer. SpotDL is a
+  # top-level Nixpkgs application rather than a python3Packages attribute.
   music-python = pkgs.python3.withPackages (ps: [
-    ps.spotdl
     ps.ytmusicapi
   ]);
+
+  # Link only this wrapper into the Home Manager profile. Adding pkgs.spotdl
+  # directly would also link its Python dependency wrappers and collide with
+  # the ones in music-python (for example bin/.idna-wrapped).
+  spotdl-cli = pkgs.writeShellScriptBin "spotdl" ''
+    exec ${pkgs.lib.getExe pkgs.spotdl} "$@"
+  '';
 in
 {
   imports = [
@@ -75,7 +81,7 @@ in
       # Python
       uv
       music-python
-
+      spotdl-cli
 
       # Typst
       typst
