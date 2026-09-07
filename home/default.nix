@@ -83,5 +83,12 @@ in
     spotdl
     yt-dlp
     waylyrics
+
+    # Python environment used by music-tag-transfer's YouTube Music search.
+    # withPackages is important here: installing ytmusicapi alone does not
+    # put a Python interpreter with that package on PATH.
+    (python313.withPackages (ps: [
+      ps.ytmusicapi
+    ]))
   ];
 }
