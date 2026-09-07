@@ -8,9 +8,7 @@ label is changed to Power Profile.
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
-@@ -91,12 +91,29 @@ impl QuickActionsSection {
-     pub(super) fn toggle_power_saver(&self, sender: &ComponentSender<Self>) {
-         let Some(power_profiles) = self.power_profiles.get() else {
+@@ -94,11 +94,28 @@
              return;
          };
  
@@ -44,7 +42,8 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/
  
          sender.oneshot_command(async move {
              if let Err(err) = power_profiles
-@@ -105,7 +122,7 @@ impl QuickActionsSection {
+@@ -106,7 +123,7 @@
+                 .set_active_profile(target)
                  .await
              {
 -                warn!(error = %err, "power profile toggle failed");
@@ -52,11 +51,11 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/
              }
              QuickActionsCmd::PowerSaverChanged(target == PowerProfile::PowerSaver)
          });
-     }
 diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
 --- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
 +++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
-@@ -9,6 +9,6 @@ dropdown-dashboard-airplane = Airplane Mode
+@@ -9,7 +9,7 @@
+ dropdown-dashboard-airplane = Airplane Mode
  dropdown-dashboard-dnd = Do Not Disturb
  dropdown-dashboard-idle-inhibit = Idle Inhibit
 -dropdown-dashboard-power-saver = Power Saver
