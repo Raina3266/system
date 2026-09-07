@@ -47,14 +47,15 @@ in
   };
 
   modules = {
-    # Wayle's native dashboard. The Wayle bar itself remains hidden; this D-Bus
-    # action toggles the tiny external dashboard host provided by our Wayle patch.
+    # Wayle's native dashboard. Wayle's own bar is visually hidden but remains
+    # mapped as the GTK popup parent; the empty monitor argument asks Wayle to
+    # use its first connected output.
     "custom/dashboard" = {
       format = "󰕮";
       tooltip = true;
       tooltip-format = "Dashboard";
       on-click =
-        "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DashboardToggle";
+        "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ''";
     };
 
     # The bar's centre button opens the larger calendar/notification control centre.
