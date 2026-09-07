@@ -5,4 +5,8 @@ edition.workspace = true
 
 [dependencies]
 nmrs = "=3.4.2"
-tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread"] }
+# "time" is unused here, but rofi-audio asks for it and the shared dependency
+# artifact is compiled with features unified across the workspace. Asking for
+# the same set is what lets this crate reuse that tokio instead of compiling
+# its own copy.
+tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }
