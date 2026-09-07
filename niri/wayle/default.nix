@@ -1,7 +1,7 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # scripts/control-centre keeps the larger notification/calendar panel. Wayle's
-# own bar stays hidden; dashboard-waybar.patch exposes Wayle's native dashboard
+# own bar stays hidden; the dashboard patches expose Wayle's native dashboard
 # through a tiny transparent host that Waybar can toggle over D-Bus.
 { ... }:
 {
@@ -18,7 +18,8 @@
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
         patches = (oldAttrs.patches or [ ]) ++ [
           ./notification-ipc.patch
-          ./dashboard-waybar.patch
+          ./dashboard-waybar-host.patch
+          ./dashboard-power-profile.patch
         ];
       });
     })
