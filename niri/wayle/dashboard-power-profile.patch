@@ -8,7 +8,7 @@ label is changed to Power Profile.
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
-@@ -91,12 +91,31 @@ impl QuickActionsSection {
+@@ -91,12 +91,29 @@ impl QuickActionsSection {
      pub(super) fn toggle_power_saver(&self, sender: &ComponentSender<Self>) {
          let Some(power_profiles) = self.power_profiles.get() else {
              return;
@@ -44,7 +44,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/
  
          sender.oneshot_command(async move {
              if let Err(err) = power_profiles
-@@ -105,7 +124,7 @@ impl QuickActionsSection {
+@@ -105,7 +122,7 @@ impl QuickActionsSection {
                  .await
              {
 -                warn!(error = %err, "power profile toggle failed");
