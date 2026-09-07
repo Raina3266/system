@@ -10,6 +10,11 @@
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    sonora = {
+      url = "github:nolight132/sonora";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =

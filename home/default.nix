@@ -90,5 +90,7 @@ in
     (python313.withPackages (ps: [
       ps.ytmusicapi
     ]))
+
+    inputs.sonora.packages.${pkgs.system}.default
   ];
 }
