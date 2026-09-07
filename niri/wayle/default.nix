@@ -2,7 +2,7 @@
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # scripts/control-centre keeps the larger notification/calendar panel. Wayle's
 # own bar stays hidden; the dashboard patches expose Wayle's native dashboard
-# through a tiny transparent host that Waybar can toggle over D-Bus.
+# through a tiny transparent host and GTK application action.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
@@ -19,6 +19,7 @@
         patches = (oldAttrs.patches or [ ]) ++ [
           ./notification-ipc.patch
           ./dashboard-waybar-host.patch
+          ./dashboard-gaction.patch
           ./dashboard-power-profile.patch
         ];
       });
