@@ -47,14 +47,14 @@ in
   };
 
   modules = {
-    # Wayle's native dashboard. The Wayle bar itself remains hidden; the CLI
-    # activates a GTK application action in the running Wayle shell, so the
-    # popover is toggled on GTK's main thread rather than through a side relay.
+    # Wayle's native dashboard. The Wayle bar itself remains hidden; this D-Bus
+    # action toggles the tiny external dashboard host provided by our Wayle patch.
     "custom/dashboard" = {
       format = "󰕮";
       tooltip = true;
       tooltip-format = "Dashboard";
-      on-click = "${pkgs.wayle}/bin/wayle panel dashboard";
+      on-click =
+        "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DashboardToggle";
     };
 
     # The bar's centre button opens the larger calendar/notification control centre.
