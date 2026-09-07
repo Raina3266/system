@@ -17,6 +17,16 @@ let
           "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
         ];
       });
+
+  # Wayle streams {"count":N,"dnd":bool}; Waybar wants {text,class,tooltip}.
+  # The classes are the ones themes/waybar.css already colours.
+  notificationBadge = ''
+    {
+      text: (if .dnd then "󰂛" elif .count > 0 then "󰂚 \(.count)" else "󰂜" end),
+      class: (if .dnd then "dnd" elif .count > 0 then "notification" else "quiet" end),
+      tooltip: (if .dnd then "Do Not Disturb" elif .count > 0 then "\(.count) waiting" else "No notifications" end)
+    }
+  '';
 in
 {
   homeConfig = {
@@ -101,23 +111,40 @@ in
       '';
     };
 
-    # The bar's centre button, and the only one that opens the notification centre.
-    # media-control composes the whole label: the notification badge it follows
-    # over `wayle notify status --watch`, then the current track. Keeping both in
-    # one module keeps one program in charge of what "now playing" means, and
-    # costs the bar one slot instead of two.
+    # The bar's centre button, and the only one that opens the notification
+    # centre. It used to carry the current track too, composed by
+    # media-control; Wayle's control centre lists the players now, so the
+    # button is just the badge and the track is the mpris module beside it.
     "custom/media" = {
       format = "{}";
       return-type = "json";
-      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.mediaControl}/bin/media-control waybar --watch --interval-ms 750";
+      exec = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.wayle}/bin/wayle notify status --watch | ${pkgs.jq}/bin/jq --unbuffered -c '${notificationBadge}'";
       tooltip = true;
       escape = true;
       "restart-interval" = 2;
       "exec-on-event" = false;
       # Place Wayle immediately below this 40-pixel Waybar.
       on-click = "${pkgs.wayle}/bin/wayle panel dropdown notification --offset 40";
-      on-click-middle = "${packages.mediaControl}/bin/media-control toggle";
-      on-click-right = "${packages.mediaControl}/bin/media-control menu";
+      on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
+    };
+
+    # The track the centre button used to carry. Waybar reads MPRIS itself, so
+    # nothing in this repository has to. {dynamic} drops the artist rather
+    # than leaving a trailing separator when a player reports none; click,
+    # scroll and the rest stay Waybar's own defaults.
+    mpris = {
+      format = "{status_icon}  {dynamic}";
+      format-stopped = "";
+      status-icons = {
+        playing = "󰐊";
+        paused = "󰏤";
+      };
+      dynamic-order = [
+        "title"
+        "artist"
+      ];
+      dynamic-len = 40;
+      tooltip-format = "{player} - {status}";
     };
 
     "custom/lyrics" = {

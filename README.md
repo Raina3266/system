@@ -1,8 +1,7 @@
 # Custom Scripts
 
-This repository contains seven Rust utilities used by the desktop configuration:
+This repository contains six Rust utilities used by the desktop configuration:
 
-- [`media-control`](#media-control) — the bar's centre button: MPRIS control for Rofi, Waybar and the notification centre
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
@@ -11,104 +10,7 @@ This repository contains seven Rust utilities used by the desktop configuration:
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor
 
 It also documents the [Wayle notification center](#notification-center) opened
-from the Waybar media button.
-
-## media-control
-
-`scripts/media-control` is the MPRIS controller behind the bar's centre button,
-and its Rofi menu. One program owns both, so "the current player" means the same thing wherever it is shown.
-
-The players it considers, how they are ranked, and how browser tabs are filtered
-are unchanged; what follows is only the three faces it renders.
-
-### The bar button
-
-`media-control waybar --watch` streams Waybar JSON for `custom/media`, the one
-module in the centre of the top bar. Its label is a notification badge followed
-by the current track:
-
-```text
-󰂜                          nothing waiting, nothing playing
-󰂚 3                        three notifications, nothing playing
-󰂜  ·  󰐊  Delulu — SZA      playing, nothing waiting
-󰂚 3  ·  󰏤  Delulu — SZA    three notifications, paused
-󰂛                          Do Not Disturb; the count is not worth showing
-```
-
-The count comes from `wayle notify status --watch`, which streams compact JSON
-containing the notification count and Do Not Disturb state. Following it costs
-one long-lived child, and the subscriber restarts if Wayle does. Until its first
-line arrives, the button shows a quiet bell.
-
-Waybar escapes the label before setting it as markup, so the text stays plain
-and the colours come from classes. The module emits two, sometimes three: the
-notification state (`quiet`, `notification`, `dnd`), the playback state
-(`playing`, `paused`, `empty`), `themes/waybar.css` recolours it from those.
-
-| Action | Result |
-| --- | --- |
-| Click | Open or close the notification centre |
-| Middle-click | Play/pause the current player |
-| Right-click | Open the Rofi media menu |
-
-Left-click opens notification history; media playback remains on middle-click and the full per-player controls remain in the Rofi menu.
-
-### Scriptable player rows
-
-`media-control players`, `play-pause`, `volume`, and `seek` remain available for
-other integrations that need compact tab-separated MPRIS state and direct
-per-player controls. Wayle itself owns notification history and does not consume
-these rows.
-
-### The Rofi menu
-
-Unchanged: `media-control menu` opens the full list, with per-player volume,
-pinning and transport controls. `media-control list`, `toggle` and `pause-all`
-are also unchanged.
-
-### Commands
-
-```text
-media-control menu
-media-control waybar --watch [--interval-ms 750]
-media-control players
-media-control play-pause <player>
-media-control volume <player> <percent>
-media-control seek <player> <seconds>
-media-control toggle
-media-control pause-all
-media-control list
-```
-
-`toggle` acts on the most relevant player, which is what the bar button's middle
-click wants; `play-pause` names one, which is what a row in the list wants.
-
-### Environment variables
-
-| Variable | Purpose |
-| --- | --- |
-| `MEDIA_CONTROL_PLAYERCTL` | Override the `playerctl` executable |
-| `MEDIA_CONTROL_ROFI` | Override the `rofi` executable |
-| `MEDIA_CONTROL_WAYLE` | Override the `wayle` executable |
-| `MEDIA_CONTROL_WITH_PARENT_DEATH` | Guard the subscriber child so it exits with this process |
-| `MEDIA_CONTROL_THEME` | Override the Rofi theme path |
-| `MEDIA_CONTROL_FALLBACK_THEME` | Theme used when no configured one exists |
-
-### Development checks
-
-```sh
-nix develop .#rust
-cargo fmt --manifest-path scripts/Cargo.toml --package media-control -- --check
-cargo test --manifest-path scripts/Cargo.toml --package media-control --locked
-cargo clippy --manifest-path scripts/Cargo.toml --package media-control --locked -- -D warnings
-```
-
-Tests cover the badge for each daemon state, the badge and track sharing one
-label, truncation of a long title, notification-status parsing, the seven fields
-of a widget row including the ones MPRIS leaves out, and clock formatting on
-either side of an hour.
-
----
+from the Waybar notification button.
 
 ## rofi-audio
 
@@ -572,9 +474,9 @@ serial and the compositor would dismiss the dropdown as it opened. Clicking the
 Waybar button again closes it.
 
 The same patch adds `wayle notify status --watch`, which is the streaming JSON
-source used by `media-control` for the Waybar bell, notification count, and DND
-state. `Mod+N` and a left-click on the centre media button toggle Wayle's
-notification history; `F8` runs `wayle notify dnd`.
+source behind the Waybar bell: `jq` turns its count and DND state into the
+`custom/media` label and class. `Mod+N` and a left-click on that button toggle
+Wayle's notification history; `F8` runs `wayle notify dnd`.
 
 Chrome is forced to use Linux system notifications. Because Chrome marks web
 notifications transient, the patch copies only Chrome/Chromium transient

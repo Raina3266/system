@@ -8,7 +8,6 @@ let
 
   # Kept in sync with [workspace].members in ./Cargo.toml.
   workspaceMembers = [
-    "media-control"
     "ocr-screenshot"
     "preview-panel"
     "rofi-audio"
@@ -102,18 +101,6 @@ let
 in
 rec {
   inherit withParentDeath;
-  mediaControl = mkWorkspacePackage "media-control" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postInstall = ''
-      wrapProgram "$out/bin/media-control" \
-        --set MEDIA_CONTROL_PLAYERCTL "${pkgs.lib.getExe pkgs.playerctl}" \
-        --set MEDIA_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set MEDIA_CONTROL_FALLBACK_THEME "$out/share/rofi/themes/media-control.rasi" \
-        --set MEDIA_CONTROL_WAYLE "${pkgs.lib.getExe pkgs.wayle}" \
-        --set MEDIA_CONTROL_WITH_PARENT_DEATH "${withParentDeath}/bin/with-parent-death"
-    '';
-  };
-
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''

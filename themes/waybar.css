@@ -39,6 +39,7 @@ window#waybar.bottom {
 #custom-files,
 #custom-battery,
 #custom-media,
+#mpris,
 #tray {
     color: #7afcff;
     background-color: transparent;
@@ -139,6 +140,7 @@ window#waybar.bottom {
 #custom-files:hover,
 #custom-timer:hover,
 #custom-media:hover,
+#mpris:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
 #custom-whatsapp:hover,
@@ -168,9 +170,8 @@ tooltip label {
 
 /* ── States ── */
 
-/* The centre button carries two classes at once, one per half of its label:
-   the notification state, then the playback state. Pink with something
-   waiting and dimmed under Do Not Disturb. */
+/* The centre button is the notification badge alone now: pink with something
+   waiting, dimmed under Do Not Disturb. The track sits beside it in #mpris. */
 
 #custom-media.notification {
     color: #ff7edb;
@@ -181,9 +182,8 @@ tooltip label {
     color: #5c6776;
 }
 
-/* A paused track dims the label, but not when the badge has something of its
-   own to say. */
-#custom-media.quiet.paused {
+/* A paused track dims, the way the centre button's playback half used to. */
+#mpris.paused {
     color: #5c6776;
 }
 
