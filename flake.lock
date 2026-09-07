@@ -1,5 +1,20 @@
 {
   "nodes": {
+    "crane": {
+      "locked": {
+        "lastModified": 1788465171,
+        "narHash": "sha256-Y1/TTVXjYXGF068IThQH9fPSZ0SIE74PABlUxnWTUH0=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "eb35abda9f232cc6610b1d1e3200d15c49b7ac54",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -95,11 +110,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1788614874,
-        "narHash": "sha256-7QYjT2vHLuX9Z1pdxHXDKCbh1CR3D/2rywB9Tx0MPRg=",
+        "lastModified": 1788752844,
+        "narHash": "sha256-VaWGJ6+cIYN2erfSecbRV+4ljI185Ty2wUrXyvQbgOw=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "c043004d1c6985732bcc1cbc5a9c9aecbbb4e0f0",
+        "rev": "dc5d91f840324650bac8c379428c7037a416959a",
         "type": "github"
       },
       "original": {
@@ -133,6 +148,7 @@
     },
     "root": {
       "inputs": {
+        "crane": "crane",
         "home-manager": "home-manager",
         "nixGL": "nixGL",
         "nixpkgs": "nixpkgs_2",
@@ -169,11 +185,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1788613685,
-        "narHash": "sha256-HRjTlXjM/XqatjGC0uDjqcx0aYFq9ccGx5sfb9ONSbk=",
+        "lastModified": 1788774902,
+        "narHash": "sha256-dZPnyBpnsCjnM/z/qEb7g3gh387ydL2/9N6diVhirFA=",
         "owner": "nolight132",
         "repo": "sonora",
-        "rev": "695242ed2c589215e84f7fb9f2a6944c85e0ba7c",
+        "rev": "767c41bdb7a0cc1ac9678c95bd0c295f8108c26b",
         "type": "github"
       },
       "original": {
