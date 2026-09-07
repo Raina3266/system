@@ -2,7 +2,7 @@
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # scripts/control-centre keeps the larger notification/calendar panel. Wayle's
 # own bar stays hidden; the dashboard patches expose Wayle's native dashboard
-# through a tiny transparent host and GTK application action.
+# through a tiny transparent host that stays mapped for the whole session.
 { ... }:
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
@@ -19,7 +19,6 @@
         patches = (oldAttrs.patches or [ ]) ++ [
           ./notification-ipc.patch
           ./dashboard-waybar-host.patch
-          ./dashboard-gaction.patch
           ./dashboard-power-profile.patch
         ];
       });
@@ -62,6 +61,11 @@
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;
+              # The click originates in Waybar, not Wayle. An autohide GTK
+              # popover would request an xdg_popup grab using an input serial
+              # Wayle never received, so the compositor dismisses it immediately.
+              # The same Waybar button closes the dashboard on the next click.
+              "dropdown-autohide" = false;
               layout = [
                 {
                   monitor = "*";
