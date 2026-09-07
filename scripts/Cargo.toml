@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "control-centre",
   "ocr-screenshot",
   "preview-panel",
   "rofi-audio",

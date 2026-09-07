@@ -101,6 +101,17 @@ let
 in
 rec {
   inherit withParentDeath;
+  controlCentre = mkWorkspacePackage "control-centre" {
+    nativeBuildInputs = [
+      pkgs.pkg-config
+      pkgs.wrapGAppsHook4
+    ];
+    buildInputs = [
+      pkgs.gtk4
+      pkgs.gtk4-layer-shell
+    ];
+  };
+
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''

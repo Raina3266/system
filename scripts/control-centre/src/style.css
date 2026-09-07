@@ -1,0 +1,142 @@
+/* The panel's own styling. It deliberately mirrors Wayle's control centre so
+   the notification dropdown beside it reads as part of the same surface;
+   the colours are the palette from niri/wayle/default.nix. */
+
+window.control-centre {
+    background: transparent;
+}
+
+.panel {
+    background: #0e0616;
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 12px;
+    padding: 10px;
+    color: #cbe3e7;
+    font-family: "Noto Sans", sans-serif;
+}
+
+.card {
+    background: #180a10;
+    border: 1px solid rgba(255, 126, 219, 0.28);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
+
+.card:last-child {
+    margin-bottom: 0;
+}
+
+.card-calendar {
+    border-color: rgba(122, 252, 255, 0.34);
+}
+
+.card-header {
+    margin-bottom: 6px;
+}
+
+/* Card headings, matching niri/wayle/styles.scss so both panels agree. */
+.card-title,
+.card-range {
+    color: #d52c35;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* The agenda: a heading per day, then that day's entries under it. */
+.calendar-day {
+    color: #ff7edb;
+    font-weight: bold;
+    margin-top: 4px;
+}
+
+.calendar-day:first-child {
+    margin-top: 0;
+}
+
+.calendar-entry {
+    color: #7afcff;
+}
+
+.calendar-empty,
+.media-empty {
+    color: #5c6776;
+}
+
+/* Media rows. */
+.media-track {
+    font-weight: 600;
+    color: #cbe3e7;
+}
+
+.media-meta {
+    color: #8b8794;
+    font-size: 11px;
+}
+
+.media-row {
+    margin-bottom: 8px;
+}
+
+.media-row:last-child {
+    margin-bottom: 0;
+}
+
+button.media-button {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+    min-height: 0;
+    min-width: 0;
+    color: #cbe3e7;
+}
+
+button.media-button:hover {
+    background: rgba(255, 126, 219, 0.14);
+    border-radius: 6px;
+}
+
+scale.media-seek trough {
+    background: rgba(122, 252, 255, 0.18);
+    min-height: 4px;
+    border-radius: 2px;
+}
+
+scale.media-seek highlight {
+    background: #7afcff;
+    border-radius: 2px;
+}
+
+scale.media-seek slider {
+    background: #7afcff;
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+}
+
+.media-clock {
+    color: #8b8794;
+    font-size: 10px;
+}
+
+/* System dials. */
+.ring-value {
+    font-size: 11px;
+    font-weight: 600;
+    color: #cbe3e7;
+}
+
+.ring-caption {
+    font-size: 10px;
+    color: #8b8794;
+    letter-spacing: 0.06em;
+}
+
+/* The rings draw in their own colour, taken from GTK's foreground. */
+.ring-cpu    { color: #7afcff; }
+.ring-memory { color: #ff7edb; }
+.ring-disk   { color: #fede5d; }
+.ring-temp   { color: #ff6e6e; }
