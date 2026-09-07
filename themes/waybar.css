@@ -37,7 +37,7 @@ window#waybar.bottom {
 #custom-clipboard,
 #custom-timer,
 #custom-files,
-#custom-battery,
+#custom-dashboard,
 #custom-media,
 #mpris,
 #tray {
@@ -139,6 +139,7 @@ window#waybar.bottom {
 #custom-clipboard:hover,
 #custom-files:hover,
 #custom-timer:hover,
+#custom-dashboard:hover,
 #custom-media:hover,
 #mpris:hover,
 #custom-obsidian:hover,
@@ -197,23 +198,4 @@ tooltip label {
 
 #custom-ycal.has-events {
     border-color: darkred;
-}
-
-#custom-battery.warning:not(.charging),
-#custom-battery.low:not(.charging) {
-    color: #f29e74;
-    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
-}
-
-#custom-battery.critical:not(.charging) {
-    color: #ff3333;
-    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
-    animation: blink 1s steps(2) infinite;
-}
-
-@keyframes blink {
-    to {
-        color: #1a1a2e;
-        text-shadow: none;
-    }
 }
