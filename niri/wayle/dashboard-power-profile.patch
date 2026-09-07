@@ -1,0 +1,66 @@
+Make the dashboard's Power Saver action a full Power Profile control.
+
+Keep Wayle's existing internal message/state names so this patch stays small and
+tracks v0.7.0 cleanly. Clicking the action cycles Performance -> Balanced ->
+Power Saver, skipping profiles the machine does not advertise. The visible
+label is changed to Power Profile.
+
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
+@@ -91,12 +91,31 @@ impl QuickActionsSection {
+     pub(super) fn toggle_power_saver(&self, sender: &ComponentSender<Self>) {
+         let Some(power_profiles) = self.power_profiles.get() else {
+             return;
+         };
+ 
+-        let target = if self.power_saver_active {
+-            PowerProfile::Balanced
+-        } else {
+-            PowerProfile::PowerSaver
+-        };
++        let current = power_profiles.power_profiles.active_profile.get();
++        let available: Vec<_> = power_profiles
++            .power_profiles
++            .profiles
++            .get()
++            .into_iter()
++            .map(|profile| profile.profile)
++            .collect();
++
++        let order = [
++            PowerProfile::Performance,
++            PowerProfile::Balanced,
++            PowerProfile::PowerSaver,
++        ];
++        let current_index = order
++            .iter()
++            .position(|profile| *profile == current)
++            .unwrap_or(order.len() - 1);
++        let target = (1..=order.len())
++            .map(|offset| order[(current_index + offset) % order.len()])
++            .find(|profile| available.contains(profile))
++            .unwrap_or(PowerProfile::Balanced);
+ 
+         sender.oneshot_command(async move {
+             if let Err(err) = power_profiles
+@@ -105,7 +124,7 @@ impl QuickActionsSection {
+                 .await
+             {
+-                warn!(error = %err, "power profile toggle failed");
++                warn!(error = %err, "power profile cycle failed");
+             }
+             QuickActionsCmd::PowerSaverChanged(target == PowerProfile::PowerSaver)
+         });
+     }
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+@@ -9,6 +9,6 @@ dropdown-dashboard-airplane = Airplane Mode
+ dropdown-dashboard-dnd = Do Not Disturb
+ dropdown-dashboard-idle-inhibit = Idle Inhibit
+-dropdown-dashboard-power-saver = Power Saver
++dropdown-dashboard-power-saver = Power Profile
+ 
+ ## Controls
+ dropdown-dashboard-volume = Volume
