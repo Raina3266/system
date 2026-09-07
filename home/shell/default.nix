@@ -1,6 +1,9 @@
 { inputs, pkgs, ... }:
 let
+  # One Python environment prevents duplicate console-script wrappers in
+  # Home Manager while providing python3, spotdl, and ytmusicapi together.
   music-python = pkgs.python3.withPackages (ps: [
+    ps.spotdl
     ps.ytmusicapi
   ]);
 in
@@ -73,8 +76,6 @@ in
       uv
       music-python
 
-      # Music
-      spotdl
 
       # Typst
       typst
