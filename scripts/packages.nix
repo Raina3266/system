@@ -1,6 +1,7 @@
 # Packages built from this repository and desktop integrations used by modules.
 {
   pkgs,
+  craneLib,
   kernelPackages ? pkgs.linuxPackages_latest,
 }:
 let
@@ -11,27 +12,68 @@ let
   # cargo will not load a workspace whose members are absent from disk.
   workspaceMembers = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.members;
 
-  # The source one member is built from: the workspace manifests, that member's
-  # own tree, and the siblings' manifests (cargo will not load a workspace whose
-  # members are missing from disk).
+  # One build environment for the dependency artifact and for every crate that
+  # reuses it.
+  #
+  # cargoArtifacts below compiles the whole workspace's dependencies once, but
+  # cargo only reuses a compiled dependency when the environment that produced
+  # it still matches. PKG_CONFIG_PATH is the fragile part: it is assembled from
+  # buildInputs, and wrapGAppsHook4 contributes gtk4 and librsvg through
+  # depsTargetTargetPropagated, which lands in buildInputs of anything carrying
+  # the hook. Give one crate a library or a hook the artifact was not built
+  # with and its -sys crates rebuild for that derivation alone, which is the
+  # duplication this is meant to remove. So the set is the union of what every
+  # member needs, and nothing here varies it per crate.
+  commonArgs = {
+    strictDeps = true;
+
+    nativeBuildInputs = [
+      pkgs.pkg-config
+      pkgs.makeWrapper
+      pkgs.wrapGAppsHook4
+    ];
+
+    buildInputs = [
+      pkgs.gtk4
+      pkgs.gtk4-layer-shell
+      pkgs.dbus
+      pkgs.libpulseaudio
+    ];
+  };
+
+  # Every member's dependencies, compiled once. Crane replaces the crates' own
+  # sources with generated stubs and launders the manifests through the store
+  # before this builds, so editing any .rs file leaves it alone; only a change
+  # to a dependency or to Cargo.lock rebuilds it. `--locked` and the release
+  # profile are crane's defaults, and doCheck is on so dev-dependencies land in
+  # the artifact too rather than being rebuilt by each crate's test run.
+  cargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs
+    // {
+      pname = "desktop-scripts";
+      version = "0.1.0";
+      src = craneLib.cleanCargoSource ./.;
+    }
+  );
+
+  # The source one member is built from: every manifest in the workspace, and
+  # that member's own tree.
   #
   # Passing the whole of scripts/ as src meant every derivation's input hash
-  # covered all nine crates *and* this file, so touching any one of them — or
-  # editing a wrapper below — rebuilt all nine, gtk4 and bluer trees included.
-  # Sibling manifests are still an input, but they only change when a crate
-  # gains or drops a dependency.
+  # covered all nine crates *and* this file, so touching any one of them - or
+  # editing a wrapper below - rebuilt all nine. Sibling manifests are still an
+  # input, but they only change when a crate gains or drops a dependency.
   memberSrc =
     pname:
     lib.fileset.toSource {
       root = ./.;
-      fileset = lib.fileset.unions (
-        [
-          ./Cargo.toml
-          ./Cargo.lock
-          (./. + "/${pname}")
-        ]
-        ++ map (m: ./. + "/${m}/Cargo.toml") (lib.remove pname workspaceMembers)
-      );
+      fileset = lib.fileset.unions [
+        (craneLib.fileset.cargoTomlAndLock ./.)
+        # The member's whole directory, not crane's commonCargoSources, which
+        # keeps only .rs and .toml: control-centre include_str!()s a stylesheet
+        # and would lose it.
+        (./. + "/${pname}")
+      ];
     };
 
   # Every member manifest cargo loads needs a target to point at, so stand the
@@ -46,23 +88,19 @@ let
 
   mkWorkspacePackage =
     pname: extra:
-    pkgs.rustPlatform.buildRustPackage (
-      {
-        inherit pname;
-        version = "0.1.0";
-        src = memberSrc pname;
-        cargoLock.lockFile = ./Cargo.lock;
-        cargoBuildFlags = [
-          "--package"
-          pname
-        ];
-        cargoTestFlags = [
-          "--package"
-          pname
-        ];
-      }
+    craneLib.buildPackage (
+      commonArgs
       // extra
       // {
+        inherit pname cargoArtifacts;
+        version = "0.1.0";
+        src = memberSrc pname;
+        # Feeds both the build and the test phase, so tests stay scoped to the
+        # one member as well.
+        cargoExtraArgs = "--locked --package ${pname}";
+        # The shared environment has to win over anything a crate passes, or
+        # that crate stops hitting the artifact cache.
+        inherit (commonArgs) strictDeps nativeBuildInputs buildInputs;
         postPatch = stubSiblings pname + (extra.postPatch or "");
       }
     );
@@ -94,19 +132,12 @@ let
 in
 rec {
   inherit withParentDeath;
-  controlCentre = mkWorkspacePackage "control-centre" {
-    nativeBuildInputs = [
-      pkgs.pkg-config
-      pkgs.wrapGAppsHook4
-    ];
-    buildInputs = [
-      pkgs.gtk4
-      pkgs.gtk4-layer-shell
-    ];
-  };
+  # gtk4 and the hook that wraps it live in commonArgs now, so there is nothing
+  # left for this crate to add.
+  controlCentre = mkWorkspacePackage "control-centre" { };
 
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/ocr-screenshot" \
         --set OCR_SCREENSHOT_GNOME_SCREENSHOT "${pkgs.lib.getExe' pkgs.gnome-screenshot "gnome-screenshot"}" \
@@ -118,19 +149,12 @@ rec {
     '';
   };
 
-  previewPanel = mkWorkspacePackage "preview-panel" {
-    nativeBuildInputs = [
-      pkgs.pkg-config
-      pkgs.wrapGAppsHook4
-    ];
-    buildInputs = [
-      pkgs.gtk4
-      pkgs.gtk4-layer-shell
-    ];
-  };
+  # gtk4 and the hook that wraps it live in commonArgs now, so there is nothing
+  # left for this crate to add.
+  previewPanel = mkWorkspacePackage "preview-panel" { };
 
   rofiFilesearch = mkWorkspacePackage "rofi-filesearch" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/rofi-filesearch" \
         --set ROFI_FILESEARCH_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
@@ -146,7 +170,7 @@ rec {
   };
 
   rofiClipboard = mkWorkspacePackage "rofi-clipboard" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/rofi-clipboard" \
         --set ROFI_CLIPBOARD_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
@@ -157,7 +181,7 @@ rec {
   };
 
   rofiNetwork = mkWorkspacePackage "rofi-network" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/rofi-network" \
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
@@ -168,14 +192,7 @@ rec {
   };
 
   rofiAudio = mkWorkspacePackage "rofi-audio" {
-    nativeBuildInputs = [
-      pkgs.makeWrapper
-      pkgs.pkg-config
-    ];
-    buildInputs = [
-      pkgs.dbus
-      pkgs.libpulseaudio
-    ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/rofi-audio" \
         --set ROFI_AUDIO_ROFI "${pkgs.lib.getExe pkgs.rofi}"
@@ -183,7 +200,7 @@ rec {
   };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/waybar-timer" \
         --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg-full}/bin/ffplay"
@@ -191,7 +208,7 @@ rec {
   };
 
   webcamCrop = mkWorkspacePackage "webcam-crop" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/webcam-crop" \
         --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg-full}/bin/ffmpeg" \

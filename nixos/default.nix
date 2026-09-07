@@ -12,7 +12,10 @@
 }:
 let
   kernelPackages = pkgs.linuxPackages_latest;
-  repoPackages = import ../scripts/packages.nix { inherit pkgs kernelPackages; };
+  repoPackages = import ../scripts/packages.nix {
+    inherit pkgs kernelPackages;
+    craneLib = inputs.crane.mkLib pkgs;
+  };
 in
 {
   imports = [
