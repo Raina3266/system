@@ -1,4 +1,10 @@
 { inputs, pkgs, ... }:
+let
+music-python = pkgs.python3.withPackages (ps: [
+  ps.spotdl
+  ps.ytmusicapi
+]);
+in
 {
   imports = [
     inputs.nixvim.homeModules.nixvim
@@ -66,7 +72,9 @@
 
       # Python
       uv
-      python314Packages.ytmusicapi
+      music-python
+      spotdl
+      python313Packages.ytmusicapi
 
       # Typst
       typst

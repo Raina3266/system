@@ -13,10 +13,6 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
-  music-python = pkgs.python3.withPackages (ps: [
-    ps.spotdl
-    ps.ytmusicapi
-  ]);
 in
 {
   imports = [
@@ -85,9 +81,6 @@ in
     shotcut
     kid3
     gimp
-    # Keep spotdl and ytmusicapi in one Python environment so music_organiser
-    # can invoke python3 without creating a second conflicting ytmusicapi wrapper.
-    music-python
     yt-dlp
     waylyrics
 
