@@ -1,50 +1,240 @@
-Expose Wayle's native dashboard to the external Waybar.
+Expose Wayle's native dashboard to the external Waybar using the same mapped
+hidden-bar anchor path that previously worked for external Wayle dropdowns.
 
-Wayle's own bar stays hidden. A one-pixel transparent layer-shell host keeps
-the native dashboard popover available, and com.wayle.Shell1.DashboardToggle
-lets Waybar open and close it. The user-session action card is omitted, so the
-dashboard has no lock, logout, reboot, or power-off buttons.
+A GTK popover needs an already-mapped parent surface. Instead of the separate
+one-pixel Shell window, every Wayle bar whose layout has `show = false` stays
+mapped but becomes transparent, empty, non-exclusive and click-through. An IPC
+request is delivered to the Bar instance for the selected output, which opens
+the dashboard from an anchor inside that real Wayle bar. External dropdowns
+force autohide off because the input serial belongs to Waybar, not Wayle.
 
-diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
---- a/crates/wayle-shell/src/services/shell_ipc/state.rs
-+++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
-@@ -14,7 +14,11 @@ pub struct ShellIpcState {
- 
-     /// All active monitor connectors. Updated by the shell when bars are
-     /// created or destroyed.
-     pub connectors: Property<Vec<String>>,
-+
-+    /// Monotonic request serial for the externally-hosted dashboard. Waybar
-+    /// increments this over D-Bus and the GTK shell reacts on its own thread.
-+    pub dashboard_toggle_serial: Property<u64>,
- }
- 
- impl ShellIpcState {
-@@ -21,6 +25,7 @@ impl ShellIpcState {
-         Self {
-             hidden_bars: Property::new(HashSet::new()),
-             connectors: Property::new(Vec::new()),
-+            dashboard_toggle_serial: Property::new(0),
-         }
-     }
- }
+The dashboard user-session card is also omitted, so there are no lock, logout,
+reboot, or power-off actions.
+
 diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
+index 4483872..400a1ab 100644
 --- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
 +++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
-@@ -31,6 +31,12 @@ impl ShellIpcDaemon {
+@@ -2,7 +2,10 @@
+ 
+ use zbus::{fdo, interface};
+ 
+-use super::{bar::BarVisibility, state::ShellIpcState};
++use super::{
++    bar::BarVisibility,
++    state::{DropdownRequest, ShellIpcState},
++};
+ 
+ /// D-Bus daemon that dispatches shell commands to domain handlers.
+ pub(crate) struct ShellIpcDaemon {
+@@ -36,6 +39,37 @@ impl ShellIpcDaemon {
          self.bar.toggle(monitor)
      }
  
-+    /// Toggles the dashboard popover hosted for an external bar such as Waybar.
-+    pub async fn dashboard_toggle(&self) {
-+        let serial = self.state.dashboard_toggle_serial.get().wrapping_add(1);
-+        self.state.dashboard_toggle_serial.set(serial);
++    /// Toggles a dropdown on a monitor for integration with external bars.
++    pub async fn dropdown_toggle(&self, name: &str, monitor: &str) -> fdo::Result<()> {
++        if !crate::shell::bar::dropdowns::DROPDOWN_NAMES.contains(&name) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown dropdown: {name}"
++            )));
++        }
++
++        let mut connectors = self.state.connectors.get();
++        connectors.sort();
++        let monitor = if monitor.is_empty() {
++            connectors.first().map(String::as_str).unwrap_or_default()
++        } else {
++            monitor
++        };
++
++        if !connectors.iter().any(|item| item == monitor) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown monitor: {monitor}"
++            )));
++        }
++
++        let serial = self.state.dropdown_request.get().serial.wrapping_add(1);
++        self.state.dropdown_request.set(DropdownRequest {
++            serial,
++            name: name.to_owned(),
++            monitor: monitor.to_owned(),
++        });
++        Ok(())
 +    }
 +
      /// Currently hidden monitor connectors.
      #[zbus(property)]
      pub async fn bar_hidden(&self) -> Vec<String> {
+diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
+index 9fdaf9f..a4f4358 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/state.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
+@@ -4,6 +4,17 @@ use std::collections::HashSet;
+ 
+ use wayle_core::Property;
+ 
++/// A request from an external bar to toggle one of Wayle's dropdowns.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct DropdownRequest {
++    /// Monotonically increasing value so identical requests stay observable.
++    pub serial: u64,
++    /// Registered dropdown name, for example `dashboard`.
++    pub name: String,
++    /// Monitor connector on which the dropdown should open.
++    pub monitor: String,
++}
++
+ /// Shared reactive state exposed to shell components via `ShellIpcService`.
+ ///
+ /// Bar watchers subscribe to these properties to react to IPC commands.
+@@ -15,6 +26,9 @@ pub struct ShellIpcState {
+     /// All active monitor connectors. Updated by the shell when bars are
+     /// created or destroyed.
+     pub connectors: Property<Vec<String>>,
++
++    /// Most recent request to toggle a dropdown from an external bar.
++    pub dropdown_request: Property<DropdownRequest>,
+ }
+ 
+ impl ShellIpcState {
+@@ -22,6 +36,7 @@ impl ShellIpcState {
+         Self {
+             hidden_bars: Property::new(HashSet::new()),
+             connectors: Property::new(Vec::new()),
++            dropdown_request: Property::new(DropdownRequest::default()),
+         }
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 4a0fbdf..955e95b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -378,6 +378,30 @@ impl DropdownRegistry {
+         }
+     }
+ 
++    /// Toggles a dropdown on behalf of an external bar, anchored to `widget`.
++    ///
++    /// Returns `false` when the dropdown has no instance, which happens when
++    /// the service it needs is unavailable.
++    ///
++    /// Autohide is forced off regardless of configuration. An autohide popover
++    /// asks the compositor for an `xdg_popup` grab, and a grab is only granted
++    /// against the serial of an input event this client received. The click
++    /// that triggers this path belongs to the external bar, so Wayle has no
++    /// such serial and the compositor dismisses the popup the moment it opens.
++    /// Without the grab the dropdown stays put and the external bar's button
++    /// closes it on the next click.
++    pub(crate) fn toggle_external(&self, name: &str, widget: &impl IsA<gtk::Widget>) -> bool {
++        let Some(dropdown) = self.get_or_create(name) else {
++            return false;
++        };
++
++        let mut style = dropdown_style(self);
++        style.autohide = false;
++
++        dropdown.toggle_for_widget(widget, style);
++        true
++    }
++
+     #[allow(clippy::cognitive_complexity)]
+     fn get_or_create(&self, name: &str) -> Option<Rc<DropdownInstance>> {
+         let mut cache = self.cache.borrow_mut();
+diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
+index ccca8d3..f84fc7b 100644
+--- a/crates/wayle-shell/src/shell/bar/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/methods.rs
+@@ -10,7 +10,7 @@ use wayle_config::schemas::bar::{BarItem, BarLayout, Location};
+ use wayle_widgets::prelude::BarSettings;
+ 
+ use super::{
+-    Bar,
++    ANCHOR_ONLY_CLASS, Bar,
+     dropdowns::DropdownRegistry,
+     factory::{BarItemFactory, BarItemFactoryInit},
+ };
+@@ -45,6 +45,64 @@ impl Bar {
+         }
+     }
+ 
++    /// Hides the bar without unmapping it, so it stays usable as the GTK
++    /// anchor for dropdowns opened from an external bar.
++    ///
++    /// Unmapping is what upstream does for `show = false`, but a GTK popover
++    /// can only be presented from a surface the compositor has already mapped,
++    /// and mapping a layer surface costs a configure round-trip plus a frame.
++    /// Anchor-only mode keeps the window mapped and makes it invisible
++    /// instead: the sections are hidden, the CSS below drops the background,
++    /// borders, shadow and padding, the exclusive zone is released, and an
++    /// empty input region lets clicks through to whatever is underneath.
++    pub(super) fn apply_anchor_only(
++        window: &gtk::Window,
++        right_factory: &gtk::Box,
++        anchor_only: bool,
++        exclusive: bool,
++    ) {
++        if anchor_only {
++            window.add_css_class(ANCHOR_ONLY_CLASS);
++            window.set_exclusive_zone(0);
++        } else {
++            window.remove_css_class(ANCHOR_ONLY_CLASS);
++            Self::apply_exclusive_zone(window, exclusive);
++        }
++
++        // The right section keeps its own visibility so the anchor widget
++        // appended after it stays mapped; only the factory content is hidden.
++        if let Some(center_box) = window
++            .child()
++            .and_then(|child| child.downcast::<gtk::CenterBox>().ok())
++        {
++            if let Some(start) = center_box.start_widget() {
++                start.set_visible(!anchor_only);
++            }
++            if let Some(center) = center_box.center_widget() {
++                center.set_visible(!anchor_only);
++            }
++        }
++        right_factory.set_visible(!anchor_only);
++
++        Self::apply_input_region(window, anchor_only);
++    }
++
++    /// Makes the window click-through while it is only an anchor.
++    ///
++    /// Re-applied from the window's `map` handler because the surface does not
++    /// exist before the window is realized.
++    pub(super) fn apply_input_region(window: &gtk::Window, anchor_only: bool) {
++        let Some(surface) = window.surface() else {
++            return;
++        };
++
++        if anchor_only {
++            surface.set_input_region(Some(&gtk::cairo::Region::create()));
++        } else {
++            surface.set_input_region(None);
++        }
++    }
++
+     pub(super) fn apply_css_classes(
+         window: &gtk::Window,
+         monitor: &gdk::Monitor,
+@@ -117,7 +175,13 @@ impl Bar {
+         }
+ 
+         if self.layout.show != new_layout.show {
+-            root.set_visible(new_layout.show);
++            self.anchor_only.set(!new_layout.show);
++            Self::apply_anchor_only(
++                root,
++                self.right.widget(),
++                !new_layout.show,
++                self.services.config.config().bar.exclusive.get(),
++            );
+         }
+ 
+         let settings = &self.settings;
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index 5b5cf1c..ac224fe 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1,4 +1,4 @@
@@ -53,154 +243,226 @@ diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/sh
  mod factory;
  pub(crate) mod icons;
  mod methods;
-diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
---- a/crates/wayle-shell/src/shell/mod.rs
-+++ b/crates/wayle-shell/src/shell/mod.rs
-@@ -4,17 +4,20 @@ mod notification_popup;
- mod osd;
- pub(crate) mod services;
+@@ -6,7 +6,7 @@ mod modules;
+ mod styling;
+ mod watchers;
  
--use std::time::Instant;
-+use std::{rc::Rc, time::Instant};
+-use std::rc::Rc;
++use std::{cell::Cell, rc::Rc};
  
- use console::style;
-+use futures::StreamExt;
- use gdk4::Display;
- use gtk4::{CssProvider, glib::idle_add_local_once};
--use gtk4_layer_shell::{Layer, LayerShell};
-+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
- use relm4::{gtk, gtk::prelude::*, prelude::*};
- pub(crate) use services::ShellServices;
- use tracing::{debug, info};
-+use wayle_config::ClickAction;
+ use factory::*;
+ use gtk::prelude::*;
+@@ -18,6 +18,9 @@ use wayle_widgets::{prelude::BarSettings, styling::InlineStyling};
+ use self::dropdowns::DropdownRegistry;
+ use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
  
- use self::{
-+    bar::dropdowns::{DropdownRegistry, dispatch_click_widget},
-     notification_popup::{NotificationPopupHost, PopupHostInit},
-     osd::{Osd, OsdInit},
- };
-@@ -26,6 +30,9 @@ pub(crate) struct Shell {
-     css_provider: CssProvider,
-     bars: helpers::monitors::BarMap,
++/// Marks a bar window that stays mapped only to anchor external dropdowns.
++pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
++
+ pub(crate) struct Bar {
+     settings: BarSettings,
      services: ShellServices,
-+    dashboard_anchor: gtk::Box,
-+    dashboard_dropdowns: Rc<DropdownRegistry>,
-+    dashboard_serial: u64,
-     _notification_popup: Option<Controller<NotificationPopupHost>>,
-     _osd: Option<Controller<Osd>>,
+@@ -25,6 +28,8 @@ pub(crate) struct Bar {
+     layout: BarLayout,
+     css_provider: gtk::CssProvider,
+     last_css: String,
++    external_anchor: gtk::Box,
++    anchor_only: Rc<Cell<bool>>,
+ 
+     left: FactoryVecDeque<BarItemFactory>,
+     center: FactoryVecDeque<BarItemFactory>,
+@@ -43,6 +48,7 @@ pub(crate) enum BarCmd {
+     DropdownAutohideChanged(bool),
+     ExclusiveChanged(bool),
+     LayerChanged,
++    ToggleDropdown(String),
  }
-@@ -42,4 +49,5 @@ pub(crate) enum ShellCmd {
-     CssRecompiled(String),
-+    DashboardToggleSerial(u64),
-     LocationChanged,
-     OsdEnabledChanged(bool),
-     SyncMonitors { expected_count: u32, attempt: u32 },
-@@ -56,5 +64,6 @@ impl Component for Shell {
-         #[root]
-         gtk::Window {
-             set_decorated: false,
-+            add_css_class: "dashboard-waybar-host",
-         }
-     }
-@@ -69,9 +78,23 @@ impl Component for Shell {
-         let start = Instant::now();
  
+ #[relm4::component(pub(crate))]
+@@ -100,6 +106,8 @@ impl Component for Bar {
+ 
+         let ipc_state = init.services.shell_ipc.state();
+ 
++        let exclusive = config.bar.exclusive.get();
++
+         let visible_on_startup = {
+             let connector = monitor_name.as_deref().unwrap_or("unknown");
+             let layouts = config.bar.layout.get();
+@@ -123,7 +131,7 @@ impl Component for Bar {
          root.init_layer_shell();
--        root.set_layer(Layer::Background);
-+        root.set_layer(Layer::Overlay);
-+        root.set_keyboard_mode(KeyboardMode::None);
-+        root.set_namespace(Some("wayle-dashboard-host"));
-+        root.set_anchor(Edge::Top, true);
-+        root.set_anchor(Edge::Left, true);
-+        // This repository's Waybar is 40 px tall. Keep the invisible anchor
-+        // immediately below it so the native popover opens in the right place.
-+        root.set_margin(Edge::Top, 40);
-+        root.set_margin(Edge::Left, 6);
-         root.set_default_size(1, 1);
--        root.set_visible(false);
-+        root.set_exclusive_zone(0);
-+        helpers::layer_shell::apply_primary_monitor(&root);
+         apply_layer(&root, config.bar.layer.get(), &init.services.config);
+         root.set_keyboard_mode(KeyboardMode::None);
+-        Self::apply_exclusive_zone(&root, config.bar.exclusive.get());
++        Self::apply_exclusive_zone(&root, exclusive);
+         root.set_monitor(Some(&init.monitor));
+         Self::apply_anchors(&root, location);
+         Self::apply_css_classes(&root, &init.monitor, location, is_floating);
+@@ -147,6 +155,20 @@ impl Component for Bar {
+             .detach();
+ 
+         let css_provider = gtk::CssProvider::new();
++        let external_anchor = gtk::Box::default();
++        external_anchor.set_size_request(1, 1);
 +
-+        let dashboard_anchor = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-+        dashboard_anchor.set_size_request(1, 1);
-+        root.set_child(Some(&dashboard_anchor));
-+        root.set_visible(true);
- 
-         let display = Display::default().expect("No display");
- 
-@@ -79,6 +101,29 @@ impl Component for Shell {
-         helpers::register_app_actions();
-         watchers::init(&sender, &init.services);
- 
-+        let dashboard_signal = init
-+            .services
-+            .shell_ipc
-+            .state()
-+            .dashboard_toggle_serial
-+            .clone();
-+        let dashboard_serial = dashboard_signal.get();
-+        let mut dashboard_stream = dashboard_signal.watch();
-+        sender.command(move |out, shutdown| async move {
-+            let shutdown_fut = shutdown.wait();
-+            tokio::pin!(shutdown_fut);
-+
-+            loop {
-+                tokio::select! {
-+                    () = &mut shutdown_fut => break,
-+                    Some(_) = dashboard_stream.next() => {
-+                        let _ = out.send(ShellCmd::DashboardToggleSerial(dashboard_signal.get()));
-+                    }
-+                }
-+            }
++        // The bar window doubles as the GTK anchor for dropdowns opened from an
++        // external bar, so it stays mapped even when the layout hides it: a
++        // popover can only be presented from a surface the compositor has
++        // already mapped, and `present()` followed by `popup()` in the same
++        // main-loop turn is not that. Hidden means transparent, empty and
++        // click-through instead of unmapped.
++        let anchor_only = Rc::new(Cell::new(!visible_on_startup));
++        let anchor_only_on_map = Rc::clone(&anchor_only);
++        root.connect_map(move |window| {
++            Self::apply_input_region(window, anchor_only_on_map.get());
 +        });
-+
-         let css_provider = helpers::init_css_provider(&display, &init.services.config);
-+        let dashboard_dropdowns = Rc::new(DropdownRegistry::new(&init.services));
-         let bars = helpers::monitors::create_bars(&init.services);
-         helpers::monitors::schedule_deferred_sync_if_needed(bars.len(), &sender);
-@@ -111,6 +154,9 @@ impl Component for Shell {
-             css_provider,
-             bars,
-             services: init.services,
-+            dashboard_anchor,
-+            dashboard_dropdowns,
-+            dashboard_serial,
-             _notification_popup: notification_popup,
-             _osd: osd,
-         };
-@@ -135,6 +181,20 @@ impl Component for Shell {
-                 sender.input(ShellInput::ReloadCss(css));
-             }
  
-+            ShellCmd::DashboardToggleSerial(serial) => {
-+                // `Property::watch()` may yield the current value when a
-+                // subscriber starts; only a new serial is a real click.
-+                if serial != self.dashboard_serial {
-+                    self.dashboard_serial = serial;
-+                    let action = ClickAction::Dropdown(String::from("dashboard"));
-+                    dispatch_click_widget(
-+                        &action,
-+                        &self.dashboard_dropdowns,
-+                        &self.dashboard_anchor,
+         #[allow(deprecated)]
+         root.style_context()
+@@ -156,6 +178,14 @@ impl Component for Bar {
+         watchers::dropdowns::spawn(&sender, &init.services.config);
+         watchers::exclusive::spawn(&sender, &init.services.config);
+         watchers::layer::spawn(&sender, &init.services.config);
++        watchers::external_dropdown::spawn(
++            &sender,
++            &ipc_state,
++            settings
++                .monitor_name
++                .clone()
++                .unwrap_or_else(|| String::from("unknown")),
++        );
+ 
+         let dropdowns = Rc::new(DropdownRegistry::new(&init.services));
+         dropdowns.warm_all();
+@@ -174,6 +204,8 @@ impl Component for Bar {
+             },
+             css_provider,
+             last_css: String::new(),
++            external_anchor,
++            anchor_only,
+             left,
+             center,
+             right,
+@@ -200,10 +232,10 @@ impl Component for Bar {
+         widgets.left_box.append(model.left.widget());
+         widgets.middle_box.append(model.center.widget());
+         widgets.right_box.append(model.right.widget());
++        widgets.right_box.append(&model.external_anchor);
+ 
+-        if visible_on_startup {
+-            root.present();
+-        }
++        Self::apply_anchor_only(&root, model.right.widget(), !visible_on_startup, exclusive);
++        root.present();
+ 
+         ComponentParts { model, widgets }
+     }
+@@ -224,12 +256,24 @@ impl Component for Bar {
+                 self.dropdowns.set_all_autohide(autohide);
+             }
+             BarCmd::ExclusiveChanged(exclusive) => {
+-                Self::apply_exclusive_zone(root, exclusive);
++                // An anchor-only window reserves no space; the configured zone
++                // is restored when the layout shows the bar again.
++                if !self.anchor_only.get() {
++                    Self::apply_exclusive_zone(root, exclusive);
++                }
+             }
+             BarCmd::LayerChanged => {
+                 let configured = self.services.config.config().bar.layer.get();
+                 apply_layer(root, configured, &self.services.config);
+             }
++            BarCmd::ToggleDropdown(name) => {
++                if !self.dropdowns.toggle_external(&name, &self.external_anchor) {
++                    tracing::warn!(
++                        dropdown = %name,
++                        "external bar asked for a dropdown that has no instance"
 +                    );
 +                }
 +            }
+         }
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
+index 409a9f7..c398de7 100644
+--- a/crates/wayle-shell/src/shell/bar/styling.rs
++++ b/crates/wayle-shell/src/shell/bar/styling.rs
+@@ -175,6 +175,19 @@ impl InlineStyling for Bar {
+             --bar-group-border-right: {group_border_right}; \
+             --bar-shadow: {shadow}; \
+             --bar-shadow-margin: {shadow_margin}; \
++            }} \
++            .bar.anchor-only {{ \
++            --bar-opacity: 0%; \
++            --bar-border-top: 0; \
++            --bar-border-bottom: 0; \
++            --bar-border-left: 0; \
++            --bar-border-right: 0; \
++            --bar-shadow: none; \
++            --bar-shadow-margin: 0; \
++            --bar-inset-edge-px: 0; \
++            --bar-inset-ends-px: 0; \
++            --bar-padding-px: 0; \
++            --bar-padding-ends-px: 0; \
+             }}"
+         )
+     }
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+new file mode 100644
+index 0000000..8954308
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+@@ -0,0 +1,30 @@
++//! External dropdown requests delivered by the shell IPC service.
 +
-             ShellCmd::LocationChanged => {
-                 self.recreate_bars();
-             }
-diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
---- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
-+++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
-@@ -1,3 +1,8 @@
-+.dashboard-waybar-host {
-+    background: transparent;
-+    box-shadow: none;
++use futures::StreamExt;
++use relm4::ComponentSender;
++
++use crate::{
++    services::shell_ipc::ShellIpcState,
++    shell::bar::{Bar, BarCmd},
++};
++
++pub(crate) fn spawn(sender: &ComponentSender<Bar>, ipc: &ShellIpcState, connector: String) {
++    let request = ipc.dropdown_request.clone();
++    let mut requests = request.watch();
++
++    sender.command(move |out, shutdown| async move {
++        let shutdown_fut = shutdown.wait();
++        tokio::pin!(shutdown_fut);
++
++        loop {
++            tokio::select! {
++                () = &mut shutdown_fut => break,
++                Some(current) = requests.next() => {
++                    if current.serial != 0 && current.monitor == connector {
++                        let _ = out.send(BarCmd::ToggleDropdown(current.name));
++                    }
++                }
++            }
++        }
++    });
 +}
-+
- .dashboard-dropdown {
-     > contents > .dropdown {
-         min-width: 0;
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/mod.rs b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+index c900f59..c506130 100644
+--- a/crates/wayle-shell/src/shell/bar/watchers/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+@@ -2,5 +2,6 @@
+ 
+ pub(crate) mod dropdowns;
+ pub(crate) mod exclusive;
++pub(crate) mod external_dropdown;
+ pub(crate) mod layer;
+ pub(crate) mod layout;
+diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
+index a2e1a66..56f7914 100644
+--- a/crates/wayle-shell/src/shell/mod.rs
++++ b/crates/wayle-shell/src/shell/mod.rs
+@@ -1,4 +1,4 @@
+-mod bar;
++pub(crate) mod bar;
+ mod helpers;
+ mod notification_popup;
+ mod osd;
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
