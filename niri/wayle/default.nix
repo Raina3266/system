@@ -33,6 +33,10 @@
     (
       { lib, ... }:
       {
+        # Wayle compiles ~/.config/wayle/styles/index.scss after its own
+        # stylesheet, so colour changes land here rather than in a patch.
+        xdg.configFile."wayle/styles/index.scss".source = ./styles.scss;
+
         services.wayle = {
           enable = true;
           autoInstallDependencies = false;

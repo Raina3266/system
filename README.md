@@ -483,6 +483,24 @@ notifications transient, the patch copies only Chrome/Chromium transient
 popups into Wayle's in-memory history so they remain available after the popup
 closes.
 
+### Colours
+
+Wayle compiles `~/.config/wayle/styles/index.scss` after its own stylesheet, so
+colour changes belong in `niri/wayle/styles.scss` rather than in a patch. It
+sets the card headings and the calendar's date range to the palette's red, the
+notification group's app name to pink, and each notification's summary to cyan.
+
+Its rules are nested inside `.notification-dropdown` to match the way the
+control-centre patch writes its own: a bare `.control-center-section-title` is
+the weaker selector and would lose. Nesting ties on specificity, and user
+styles are appended last, so they win.
+
+The calendar's agenda is the exception. Wayle draws the whole seven-day list as
+one label, and Pango markup is the only way to colour part of one, so the day
+headings (pink, bold) and the events under them (cyan) are coloured where that
+string is built, in `waybar-dropdown.patch`. Days follow each other directly;
+there is no blank line between them.
+
 Wayle's palette mirrors the desktop's cyberpunk colours. Its own OSD, wallpaper
 engine, and visible bar are disabled because Waybar, Niri, and the existing
 Rofi tools continue to own those jobs.
