@@ -13,6 +13,9 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
+  music-python = python314.withPackages (ps: [
+    ps.spotdl
+  ]);
 in
 {
   imports = [
@@ -81,7 +84,9 @@ in
     shotcut
     kid3
     gimp
-    spotdl
+    # Keep spotdl and its ytmusicapi dependency in the same Python 3.14
+    # environment so music_organiser can invoke the matching python3.
+    music-python
     yt-dlp
     waylyrics
 
