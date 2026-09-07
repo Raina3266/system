@@ -1,7 +1,7 @@
 //! The panel: a layer-shell surface holding the calendar, media and system
 //! cards, with Wayle's notification dropdown toggled alongside it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -11,7 +11,8 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::media::{clock, Players};
 use crate::ring::{Colour, Ring};
-use crate::{calendar, media, system, wayle};
+use crate::wayle::{relative_time, Entry, Notifications};
+use crate::{calendar, media, system};
 
 /// How often the media rows and system dials are re-read while open.
 const TICK: Duration = Duration::from_millis(750);
@@ -19,23 +20,26 @@ const TICK: Duration = Duration::from_millis(750);
 /// Distance from the top of the screen: the height of Waybar.
 const TOP_MARGIN: i32 = 40;
 
-/// Room kept on the right for Wayle's notification dropdown, so the two sit
-/// side by side rather than on top of one another. Override with
-/// `CONTROL_CENTRE_RIGHT_MARGIN` if Wayle's dropdown is a different width.
-const RIGHT_MARGIN: i32 = 306;
+/// Distance from the right edge of the screen.
+const RIGHT_MARGIN: i32 = 6;
 
-/// Passed to Wayle so its dropdown clears Waybar by the same distance.
-const WAYLE_OFFSET: i32 = TOP_MARGIN;
+/// How tall the notification list may grow before it scrolls, so a busy day
+/// does not push the panel off the bottom of the screen.
+const NOTIFICATION_HEIGHT: i32 = 260;
 
 pub struct Panel {
     window: gtk::Window,
     players: Option<Players>,
+    notifications: Option<Notifications>,
     monitor: RefCell<system::Monitor>,
     calendar_body: gtk::Box,
     media_body: gtk::Box,
+    notification_body: gtk::Box,
+    dnd_toggle: gtk::Switch,
+    /// Set while the switch is being written to, so reacting to the change
+    /// does not ask Wayle to toggle what it just reported.
+    syncing_dnd: Cell<bool>,
     rings: Rings,
-    /// Which output Wayle should open its dropdown on; empty lets it choose.
-    output: String,
 }
 
 struct Rings {
@@ -46,7 +50,7 @@ struct Rings {
 }
 
 impl Panel {
-    pub fn build(application: &gtk::Application, output: String) -> Rc<Self> {
+    pub fn build(application: &gtk::Application) -> Rc<Self> {
         let window = gtk::Window::new();
         window.set_application(Some(application));
         window.add_css_class("control-centre");
@@ -64,6 +68,9 @@ impl Panel {
 
         let calendar_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let media_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let notification_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let dnd_toggle = gtk::Switch::new();
+        let clear_all = gtk::Button::with_label("Clear All");
         // The palette from niri/wayle/default.nix, so the dials match the
         // notification dropdown sitting beside them.
         let rings = Rings {
@@ -78,6 +85,11 @@ impl Panel {
         let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
         left.add_css_class("column");
         left.append(&calendar_card(&calendar_body));
+        left.append(&notification_card(
+            &notification_body,
+            &dnd_toggle,
+            &clear_all,
+        ));
 
         let right = gtk::Box::new(gtk::Orientation::Vertical, 0);
         right.add_css_class("column");
@@ -106,14 +118,19 @@ impl Panel {
         let this = Rc::new(Panel {
             window,
             players: Players::connect().ok(),
+            notifications: Notifications::connect(),
             monitor: RefCell::new(system::Monitor::new()),
             calendar_body,
             media_body,
+            notification_body,
+            dnd_toggle,
+            syncing_dnd: Cell::new(false),
             rings,
-            output,
         });
 
         this.connect_dismissal(&backdrop, &panel);
+        this.connect_dnd();
+        this.connect_clear_all(&clear_all);
         this.start_ticking();
         this
     }
@@ -166,6 +183,7 @@ impl Panel {
         glib::timeout_add_local(TICK, move || {
             if this.window.is_visible() {
                 this.refresh_live();
+                this.refresh_notifications();
             }
             glib::ControlFlow::Continue
         });
@@ -175,21 +193,16 @@ impl Panel {
         self.window.is_visible()
     }
 
-    /// Open the panel, and bring Wayle's notification dropdown up beside it.
+    /// Open the panel, with everything it shows read fresh.
     pub fn show(self: &Rc<Self>) {
         self.refresh_calendar();
+        self.refresh_notifications();
         self.refresh_live();
         self.window.present();
-        self.toggle_wayle();
     }
 
-    /// Close the panel, and put Wayle's dropdown away with it.
     pub fn hide(&self) {
-        if !self.window.is_visible() {
-            return;
-        }
         self.window.set_visible(false);
-        self.toggle_wayle();
     }
 
     pub fn toggle(self: &Rc<Self>) {
@@ -197,14 +210,6 @@ impl Panel {
             self.hide();
         } else {
             self.show();
-        }
-    }
-
-    /// Wayle not running is a panel without its notification column, not a
-    /// failure: the calendar, media and system cards are this program's.
-    fn toggle_wayle(&self) {
-        if let Err(error) = wayle::toggle_notifications(&self.output, WAYLE_OFFSET) {
-            eprintln!("control-centre: {error}");
         }
     }
 
@@ -240,6 +245,158 @@ impl Panel {
                 self.calendar_body.append(&line);
             }
         }
+    }
+
+    /// Follow Do Not Disturb both ways: the switch asks Wayle to toggle, and
+    /// a change made anywhere else moves the switch.
+    fn connect_dnd(self: &Rc<Self>) {
+        let this = Rc::clone(self);
+        self.dnd_toggle.connect_state_set(move |_, _| {
+            if !this.syncing_dnd.get() {
+                if let Some(notifications) = this.notifications.as_ref() {
+                    notifications.toggle_dnd();
+                }
+            }
+            glib::Propagation::Proceed
+        });
+    }
+
+    fn connect_clear_all(self: &Rc<Self>, button: &gtk::Button) {
+        let this = Rc::clone(self);
+        button.connect_clicked(move |_| {
+            if let Some(notifications) = this.notifications.as_ref() {
+                notifications.dismiss_all();
+            }
+            this.refresh_notifications();
+        });
+    }
+
+    fn refresh_notifications(self: &Rc<Self>) {
+        let Some(notifications) = self.notifications.as_ref() else {
+            clear(&self.notification_body);
+            self.notification_body
+                .append(&placeholder("Wayle is not running", "notification-empty"));
+            return;
+        };
+
+        self.syncing_dnd.set(true);
+        self.dnd_toggle.set_active(notifications.dnd());
+        self.syncing_dnd.set(false);
+
+        clear(&self.notification_body);
+        let entries = notifications.list();
+        if entries.is_empty() {
+            self.notification_body
+                .append(&placeholder("No notifications", "notification-empty"));
+            return;
+        }
+
+        let now = chrono::Local::now().timestamp();
+        for (app, group) in group_by_app(entries) {
+            self.notification_body
+                .append(&self.group_widget(&app, &group, now));
+        }
+    }
+
+    /// One app's notifications: a header naming it and counting them, then a
+    /// row each. Grouping matches how Wayle's own list reads.
+    fn group_widget(self: &Rc<Self>, app: &str, group: &[Entry], now: i64) -> gtk::Box {
+        let name = gtk::Label::new(Some(app));
+        name.add_css_class("notification-app");
+        name.set_xalign(0.0);
+        name.set_hexpand(true);
+        name.set_halign(gtk::Align::Start);
+
+        let count = gtk::Label::new(Some(&format!("({})", group.len())));
+        count.add_css_class("notification-count");
+
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        header.add_css_class("notification-group-header");
+        header.append(&name);
+        header.append(&count);
+
+        let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        widget.add_css_class("notification-group");
+        widget.append(&header);
+        for entry in group {
+            widget.append(&self.entry_widget(entry, now));
+        }
+        widget
+    }
+
+    fn entry_widget(self: &Rc<Self>, entry: &Entry, now: i64) -> gtk::Box {
+        let summary = gtk::Label::new(Some(&entry.summary));
+        summary.add_css_class("notification-summary");
+        summary.set_xalign(0.0);
+        summary.set_hexpand(true);
+        summary.set_halign(gtk::Align::Start);
+        summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+
+        let age = gtk::Label::new(Some(&relative_time(entry.timestamp, now)));
+        age.add_css_class("notification-age");
+
+        let close = gtk::Button::with_label("\u{00d7}");
+        close.add_css_class("notification-close");
+        close.connect_clicked({
+            let this = Rc::clone(self);
+            let id = entry.id;
+            move |_| {
+                if let Some(notifications) = this.notifications.as_ref() {
+                    notifications.dismiss(id);
+                }
+                this.refresh_notifications();
+            }
+        });
+
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        top.append(&summary);
+        top.append(&age);
+        top.append(&close);
+
+        let row = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        row.set_css_classes(&["notification-row", entry.urgency_class()]);
+        row.append(&top);
+
+        if !entry.body.is_empty() {
+            let body = gtk::Label::new(Some(&entry.body));
+            body.add_css_class("notification-body");
+            body.set_xalign(0.0);
+            body.set_wrap(true);
+            body.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            body.set_lines(3);
+            body.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            row.append(&body);
+        }
+
+        if !entry.actions.is_empty() {
+            row.append(&self.actions_widget(entry));
+        }
+        row
+    }
+
+    /// The sender's own buttons. Wayle runs them: the application is waiting
+    /// on a signal from the daemon, not from this panel.
+    fn actions_widget(self: &Rc<Self>, entry: &Entry) -> gtk::Box {
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        actions.add_css_class("notification-actions");
+
+        for (id, label) in &entry.actions {
+            let button = gtk::Button::with_label(label);
+            button.add_css_class("notification-action");
+            button.connect_clicked({
+                let this = Rc::clone(self);
+                let notification = entry.id;
+                let action = id.clone();
+                move |_| {
+                    if let Some(notifications) = this.notifications.as_ref() {
+                        notifications.invoke(notification, &action);
+                    }
+                    this.refresh_notifications();
+                }
+            });
+            actions.append(&button);
+        }
+        actions
     }
 
     fn refresh_live(self: &Rc<Self>) {
@@ -382,6 +539,27 @@ fn right_margin() -> i32 {
         .unwrap_or(RIGHT_MARGIN)
 }
 
+/// Notifications in the order they arrived, gathered under the app that sent
+/// them. Groups keep the order of their first entry, so the newest app is top.
+fn group_by_app(entries: Vec<Entry>) -> Vec<(String, Vec<Entry>)> {
+    let mut groups: Vec<(String, Vec<Entry>)> = Vec::new();
+    for entry in entries {
+        let app = entry.app();
+        match groups.iter_mut().find(|(name, _)| name == &app) {
+            Some((_, group)) => group.push(entry),
+            None => groups.push((app, vec![entry])),
+        }
+    }
+    groups
+}
+
+fn placeholder(text: &str, class: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class(class);
+    label.set_xalign(0.0);
+    label
+}
+
 fn clear(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -429,6 +607,51 @@ fn card(title: &str, with_range: bool, body: &gtk::Box) -> gtk::Box {
 fn calendar_card(body: &gtk::Box) -> gtk::Box {
     let card = card("Calendar", true, body);
     card.add_css_class("card-calendar");
+    card
+}
+
+/// The notification card: a heading, the Do Not Disturb switch beside it, and
+/// the list under both, scrolling once it outgrows its share of the column.
+fn notification_card(body: &gtk::Box, dnd: &gtk::Switch, clear_all: &gtk::Button) -> gtk::Box {
+    let heading = gtk::Label::new(Some("Notifications"));
+    heading.add_css_class("card-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    heading.set_halign(gtk::Align::Start);
+
+    clear_all.add_css_class("notification-clear-all");
+    clear_all.set_valign(gtk::Align::Center);
+
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    header.add_css_class("card-header");
+    header.append(&heading);
+    header.append(clear_all);
+
+    let dnd_label = gtk::Label::new(Some("Do Not Disturb"));
+    dnd_label.add_css_class("dnd-label");
+    dnd_label.set_hexpand(true);
+    dnd_label.set_halign(gtk::Align::Start);
+    dnd.set_valign(gtk::Align::Center);
+
+    // Its own row: the heading, "Clear All", a caption and a switch do not fit
+    // across one column of this width.
+    let dnd_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    dnd_row.add_css_class("dnd-row");
+    dnd_row.append(&dnd_label);
+    dnd_row.append(dnd);
+
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.add_css_class("notification-scroll");
+    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroll.set_max_content_height(NOTIFICATION_HEIGHT);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_child(Some(body));
+
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    card.set_css_classes(&["card", "card-notifications"]);
+    card.append(&header);
+    card.append(&dnd_row);
+    card.append(&scroll);
     card
 }
 

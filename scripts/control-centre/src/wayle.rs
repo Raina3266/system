@@ -1,19 +1,19 @@
-//! Wayle's notification dropdown, opened beside this panel.
+//! Wayle's notification history, read and driven over the session bus.
 //!
-//! Notifications stay Wayle's job: it is the daemon, and only the daemon has
-//! the icons, actions and urgency each entry carries. This panel shows the
-//! calendar, media and system cards, and asks Wayle to bring its notification
-//! dropdown up alongside, so the two read as one control centre.
+//! Wayle stays the daemon. It owns `org.freedesktop.Notifications`, keeps the
+//! history, decides Do Not Disturb, and is the only party that may invoke an
+//! action, because the sending application waits on an `ActionInvoked` signal
+//! from the name it talked to. This panel only draws that list and asks Wayle
+//! to act, so the notifications sit in the same window as everything else.
 
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use zbus::blocking::Connection;
 use zbus::proxy::CacheProperties;
-
-/// The dropdown holding notification history.
-const HISTORY_DROPDOWN: &str = "notification";
+use zbus::zvariant::Type;
 
 /// How often the badge re-reads the daemon. Wayle emits no `PropertiesChanged`
 /// for these, so they are polled; this matches Waybar's own tick.
@@ -40,31 +40,138 @@ trait WayleNotifications {
     fn dnd(&self) -> zbus::Result<bool>;
 }
 
-/// Wayle's shell IPC. `DropdownToggle` is the one call `waybar-dropdown.patch`
-/// adds, so something other than Wayle's own bar can open a dropdown.
+/// Wayle's notification history, carried whole by `notification-ipc.patch`.
+///
+/// `com.wayle.Notifications1` publishes an id and three strings, which is not
+/// enough to draw a notification. This is the same history with the icon, the
+/// image, the actions, the urgency and the timestamp still attached.
 #[zbus::proxy(
-    interface = "com.wayle.Shell1",
-    default_service = "com.wayle.Shell1",
-    default_path = "/com/wayle/Shell",
+    interface = "com.wayle.NotificationsExt1",
+    default_service = "com.wayle.NotificationsExt1",
+    default_path = "/com/wayle/NotificationsExt",
     gen_async = false
 )]
-trait WayleShell {
-    /// Toggles `name` on `monitor`, `offset` logical pixels from the screen
-    /// edge. An empty monitor leaves the output to Wayle.
-    fn dropdown_toggle(&self, name: &str, monitor: &str, offset: i32) -> zbus::Result<()>;
+trait WayleNotificationsExt {
+    /// Every notification in history, newest first.
+    fn list(&self) -> zbus::Result<Vec<Entry>>;
+
+    /// Run one of a notification's actions. Only Wayle can: the sending
+    /// application waits on an `ActionInvoked` signal from the daemon.
+    fn invoke(&self, id: u32, action: &str) -> zbus::Result<()>;
+
+    /// Dismiss one notification.
+    fn dismiss(&self, id: u32) -> zbus::Result<()>;
+
+    /// Dismiss everything in history.
+    fn dismiss_all(&self) -> zbus::Result<()>;
+
+    /// Toggle Do Not Disturb.
+    fn toggle_dnd(&self) -> zbus::Result<()>;
+
+    #[zbus(property)]
+    fn dnd(&self) -> zbus::Result<bool>;
 }
 
-/// Toggle Wayle's notification dropdown.
-///
-/// Errors are returned rather than raised: Wayle not running is a reason to
-/// show this panel without its notification column, not a reason to fail.
-pub fn toggle_notifications(monitor: &str, offset: i32) -> Result<(), String> {
-    let connection = Connection::session()
-        .map_err(|error| format!("could not reach the session bus: {error}"))?;
-    WayleShellProxy::new(&connection)
-        .map_err(|error| format!("could not reach Wayle: {error}"))?
-        .dropdown_toggle(HISTORY_DROPDOWN, monitor, offset)
-        .map_err(|error| format!("could not toggle the notification dropdown: {error}"))
+/// One notification, exactly as `notification-ipc.patch` sends it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Entry {
+    pub id: u32,
+    pub app_name: String,
+    /// Icon name or path, whichever the sender supplied.
+    pub app_icon: String,
+    pub summary: String,
+    pub body: String,
+    /// Path to the notification's own image, empty when it has none.
+    pub image_path: String,
+    /// The desktop entry, which names the app more reliably than `app_name`.
+    pub desktop_entry: String,
+    /// 0 low, 1 normal, 2 critical.
+    pub urgency: u32,
+    /// Unix seconds, so a reader can say how long ago it arrived.
+    pub timestamp: i64,
+    /// Action id and label, in the order the sender listed them.
+    pub actions: Vec<(String, String)>,
+}
+
+impl Entry {
+    /// The app a person would name, preferring what the sender called itself.
+    pub fn app(&self) -> String {
+        let name = if self.app_name.is_empty() {
+            self.desktop_entry.as_str()
+        } else {
+            self.app_name.as_str()
+        };
+        if name.is_empty() {
+            return String::from("Notifications");
+        }
+
+        let mut characters = name.chars();
+        characters.next().map_or_else(String::new, |first| {
+            first.to_uppercase().collect::<String>() + characters.as_str()
+        })
+    }
+
+    /// The class its urgency colours the row by.
+    pub fn urgency_class(&self) -> &'static str {
+        match self.urgency {
+            0 => "urgency-low",
+            2 => "urgency-critical",
+            _ => "urgency-normal",
+        }
+    }
+}
+
+/// How long ago a notification arrived, said the way a person would.
+pub fn relative_time(timestamp: i64, now: i64) -> String {
+    let seconds = (now - timestamp).max(0);
+    match seconds {
+        ..=44 => String::from("now"),
+        45..=5399 => format!("{}m ago", (seconds + 30) / 60),
+        5400..=86_399 => format!("{}h ago", (seconds + 1800) / 3600),
+        _ => format!("{}d ago", (seconds + 43_200) / 86_400),
+    }
+}
+
+/// A live handle on Wayle's notification history.
+pub struct Notifications {
+    proxy: WayleNotificationsExtProxy<'static>,
+}
+
+impl Notifications {
+    /// Returns `None` when Wayle is not up; the panel then draws its other
+    /// cards and says the list is unavailable rather than failing to open.
+    pub fn connect() -> Option<Self> {
+        let connection = Connection::session().ok()?;
+        WayleNotificationsExtProxy::builder(&connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .ok()
+            .map(|proxy| Notifications { proxy })
+    }
+
+    pub fn list(&self) -> Vec<Entry> {
+        self.proxy.list().unwrap_or_default()
+    }
+
+    pub fn dnd(&self) -> bool {
+        self.proxy.dnd().unwrap_or(false)
+    }
+
+    pub fn invoke(&self, id: u32, action: &str) {
+        let _ = self.proxy.invoke(id, action);
+    }
+
+    pub fn dismiss(&self, id: u32) {
+        let _ = self.proxy.dismiss(id);
+    }
+
+    pub fn dismiss_all(&self) {
+        let _ = self.proxy.dismiss_all();
+    }
+
+    pub fn toggle_dnd(&self) {
+        let _ = self.proxy.toggle_dnd();
+    }
 }
 
 /// What the bar badge shows about the daemon.

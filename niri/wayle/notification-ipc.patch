@@ -1,0 +1,406 @@
+Publish notification history on the session bus, against v0.7.0.
+
+Wayle stays the notification daemon: it owns `org.freedesktop.Notifications`,
+holds the history, and is the only party that may invoke an action, because the
+sending application is waiting on an `ActionInvoked` signal from the name it
+talked to. What upstream does not do is publish enough of a notification for
+anything else to draw one — `com.wayle.Notifications1.List` carries an id and
+three strings, with no icon, image, actions, urgency or timestamp.
+
+This adds `com.wayle.NotificationsExt1`, which carries the whole entry, plus
+Invoke, Dismiss, DismissAll and ToggleDnd, and a Changed signal so a reader
+redraws when something happens instead of polling. Every field it sends is
+already on the in-memory model; nothing here changes how Wayle behaves.
+
+Chrome marks its web notifications transient, which upstream shows as a popup
+and then drops. They are kept in history here so the list has them after the
+popup closes.
+
+`scripts/control-centre` renders that list, so the notification card, the
+calendar, the media players and the system readings are one panel.
+
+diff --git a/crates/wayle-shell/src/bootstrap/mod.rs b/crates/wayle-shell/src/bootstrap/mod.rs
+index 2bc6fc0..868c377 100644
+--- a/crates/wayle-shell/src/bootstrap/mod.rs
++++ b/crates/wayle-shell/src/bootstrap/mod.rs
+@@ -32,7 +32,7 @@ use wayle_wallpaper::WallpaperService;
+ use zbus::{Connection, fdo::DBusProxy};
+ 
+ use crate::{
+-    services::{IdleInhibitService, ShellIpcService},
++    services::{IdleInhibitService, NotificationIpcService, ShellIpcService},
+     shell::ShellServices,
+     startup::StartupTimer,
+     watchers::build_extractor_config,
+@@ -153,6 +153,19 @@ pub async fn init_services() -> Result<(StartupTimer, ShellServices), Box<dyn Er
+         }
+     };
+ 
++    // The panel that draws the notification list needs more of each entry than
++    // `com.wayle.Notifications1` publishes; this serves the rest of it.
++    let notification_ipc = match daemons.notification.clone() {
++        Some(notification) => match NotificationIpcService::new(notification).await {
++            Ok(service) => Some(Arc::new(service)),
++            Err(err) => {
++                warn!(error = %err, "Notification IPC service unavailable");
++                None
++            }
++        },
++        None => None,
++    };
++
+     timer.mark_services_done();
+ 
+     let services = ShellServices {
+@@ -169,6 +182,7 @@ pub async fn init_services() -> Result<(StartupTimer, ShellServices), Box<dyn Er
+         niri: optional.niri,
+         network: core.network,
+         notification: daemons.notification,
++        notification_ipc,
+         sysinfo: core.sysinfo,
+         systray: daemons.systray,
+         wallpaper: core.wallpaper,
+diff --git a/crates/wayle-shell/src/services/mod.rs b/crates/wayle-shell/src/services/mod.rs
+index d7c503c..a2528c9 100644
+--- a/crates/wayle-shell/src/services/mod.rs
++++ b/crates/wayle-shell/src/services/mod.rs
+@@ -1,7 +1,9 @@
+ //! Shell-specific services that run alongside the UI.
+ 
+ pub mod idle_inhibit;
++pub mod notification_ipc;
+ pub mod shell_ipc;
+ 
+ pub use idle_inhibit::IdleInhibitService;
++pub use notification_ipc::NotificationIpcService;
+ pub use shell_ipc::ShellIpcService;
+diff --git a/crates/wayle-shell/src/services/notification_ipc/dbus.rs b/crates/wayle-shell/src/services/notification_ipc/dbus.rs
+new file mode 100644
+index 0000000..891c0ec
+--- /dev/null
++++ b/crates/wayle-shell/src/services/notification_ipc/dbus.rs
+@@ -0,0 +1,122 @@
++//! D-Bus surface over the notification service's own model.
++
++use std::sync::Arc;
++
++use wayle_notification::NotificationService;
++use zbus::{fdo, interface, object_server::SignalEmitter, zvariant::Type};
++
++use serde::{Deserialize, Serialize};
++
++/// One notification, flattened for the bus.
++///
++/// `com.wayle.Notifications1` publishes only the id, app name, summary and
++/// body, which is not enough to draw a notification list: the icon, the image,
++/// the actions and the urgency are all missing. Everything here is already on
++/// the in-memory model; this only carries it across.
++#[derive(Clone, Debug, Serialize, Deserialize, Type)]
++pub struct Entry {
++    pub id: u32,
++    pub app_name: String,
++    /// Icon name or path, whichever the sender supplied.
++    pub app_icon: String,
++    pub summary: String,
++    pub body: String,
++    /// Path to the notification's own image, empty when it has none.
++    pub image_path: String,
++    /// The desktop entry, which names the app more reliably than `app_name`.
++    pub desktop_entry: String,
++    /// 0 low, 1 normal, 2 critical.
++    pub urgency: u32,
++    /// Unix seconds, so a reader can say how long ago it arrived.
++    pub timestamp: i64,
++    /// Action id and label, in the order the sender listed them.
++    pub actions: Vec<(String, String)>,
++}
++
++pub(crate) struct NotificationIpcDaemon {
++    pub(crate) service: Arc<NotificationService>,
++}
++
++#[interface(name = "com.wayle.NotificationsExt1")]
++impl NotificationIpcDaemon {
++    /// Every notification in history, newest first.
++    async fn list(&self) -> Vec<Entry> {
++        self.service
++            .notifications
++            .get()
++            .iter()
++            .map(|item| Entry {
++                id: item.id,
++                app_name: item.app_name.get().unwrap_or_default(),
++                app_icon: item.app_icon.get().unwrap_or_default(),
++                summary: item.summary.get(),
++                body: item.body.get().unwrap_or_default(),
++                image_path: item.image_path.get().unwrap_or_default(),
++                desktop_entry: item.desktop_entry.get().unwrap_or_default(),
++                urgency: item.urgency.get() as u32,
++                timestamp: item.timestamp.get().timestamp(),
++                actions: item
++                    .actions
++                    .get()
++                    .iter()
++                    .map(|action| (action.id.clone(), action.label.clone()))
++                    .collect(),
++            })
++            .collect()
++    }
++
++    /// Invoke one of a notification's actions, as clicking it in Wayle's own
++    /// list would. Only the daemon can do this: the sender is waiting on an
++    /// `ActionInvoked` signal from whoever owns the notification.
++    async fn invoke(&self, id: u32, action: &str) -> fdo::Result<()> {
++        let notifications = self.service.notifications.get();
++        let Some(target) = notifications.iter().find(|item| item.id == id) else {
++            return Err(fdo::Error::InvalidArgs(format!("unknown notification: {id}")));
++        };
++
++        target
++            .invoke(action)
++            .await
++            .map_err(|err| fdo::Error::Failed(err.to_string()))
++    }
++
++    /// Dismiss one notification.
++    async fn dismiss(&self, id: u32) -> fdo::Result<()> {
++        let notifications = self.service.notifications.get();
++        let Some(target) = notifications.iter().find(|item| item.id == id) else {
++            return Err(fdo::Error::InvalidArgs(format!("unknown notification: {id}")));
++        };
++
++        target.dismiss();
++        Ok(())
++    }
++
++    /// Dismiss everything in history.
++    async fn dismiss_all(&self) -> fdo::Result<()> {
++        self.service
++            .dismiss_all()
++            .await
++            .map_err(|err| fdo::Error::Failed(err.to_string()))
++    }
++
++    /// Toggle Do Not Disturb.
++    async fn toggle_dnd(&self) -> fdo::Result<()> {
++        self.service.set_dnd(!self.service.dnd.get());
++        Ok(())
++    }
++
++    #[zbus(property)]
++    async fn dnd(&self) -> bool {
++        self.service.dnd.get()
++    }
++
++    #[zbus(property)]
++    async fn count(&self) -> u32 {
++        self.service.notifications.get().len() as u32
++    }
++
++    /// Emitted whenever history or Do Not Disturb changes, so a reader can
++    /// redraw when something happens instead of polling for it.
++    #[zbus(signal)]
++    pub(crate) async fn changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
++}
+diff --git a/crates/wayle-shell/src/services/notification_ipc/mod.rs b/crates/wayle-shell/src/services/notification_ipc/mod.rs
+new file mode 100644
+index 0000000..c2ae0d1
+--- /dev/null
++++ b/crates/wayle-shell/src/services/notification_ipc/mod.rs
+@@ -0,0 +1,94 @@
++//! Notification history on the session bus, as `com.wayle.NotificationsExt1`.
++//!
++//! Wayle stays the notification daemon: it owns
++//! `org.freedesktop.Notifications`, holds the history, and is the only party
++//! that may invoke an action, because the sending application is waiting on an
++//! `ActionInvoked` signal from the name it talked to. What it does not do is
++//! publish enough of a notification for anything else to draw one — its own
++//! `List` carries four strings. This adds an interface that carries the whole
++//! entry, so an external panel can render the list Wayle already keeps.
++
++mod dbus;
++
++use std::sync::Arc;
++
++use futures::StreamExt;
++use tracing::{info, warn};
++use wayle_notification::NotificationService;
++use zbus::{object_server::SignalEmitter, Connection};
++
++use self::dbus::NotificationIpcDaemon;
++use super::shell_ipc::Error;
++
++/// D-Bus service name for the notification extensions.
++pub const SERVICE_NAME: &str = "com.wayle.NotificationsExt1";
++
++/// D-Bus object path for the notification extensions.
++pub const SERVICE_PATH: &str = "/com/wayle/NotificationsExt";
++
++/// Registers `com.wayle.NotificationsExt1` and keeps it in step with history.
++pub struct NotificationIpcService {
++    _connection: Connection,
++}
++
++impl NotificationIpcService {
++    /// Connects to the session bus and registers the interface.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error if the session bus is unreachable or the D-Bus name is
++    /// already claimed.
++    pub async fn new(service: Arc<NotificationService>) -> Result<Self, Error> {
++        let connection = Connection::session()
++            .await
++            .map_err(|err| Error::Connection(err.to_string()))?;
++
++        let daemon = NotificationIpcDaemon {
++            service: Arc::clone(&service),
++        };
++
++        connection
++            .object_server()
++            .at(SERVICE_PATH, daemon)
++            .await
++            .map_err(|err| Error::Registration(err.to_string()))?;
++
++        connection
++            .request_name(SERVICE_NAME)
++            .await
++            .map_err(|err| Error::NameRequest(err.to_string()))?;
++
++        spawn_change_signal(&connection, &service);
++
++        info!("Notification IPC service registered at {SERVICE_NAME}");
++
++        Ok(Self {
++            _connection: connection,
++        })
++    }
++}
++
++/// Announce every change to history and Do Not Disturb, so a reader redraws
++/// when something happens rather than on a timer.
++fn spawn_change_signal(connection: &Connection, service: &Arc<NotificationService>) {
++    let Ok(emitter) = SignalEmitter::new(connection, SERVICE_PATH) else {
++        warn!("cannot build a signal emitter; notification changes will not be announced");
++        return;
++    };
++
++    let mut history = service.notifications.watch();
++    let mut dnd = service.dnd.watch();
++
++    tokio::spawn(async move {
++        loop {
++            tokio::select! {
++                item = history.next() => if item.is_none() { break },
++                item = dnd.next() => if item.is_none() { break },
++            }
++
++            if let Err(err) = NotificationIpcDaemon::changed(&emitter).await {
++                warn!(error = %err, "cannot announce notification change");
++            }
++        }
++    });
++}
+diff --git a/crates/wayle-shell/src/shell/services.rs b/crates/wayle-shell/src/shell/services.rs
+index 65bd70d..babd8c9 100644
+--- a/crates/wayle-shell/src/shell/services.rs
++++ b/crates/wayle-shell/src/shell/services.rs
+@@ -18,7 +18,7 @@ use wayle_systray::SystemTrayService;
+ use wayle_wallpaper::WallpaperService;
+ use wayle_weather::WeatherService;
+ 
+-use crate::services::{IdleInhibitService, ShellIpcService};
++use crate::services::{IdleInhibitService, NotificationIpcService, ShellIpcService};
+ 
+ /// Container for services used by shell components.
+ ///
+@@ -38,6 +38,11 @@ pub(crate) struct ShellServices {
+     pub niri: Option<Arc<NiriService>>,
+     pub network: Option<Arc<NetworkService>>,
+     pub notification: Option<Arc<NotificationService>>,
++
++    /// Serves notification history to an external panel. Never read: it is
++    /// held only so its D-Bus connection lives as long as the shell does.
++    #[allow(dead_code)]
++    pub notification_ipc: Option<Arc<NotificationIpcService>>,
+     pub power_profiles: DeferredService<PowerProfilesService>,
+     pub sysinfo: Arc<SysinfoService>,
+     pub systray: Option<Arc<SystemTrayService>>,
+diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
+index abe3e41..6b78a1d 100644
+--- a/crates/wayle-shell/src/watchers/notification.rs
++++ b/crates/wayle-shell/src/watchers/notification.rs
+@@ -3,7 +3,7 @@
+ use std::sync::Arc;
+ 
+ use futures::StreamExt;
+-use wayle_notification::NotificationService;
++use wayle_notification::{NotificationService, core::notification::Notification};
+ 
+ use crate::shell::ShellServices;
+ 
+@@ -15,6 +15,63 @@ pub fn spawn(services: &ShellServices) {
+ 
+     let config = services.config.config();
+     spawn_blocklist_watcher(&config.modules.notifications, notification);
++    spawn_chrome_history_watcher(notification);
++}
++
++/// Chrome marks web notifications transient. Wayle correctly displays those
++/// as popups but normally omits them from history; retain Chrome's entries so
++/// an external notification-center button can still reopen them.
++fn spawn_chrome_history_watcher(service: &Arc<NotificationService>) {
++    let popups = service.popups.clone();
++    let history = service.notifications.clone();
++    let mut stream = popups.watch();
++
++    tokio::spawn(async move {
++        while stream.next().await.is_some() {
++            let mut current = history.get();
++            let mut changed = false;
++
++            for popup in popups
++                .get()
++                .iter()
++                .filter(|item| retain_transient(item.as_ref()))
++            {
++                if current.iter().any(|item| item.id == popup.id) {
++                    continue;
++                }
++                current.insert(0, popup.clone());
++                changed = true;
++            }
++
++            if changed {
++                history.set(current);
++            }
++        }
++    });
++}
++
++fn retain_transient(notification: &Notification) -> bool {
++    if !notification.is_transient.get() {
++        return false;
++    }
++
++    let desktop_entry = notification
++        .desktop_entry
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let app_name = notification
++        .app_name
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++
++    desktop_entry == "google-chrome"
++        || desktop_entry == "chromium"
++        || desktop_entry == "chromium-browser"
++        || desktop_entry.starts_with("chrome-")
++        || app_name.contains("chrome")
++        || app_name.contains("chromium")
+ }
+ 
+ fn spawn_blocklist_watcher(

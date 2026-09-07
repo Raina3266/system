@@ -101,11 +101,11 @@ in
       '';
     };
 
-    # The bar's centre button, and the only one that opens the control
-    # centre. control-centre draws the calendar, media and system cards and
-    # asks Wayle for its notification dropdown beside them; the badge is the
-    # same program reading Wayle's count over D-Bus, so no shell or jq is in
-    # the loop. The track is the mpris module beside this one.
+    # The bar's centre button, and the only one that opens the control centre.
+    # control-centre draws the whole panel — notifications, calendar, media and
+    # system — and the badge is the same program reading Wayle's count over
+    # D-Bus, so no shell or jq is in the loop. The track is the mpris module
+    # beside this one.
     "custom/media" = {
       format = "{}";
       return-type = "json";

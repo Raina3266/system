@@ -27,7 +27,7 @@ const APP_ID: &str = "dev.raina.ControlCentre";
 
 fn main() -> ExitCode {
     let mut arguments = env::args().skip(1);
-    let output = match arguments.next().as_deref() {
+    match arguments.next().as_deref() {
         // The bar badge needs no window, so it never starts GTK.
         Some("waybar") => {
             return match wayle::watch_badge() {
@@ -38,15 +38,15 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Some("toggle") | None => arguments.next().unwrap_or_default(),
+        Some("toggle") | None => {}
         Some("help" | "--help" | "-h") => {
             println!(
                 "control-centre\n\n\
                  Usage:\n  \
-                 control-centre toggle [monitor]\n  \
+                 control-centre toggle\n  \
                  control-centre waybar\n\n\
-                 Opens or closes the panel. With no monitor, Wayle puts its\n\
-                 notification dropdown on the output holding focus."
+                 `toggle` opens or closes the panel; `waybar` streams the bar\n\
+                 badge as JSON."
             );
             return ExitCode::SUCCESS;
         }
@@ -64,7 +64,7 @@ fn main() -> ExitCode {
         let mut held = panel.borrow_mut();
         // The first launch builds the panel; every later one toggles it, so
         // reopening costs no process start and no GTK setup.
-        let panel = held.get_or_insert_with(|| ui::Panel::build(application, output.clone()));
+        let panel = held.get_or_insert_with(|| ui::Panel::build(application));
         panel.toggle();
     });
 
