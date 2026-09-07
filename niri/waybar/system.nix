@@ -1,8 +1,8 @@
 # Battery, media, and Google Calendar/Tasks status modules.
 #
-# The centre media button also carries Wayle's notification count and opens its
-# notification history. Battery stays in the bar because it is the one reading
-# worth seeing without opening anything.
+# The centre media button carries Wayle's notification count and opens the
+# control centre. Battery stays in the bar because it is the one reading worth
+# seeing without opening anything.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -17,16 +17,6 @@ let
           "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
         ];
       });
-
-  # Wayle streams {"count":N,"dnd":bool}; Waybar wants {text,class,tooltip}.
-  # The classes are the ones themes/waybar.css already colours.
-  notificationBadge = ''
-    {
-      text: (if .dnd then "󰂛" elif .count > 0 then "󰂚 \(.count)" else "󰂜" end),
-      class: (if .dnd then "dnd" elif .count > 0 then "notification" else "quiet" end),
-      tooltip: (if .dnd then "Do Not Disturb" elif .count > 0 then "\(.count) waiting" else "No notifications" end)
-    }
-  '';
 in
 {
   homeConfig = {
@@ -111,20 +101,20 @@ in
       '';
     };
 
-    # The bar's centre button, and the only one that opens the notification
-    # centre. It used to carry the current track too, composed by
-    # media-control; Wayle's control centre lists the players now, so the
-    # button is just the badge and the track is the mpris module beside it.
+    # The bar's centre button, and the only one that opens the control
+    # centre. control-centre draws the calendar, media and system cards and
+    # asks Wayle for its notification dropdown beside them; the badge is the
+    # same program reading Wayle's count over D-Bus, so no shell or jq is in
+    # the loop. The track is the mpris module beside this one.
     "custom/media" = {
       format = "{}";
       return-type = "json";
-      exec = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.wayle}/bin/wayle notify status --watch | ${pkgs.jq}/bin/jq --unbuffered -c '${notificationBadge}'";
+      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.controlCentre}/bin/control-centre waybar";
       tooltip = true;
       escape = true;
       "restart-interval" = 2;
       "exec-on-event" = false;
-      # Place Wayle immediately below this 40-pixel Waybar.
-      on-click = "${pkgs.wayle}/bin/wayle panel dropdown notification --offset 40";
+      on-click = "${packages.controlCentre}/bin/control-centre toggle";
       on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
     };
 

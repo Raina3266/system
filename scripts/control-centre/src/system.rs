@@ -49,10 +49,7 @@ impl Monitor {
 
         Stats {
             cpu: percentage(f64::from(self.system.global_cpu_usage()) / 100.0),
-            memory: percentage(ratio(
-                self.system.used_memory(),
-                self.system.total_memory(),
-            )),
+            memory: percentage(ratio(self.system.used_memory(), self.system.total_memory())),
             disk: percentage(self.root_disk_used()),
             temperature: self.hottest(),
         }

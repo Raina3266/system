@@ -28,12 +28,23 @@ const APP_ID: &str = "dev.raina.ControlCentre";
 fn main() -> ExitCode {
     let mut arguments = env::args().skip(1);
     let output = match arguments.next().as_deref() {
+        // The bar badge needs no window, so it never starts GTK.
+        Some("waybar") => {
+            return match wayle::watch_badge() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("control-centre: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("toggle") | None => arguments.next().unwrap_or_default(),
         Some("help" | "--help" | "-h") => {
             println!(
                 "control-centre\n\n\
                  Usage:\n  \
-                 control-centre toggle [monitor]\n\n\
+                 control-centre toggle [monitor]\n  \
+                 control-centre waybar\n\n\
                  Opens or closes the panel. With no monitor, Wayle puts its\n\
                  notification dropdown on the output holding focus."
             );

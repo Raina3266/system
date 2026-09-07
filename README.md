@@ -440,71 +440,51 @@ A minimal custom module configuration looks like this:
 
 ---
 
-## Notification center
+## Control centre
 
-Wayle v0.7.0 is the notification daemon and history UI while
-Waybar remains the visible top and bottom bar. Configuration lives in
-`niri/wayle/default.nix`.
+`Mod+N` and the bar's centre button open `control-centre`, a layer-shell panel
+holding the calendar, the media players and the system readings. Wayle keeps
+the notification list beside it: it is the notification daemon, and only the
+daemon holds each entry's icon, actions and urgency, so drawing that list
+anywhere else would lose them.
 
-Upstream Wayle only opens dropdowns from its own bar. The local
-`waybar-dropdown.patch` adds `wayle panel dropdown <name> [monitor]` and keeps
-one Wayle bar per output as the GTK anchor for the dropdown. That bar stays
-mapped for the whole session: a GTK popover can only be presented from a
-surface the compositor has already mapped, and mapping a layer surface costs a
-configure round-trip and a frame, so a bar mapped at click time is never ready
-when the popover needs it. The patch hides the bar without unmapping it
-instead — background, borders, shadow, padding and sections all go away, and an
-empty input region lets clicks through — so it neither shows nor intercepts
-anything above Waybar. The anchor widget keeps one near-transparent pixel:
-a window with nothing at all to draw never attaches a buffer, its layer
-surface is then never mapped, and a compositor does not render the popups of
-an unmapped surface.
+The panel covers the output it opens on, so a click beside it dismisses it, and
+it leaves the right-hand margin clear for Wayle's dropdown. Set
+`CONTROL_CENTRE_RIGHT_MARGIN` if that dropdown is a different width.
 
-With no monitor argument the dropdown opens on the output holding compositor
-focus. Waybar cannot tell Wayle which screen was clicked, and Wayland gives a
-client no way to ask where the pointer is, so the patch tracks niri's focused
-workspace and publishes its output for the IPC handler to route by. Under any
-other compositor, or before niri reports a focus, it falls back to the first
-connector by name. An explicit connector such as `DP-7` still overrides both.
+| Card | Source |
+| --- | --- |
+| Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
+| Media players | MPRIS over D-Bus, with a seek bar per player |
+| System | CPU, memory, the root filesystem, and the hottest component |
 
-The dropdown does not autohide. A GTK autohide popover asks the compositor for
-a popup grab, which is only granted against the serial of an input event the
-client itself received; the click belongs to Waybar, so Wayle has no such
-serial and the compositor would dismiss the dropdown as it opened. Clicking the
-Waybar button again closes it.
+`control-centre waybar` streams the badge for `custom/media`: a bell, a count,
+or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
+properties. It replaces a `wayle notify status --watch | jq` pipeline, so
+nothing shells out for the bar's notification count.
 
-The same patch adds `wayle notify status --watch`, which is the streaming JSON
-source behind the Waybar bell: `jq` turns its count and DND state into the
-`custom/media` label and class. `Mod+N` and a left-click on that button toggle
-Wayle's notification history; `F8` runs `wayle notify dnd`.
+### What is still patched
 
-Chrome is forced to use Linux system notifications. Because Chrome marks web
-notifications transient, the patch copies only Chrome/Chromium transient
-popups into Wayle's in-memory history so they remain available after the popup
-closes.
+Wayle needs two patches, both against v0.7.0, and neither touches its CLI:
+
+| Patch | Why it cannot be a program |
+| --- | --- |
+| `waybar-dropdown.patch` | A GtkPopover cannot take a parent surface from another client, so Wayle itself has to host an externally requested dropdown in a layer-shell window. It also adds `DropdownToggle` to `com.wayle.Shell1` and keeps Chrome's transient popups in history. |
+| `click-outside.patch` | Dismissing that dropdown on an outside click happens inside Wayle's own widget tree. |
+
+`mprisence-position.patch` is unrelated to Wayle: it stops mprisence clamping a
+browser's position backwards after a replay or a backward seek, which is a fix
+to what it publishes and so cannot be corrected by a reader.
 
 ### Colours
 
 Wayle compiles `~/.config/wayle/styles/index.scss` after its own stylesheet, so
-colour changes belong in `niri/wayle/styles.scss` rather than in a patch. It
-sets the card headings and the calendar's date range to the palette's red, the
+colour changes for its notification dropdown belong in `niri/wayle/styles.scss`
+rather than in a patch. It sets the card headings to the palette's red, the
 notification group's app name to pink, and each notification's summary to cyan.
 
-Its rules are nested inside `.notification-dropdown` to match the way the
-control-centre patch writes its own: a bare `.control-center-section-title` is
-the weaker selector and would lose. Nesting ties on specificity, and user
-styles are appended last, so they win.
-
-The calendar's agenda is the exception. Wayle draws the whole seven-day list as
-one label, and Pango markup is the only way to colour part of one, so the day
-headings (pink, bold) and the events under them (cyan) are coloured where that
-string is built, in `waybar-dropdown.patch`. Days follow each other directly;
-there is no blank line between them.
-
-Wayle's palette mirrors the desktop's cyberpunk colours. Its own OSD, wallpaper
-engine, and visible bar are disabled because Waybar, Niri, and the existing
-Rofi tools continue to own those jobs.
-
-The systemd unit is conditioned on `XDG_CURRENT_DESKTOP=niri`. GNOME keeps its
-own notification daemon, avoiding two owners of
-`org.freedesktop.Notifications` in the GNOME session.
+Its rules are nested inside `.notification-dropdown` to match the way Wayle
+writes its own: a bare `.control-center-section-title` is the weaker selector
+and would lose. Nesting ties on specificity, and user styles are appended last,
+so they win. `control-centre` carries the same palette in its own
+`src/style.css`, so the two panels read as one surface.

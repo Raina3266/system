@@ -26,7 +26,12 @@ fn the_first_day_is_named_today_and_the_rest_are_dated() {
     let headings: Vec<&str> = agenda.days.iter().map(|day| day.heading.as_str()).collect();
     assert_eq!(
         headings,
-        ["Today", "Wednesday 9 Sep", "Thursday 10 Sep", "Sunday 13 Sep"]
+        [
+            "Today",
+            "Wednesday 9 Sep",
+            "Thursday 10 Sep",
+            "Sunday 13 Sep"
+        ]
     );
 }
 
