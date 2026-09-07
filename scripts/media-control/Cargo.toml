@@ -1,8 +1,0 @@
-[package]
-name = "media-control"
-version.workspace = true
-edition = "2021"
-
-[[bin]]
-name = "media-control"
-path = "src/main.rs"

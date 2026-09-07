@@ -30,11 +30,6 @@ window#waybar.bottom {
 
 /* ── Standard modules ── */
 
-#cpu,
-#temperature,
-#memory,
-#disk,
-#network,
 #clock,
 #custom-ycal,
 #custom-network,
@@ -42,14 +37,10 @@ window#waybar.bottom {
 #custom-clipboard,
 #custom-timer,
 #custom-files,
-#backlight,
-#pulseaudio,
 #custom-battery,
-#tray,
-#group-hardware,
-#group-system,
-#group-hardware > widget,
-#group-system > widget {
+#custom-media,
+#mpris,
+#tray {
     color: #7afcff;
     background-color: transparent;
     margin-right: 5px;
@@ -72,18 +63,16 @@ window#waybar.bottom {
     border: 2px solid rgba(255, 126, 219, 0.3);
 }
 
-/* ── Borderless modules (media / workspaces) ── */
+/* ── Borderless modules (lyrics / workspaces) ── */
 
-#custom-media,
 #custom-lyrics {
     color: #7afcff;
-    padding-left: 50px;
-    padding-right: 50px;
+    padding-left: 20px;
+    padding-right: 20px;
     border: none;
     background-color: transparent;
 }
 
-#custom-media.paused,
 #custom-lyrics.paused {
     color: #5c6776;
     margin-top: 2px;
@@ -143,11 +132,6 @@ window#waybar.bottom {
 /* ── Hover states ── */
 
 #workspaces button:hover,
-#cpu:hover,
-#temperature:hover,
-#memory:hover,
-#disk:hover,
-#network:hover,
 #clock:hover,
 #custom-ycal:hover,
 #custom-network:hover,
@@ -155,14 +139,14 @@ window#waybar.bottom {
 #custom-clipboard:hover,
 #custom-files:hover,
 #custom-timer:hover,
+#custom-media:hover,
+#mpris:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
 #custom-whatsapp:hover,
 #custom-gkeep:hover,
 #custom-gcal:hover,
 #custom-gphotos:hover,
-#backlight:hover,
-#pulseaudio:hover,
 #tray:hover,
 .niri-window-buttons button:hover,
 .scroll-arrow-left:hover,
@@ -186,6 +170,23 @@ tooltip label {
 
 /* ── States ── */
 
+/* The centre button is the notification badge alone now: pink with something
+   waiting, dimmed under Do Not Disturb. The track sits beside it in #mpris. */
+
+#custom-media.notification {
+    color: #ff7edb;
+    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+}
+
+#custom-media.dnd {
+    color: #5c6776;
+}
+
+/* A paused track dims, the way the centre button's playback half used to. */
+#mpris.paused {
+    color: #5c6776;
+}
+
 #custom-timer.running {
     color: #ff7edb;
 }
@@ -198,14 +199,12 @@ tooltip label {
     border-color: darkred;
 }
 
-#temperature.warning,
 #custom-battery.warning:not(.charging),
 #custom-battery.low:not(.charging) {
     color: #f29e74;
     text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 
-#temperature.critical,
 #custom-battery.critical:not(.charging) {
     color: #ff3333;
     text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);

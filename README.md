@@ -1,14 +1,16 @@
 # Custom Scripts
 
-This repository contains seven Rust utilities used by the desktop configuration:
+This repository contains six Rust utilities used by the desktop configuration:
 
-- `media-control` — a dynamic MPRIS controller for Rofi and Waybar
 - `preview-panel` — a reusable GTK4 text and image preview window
 - [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
-- `rofi-network-manager` — Wi-Fi and Ethernet controls with a Rofi interface
+- `rofi-network` — Wi-Fi and Ethernet controls with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor
+
+It also documents the [Wayle notification center](#notification-center) opened
+from the Waybar notification button.
 
 ## rofi-audio
 
@@ -202,9 +204,9 @@ The text is a single glyph:
 | On, nothing connected | 󰂯 |
 | On, device connected | 󰂱 |
 
-Giving the slot to Bluetooth while the adapter is on costs nothing, because the
-separate `pulseaudio` module in the top-left group already shows the volume and
-its own mute glyph. The module also sets a `class` — `bluetooth-connected`,
+Giving the slot to Bluetooth while the adapter is on costs nothing: the level is
+back as soon as the adapter is off, and the [notification center](#notification-center)
+carries a volume slider besides. The module also sets a `class` — `bluetooth-connected`,
 `bluetooth-on`, `muted`, `active`, or `unavailable` — so the glyph can be
 recoloured per state from `waybar.css`.
 
@@ -435,3 +437,54 @@ A minimal custom module configuration looks like this:
   }
 }
 ```
+
+---
+
+## Control centre
+
+`Mod+N` and the bar's centre button open `control-centre`, a layer-shell panel
+holding the calendar, the media players and the system readings. Wayle keeps
+the notification list beside it: it is the notification daemon, and only the
+daemon holds each entry's icon, actions and urgency, so drawing that list
+anywhere else would lose them.
+
+The panel covers the output it opens on, so a click beside it dismisses it, and
+it leaves the right-hand margin clear for Wayle's dropdown. Set
+`CONTROL_CENTRE_RIGHT_MARGIN` if that dropdown is a different width.
+
+| Card | Source |
+| --- | --- |
+| Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
+| Media players | MPRIS over D-Bus, with a seek bar per player |
+| System | CPU, memory, the root filesystem, and the hottest component |
+
+`control-centre waybar` streams the badge for `custom/media`: a bell, a count,
+or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
+properties. It replaces a `wayle notify status --watch | jq` pipeline, so
+nothing shells out for the bar's notification count.
+
+### What is still patched
+
+Wayle needs two patches, both against v0.7.0, and neither touches its CLI:
+
+| Patch | Why it cannot be a program |
+| --- | --- |
+| `waybar-dropdown.patch` | A GtkPopover cannot take a parent surface from another client, so Wayle itself has to host an externally requested dropdown in a layer-shell window. It also adds `DropdownToggle` to `com.wayle.Shell1` and keeps Chrome's transient popups in history. |
+| `click-outside.patch` | Dismissing that dropdown on an outside click happens inside Wayle's own widget tree. |
+
+`mprisence-position.patch` is unrelated to Wayle: it stops mprisence clamping a
+browser's position backwards after a replay or a backward seek, which is a fix
+to what it publishes and so cannot be corrected by a reader.
+
+### Colours
+
+Wayle compiles `~/.config/wayle/styles/index.scss` after its own stylesheet, so
+colour changes for its notification dropdown belong in `niri/wayle/styles.scss`
+rather than in a patch. It sets the card headings to the palette's red, the
+notification group's app name to pink, and each notification's summary to cyan.
+
+Its rules are nested inside `.notification-dropdown` to match the way Wayle
+writes its own: a bare `.control-center-section-title` is the weaker selector
+and would lose. Nesting ties on specificity, and user styles are appended last,
+so they win. `control-centre` carries the same palette in its own
+`src/style.css`, so the two panels read as one surface.

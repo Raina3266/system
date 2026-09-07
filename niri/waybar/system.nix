@@ -1,11 +1,10 @@
-# System, hardware, media, and Google Calendar/Tasks status modules.
+# Battery, media, and Google Calendar/Tasks status modules.
+#
+# The centre media button carries Wayle's notification count and opens the
+# control centre. Battery stays in the bar because it is the one reading worth
+# seeing without opening anything.
 { lib, pkgs, packages }:
 let
-  drawer = {
-    transition-duration = 300;
-    transition-left-to-right = true;
-  };
-
   mprisenceNativeHost =
     pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
       (builtins.toJSON {
@@ -48,28 +47,6 @@ in
   };
 
   modules = {
-    "group/system" = {
-      orientation = "horizontal";
-      inherit drawer;
-      modules = [
-        "custom/battery"
-        "backlight"
-        "pulseaudio"
-      ];
-    };
-
-    "group/hardware" = {
-      orientation = "horizontal";
-      inherit drawer;
-      modules = [
-        "temperature"
-        "memory"
-        "cpu"
-        "disk"
-        "network"
-      ];
-    };
-
     "custom/battery" = {
       return-type = "json";
       interval = 5;
@@ -124,77 +101,40 @@ in
       '';
     };
 
-    backlight = {
-      format = "󰃠 {percent}%";
-      tooltip-format = "Backlight: {percent}%";
-      on-scroll-up = "${pkgs.brightnessctl}/bin/brightnessctl set 5%+";
-      on-scroll-down = "${pkgs.brightnessctl}/bin/brightnessctl set 5%-";
-      on-click = "${pkgs.brightnessctl}/bin/brightnessctl set 100%";
-    };
-
-    pulseaudio = {
-      format = "󰕾 {volume}%";
-      format-bluetooth = "󰕾 {volume}%";
-      format-bluetooth-muted = "󰝟 {volume}%";
-      format-muted = "󰝟 {volume}%";
-      tooltip-format = "Volume: {volume}%";
-      scroll-step = 5;
-      on-click-right = "pavucontrol";
-      on-click = "pactl set-sink-mute 0 toggle";
-    };
-
-    temperature = {
-      thermal-zone = 8;
-      warning-threshold = 55;
-      critical-threshold = 80;
-      interval = 5;
-      format = "󰄏 {temperatureC}°C";
-      format-critical = "󰄅 {temperatureC}°C";
-      tooltip-format = "CPU package: {temperatureC}°C";
-    };
-
-    memory = {
-      interval = 5;
-      format = "󰍛 {used:0.1f}G / {total:0.1f}G";
-      format-alt = "󰍛 {percentage}%";
-      tooltip-format = "RAM: {used:0.1f}G / {total:0.1f}G ({percentage}%)\nSwap: {swapUsed:0.1f}G / {swapTotal:0.1f}G";
-    };
-
-    cpu = {
-      format = "󰻠 {usage}%";
-      tooltip = true;
-      tooltip-format = "CPU: {usage}%\n{avg_frequency} GHz";
-    };
-
-    disk = {
-      format = "󰋊 {free}";
-      format-alt = "󰋊 {percentage_used}% ({free})";
-      tooltip = true;
-    };
-
-    network = {
-      format = "󰖩  {bandwidthDownBytes}";
-      format-disconnected = "󰖪 Disconnected";
-      format-alt = "󰖩  {bandwidthUpBytes} |  {bandwidthDownBytes}";
-      format-wifi = "󰖩  {bandwidthDownBytes}";
-      format-ethernet = "󰈀  {bandwidthDownBytes}";
-      tooltip-format-wifi = "󰖩 {essid} ({signalStrength}%)\n {ipaddr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
-      tooltip-format-ethernet = "󰈀 {ifname}: {ipaddr}/{cidr}\n {bandwidthUpBytes} /  {bandwidthDownBytes}";
-      tooltip-format-disconnected = "󰖪 Disconnected";
-      on-click-right = "nm-connection-editor";
-    };
-
+    # The bar's centre button, and the only one that opens the control
+    # centre. control-centre draws the calendar, media and system cards and
+    # asks Wayle for its notification dropdown beside them; the badge is the
+    # same program reading Wayle's count over D-Bus, so no shell or jq is in
+    # the loop. The track is the mpris module beside this one.
     "custom/media" = {
-      hide-empty-text = true;
       format = "{}";
       return-type = "json";
-      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.mediaControl}/bin/media-control waybar --watch --interval-ms 750";
+      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.controlCentre}/bin/control-centre waybar";
       tooltip = true;
       escape = true;
       "restart-interval" = 2;
       "exec-on-event" = false;
-      on-click = "${packages.mediaControl}/bin/media-control toggle";
-      on-click-right = "${packages.mediaControl}/bin/media-control menu";
+      on-click = "${packages.controlCentre}/bin/control-centre toggle";
+      on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
+    };
+
+    # The track the centre button used to carry. Waybar reads MPRIS itself, so
+    # nothing in this repository has to. {dynamic} drops the artist rather
+    # than leaving a trailing separator when a player reports none; click,
+    # scroll and the rest stay Waybar's own defaults.
+    mpris = {
+      format = "{status_icon}  {dynamic}";
+      format-stopped = "";
+      status-icons = {
+        playing = "󰐊";
+        paused = "󰏤";
+      };
+      dynamic-order = [
+        "title"
+        "artist"
+      ];
+      dynamic-len = 40;
+      tooltip-format = "{player} - {status}";
     };
 
     "custom/lyrics" = {

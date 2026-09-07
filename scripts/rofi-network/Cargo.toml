@@ -1,5 +1,5 @@
 [package]
-name = "rofi-network-manager"
+name = "rofi-network"
 version.workspace = true
 edition.workspace = true
 

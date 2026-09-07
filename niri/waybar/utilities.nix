@@ -8,18 +8,18 @@
   homeConfig.home.packages = [
     packages.previewPanel
     packages.rofiClipboard
-    packages.rofiNetworkManager
+    packages.rofiNetwork
     packages.rofiAudio
   ];
 
   modules = {
     "custom/network" = {
-      exec = "${packages.rofiNetworkManager}/bin/rofi-network-manager status";
+      exec = "${packages.rofiNetwork}/bin/rofi-network status";
       interval = 5;
       return-type = "json";
       tooltip = true;
       escape = false;
-      on-click = "${packages.rofiNetworkManager}/bin/rofi-network-manager";
+      on-click = "${packages.rofiNetwork}/bin/rofi-network";
     };
 
     "custom/timer" = {

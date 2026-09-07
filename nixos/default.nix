@@ -20,6 +20,7 @@ in
     ./hardware.nix
     ./services.nix
     ../niri/rofi
+    ../niri/wayle
   ];
 
   config = {
@@ -31,7 +32,10 @@ in
     ];
 
     # Nix
-    nix.settings.experimental-features = "nix-command flakes";
+    nix.settings.experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
     nix.settings.trusted-users = [
       "root"
       "raina"

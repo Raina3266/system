@@ -1,0 +1,32 @@
+// Wayle compiles this after its own stylesheet, so anything here wins without
+// a patch. It lives at ~/.config/wayle/styles/index.scss; see ./default.nix.
+//
+// Palette variables (--palette-red and friends) come from the
+// `styling.palette` block in ./default.nix. The literal pinks and cyans match
+// the ones the control-centre patch already uses.
+//
+// The nesting is not decoration: the patch styles all of this inside
+// `.notification-dropdown`, so a bare `.control-center-section-title` would be
+// a weaker selector and lose. Matching the nesting ties on specificity, and
+// user styles are appended last, so these win.
+
+.notification-dropdown {
+    // Card headings — "CALENDAR", "NOTIFICATIONS", "MEDIA PLAYERS" — and the
+    // date range beside the calendar's heading.
+    .control-center-section-title,
+    .control-center-calendar-date,
+    .control-center-calendar .card-title,
+    .control-center-media .card-title {
+        color: var(--palette-red);
+    }
+
+    // The app a group of notifications came from, e.g. "Google Chrome".
+    .notification-dropdown-group-name {
+        color: #ff7edb;
+    }
+
+    // A notification's own summary line.
+    .notification-dropdown-item-title {
+        color: #7afcff;
+    }
+}

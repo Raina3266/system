@@ -34,17 +34,20 @@ let
     // {
       position = "top";
       expand-center = true;
+      # Battery at the far left. In the middle, `custom/media` carries Wayle's
+      # notification count and opens its history, and `mpris` carries the
+      # current track. Wayle stays hidden until that button opens it.
       modules-left = [
+        "custom/battery"
+        "tray"
         "custom/ycal"
-        "group/system"
-        "group/hardware"
       ];
       modules-center = [
         "custom/media"
+        "mpris"
         "custom/lyrics"
       ];
       modules-right = [
-        "tray"
         "custom/timer"
         "custom/clipboard"
         "custom/audio"

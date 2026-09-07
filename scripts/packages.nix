@@ -4,12 +4,53 @@
   kernelPackages ? pkgs.linuxPackages_latest,
 }:
 let
-  mkWorkspacePackage = pname: extra:
+  inherit (pkgs) lib;
+
+  # Read from [workspace].members rather than repeated here: a member missing
+  # from this list builds itself fine and breaks every other crate, because
+  # cargo will not load a workspace whose members are absent from disk.
+  workspaceMembers = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.members;
+
+  # The source one member is built from: the workspace manifests, that member's
+  # own tree, and the siblings' manifests (cargo will not load a workspace whose
+  # members are missing from disk).
+  #
+  # Passing the whole of scripts/ as src meant every derivation's input hash
+  # covered all nine crates *and* this file, so touching any one of them — or
+  # editing a wrapper below — rebuilt all nine, gtk4 and bluer trees included.
+  # Sibling manifests are still an input, but they only change when a crate
+  # gains or drops a dependency.
+  memberSrc =
+    pname:
+    lib.fileset.toSource {
+      root = ./.;
+      fileset = lib.fileset.unions (
+        [
+          ./Cargo.toml
+          ./Cargo.lock
+          (./. + "/${pname}")
+        ]
+        ++ map (m: ./. + "/${m}/Cargo.toml") (lib.remove pname workspaceMembers)
+      );
+    };
+
+  # Every member manifest cargo loads needs a target to point at, so stand the
+  # siblings back up as empty binaries. --package only walks the requested
+  # member's dependency graph, so the stubs are parsed and never compiled.
+  stubSiblings =
+    pname:
+    lib.concatMapStrings (m: ''
+      mkdir -p ${m}/src
+      : > ${m}/src/main.rs
+    '') (lib.remove pname workspaceMembers);
+
+  mkWorkspacePackage =
+    pname: extra:
     pkgs.rustPlatform.buildRustPackage (
       {
         inherit pname;
         version = "0.1.0";
-        src = ./.;
+        src = memberSrc pname;
         cargoLock.lockFile = ./Cargo.lock;
         cargoBuildFlags = [
           "--package"
@@ -21,6 +62,9 @@ let
         ];
       }
       // extra
+      // {
+        postPatch = stubSiblings pname + (extra.postPatch or "");
+      }
     );
 
   withParentDeath = pkgs.runCommandCC "with-parent-death" {
@@ -50,14 +94,15 @@ let
 in
 rec {
   inherit withParentDeath;
-  mediaControl = mkWorkspacePackage "media-control" {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postInstall = ''
-      wrapProgram "$out/bin/media-control" \
-        --set MEDIA_CONTROL_PLAYERCTL "${pkgs.lib.getExe pkgs.playerctl}" \
-        --set MEDIA_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set MEDIA_CONTROL_FALLBACK_THEME "$out/share/rofi/themes/media-control.rasi"
-    '';
+  controlCentre = mkWorkspacePackage "control-centre" {
+    nativeBuildInputs = [
+      pkgs.pkg-config
+      pkgs.wrapGAppsHook4
+    ];
+    buildInputs = [
+      pkgs.gtk4
+      pkgs.gtk4-layer-shell
+    ];
   };
 
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
@@ -111,10 +156,10 @@ rec {
     '';
   };
 
-  rofiNetworkManager = mkWorkspacePackage "rofi-network-manager" {
+  rofiNetwork = mkWorkspacePackage "rofi-network" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postInstall = ''
-      wrapProgram "$out/bin/rofi-network-manager" \
+      wrapProgram "$out/bin/rofi-network" \
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
         --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
@@ -240,7 +285,7 @@ rec {
           mkdir -p $out/share/waybar-ycal $out/bin
           cp ${src}/bar.py ${src}/popup.py ${src}/toggle.sh $out/share/waybar-ycal/
           chmod +x $out/share/waybar-ycal/{bar.py,popup.py,toggle.sh}
-          chmod u+w $out/share/waybar-ycal/popup.py
+          chmod u+w $out/share/waybar-ycal/{bar.py,popup.py}
 
           python - <<PY
           import re
@@ -261,6 +306,11 @@ rec {
             "Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 4)\n",
             "Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 4)\n        Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.LEFT, 4)\n",
           )
+          p.write_text(s)
+
+          p = Path('$out/share/waybar-ycal/bar.py')
+          s = p.read_text()
+          s = s.replace("%A %H:%M", "%A %-d %b %H:%M")
           p.write_text(s)
           PY
 
