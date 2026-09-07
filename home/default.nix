@@ -86,8 +86,5 @@ in
     waylyrics
 
     inputs.sonora.packages.${pkgs.system}.default
-    (python313.withPackages (ps: [
-      ps.ytmusicapi
-    ]))
   ];
 }
