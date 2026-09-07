@@ -6,17 +6,10 @@
 let
   inherit (pkgs) lib;
 
-  # Kept in sync with [workspace].members in ./Cargo.toml.
-  workspaceMembers = [
-    "ocr-screenshot"
-    "preview-panel"
-    "rofi-audio"
-    "rofi-clipboard"
-    "rofi-filesearch"
-    "rofi-network"
-    "waybar-timer"
-    "webcam-crop"
-  ];
+  # Read from [workspace].members rather than repeated here: a member missing
+  # from this list builds itself fine and breaks every other crate, because
+  # cargo will not load a workspace whose members are absent from disk.
+  workspaceMembers = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.members;
 
   # The source one member is built from: the workspace manifests, that member's
   # own tree, and the siblings' manifests (cargo will not load a workspace whose

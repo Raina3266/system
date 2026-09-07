@@ -16,13 +16,10 @@
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        # Order matters: each patch is generated against the tree the previous
-        # ones leave behind.
+        # Order matters: click-outside.patch is generated against the tree
+        # waybar-dropdown.patch leaves behind.
         patches = (oldAttrs.patches or [ ]) ++ [
           ./waybar-dropdown.patch
-          ./control-center-layout.patch
-          ./media-progress.patch
-          ./system-stats-compact.patch
           ./click-outside.patch
         ];
       });
