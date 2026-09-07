@@ -1,8 +1,8 @@
-# Battery, media, and Google Calendar/Tasks status modules.
+# Dashboard, media, and Google Calendar/Tasks status modules.
 #
-# The centre media button carries Wayle's notification count and opens the
-# control centre. Battery stays in the bar because it is the one reading worth
-# seeing without opening anything.
+# The left dashboard button opens Wayle's native system dashboard. The centre
+# media button still carries Wayle's notification count and opens the larger
+# calendar/notification control centre.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -47,61 +47,17 @@ in
   };
 
   modules = {
-    "custom/battery" = {
-      return-type = "json";
-      interval = 5;
-      exec = pkgs.writeShellScript "waybar-battery-poll" ''
-        bat=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1)
-        if [ -z "$bat" ]; then
-          printf '{"text":"","class":"clear"}'
-          exit 0
-        fi
-
-        capacity=$(cat "$bat/capacity" 2>/dev/null)
-        status=$(cat "$bat/status" 2>/dev/null)
-        profile=$(powerprofilesctl get 2>/dev/null)
-
-        icons=("󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹")
-        idx=$(( capacity / 10 ))
-        [ "$idx" -gt 9 ] && idx=9
-        icon="''${icons[$idx]}"
-
-        case "$status" in
-          Charging|"Not charging") icon="󰂄"; class="charging" ;;
-          Full) icon="󰂄"; class="full" ;;
-          *)
-            class="discharging"
-            if [ "$capacity" -le 15 ]; then
-              class="critical"
-            elif [ "$capacity" -le 25 ]; then
-              class="warning"
-            elif [ "$capacity" -lt 50 ]; then
-              class="low"
-            fi
-            ;;
-        esac
-
-        tooltip="$status | Profile: $profile"
-        ${pkgs.jq}/bin/jq -cn \
-          --arg text "$icon $capacity%" \
-          --arg tooltip "$tooltip" \
-          --arg class "$class" \
-          '{text:$text, tooltip:$tooltip, class:$class}'
-      '';
-      on-click = pkgs.writeShellScript "waybar-battery-cycle" ''
-        current=$(powerprofilesctl get 2>/dev/null)
-        case "$current" in
-          performance) next="balanced" ;;
-          balanced) next="power-saver" ;;
-          power-saver) next="performance" ;;
-          *) next="balanced" ;;
-        esac
-        powerprofilesctl set "$next" 2>/dev/null
-        notify-send "Power Profile" "Set to $next"
-      '';
+    # Wayle's native dashboard. The Wayle bar itself remains hidden; this D-Bus
+    # action toggles the tiny external dashboard host provided by our Wayle patch.
+    "custom/dashboard" = {
+      format = "󰕮";
+      tooltip = true;
+      tooltip-format = "Dashboard";
+      on-click =
+        "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DashboardToggle";
     };
 
-    # The bar's centre button, and the only one that opens the control centre.
+    # The bar's centre button opens the larger calendar/notification control centre.
     # control-centre draws the whole panel — notifications, calendar, media and
     # system — and the badge is the same program reading Wayle's count over
     # D-Bus, so no shell or jq is in the loop. The track is the mpris module
