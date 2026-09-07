@@ -13,9 +13,10 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
-  music-python = python314.withPackages (ps: [
-    ps.spotdl
-  ]);
+  music-python = pkgs.runCommand "music-python" { } ''
+    mkdir -p $out/bin
+    ln -s ${pkgs.python3.withPackages (ps: [ ps.ytmusicapi ])}/bin/python3 $out/bin/python3
+  '';
 in
 {
   imports = [
@@ -84,8 +85,9 @@ in
     shotcut
     kid3
     gimp
-    # Keep spotdl and its ytmusicapi dependency in the same Python 3.14
-    # environment so music_organiser can invoke the matching python3.
+    # Expose only the Python interpreter so it does not conflict with
+    # spotdl's own ytmusicapi wrapper in the Home Manager build environment.
+    spotdl
     music-python
     yt-dlp
     waylyrics
