@@ -4,6 +4,18 @@
 # own bar is visually hidden. The native dashboard opened from Waybar is moved
 # into a real layer-shell window, avoiding GTK popup-grab restrictions.
 { ... }:
+let
+  # Flakes are copied into a source store path whose hash changes whenever an
+  # unrelated tracked file changes. Copy each patch to its own content-based
+  # path so those edits do not invalidate the expensive Wayle build.
+  stableWaylePatch =
+    path:
+    builtins.path {
+      inherit path;
+      name = builtins.baseNameOf path;
+      recursive = false;
+    };
+in
 {
   environment.etc."opt/chrome/policies/managed/wayle-notifications.json".text =
     builtins.toJSON { AllowSystemNotifications = true; };
@@ -16,13 +28,15 @@
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        patches = (oldAttrs.patches or [ ]) ++ [
-          ./notification-ipc.patch
-          ./dashboard-waybar-host.patch
-          ./dashboard-layer-window.patch
-          ./dashboard-network.patch
-          ./dashboard-power-profile.patch
-        ];
+        patches =
+          (oldAttrs.patches or [ ])
+          ++ builtins.map stableWaylePatch [
+            ./notification-ipc.patch
+            ./dashboard-waybar-host.patch
+            ./dashboard-layer-window.patch
+            ./dashboard-network.patch
+            ./dashboard-power-profile.patch
+          ];
       });
     })
   ];
