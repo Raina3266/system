@@ -20,6 +20,7 @@
           ./notification-ipc.patch
           ./dashboard-waybar-host.patch
           ./dashboard-layer-window.patch
+          ./dashboard-network.patch
           ./dashboard-power-profile.patch
         ];
       });
@@ -28,7 +29,7 @@
 
   home-manager.sharedModules = [
     (
-      { lib, ... }:
+      { lib, pkgs, ... }:
       {
         services.wayle = {
           enable = true;
@@ -113,7 +114,12 @@
             # generation before Wayle claims org.freedesktop.Notifications.
             Conflicts = [ "swaync.service" ];
           };
-          Service.RestartSec = 3;
+          Service = {
+            RestartSec = 3;
+            # The native network page pipes the Wi-Fi payload over stdin, so
+            # saved passwords never appear in argv or a temporary file.
+            Environment = "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}";
+          };
         };
       }
     )

@@ -1,0 +1,1163 @@
+Open Wayle's native network manager from the dashboard Wi-Fi tile and add QR sharing.
+
+A primary click now navigates to the existing Wayle network dropdown content,
+so scanning, saved-profile activation, password entry, disconnect and forget
+all remain native. A secondary click preserves the quick radio toggle.
+
+The connected Wi-Fi card can render an inline QR code. Secrets are requested
+from NetworkManager only when the user presses QR, the Wi-Fi payload is piped
+to qrencode over stdin, and no password is placed in argv or a temporary file.
+Open, WEP and personal WPA profiles are supported; Enterprise and OWE profiles
+return a clear unsupported message.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+index 0b6d5d1c84bdb8588ab84c89e2f60e44ec9ef1b1..fbcf07fb3956674a6a4aac7b50322ecd4de2795c 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+@@ -5,6 +5,7 @@ dropdown-dashboard-open-settings = Open Settings
+ 
+ ## Quick Actions
+ dropdown-dashboard-wifi = WiFi
++dropdown-dashboard-wifi-manage-tooltip = Manage WiFi networks (right-click to toggle)
+ dropdown-dashboard-bluetooth = Bluetooth
+ dropdown-dashboard-airplane = Airplane Mode
+ dropdown-dashboard-dnd = Do Not Disturb
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+index 7d8b07912bd5949fa37b3dbd59c1ed9299176220..48dd6d55001367886322c87c0bf32d26bb1c6ca7 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+@@ -15,6 +15,13 @@ dropdown-network-cancel = Cancel
+ dropdown-network-password-placeholder = Enter password
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = WiFi
++dropdown-network-back-dashboard = Back to dashboard
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Show WiFi QR code
++dropdown-network-close-qr = Close QR code
++dropdown-network-qr-title = Share { $ssid }
++dropdown-network-qr-description = Scan this code to connect to the WiFi network
++dropdown-network-qr-loading = Creating QR code…
+ dropdown-network-no-networks-title = No Networks Found
+ dropdown-network-no-networks-description = Make sure WiFi is enabled and try scanning again
+ dropdown-network-no-adapter-title = No WiFi Adapter
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+index aa799bc857588a30ee356d6ecb479003c0354c9d..bb7ba6d62cdf31954956da05762cb7504cfaa96b 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+@@ -5,6 +5,7 @@ dropdown-dashboard-open-settings = Ouvrir les paramètres
+ 
+ ## Actions rapides
+ dropdown-dashboard-wifi = Wi-Fi
++dropdown-dashboard-wifi-manage-tooltip = Gérer les réseaux Wi-Fi (clic droit pour activer ou désactiver)
+ dropdown-dashboard-bluetooth = Bluetooth
+ dropdown-dashboard-airplane = Mode avion
+ dropdown-dashboard-dnd = Ne pas déranger
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+index fe3920a9ec0c30dd3ec8fa2f777bb6db05c33975..934d665b5a875ef85055fc57eca3a79557293c89 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+@@ -15,6 +15,13 @@ dropdown-network-cancel = Annuler
+ dropdown-network-password-placeholder = Entrez le mot de passe
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = Wi-Fi
++dropdown-network-back-dashboard = Retour au tableau de bord
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Afficher le code QR Wi-Fi
++dropdown-network-close-qr = Fermer le code QR
++dropdown-network-qr-title = Partager { $ssid }
++dropdown-network-qr-description = Scannez ce code pour vous connecter au réseau Wi-Fi
++dropdown-network-qr-loading = Création du code QR…
+ dropdown-network-no-networks-title = Aucun réseau trouvé
+ dropdown-network-no-networks-description = Assurez-vous que le Wi-Fi est activé et relancez la recherche
+ dropdown-network-no-adapter-title = Aucun adaptateur Wi-Fi
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+index 6203abfb4734380e0ac9a2c69acda96a24a2ec43..c0cc672f37a430253caa1edcaf49448b2affa3ee 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+@@ -31,6 +31,8 @@ pub(crate) struct DashboardDropdownInit {
+ pub(crate) enum DashboardDropdownMsg {
+     VisibilityChanged(bool),
+     SetExternalHost(gtk::Window),
++    OpenNetwork,
++    CloseNetwork,
+     OpenSettings,
+ }
+ 
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+index dfb7d8b9d4247bd7fa03319d8593d654c1831ddc..a48a2cee5dcc64ac3962479a1579ab6f6f88fa7a 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+@@ -23,14 +23,37 @@ use self::{
+     media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
+     messages::{DashboardDropdownCmd, DashboardDropdownInit},
+     network_section::{NetworkSection, NetworkSectionInit, NetworkSectionInput},
+-    quick_actions::{QuickActionsInit, QuickActionsSection},
++    quick_actions::{QuickActionsInit, QuickActionsOutput, QuickActionsSection},
+     system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
+ };
+ pub(super) use self::{factory::Factory, messages::DashboardDropdownMsg};
+-use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::{
++        network::{
++            NetworkDropdown, NetworkDropdownInit, NetworkDropdownMsg, NetworkDropdownOutput,
++        },
++        scaled_dimension,
++    },
++};
+ 
+ const BASE_WIDTH: f32 = 380.0;
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum DashboardPage {
++    Main,
++    Network,
++}
++
++impl DashboardPage {
++    const fn name(self) -> &'static str {
++        match self {
++            Self::Main => "dashboard",
++            Self::Network => "network",
++        }
++    }
++}
++
+ fn spawn_settings_app() {
+     match Command::new("wayle-settings")
+         .stdin(Stdio::null())
+@@ -52,8 +75,10 @@ fn spawn_settings_app() {
+ pub(crate) struct DashboardDropdown {
+     scaled_width: i32,
+     external_host: Option<gtk::Window>,
++    active_page: DashboardPage,
+ 
+     quick_actions: Controller<QuickActionsSection>,
++    embedded_network: Option<Controller<NetworkDropdown>>,
+     controls: Controller<ControlsSection>,
+     media: Controller<MediaSection>,
+     battery: Option<Controller<BatterySection>>,
+@@ -76,56 +101,75 @@ impl Component for DashboardDropdown {
+             #[watch]
+             set_width_request: model.scaled_width,
+ 
+-            #[template]
+-            #[name = "dashboard_container"]
+-            Dropdown {
++            #[name = "page_stack"]
++            gtk::Stack {
++                add_css_class: "dashboard-page-stack",
++                set_hhomogeneous: false,
++                set_vhomogeneous: false,
++                set_transition_type: gtk::StackTransitionType::SlideLeftRight,
++                set_transition_duration: 200,
+                 #[watch]
+-                set_width_request: model.scaled_width,
+-
+-                #[template]
+-                #[name = "header"]
+-                DropdownHeader {
+-                    #[template_child]
+-                    icon {
+-                        set_visible: true,
+-                        set_icon_name: Some("ld-layout-dashboard-symbolic"),
+-                    },
+-                    #[template_child]
+-                    label {
+-                        set_label: &t!("dropdown-dashboard-title"),
+-                    },
+-                    #[template_child]
+-                    actions {
++                set_visible_child_name: model.active_page.name(),
++
++                add_named[Some("dashboard")] = &gtk::Box {
++                    add_css_class: "dashboard-main-page",
++                    set_orientation: gtk::Orientation::Vertical,
++
++                    #[template]
++                    #[name = "dashboard_container"]
++                    Dropdown {
++                        #[watch]
++                        set_width_request: model.scaled_width,
++
+                         #[template]
+-                        GhostIconButton {
+-                            add_css_class: "dashboard-settings-btn",
+-                            set_icon_name: "ld-settings-symbolic",
+-                            set_tooltip_text: Some(&t!("dropdown-dashboard-open-settings")),
+-                            connect_clicked => DashboardDropdownMsg::OpenSettings,
++                        #[name = "header"]
++                        DropdownHeader {
++                            #[template_child]
++                            icon {
++                                set_visible: true,
++                                set_icon_name: Some("ld-layout-dashboard-symbolic"),
++                            },
++                            #[template_child]
++                            label {
++                                set_label: &t!("dropdown-dashboard-title"),
++                            },
++                            #[template_child]
++                            actions {
++                                #[template]
++                                GhostIconButton {
++                                    add_css_class: "dashboard-settings-btn",
++                                    set_icon_name: "ld-settings-symbolic",
++                                    set_tooltip_text: Some(&t!("dropdown-dashboard-open-settings")),
++                                    connect_clicked => DashboardDropdownMsg::OpenSettings,
++                                },
++                            },
+                         },
+-                    },
+-                },
+ 
+-                #[template]
+-                #[name = "content"]
+-                DropdownContent {
+-                    set_vexpand: true,
++                        #[template]
++                        #[name = "content"]
++                        DropdownContent {
++                            set_vexpand: true,
+ 
+-                    #[local_ref]
+-                    quick_actions_widget -> gtk::Box {},
++                            #[local_ref]
++                            quick_actions_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    controls_widget -> gtk::Box {},
++                            #[local_ref]
++                            controls_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    media_widget -> gtk::Box {},
++                            #[local_ref]
++                            media_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    info_row_widget -> gtk::Box {},
++                            #[local_ref]
++                            info_row_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    system_stats_widget -> gtk::Box {},
++                            #[local_ref]
++                            system_stats_widget -> gtk::Box {},
++                        },
++                    },
+                 },
++
++                #[local_ref]
++                add_named[Some("network")] = embedded_network_widget -> gtk::Box {},
+             },
+         }
+     }
+@@ -143,7 +187,9 @@ impl Component for DashboardDropdown {
+                 power_profiles: init.power_profiles.clone(),
+                 idle_inhibit: init.idle_inhibit.clone(),
+             })
+-            .detach();
++            .forward(sender.input_sender(), |output| match output {
++                QuickActionsOutput::OpenNetwork => DashboardDropdownMsg::OpenNetwork,
++            });
+ 
+         let controls = ControlsSection::builder()
+             .launch(ControlsInit {
+@@ -178,6 +224,32 @@ impl Component for DashboardDropdown {
+             })
+             .detach();
+ 
++        let (embedded_network, embedded_network_widget) = match init.network.clone() {
++            Some(network_service) => {
++                let controller = NetworkDropdown::builder()
++                    .launch(NetworkDropdownInit {
++                        network: network_service,
++                        config: init.config.clone(),
++                        embedded: true,
++                    })
++                    .forward(sender.input_sender(), |output| match output {
++                        NetworkDropdownOutput::NavigateBack => DashboardDropdownMsg::CloseNetwork,
++                    });
++
++                let child = controller.widget().child();
++                controller.widget().set_child(Option::<&gtk::Widget>::None);
++                let widget = child
++                    .and_then(|child| child.downcast::<gtk::Box>().ok())
++                    .unwrap_or_else(|| {
++                        tracing::warn!("network dropdown has no embeddable content");
++                        gtk::Box::default()
++                    });
++
++                (Some(controller), widget)
++            }
++            None => (None, gtk::Box::default()),
++        };
++
+         let system_stats = SystemStatsSection::builder()
+             .launch(SystemStatsInit {
+                 sysinfo: init.sysinfo.clone(),
+@@ -191,8 +263,10 @@ impl Component for DashboardDropdown {
+         let model = Self {
+             scaled_width: scaled_dimension(BASE_WIDTH, scale),
+             external_host: None,
++            active_page: DashboardPage::Main,
+ 
+             quick_actions,
++            embedded_network,
+             controls,
+             media,
+             battery,
+@@ -235,6 +309,7 @@ impl Component for DashboardDropdown {
+             model.network.widget().set_hexpand(true);
+         }
+         let info_row_widget = &info_row;
++        let embedded_network_widget = &embedded_network_widget;
+ 
+         let widgets = view_output!();
+         ComponentParts { model, widgets }
+@@ -246,6 +321,12 @@ impl Component for DashboardDropdown {
+                 self.network.emit(NetworkSectionInput::SetActive(visible));
+                 self.system_stats.emit(SystemStatsInput::SetActive(visible));
+                 self.media.emit(MediaSectionInput::SetActive(visible));
++                if !visible {
++                    self.active_page = DashboardPage::Main;
++                    if let Some(network) = &self.embedded_network {
++                        network.emit(NetworkDropdownMsg::Reset);
++                    }
++                }
+             }
+             DashboardDropdownMsg::SetExternalHost(window) => {
+                 let is_visible = window.is_visible();
+@@ -260,6 +341,18 @@ impl Component for DashboardDropdown {
+                     .emit(SystemStatsInput::SetActive(is_visible));
+                 self.media.emit(MediaSectionInput::SetActive(is_visible));
+             }
++            DashboardDropdownMsg::OpenNetwork => {
++                if let Some(network) = &self.embedded_network {
++                    self.active_page = DashboardPage::Network;
++                    network.emit(NetworkDropdownMsg::ScanRequested);
++                }
++            }
++            DashboardDropdownMsg::CloseNetwork => {
++                self.active_page = DashboardPage::Main;
++                if let Some(network) = &self.embedded_network {
++                    network.emit(NetworkDropdownMsg::Reset);
++                }
++            }
+             DashboardDropdownMsg::OpenSettings => {
+                 root.popdown();
+                 if let Some(window) = &self.external_host {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+index dbc5e3698ec959c9d2b70346bfb2992dc85cfc74..6e04a0805876c19ca2c871bdeb4a4809d833bcf1 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+@@ -19,6 +19,7 @@ pub(crate) struct QuickActionsInit {
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum QuickActionsInput {
++    WifiManage,
+     WifiToggled,
+     BluetoothToggled,
+     AirplaneToggled,
+@@ -27,6 +28,11 @@ pub(crate) enum QuickActionsInput {
+     PowerSaverToggled,
+ }
+ 
++#[derive(Debug)]
++pub(crate) enum QuickActionsOutput {
++    OpenNetwork,
++}
++
+ #[derive(Debug)]
+ pub(crate) enum QuickActionsCmd {
+     WifiChanged(bool),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+index 690037297ab765f9f6fad3858d8123ed937db9a0..9e2edb7d72bf5c9331e741c2da48fa53a73f79cc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+@@ -13,8 +13,8 @@ use wayle_notification::NotificationService;
+ use wayle_power_profiles::{PowerProfilesService, types::profile::PowerProfile};
+ use wayle_widgets::WatcherToken;
+ 
+-pub(crate) use self::messages::QuickActionsInit;
+ use self::messages::{QuickActionsCmd, QuickActionsInput};
++pub(crate) use self::messages::{QuickActionsInit, QuickActionsOutput};
+ use crate::{i18n::t, services::IdleInhibitService};
+ 
+ pub(crate) struct QuickActionsSection {
+@@ -47,7 +47,7 @@ pub(crate) struct QuickActionsSection {
+ impl Component for QuickActionsSection {
+     type Init = QuickActionsInit;
+     type Input = QuickActionsInput;
+-    type Output = ();
++    type Output = QuickActionsOutput;
+     type CommandOutput = QuickActionsCmd;
+ 
+     view! {
+@@ -72,7 +72,8 @@ impl Component for QuickActionsSection {
+                     #[watch]
+                     set_sensitive: model.has_wifi && !model.airplane_active,
+                     set_cursor_from_name: Some("pointer"),
+-                    connect_clicked => QuickActionsInput::WifiToggled,
++                    set_tooltip_text: Some(&t!("dropdown-dashboard-wifi-manage-tooltip")),
++                    connect_clicked => QuickActionsInput::WifiManage,
+ 
+                     gtk::Box {
+                         set_orientation: gtk::Orientation::Vertical,
+@@ -353,11 +354,24 @@ impl Component for QuickActionsSection {
+         };
+ 
+         let widgets = view_output!();
++
++        let secondary_click = gtk::GestureClick::new();
++        secondary_click.set_button(gtk::gdk::BUTTON_SECONDARY);
++        let wifi_sender = sender.input_sender().clone();
++        secondary_click.connect_pressed(move |gesture, _, _, _| {
++            gesture.set_state(gtk::EventSequenceState::Claimed);
++            wifi_sender.emit(QuickActionsInput::WifiToggled);
++        });
++        widgets.wifi_btn.add_controller(secondary_click);
++
+         ComponentParts { model, widgets }
+     }
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            QuickActionsInput::WifiManage => {
++                let _ = sender.output(QuickActionsOutput::OpenNetwork);
++            }
+             QuickActionsInput::WifiToggled => self.toggle_wifi(&sender),
+             QuickActionsInput::BluetoothToggled => self.toggle_bluetooth(&sender),
+             QuickActionsInput::AirplaneToggled => self.toggle_airplane(&sender),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+index 2709bf970c03d150ece130c079219c8b828a9a64..9f6be56cb12efb50ff30f99fa033dca81efc904d 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+@@ -78,6 +78,8 @@ pub(super) struct ConnectionProgress {
+ 
+ #[derive(Debug)]
+ pub(crate) enum ActiveConnectionsInput {
++    ShowWifiQr,
++    HideQr,
+     DisconnectWifi,
+     ForgetWifi,
+     DismissError,
+@@ -92,6 +94,10 @@ pub(crate) enum ActiveConnectionsInput {
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum ActiveConnectionsCmd {
++    QrRendered {
++        ssid: String,
++        result: Result<Vec<u8>, String>,
++    },
+     WifiStateChanged {
+         connectivity: NetworkStatus,
+         ssid: Option<String>,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+index 5f49901ee50456d2c3dc5114eecfe0c3313944d2..23e11e77c5090881a4d5aec58c2f59d23d36d97b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+@@ -2,10 +2,36 @@ use relm4::ComponentSender;
+ use tracing::warn;
+ use wayle_network::core::access_point::Ssid;
+ 
+-use super::ActiveConnections;
++use super::{ActiveConnections, messages::ActiveConnectionsCmd};
+ use crate::{i18n::t, shell::bar::dropdowns::network::helpers};
+ 
+ impl ActiveConnections {
++    pub(super) fn show_wifi_qr(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.qr_visible = true;
++        self.qr_loading = true;
++        self.qr_ssid.clone_from(&ssid);
++        self.qr_paintable = None;
++        self.qr_error = None;
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::qr::render(network, ssid.clone()).await;
++            ActiveConnectionsCmd::QrRendered { ssid, result }
++        });
++    }
++
++    pub(super) fn hide_wifi_qr(&mut self) {
++        self.qr_visible = false;
++        self.qr_loading = false;
++        self.qr_ssid.clear();
++        self.qr_paintable = None;
++        self.qr_error = None;
++    }
++
+     pub(super) fn has_wifi_error(&self) -> bool {
+         self.connection.error.is_some() && !self.wifi.connected
+     }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+index 633282d0cdbabd9912e903d55e7e1cd748a71bf8..69edd156f7f96f0048d0ed9acce410bd706e003b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+@@ -1,11 +1,12 @@
+ mod messages;
+ mod methods;
++mod qr;
+ mod watchers;
+ 
+ use std::sync::Arc;
+ 
+ use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
++use relm4::{gtk, gtk::gdk, prelude::*};
+ use wayle_network::{NetworkService, types::states::NetworkStatus};
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+@@ -19,6 +20,11 @@ pub(crate) struct ActiveConnections {
+     wired: WiredState,
+     connection: ConnectionProgress,
+     has_connections: bool,
++    qr_visible: bool,
++    qr_loading: bool,
++    qr_ssid: String,
++    qr_paintable: Option<gdk::Paintable>,
++    qr_error: Option<String>,
+     wifi_watcher: WatcherToken,
+     wired_watcher: WatcherToken,
+ }
+@@ -215,6 +221,23 @@ impl Component for ActiveConnections {
+                                 "network-connection-actions",
+                             set_valign: gtk::Align::Center,
+ 
++                            #[template]
++                            GhostButton {
++                                add_css_class:
++                                    "network-action-qr",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-qr-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!(
++                                        "dropdown-network-show-qr"
++                                    ),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiQr,
++                            },
++
+                             #[template]
+                             GhostButton {
+                                 add_css_class:
+@@ -281,6 +304,107 @@ impl Component for ActiveConnections {
+                     },
+                 },
+             },
++
++            gtk::Revealer {
++                set_transition_type: gtk::RevealerTransitionType::SlideDown,
++                set_transition_duration: 200,
++                #[watch]
++                set_reveal_child: model.qr_visible,
++
++                #[template]
++                Card {
++                    add_css_class: "network-qr-card",
++                    set_orientation: gtk::Orientation::Vertical,
++
++                    gtk::Box {
++                        add_css_class: "network-qr-header",
++
++                        gtk::Box {
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_hexpand: true,
++
++                            gtk::Label {
++                                add_css_class: "network-qr-title",
++                                set_halign: gtk::Align::Start,
++                                #[watch]
++                                set_label: &t!(
++                                    "dropdown-network-qr-title",
++                                    ssid = model.qr_ssid.clone()
++                                ),
++                            },
++
++                            gtk::Label {
++                                add_css_class: "network-qr-description",
++                                set_halign: gtk::Align::Start,
++                                set_label: &t!("dropdown-network-qr-description"),
++                            },
++                        },
++
++                        #[template]
++                        GhostIconButton {
++                            set_icon_name: "ld-x-symbolic",
++                            set_tooltip_text: Some(&t!("dropdown-network-close-qr")),
++                            connect_clicked => ActiveConnectionsInput::HideQr,
++                        },
++                    },
++
++                    gtk::Stack {
++                        add_css_class: "network-qr-stack",
++                        set_transition_type: gtk::StackTransitionType::Crossfade,
++                        set_transition_duration: 150,
++                        #[watch]
++                        set_visible_child_name: if model.qr_loading {
++                            "loading"
++                        } else if model.qr_error.is_some() {
++                            "error"
++                        } else {
++                            "code"
++                        },
++
++                        add_named[Some("loading")] = &gtk::Box {
++                            add_css_class: "network-qr-status",
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_halign: gtk::Align::Center,
++
++                            gtk::Spinner {
++                                set_spinning: true,
++                            },
++
++                            gtk::Label {
++                                set_label: &t!("dropdown-network-qr-loading"),
++                            },
++                        },
++
++                        add_named[Some("code")] = &gtk::Box {
++                            add_css_class: "network-qr-code",
++                            set_halign: gtk::Align::Center,
++                            set_valign: gtk::Align::Center,
++
++                            gtk::Image {
++                                #[watch]
++                                set_paintable: model.qr_paintable.as_ref(),
++                            },
++                        },
++
++                        add_named[Some("error")] = &gtk::Box {
++                            add_css_class: "network-qr-status",
++                            add_css_class: "error",
++                            set_orientation: gtk::Orientation::Vertical,
++
++                            gtk::Image {
++                                set_icon_name: Some("ld-triangle-alert-symbolic"),
++                            },
++
++                            gtk::Label {
++                                set_wrap: true,
++                                set_justify: gtk::Justification::Center,
++                                #[watch]
++                                set_label: model.qr_error.as_deref().unwrap_or_default(),
++                            },
++                        },
++                    },
++                },
++            },
+         }
+     }
+ 
+@@ -309,6 +433,11 @@ impl Component for ActiveConnections {
+             wired,
+             connection: ConnectionProgress::default(),
+             has_connections,
++            qr_visible: false,
++            qr_loading: false,
++            qr_ssid: String::new(),
++            qr_paintable: None,
++            qr_error: None,
+             wifi_watcher: WatcherToken::new(),
+             wired_watcher: WatcherToken::new(),
+         };
+@@ -339,6 +468,12 @@ impl Component for ActiveConnections {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            ActiveConnectionsInput::ShowWifiQr => {
++                self.show_wifi_qr(&sender);
++            }
++            ActiveConnectionsInput::HideQr => {
++                self.hide_wifi_qr();
++            }
+             ActiveConnectionsInput::DisconnectWifi => self.disconnect_wifi(&sender),
+             ActiveConnectionsInput::ForgetWifi => self.forget_wifi(&sender),
+             ActiveConnectionsInput::DismissError => {
+@@ -377,6 +512,37 @@ impl Component for ActiveConnections {
+         _root: &Self::Root,
+     ) {
+         match msg {
++            ActiveConnectionsCmd::QrRendered { ssid, result } => {
++                if !self.qr_visible
++                    || self.qr_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.qr_loading = false;
++                match result {
++                    Ok(png) => {
++                        let bytes = gtk::glib::Bytes::from_owned(png);
++                        match gdk::Texture::from_bytes(&bytes) {
++                            Ok(texture) => {
++                                self.qr_paintable = Some(texture.upcast());
++                                self.qr_error = None;
++                            }
++                            Err(error) => {
++                                self.qr_paintable = None;
++                                self.qr_error =
++                                    Some(format!("Could not decode the QR image: {error}"));
++                            }
++                        }
++                    }
++                    Err(error) => {
++                        self.qr_paintable = None;
++                        self.qr_error = Some(error);
++                    }
++                }
++            }
+             ActiveConnectionsCmd::WifiStateChanged {
+                 connectivity,
+                 ssid,
+@@ -395,6 +561,8 @@ impl Component for ActiveConnections {
+ 
+                 if self.wifi.connected {
+                     self.connection = ConnectionProgress::default();
++                } else {
++                    self.hide_wifi_qr();
+                 }
+                 self.update_has_connections();
+             }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/factory.rs
+index b11f38a00b171162f8907b730fd4f17a0b4a710f..05557f4bfa7776a023cb2c5c7c0e90f18b012506 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/factory.rs
+@@ -13,7 +13,11 @@ impl DropdownFactory for Factory {
+         let network = require_service("network", "network", services.network.clone())?;
+         let config = services.config.clone();
+ 
+-        let init = NetworkDropdownInit { network, config };
++        let init = NetworkDropdownInit {
++            network,
++            config,
++            embedded: false,
++        };
+         let controller = NetworkDropdown::builder().launch(init).detach();
+ 
+         let popover = controller.widget().clone();
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+index f0192d50cbc68f089b41139acb8934f88e904ee4..b611d8a1c377ef4f9475b1757e87ec15236c6dc8 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+@@ -8,15 +8,23 @@ use super::available_networks::AvailableNetworksOutput;
+ pub(crate) struct NetworkDropdownInit {
+     pub network: Arc<NetworkService>,
+     pub config: Arc<ConfigService>,
++    pub embedded: bool,
+ }
+ 
+ #[derive(Debug)]
+ pub(crate) enum NetworkDropdownMsg {
++    BackRequested,
++    Reset,
+     WifiToggled(bool),
+     ScanRequested,
+     AvailableNetworks(AvailableNetworksOutput),
+ }
+ 
++#[derive(Debug)]
++pub(crate) enum NetworkDropdownOutput {
++    NavigateBack,
++}
++
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum NetworkDropdownCmd {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+index b8c24836b99ba7dd5a2b2a8b24bb35130d310a31..3bad83a774022a10d0c337c0167edf8de483d580 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+@@ -15,12 +15,13 @@ use wayle_network::NetworkService;
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+ pub(super) use self::factory::Factory;
++pub(crate) use self::messages::{NetworkDropdownInit, NetworkDropdownMsg, NetworkDropdownOutput};
+ use self::{
+     active_connections::{ActiveConnections, ActiveConnectionsInit, ActiveConnectionsInput},
+     available_networks::{
+         AvailableNetworks, AvailableNetworksInit, AvailableNetworksInput, AvailableNetworksOutput,
+     },
+-    messages::{NetworkDropdownCmd, NetworkDropdownInit, NetworkDropdownMsg},
++    messages::NetworkDropdownCmd,
+ };
+ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+@@ -34,6 +35,7 @@ pub(crate) struct NetworkDropdown {
+     wifi_enabled: bool,
+     wifi_available: bool,
+     scanning: bool,
++    embedded: bool,
+     active_connections: Controller<ActiveConnections>,
+     available_networks: Controller<AvailableNetworks>,
+     wifi_watcher: WatcherToken,
+@@ -43,7 +45,7 @@ pub(crate) struct NetworkDropdown {
+ impl Component for NetworkDropdown {
+     type Init = NetworkDropdownInit;
+     type Input = NetworkDropdownMsg;
+-    type Output = ();
++    type Output = NetworkDropdownOutput;
+     type CommandOutput = NetworkDropdownCmd;
+ 
+     view! {
+@@ -57,7 +59,12 @@ impl Component for NetworkDropdown {
+             set_height_request: model.scaled_height,
+ 
+             #[template]
++            #[name = "network_container"]
+             Dropdown {
++                #[watch]
++                set_width_request: model.scaled_width,
++                #[watch]
++                set_height_request: model.scaled_height,
+                 set_overflow: gtk::Overflow::Hidden,
+ 
+                 #[template]
+@@ -78,6 +85,15 @@ impl Component for NetworkDropdown {
+                     },
+                     #[template_child]
+                     actions {
++                        #[template]
++                        GhostIconButton {
++                            set_icon_name: "ld-arrow-left-symbolic",
++                            set_tooltip_text: Some(&t!("dropdown-network-back-dashboard")),
++                            #[watch]
++                            set_visible: model.embedded,
++                            connect_clicked => NetworkDropdownMsg::BackRequested,
++                        },
++
+                         #[template]
+                         GhostIconButton {
+                             add_css_class: "network-scan-btn",
+@@ -160,6 +176,7 @@ impl Component for NetworkDropdown {
+             wifi_enabled,
+             wifi_available,
+             scanning: false,
++            embedded: init.embedded,
+             active_connections,
+             available_networks,
+             wifi_watcher: WatcherToken::new(),
+@@ -176,6 +193,13 @@ impl Component for NetworkDropdown {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            NetworkDropdownMsg::BackRequested => {
++                self.active_connections.emit(ActiveConnectionsInput::HideQr);
++                let _ = sender.output(NetworkDropdownOutput::NavigateBack);
++            }
++            NetworkDropdownMsg::Reset => {
++                self.active_connections.emit(ActiveConnectionsInput::HideQr);
++            }
+             NetworkDropdownMsg::WifiToggled(active) => {
+                 self.toggle_wifi(active, &sender);
+             }
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+index e5e1d1a81550c19ec74dbb1b99896512e371beb3..8a7a49f51a92315f4a63e46fc44aacb336f1c467 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+@@ -41,14 +41,20 @@ window.dashboard-layer-window {
+     background: transparent;
+     box-shadow: none;
+ 
+-    > .dropdown {
+-        min-width: 0;
++    > .dashboard-page-stack {
++        > .dashboard-main-page > .dropdown,
++        > .dropdown {
++            min-width: 0;
++        }
+     }
+ 
+-    &.shadow > .dropdown {
+-        box-shadow:
+-            0 0 5px rgba(0, 0, 0, 0.3),
+-            0 4px 10px rgba(0, 0, 0, 0.3),
+-            0 0 0 1px rgba(255, 255, 255, 0.04);
++    &.shadow > .dashboard-page-stack {
++        > .dashboard-main-page > .dropdown,
++        > .dropdown {
++            box-shadow:
++                0 0 5px rgba(0, 0, 0, 0.3),
++                0 4px 10px rgba(0, 0, 0, 0.3),
++                0 0 0 1px rgba(255, 255, 255, 0.04);
++        }
+     }
+ }
+diff --git a/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss b/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
+index 667dc8d01f099ac554064cedd312b8fbd082cd34..7351f7d1077253b6b8421a19cb8a15c0be784fcc 100644
+--- a/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
++++ b/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
+@@ -98,3 +98,49 @@
+ button.network-action-forget:hover {
+     color: var(--status-error);
+ }
++
++.network-qr-card {
++    margin-top: var(--space-sm);
++    padding: var(--space-md);
++}
++
++.network-qr-header {
++    margin-bottom: var(--space-md);
++}
++
++.network-qr-title {
++    font-size: var(--text-md);
++    font-weight: var(--weight-bold);
++    color: var(--fg-default);
++}
++
++.network-qr-description {
++    font-size: var(--text-sm);
++    font-weight: var(--weight-medium);
++    color: var(--fg-subtle);
++}
++
++.network-qr-stack {
++    min-height: calc(15rem * var(--global-scale));
++}
++
++.network-qr-code {
++    padding: var(--space-sm);
++    border-radius: var(--rounding-element);
++    background: white;
++}
++
++.network-qr-status {
++    min-height: calc(15rem * var(--global-scale));
++    border-spacing: var(--space-sm);
++    color: var(--fg-subtle);
++
++    spinner,
++    image {
++        -gtk-icon-size: var(--icon-lg);
++    }
++
++    &.error {
++        color: var(--status-error);
++    }
++}
++diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..66f187065af917153f84c0f2e2721ccc084106a4
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+@@ -0,0 +1,206 @@
++use std::{env, ffi::OsString, process::Stdio, sync::Arc};
++
++use tokio::io::AsyncWriteExt;
++use wayle_network::{
++    NetworkService,
++    core::{access_point::Ssid, settings_connection::ConnectionSettings},
++};
++use zbus::zvariant::OwnedValue;
++
++const SECURITY_SETTING: &str = "802-11-wireless-security";
++
++pub(super) async fn render(network: Arc<NetworkService>, ssid: String) -> Result<Vec<u8>, String> {
++    let stored_ssid = Ssid::new(ssid.as_bytes().to_vec());
++    let profiles = network.settings.connections_for_ssid(&stored_ssid);
++
++    if profiles.is_empty() {
++        return Err(String::from(
++            "No saved NetworkManager profile was found for this connection.",
++        ));
++    }
++
++    let mut last_error = None;
++    for profile in profiles {
++        match payload_for_profile(&profile, &ssid).await {
++            Ok(payload) => return encode(&payload).await,
++            Err(error) => last_error = Some(error),
++        }
++    }
++
++    Err(last_error.unwrap_or_else(|| String::from("This WiFi profile cannot be shared.")))
++}
++
++async fn payload_for_profile(profile: &ConnectionSettings, ssid: &str) -> Result<String, String> {
++    let settings = profile
++        .get_settings()
++        .await
++        .map_err(|error| format!("Could not read the saved WiFi profile: {error}"))?;
++
++    let hidden = settings
++        .get("802-11-wireless")
++        .and_then(|wireless| wireless.get("hidden"))
++        .and_then(bool_value)
++        .unwrap_or(false);
++
++    let Some(security) = settings.get(SECURITY_SETTING) else {
++        return Ok(wifi_qr_payload(ssid, "nopass", None, hidden));
++    };
++
++    let key_mgmt = security.get("key-mgmt").and_then(string_value);
++    if matches!(key_mgmt.as_deref(), Some("owe")) {
++        return Err(String::from(
++            "Enhanced Open (OWE) networks are not supported by the WiFi QR format.",
++        ));
++    }
++    if matches!(
++        key_mgmt.as_deref(),
++        Some("wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x")
++    ) {
++        return Err(String::from(
++            "Enterprise WiFi credentials cannot be represented by this QR format.",
++        ));
++    }
++
++    let secrets = profile
++        .get_secrets(SECURITY_SETTING)
++        .await
++        .map_err(|error| format!("NetworkManager did not provide the saved password: {error}"))?;
++    let secrets = secrets.get(SECURITY_SETTING).ok_or_else(|| {
++        String::from("NetworkManager did not return a saved password for this profile.")
++    })?;
++
++    let (authentication, password) = match key_mgmt.as_deref() {
++        Some("wpa-psk" | "wpa-none" | "sae") => {
++            ("WPA", secret_string(secrets.get("psk"), "WPA password")?)
++        }
++        Some("none") => ("WEP", secret_string(secrets.get("wep-key0"), "WEP key")?),
++        Some(other) => {
++            return Err(format!(
++                "The saved WiFi security type ({other}) cannot be shared as a QR code."
++            ));
++        }
++        None => {
++            if let Some(password) = secrets.get("psk").and_then(string_value) {
++                ("WPA", password)
++            } else if let Some(password) = secrets.get("wep-key0").and_then(string_value) {
++                ("WEP", password)
++            } else {
++                return Err(String::from(
++                    "NetworkManager did not return a saved password for this profile.",
++                ));
++            }
++        }
++    };
++
++    Ok(wifi_qr_payload(
++        ssid,
++        authentication,
++        Some(&password),
++        hidden,
++    ))
++}
++
++fn secret_string(value: Option<&OwnedValue>, name: &str) -> Result<String, String> {
++    value
++        .and_then(string_value)
++        .filter(|value| !value.is_empty())
++        .ok_or_else(|| format!("NetworkManager did not return the saved {name}."))
++}
++
++fn string_value(value: &OwnedValue) -> Option<String> {
++    String::try_from(value.clone()).ok()
++}
++
++fn bool_value(value: &OwnedValue) -> Option<bool> {
++    bool::try_from(value.clone()).ok()
++}
++
++async fn encode(payload: &str) -> Result<Vec<u8>, String> {
++    let mut child = tokio::process::Command::new(qrencode_binary())
++        .args(["-t", "PNG", "-s", "7", "-m", "3", "-o", "-"])
++        .stdin(Stdio::piped())
++        .stdout(Stdio::piped())
++        .stderr(Stdio::piped())
++        .spawn()
++        .map_err(|error| format!("Could not start qrencode: {error}"))?;
++
++    let mut input = child
++        .stdin
++        .take()
++        .ok_or_else(|| String::from("qrencode standard input is unavailable."))?;
++    input
++        .write_all(payload.as_bytes())
++        .await
++        .map_err(|error| format!("Could not send WiFi details to qrencode: {error}"))?;
++    drop(input);
++
++    let output = child
++        .wait_with_output()
++        .await
++        .map_err(|error| format!("Could not read the QR image: {error}"))?;
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(format!("qrencode failed: {}", detail.trim()));
++    }
++    if output.stdout.is_empty() {
++        return Err(String::from("qrencode returned an empty image."));
++    }
++
++    Ok(output.stdout)
++}
++
++fn qrencode_binary() -> OsString {
++    env::var_os("WAYLE_QRENCODE").unwrap_or_else(|| OsString::from("qrencode"))
++}
++
++fn wifi_qr_payload(
++    ssid: &str,
++    authentication: &str,
++    password: Option<&str>,
++    hidden: bool,
++) -> String {
++    let mut payload = format!(
++        "WIFI:T:{};S:{};",
++        wifi_qr_escape(authentication),
++        wifi_qr_escape(ssid)
++    );
++    if let Some(password) = password {
++        payload.push_str("P:");
++        payload.push_str(&wifi_qr_escape(password));
++        payload.push(';');
++    }
++    payload.push_str(if hidden { "H:true;;" } else { "H:false;;" });
++    payload
++}
++
++fn wifi_qr_escape(value: &str) -> String {
++    let mut escaped = String::with_capacity(value.len());
++    for character in value.chars() {
++        if matches!(character, '\\' | ';' | ',' | ':' | '"') {
++            escaped.push('\\');
++        }
++        escaped.push(character);
++    }
++    escaped
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn payload_escapes_wifi_qr_delimiters() {
++        assert_eq!(
++            wifi_qr_payload("Cafe;Guest", "WPA", Some("a:b,c\\d"), false),
++            "WIFI:T:WPA;S:Cafe\\;Guest;P:a\\:b\\,c\\\\d;H:false;;"
++        );
++    }
++
++    #[test]
++    fn payload_marks_hidden_open_networks() {
++        assert_eq!(
++            wifi_qr_payload("Hidden", "nopass", None, true),
++            "WIFI:T:nopass;S:Hidden;H:true;;"
++        );
++    }
++}
