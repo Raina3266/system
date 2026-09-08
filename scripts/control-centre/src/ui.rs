@@ -1,7 +1,6 @@
-//! The panel: a layer-shell surface holding the calendar, media and system
-//! cards, with Wayle's notification dropdown toggled alongside it.
+//! The calendar and notification panel shown from Waybar.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -9,12 +8,10 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::media::{clock, Players};
-use crate::ring::{Colour, Ring};
+use crate::calendar;
 use crate::wayle::{relative_time, Entry, Notifications};
-use crate::{calendar, media, system};
 
-/// How often the media rows and system dials are re-read while open.
+/// How often notification state is refreshed while the panel is open.
 const TICK: Duration = Duration::from_millis(750);
 
 /// Distance from the top of the screen: the height of Waybar.
@@ -23,10 +20,8 @@ const TOP_MARGIN: i32 = 40;
 /// Distance from the right edge of the screen.
 const RIGHT_MARGIN: i32 = 6;
 
-/// How tall each list may grow before it scrolls. Without these the media card
-/// alone runs to five players' worth of rows and pushes the panel off screen.
-const NOTIFICATION_HEIGHT: i32 = 240;
-const MEDIA_HEIGHT: i32 = 260;
+/// How tall the notification list may grow before it scrolls.
+const NOTIFICATION_HEIGHT: i32 = 360;
 
 /// Width kept clear on the right of a scrolling list. GTK draws the scrollbar
 /// over the content, so without this it sits on the dismiss buttons.
@@ -39,24 +34,13 @@ const WRAP_CHARS: i32 = 24;
 
 pub struct Panel {
     window: gtk::Window,
-    players: Option<Players>,
     notifications: Option<Notifications>,
-    monitor: RefCell<system::Monitor>,
     calendar_body: gtk::Box,
-    media_body: gtk::Box,
     notification_body: gtk::Box,
     dnd_toggle: gtk::Switch,
     /// Set while the switch is being written to, so reacting to the change
     /// does not ask Wayle to toggle what it just reported.
     syncing_dnd: Cell<bool>,
-    rings: Rings,
-}
-
-struct Rings {
-    cpu: Ring,
-    memory: Ring,
-    disk: Ring,
-    temperature: Ring,
 }
 
 impl Panel {
@@ -77,39 +61,18 @@ impl Panel {
         window.set_keyboard_mode(KeyboardMode::OnDemand);
 
         let calendar_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let media_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let notification_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let dnd_toggle = gtk::Switch::new();
         let clear_all = gtk::Button::with_label("Clear All");
-        // The palette from niri/wayle/default.nix, so the dials match the
-        // notification dropdown sitting beside them.
-        let rings = Rings {
-            cpu: Ring::new("CPU", Colour(0.478, 0.988, 1.0)),
-            memory: Ring::new("RAM", Colour(1.0, 0.494, 0.859)),
-            disk: Ring::new("DISK", Colour(0.996, 0.871, 0.365)),
-            temperature: Ring::new("TEMP", Colour(1.0, 0.431, 0.431)),
-        };
 
-        // Two columns, as Wayle's control centre had: the agenda reads as a
-        // tall block, and the readings and players stack beside it.
-        let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        left.add_css_class("column");
-        left.append(&calendar_card(&calendar_body));
-        left.append(&notification_card(
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        column.add_css_class("column");
+        column.append(&calendar_card(&calendar_body));
+        column.append(&notification_card(
             &notification_body,
             &dnd_toggle,
             &clear_all,
         ));
-
-        let right = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        right.add_css_class("column");
-        right.append(&system_card(&rings));
-        right.append(&media_card(&media_body));
-
-        let columns = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        columns.add_css_class("columns");
-        columns.append(&left);
-        columns.append(&right);
 
         let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
         panel.add_css_class("panel");
@@ -117,7 +80,7 @@ impl Panel {
         panel.set_valign(gtk::Align::Start);
         panel.set_margin_top(TOP_MARGIN);
         panel.set_margin_end(right_margin());
-        panel.append(&columns);
+        panel.append(&column);
 
         let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
         backdrop.set_hexpand(true);
@@ -127,15 +90,11 @@ impl Panel {
 
         let this = Rc::new(Panel {
             window,
-            players: Players::connect().ok(),
             notifications: Notifications::connect(),
-            monitor: RefCell::new(system::Monitor::new()),
             calendar_body,
-            media_body,
             notification_body,
             dnd_toggle,
             syncing_dnd: Cell::new(false),
-            rings,
         });
 
         this.connect_dismissal(&backdrop, &panel);
@@ -192,7 +151,6 @@ impl Panel {
         let this = Rc::clone(self);
         glib::timeout_add_local(TICK, move || {
             if this.window.is_visible() {
-                this.refresh_live();
                 this.refresh_notifications();
             }
             glib::ControlFlow::Continue
@@ -207,7 +165,6 @@ impl Panel {
     pub fn show(self: &Rc<Self>) {
         self.refresh_calendar();
         self.refresh_notifications();
-        self.refresh_live();
         self.window.present();
     }
 
@@ -384,148 +341,6 @@ impl Panel {
 
         row
     }
-
-    fn refresh_live(self: &Rc<Self>) {
-        let stats = self.monitor.borrow_mut().sample();
-        self.rings.cpu.set(stats.cpu.fraction, &stats.cpu.text);
-        self.rings
-            .memory
-            .set(stats.memory.fraction, &stats.memory.text);
-        self.rings.disk.set(stats.disk.fraction, &stats.disk.text);
-        self.rings
-            .temperature
-            .set(stats.temperature.fraction, &stats.temperature.text);
-
-        self.refresh_media();
-    }
-
-    fn refresh_media(self: &Rc<Self>) {
-        let Some(players) = self.players.as_ref() else {
-            return;
-        };
-        let snapshot = players.snapshot();
-
-        clear(&self.media_body);
-        if snapshot.is_empty() {
-            let empty = gtk::Label::new(Some("Nothing playing"));
-            empty.add_css_class("media-empty");
-            empty.set_xalign(0.0);
-            self.media_body.append(&empty);
-            return;
-        }
-
-        for player in snapshot {
-            self.media_body.append(&self.media_row(&player));
-        }
-    }
-
-    fn media_row(self: &Rc<Self>, player: &media::Player) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        row.add_css_class("media-row");
-
-        let title = gtk::Label::new(Some(&player.title));
-        title.add_css_class("media-track");
-        title.set_xalign(0.0);
-        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title.set_max_width_chars(WRAP_CHARS);
-        row.append(&title);
-
-        let meta = if player.artist.is_empty() {
-            player.source.clone()
-        } else {
-            format!("{}  ·  {}", player.source, player.artist)
-        };
-        let meta = gtk::Label::new(Some(&meta));
-        meta.add_css_class("media-meta");
-        meta.set_xalign(0.0);
-        meta.set_hexpand(true);
-        meta.set_halign(gtk::Align::Start);
-        meta.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        meta.set_max_width_chars(WRAP_CHARS);
-
-        // Who is playing it and the buttons that drive it share a line, which
-        // saves a row per player in a card that holds several.
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        controls.add_css_class("media-controls");
-        controls.append(&meta);
-        controls.append(&self.transport(player));
-        row.append(&controls);
-
-        if player.has_length() {
-            row.append(&self.seek(player));
-        }
-        row
-    }
-
-    fn transport(self: &Rc<Self>, player: &media::Player) -> gtk::Box {
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        controls.set_halign(gtk::Align::Start);
-
-        for (glyph, action) in [
-            ("󰒮", Action::Previous),
-            (player.status.icon(), Action::PlayPause),
-            ("󰒭", Action::Next),
-        ] {
-            let button = gtk::Button::with_label(glyph);
-            button.add_css_class("media-button");
-            button.connect_clicked({
-                let bus = player.bus.clone();
-                let this = Rc::clone(self);
-                move |_| this.act(&bus, action)
-            });
-            controls.append(&button);
-        }
-        controls
-    }
-
-    fn seek(self: &Rc<Self>, player: &media::Player) -> gtk::Box {
-        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.001);
-        scale.add_css_class("media-seek");
-        scale.set_draw_value(false);
-        scale.set_hexpand(true);
-        scale.set_value(player.progress());
-        scale.connect_change_value({
-            let bus = player.bus.clone();
-            let length = player.length;
-            let this = Rc::clone(self);
-            move |_, _, value| {
-                if let Some(players) = this.players.as_ref() {
-                    players.seek_to(&bus, value, length);
-                }
-                glib::Propagation::Proceed
-            }
-        });
-
-        let elapsed = gtk::Label::new(Some(&clock(player.position)));
-        elapsed.add_css_class("media-clock");
-        let total = gtk::Label::new(Some(&clock(player.length)));
-        total.add_css_class("media-clock");
-
-        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        bar.append(&elapsed);
-        bar.append(&scale);
-        bar.append(&total);
-        bar
-    }
-
-    fn act(self: &Rc<Self>, bus: &str, action: Action) {
-        let Some(players) = self.players.as_ref() else {
-            return;
-        };
-        match action {
-            Action::Previous => players.previous(bus),
-            Action::PlayPause => players.play_pause(bus),
-            Action::Next => players.next(bus),
-        }
-        self.refresh_media();
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Action {
-    Previous,
-    PlayPause,
-    Next,
 }
 
 fn right_margin() -> i32 {
@@ -656,25 +471,5 @@ fn notification_card(body: &gtk::Box, dnd: &gtk::Switch, clear_all: &gtk::Button
     card.append(&header);
     card.append(&dnd_row);
     card.append(&scroll);
-    card
-}
-
-fn media_card(body: &gtk::Box) -> gtk::Box {
-    let scroll = scrolling(body, MEDIA_HEIGHT);
-    card("Media players", false, &scroll)
-}
-
-fn system_card(rings: &Rings) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    row.set_homogeneous(true);
-    row.append(&rings.cpu.widget);
-    row.append(&rings.memory.widget);
-    row.append(&rings.disk.widget);
-    row.append(&rings.temperature.widget);
-
-    // The dials name themselves, so this card goes without a heading.
-    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    card.set_css_classes(&["card", "card-system"]);
-    card.append(&row);
     card
 }

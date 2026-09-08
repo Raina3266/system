@@ -39,7 +39,8 @@ window#waybar.bottom {
 #custom-files,
 #custom-dashboard,
 #custom-wayle-wifi,
-#custom-media,
+#custom-notifications,
+#custom-wayle-media,
 #mpris,
 #tray {
     color: #7afcff;
@@ -142,7 +143,8 @@ window#waybar.bottom {
 #custom-timer:hover,
 #custom-dashboard:hover,
 #custom-wayle-wifi:hover,
-#custom-media:hover,
+#custom-notifications:hover,
+#custom-wayle-media:hover,
 #mpris:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
@@ -173,15 +175,15 @@ tooltip label {
 
 /* ── States ── */
 
-/* The centre button is the notification badge alone now: pink with something
-   waiting, dimmed under Do Not Disturb. The track sits beside it in #mpris. */
+/* The notification badge is pink with something waiting and dimmed under Do
+   Not Disturb. Its dedicated media button and current track sit beside it. */
 
-#custom-media.notification {
+#custom-notifications.notification {
     color: #ff7edb;
     text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
 }
 
-#custom-media.dnd {
+#custom-notifications.dnd {
     color: #5c6776;
 }
 

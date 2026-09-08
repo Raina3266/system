@@ -1,11 +1,7 @@
-//! The desktop's control centre: calendar, media and system readings in a
-//! layer-shell panel, with Wayle's notification dropdown opened beside it.
+//! The desktop's calendar and notification panel.
 //!
-//! Wayle keeps the notifications. It is the notification daemon, and only the
-//! daemon holds each entry's icon, actions and urgency, so re-drawing that
-//! list here would lose them. Everything else Wayle's control centre used to
-//! carry is drawn by this program instead, which is why the patches against
-//! Wayle no longer reach into its widgets.
+//! Wayle remains the notification daemon and exposes its notification state to
+//! this small layer-shell client. Media lives in Wayle's native media panel.
 
 use std::cell::RefCell;
 use std::env;
@@ -16,9 +12,6 @@ use gtk::prelude::*;
 use gtk::{gdk, glib};
 
 mod calendar;
-mod media;
-mod ring;
-mod system;
 mod ui;
 mod wayle;
 
@@ -36,7 +29,7 @@ fn main() -> ExitCode {
                     eprintln!("control-centre: {error}");
                     ExitCode::FAILURE
                 }
-            }
+            };
         }
         Some("toggle") | None => {}
         Some("help" | "--help" | "-h") => {

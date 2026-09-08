@@ -1,8 +1,7 @@
-# Dashboard, Wayle Wi-Fi, media, and Google Calendar/Tasks status modules.
+# Dashboard, Wayle Wi-Fi/media, notifications, and Calendar/Tasks modules.
 #
-# The two left buttons open Wayle's native dashboard and Wi-Fi manager. The
-# centre media button still carries Wayle's notification count and opens the
-# larger calendar/notification control centre.
+# Dedicated Waybar buttons open Wayle's native dashboard, Wi-Fi manager, and
+# media panel. The notification badge opens the calendar/notification panel.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -33,9 +32,18 @@ let
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
+
+  wayleMediaModule = monitor: {
+    format = "󰎆";
+    tooltip = true;
+    tooltip-format = "Media players";
+    on-click =
+      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss media ${lib.escapeShellArg monitor}";
+    on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
+  };
 in
 {
-  inherit dashboardModule wayleWifiModule;
+  inherit dashboardModule wayleMediaModule wayleWifiModule;
 
   homeConfig = {
     home.packages = [
@@ -70,13 +78,12 @@ in
     # each panel on the monitor whose button was clicked.
     "custom/dashboard" = dashboardModule "";
     "custom/wayle-wifi" = wayleWifiModule "";
+    "custom/wayle-media" = wayleMediaModule "";
 
-    # The bar's centre button opens the larger calendar/notification control centre.
-    # control-centre draws the whole panel — notifications, calendar, media and
-    # system — and the badge is the same program reading Wayle's count over
-    # D-Bus, so no shell or jq is in the loop. The track is the mpris module
-    # beside this one.
-    "custom/media" = {
+    # The notification badge and calendar share the remaining control-centre.
+    # The badge is the same program reading Wayle's count over D-Bus, so no
+    # shell or jq is in the loop.
+    "custom/notifications" = {
       format = "{}";
       return-type = "json";
       exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.controlCentre}/bin/control-centre waybar";
@@ -85,13 +92,12 @@ in
       "restart-interval" = 2;
       "exec-on-event" = false;
       on-click = "${packages.controlCentre}/bin/control-centre toggle";
-      on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
     };
 
-    # The track the centre button used to carry. Waybar reads MPRIS itself, so
-    # nothing in this repository has to. {dynamic} drops the artist rather
-    # than leaving a trailing separator when a player reports none; click,
-    # scroll and the rest stay Waybar's own defaults.
+    # The current track stays beside the dedicated media-panel button. Waybar
+    # reads MPRIS itself, so nothing in this repository has to. {dynamic}
+    # drops the artist rather than leaving a trailing separator when a player
+    # reports none; click, scroll and the rest stay Waybar's own defaults.
     mpris = {
       format = "{status_icon}  {dynamic}";
       format-stopped = "";

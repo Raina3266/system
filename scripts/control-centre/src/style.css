@@ -1,6 +1,5 @@
-/* The panel's own styling. It deliberately mirrors Wayle's control centre so
-   the notification dropdown beside it reads as part of the same surface;
-   the colours are the palette from niri/wayle/default.nix.
+/* The panel's own styling mirrors Wayle's palette so the calendar and
+   notifications read as part of the same desktop shell.
 
    Keep every rule non-empty. GTK stops parsing at the first error and an empty
    declaration block is one, which costs every rule after it — including the
@@ -19,13 +18,8 @@ window.control-centre {
     font-family: "Noto Sans", sans-serif;
 }
 
-/* Two columns of cards, side by side. */
 .column {
-    min-width: 186px;
-}
-
-.column:first-child {
-    margin-right: 8px;
+    min-width: 300px;
 }
 
 .card {
@@ -72,8 +66,7 @@ window.control-centre {
     color: #7afcff;
 }
 
-.calendar-empty,
-.media-empty {
+.calendar-empty {
     color: #5c6776;
 }
 
@@ -209,88 +202,3 @@ button.notification-action:hover {
     color: #5c6776;
     font-size: 11px;
 }
-
-/* Media rows. */
-.media-track {
-    font-weight: 600;
-    color: #cbe3e7;
-}
-
-.media-meta {
-    color: #8b8794;
-    font-size: 11px;
-}
-
-.media-row {
-    margin-bottom: 8px;
-}
-
-.media-row:last-child {
-    margin-bottom: 0;
-}
-
-.media-controls {
-    margin-top: 2px;
-}
-
-button.media-button {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    padding: 2px 6px;
-    min-height: 0;
-    min-width: 0;
-    color: #cbe3e7;
-}
-
-button.media-button:hover {
-    background: rgba(255, 126, 219, 0.14);
-    border-radius: 6px;
-}
-
-scale.media-seek trough {
-    background: rgba(122, 252, 255, 0.18);
-    min-height: 4px;
-    border-radius: 2px;
-}
-
-scale.media-seek highlight {
-    background: #7afcff;
-    border-radius: 2px;
-}
-
-scale.media-seek slider {
-    background: #7afcff;
-    min-width: 12px;
-    min-height: 12px;
-    margin: -4px;
-    border-radius: 50%;
-}
-
-.media-clock {
-    color: #8b8794;
-    font-size: 10px;
-}
-
-/* System dials. */
-.card-system {
-    padding: 6px 8px;
-}
-
-.ring-value {
-    font-size: 9px;
-    font-weight: 600;
-    color: #cbe3e7;
-}
-
-.ring-caption {
-    font-size: 9px;
-    color: #8b8794;
-    letter-spacing: 0.06em;
-}
-
-/* The rings draw in their own colour, taken from GTK's foreground. */
-.ring-cpu    { color: #7afcff; }
-.ring-memory { color: #ff7edb; }
-.ring-disk   { color: #fede5d; }
-.ring-temp   { color: #ff6e6e; }

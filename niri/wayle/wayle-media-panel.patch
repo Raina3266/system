@@ -1,0 +1,1596 @@
+Turn Wayle's native media dropdown into a monitor-local multi-player panel,
+and remove Wi-Fi's duplicate dashboard tile now that it has its own panel.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
+index 509b6f6..4679ae0 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
+@@ -7,3 +7,6 @@ dropdown-media-sources = Media Sources
+ dropdown-media-unknown-title = Unknown Title
+ dropdown-media-unknown-artist = Unknown Artist
+ dropdown-media-unknown-album = Unknown Album
++dropdown-media-playing = Playing
++dropdown-media-paused = Paused
++dropdown-media-stopped = Stopped
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_media.ftl b/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
+index d6b7965..23daadf 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
+@@ -7,3 +7,6 @@ dropdown-media-sources = Sources de médias
+ dropdown-media-unknown-title = Titre inconnu
+ dropdown-media-unknown-artist = Artiste inconnu
+ dropdown-media-unknown-album = Album inconnu
++dropdown-media-playing = Lecture
++dropdown-media-paused = En pause
++dropdown-media-stopped = Arrêté
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+index dbc5e36..a0c33cf 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+@@ -19,7 +19,6 @@ pub(crate) struct QuickActionsInit {
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum QuickActionsInput {
+-    WifiToggled,
+     BluetoothToggled,
+     AirplaneToggled,
+     DndToggled,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+index 6900372..f29a655 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+@@ -64,45 +64,8 @@ impl Component for QuickActionsSection {
+                 set_row_spacing: 4,
+                 set_column_spacing: 8,
+ 
+-                #[name = "wifi_btn"]
+-                attach[0, 0, 1, 1] = &gtk::Button {
+-                    add_css_class: "quick-action",
+-                    #[watch]
+-                    set_class_active: ("active", model.wifi_active),
+-                    #[watch]
+-                    set_sensitive: model.has_wifi && !model.airplane_active,
+-                    set_cursor_from_name: Some("pointer"),
+-                    connect_clicked => QuickActionsInput::WifiToggled,
+-
+-                    gtk::Box {
+-                        set_orientation: gtk::Orientation::Vertical,
+-                        set_halign: gtk::Align::Center,
+-                        set_valign: gtk::Align::Center,
+-
+-                        gtk::Box {
+-                            add_css_class: "quick-action-icon",
+-                            set_halign: gtk::Align::Center,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(if model.wifi_active {
+-                                    "ld-wifi-symbolic"
+-                                } else {
+-                                    "ld-wifi-off-symbolic"
+-                                }),
+-                            },
+-                        },
+-
+-                        gtk::Label {
+-                            add_css_class: "quick-action-label",
+-                            set_halign: gtk::Align::Center,
+-                            set_label: &t!("dropdown-dashboard-wifi"),
+-                        },
+-                    },
+-                },
+-
+                 #[name = "bt_btn"]
+-                attach[1, 0, 1, 1] = &gtk::Button {
++                attach[0, 0, 1, 1] = &gtk::Button {
+                     add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.bluetooth_active),
+@@ -139,7 +102,7 @@ impl Component for QuickActionsSection {
+                 },
+ 
+                 #[name = "airplane_btn"]
+-                attach[2, 0, 1, 1] = &gtk::Button {
++                attach[1, 0, 1, 1] = &gtk::Button {
+                     add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.airplane_active),
+@@ -171,7 +134,7 @@ impl Component for QuickActionsSection {
+                 },
+ 
+                 #[name = "dnd_btn"]
+-                attach[0, 1, 1, 1] = &gtk::Button {
++                attach[2, 0, 1, 1] = &gtk::Button {
+                     add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.dnd_active),
+@@ -208,7 +171,7 @@ impl Component for QuickActionsSection {
+                 },
+ 
+                 #[name = "idle_btn"]
+-                attach[1, 1, 1, 1] = &gtk::Button {
++                attach[0, 1, 1, 1] = &gtk::Button {
+                     add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.idle_inhibit_active),
+@@ -238,7 +201,7 @@ impl Component for QuickActionsSection {
+                 },
+ 
+                 #[name = "power_saver_btn"]
+-                attach[2, 1, 1, 1] = &gtk::Button {
++                attach[1, 1, 1, 1] = &gtk::Button {
+                     add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.power_saver_active),
+@@ -358,7 +321,6 @@ impl Component for QuickActionsSection {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
+-            QuickActionsInput::WifiToggled => self.toggle_wifi(&sender),
+             QuickActionsInput::BluetoothToggled => self.toggle_bluetooth(&sender),
+             QuickActionsInput::AirplaneToggled => self.toggle_airplane(&sender),
+             QuickActionsInput::DndToggled => self.toggle_dnd(&sender),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs
+index e62b8e2..29e36e5 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs
+@@ -1,9 +1,7 @@
+ use std::sync::Arc;
+ 
+ use wayle_config::ConfigService;
+-use wayle_media::MediaService;
+-
+-use super::{player_view::PlayerViewOutput, source_picker::SourcePickerOutput};
++use wayle_media::{MediaService, core::player::Player};
+ 
+ pub(crate) struct MediaDropdownInit {
+     pub media: Arc<MediaService>,
+@@ -12,12 +10,13 @@ pub(crate) struct MediaDropdownInit {
+ 
+ #[derive(Debug)]
+ pub(crate) enum MediaDropdownMsg {
+-    PlayerView(PlayerViewOutput),
+-    SourcePicker(SourcePickerOutput),
+     VisibilityChanged(bool),
+ }
+ 
+ #[derive(Debug)]
++#[allow(clippy::enum_variant_names)]
+ pub(crate) enum MediaDropdownCmd {
+     ScaleChanged(f32),
++    PlayerListChanged(Vec<Arc<Player>>),
++    PlaybackStateChanged,
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
+index f2e3b13..f1f5076 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
+@@ -2,45 +2,39 @@ mod factory;
+ mod helpers;
+ mod messages;
+ pub(crate) mod player_view;
+-pub(crate) mod source_picker;
+ mod watchers;
+ 
++use std::sync::Arc;
++
+ use gtk::prelude::*;
+ use relm4::{gtk, prelude::*};
+-use wayle_widgets::prelude::*;
++use wayle_media::{
++    MediaService,
++    core::player::Player,
++    types::{PlaybackState, PlayerId},
++};
++use wayle_widgets::{WatcherToken, prelude::*};
+ 
+ pub(super) use self::factory::Factory;
++pub(crate) use self::messages::MediaDropdownMsg;
+ use self::{
+-    messages::{MediaDropdownCmd, MediaDropdownInit, MediaDropdownMsg},
+-    player_view::{PlayerView, PlayerViewInit, PlayerViewInput, PlayerViewOutput},
+-    source_picker::{SourcePicker, SourcePickerInit, SourcePickerOutput},
++    messages::{MediaDropdownCmd, MediaDropdownInit},
++    player_view::{PlayerView, PlayerViewInit, PlayerViewInput},
+ };
+-use crate::shell::bar::dropdowns::scaled_dimension;
++use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+-const BASE_WIDTH: f32 = 380.0;
+-const BASE_HEIGHT: f32 = 410.0;
+-
+-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-enum MediaPage {
+-    Main,
+-    Sources,
+-}
+-
+-impl MediaPage {
+-    fn name(self) -> &'static str {
+-        match self {
+-            Self::Main => "main",
+-            Self::Sources => "sources",
+-        }
+-    }
+-}
++const BASE_WIDTH: f32 = 410.0;
++const BASE_HEIGHT: f32 = 520.0;
+ 
+ pub(crate) struct MediaDropdown {
++    media: Arc<MediaService>,
+     scaled_width: i32,
+     scaled_height: i32,
+-    active_page: MediaPage,
+-    player_view: Controller<PlayerView>,
+-    source_picker: Controller<SourcePicker>,
++    is_active: bool,
++    player_ids: Vec<PlayerId>,
++    player_views: Vec<Controller<PlayerView>>,
++    player_state_watcher: WatcherToken,
++    player_list: gtk::Box,
+ }
+ 
+ #[relm4::component(pub(crate))]
+@@ -62,19 +56,64 @@ impl Component for MediaDropdown {
+ 
+             #[template]
+             Dropdown {
+-                #[name = "stack"]
+-                gtk::Stack {
+-                    set_vexpand: true,
+-                    set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+-                    set_transition_duration: 200,
+-                    #[local_ref]
+-                    add_named[Some("main")] = player_view_widget -> gtk::Box {},
++                #[watch]
++                set_width_request: model.scaled_width,
++                #[watch]
++                set_height_request: model.scaled_height,
++
++                #[template]
++                DropdownHeader {
++                    #[template_child]
++                    icon {
++                        set_visible: true,
++                        set_icon_name: Some("ld-music-symbolic"),
++                    },
++                    #[template_child]
++                    label {
++                        set_label: &t!("dropdown-media-title"),
++                    },
++                    #[template_child]
++                    actions {
++                        set_visible: false,
++                    },
++                },
+ 
+-                    #[local_ref]
+-                    add_named[Some("sources")] = source_picker_widget -> gtk::Box {},
++                #[template]
++                DropdownContent {
++                    set_vexpand: true,
+ 
+-                    #[watch]
+-                    set_visible_child_name: model.active_page.name(),
++                    gtk::ScrolledWindow {
++                        add_css_class: "media-player-scroll",
++                        set_vexpand: true,
++                        set_hscrollbar_policy: gtk::PolicyType::Never,
++                        #[watch]
++                        set_visible: !model.player_ids.is_empty(),
++
++                        #[local_ref]
++                        player_list_widget -> gtk::Box {
++                            add_css_class: "media-player-list",
++                            set_orientation: gtk::Orientation::Vertical,
++                        },
++                    },
++
++                    #[template]
++                    EmptyState {
++                        add_css_class: "media-empty",
++                        #[watch]
++                        set_visible: model.player_ids.is_empty(),
++                        #[template_child]
++                        icon {
++                            set_icon_name: Some("ld-play-symbolic"),
++                        },
++                        #[template_child]
++                        title {
++                            set_label: &t!("dropdown-media-no-player-title"),
++                        },
++                        #[template_child]
++                        description {
++                            set_label: &t!("dropdown-media-no-player-description"),
++                        },
++                    },
+                 },
+             },
+         }
+@@ -85,57 +124,40 @@ impl Component for MediaDropdown {
+         root: Self::Root,
+         sender: ComponentSender<Self>,
+     ) -> ComponentParts<Self> {
+-        let player_view = PlayerView::builder()
+-            .launch(PlayerViewInit {
+-                media: init.media.clone(),
+-            })
+-            .forward(sender.input_sender(), MediaDropdownMsg::PlayerView);
+-
+-        let source_picker = SourcePicker::builder()
+-            .launch(SourcePickerInit {
+-                media: init.media.clone(),
+-            })
+-            .forward(sender.input_sender(), MediaDropdownMsg::SourcePicker);
++        watchers::spawn(&sender, &init.config, &init.media);
+ 
+         let scale = init.config.config().styling.scale.get().value();
+-        watchers::spawn(&sender, &init.config);
+-
+-        let model = Self {
++        let players = init.media.player_list.get();
++        let mut model = Self {
++            media: init.media,
+             scaled_width: scaled_dimension(BASE_WIDTH, scale),
+             scaled_height: scaled_dimension(BASE_HEIGHT, scale),
+-            active_page: MediaPage::Main,
+-            player_view,
+-            source_picker,
++            is_active: root.is_visible(),
++            player_ids: Vec::new(),
++            player_views: Vec::new(),
++            player_state_watcher: WatcherToken::new(),
++            player_list: gtk::Box::new(gtk::Orientation::Vertical, 0),
+         };
+ 
++        model.update_player_list(players, &sender);
++
+         let input_sender = sender.input_sender().clone();
+         root.connect_visible_notify(move |popover| {
+             input_sender.emit(MediaDropdownMsg::VisibilityChanged(popover.is_visible()));
+         });
+ 
+-        model
+-            .player_view
+-            .emit(PlayerViewInput::SetActive(root.is_visible()));
+-
+-        let player_view_widget = model.player_view.widget();
+-        let source_picker_widget = model.source_picker.widget();
++        let player_list_widget = &model.player_list;
+         let widgets = view_output!();
+-
+         ComponentParts { model, widgets }
+     }
+ 
+     fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
+-            MediaDropdownMsg::PlayerView(PlayerViewOutput::ShowSourcePicker) => {
+-                self.active_page = MediaPage::Sources;
+-            }
+-
+-            MediaDropdownMsg::SourcePicker(SourcePickerOutput::NavigateBack) => {
+-                self.active_page = MediaPage::Main;
+-            }
+-
+             MediaDropdownMsg::VisibilityChanged(visible) => {
+-                self.player_view.emit(PlayerViewInput::SetActive(visible));
++                self.is_active = visible;
++                for player_view in &self.player_views {
++                    player_view.emit(PlayerViewInput::SetActive(visible));
++                }
+             }
+         }
+     }
+@@ -143,7 +165,7 @@ impl Component for MediaDropdown {
+     fn update_cmd(
+         &mut self,
+         msg: MediaDropdownCmd,
+-        _sender: ComponentSender<Self>,
++        sender: ComponentSender<Self>,
+         _root: &Self::Root,
+     ) {
+         match msg {
+@@ -151,6 +173,48 @@ impl Component for MediaDropdown {
+                 self.scaled_width = scaled_dimension(BASE_WIDTH, scale);
+                 self.scaled_height = scaled_dimension(BASE_HEIGHT, scale);
+             }
++            MediaDropdownCmd::PlayerListChanged(players) => {
++                self.update_player_list(players, &sender);
++            }
++            MediaDropdownCmd::PlaybackStateChanged => {
++                self.sync_player_views(self.media.player_list.get());
++            }
++        }
++    }
++}
++
++impl MediaDropdown {
++    fn update_player_list(&mut self, players: Vec<Arc<Player>>, sender: &ComponentSender<Self>) {
++        let token = self.player_state_watcher.reset();
++        watchers::spawn_playback_state(sender, &players, token);
++        self.sync_player_views(players);
++    }
++
++    fn sync_player_views(&mut self, players: Vec<Arc<Player>>) {
++        let players: Vec<_> = players
++            .into_iter()
++            .filter(|player| player.playback_state.get() != PlaybackState::Stopped)
++            .collect();
++        let player_ids: Vec<_> = players.iter().map(|player| player.id.clone()).collect();
++
++        if player_ids == self.player_ids {
++            return;
+         }
++
++        while let Some(child) = self.player_list.first_child() {
++            self.player_list.remove(&child);
++        }
++        self.player_views.clear();
++
++        for player in players {
++            let player_view = PlayerView::builder()
++                .launch(PlayerViewInit { player })
++                .detach();
++            player_view.emit(PlayerViewInput::SetActive(self.is_active));
++            self.player_list.append(player_view.widget());
++            self.player_views.push(player_view);
++        }
++
++        self.player_ids = player_ids;
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
+index a4a0c29..fe0495a 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
+@@ -1,19 +1,17 @@
+ use std::{sync::Arc, time::Duration};
+ 
+ use wayle_media::{
+-    MediaService,
+     core::player::Player,
+     types::{LoopMode, PlaybackState, ShuffleMode},
+ };
+ 
+ pub(crate) struct PlayerViewInit {
+-    pub media: Arc<MediaService>,
++    pub player: Arc<Player>,
+ }
+ 
+ #[derive(Debug)]
+ pub(crate) enum PlayerViewInput {
+     SetActive(bool),
+-    ShowSourcePickerClicked,
+     PlayPauseClicked,
+     NextClicked,
+     PreviousClicked,
+@@ -22,14 +20,8 @@ pub(crate) enum PlayerViewInput {
+     SeekCommitted(f64),
+ }
+ 
+-#[derive(Debug)]
+-pub(crate) enum PlayerViewOutput {
+-    ShowSourcePicker,
+-}
+-
+ #[derive(Debug)]
+ pub(crate) enum PlayerViewCmd {
+-    PlayerChanged(Option<Arc<Player>>),
+     MetadataChanged,
+     PlaybackStateChanged(PlaybackState),
+     PositionTick(Duration),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
+index d52db43..f843f79 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
+@@ -1,4 +1,4 @@
+-use std::{borrow::Cow, future::Future, sync::Arc, time::Duration};
++use std::{borrow::Cow, future::Future, sync::Arc};
+ 
+ use relm4::ComponentSender;
+ use wayle_media::{core::player::Player, types::*};
+@@ -16,7 +16,9 @@ impl PlayerView {
+         let _ = self.player_watcher.reset();
+ 
+         if active {
+-            self.update_player(self.player.clone(), sender);
++            let token = self.player_watcher.reset();
++            super::watchers::spawn_player(sender, &self.player, token);
++            self.refresh_position_now(sender);
+         }
+     }
+ 
+@@ -29,9 +31,7 @@ impl PlayerView {
+         F: FnOnce(Arc<Player>) -> Fut + Send + 'static,
+         Fut: Future<Output = Result<(), wayle_media::Error>> + Send,
+     {
+-        let Some(player) = self.player.clone() else {
+-            return;
+-        };
++        let player = self.player.clone();
+         sender.oneshot_command(async move {
+             if let Err(err) = action(player).await {
+                 tracing::warn!(error = %err, "{label}");
+@@ -40,34 +40,8 @@ impl PlayerView {
+         });
+     }
+ 
+-    pub(super) fn update_player(
+-        &mut self,
+-        player: Option<Arc<Player>>,
+-        sender: &ComponentSender<PlayerView>,
+-    ) {
+-        self.player = player.clone();
+-        self.has_player = player.is_some();
+-
+-        let Some(player) = player else {
+-            self.clear_fields();
+-            return;
+-        };
+-
+-        self.refresh_from_player(&player);
+-
+-        let token = self.player_watcher.reset();
+-        if self.is_active {
+-            super::watchers::spawn_player(sender, &player, token);
+-            self.refresh_position_now(sender);
+-        }
+-    }
+-
+     pub(super) fn refresh_metadata(&mut self) {
+-        let Some(player) = self.player.as_ref() else {
+-            return;
+-        };
+-
+-        let metadata = &player.metadata;
++        let metadata = &self.player.metadata;
+         self.title = metadata.title.get();
+         self.artist = metadata.artist.get();
+         self.album = metadata.album.get();
+@@ -77,15 +51,11 @@ impl PlayerView {
+     }
+ 
+     pub(super) fn refresh_capabilities(&mut self) {
+-        let Some(player) = self.player.as_ref() else {
+-            return;
+-        };
+-
+-        self.can_go_previous = player.can_go_previous.get();
+-        self.can_go_next = player.can_go_next.get();
+-        self.can_seek = player.can_seek.get();
+-        self.can_loop = player.can_loop.get();
+-        self.can_shuffle = player.can_shuffle.get();
++        self.can_go_previous = self.player.can_go_previous.get();
++        self.can_go_next = self.player.can_go_next.get();
++        self.can_seek = self.player.can_seek.get();
++        self.can_loop = self.player.can_loop.get();
++        self.can_shuffle = self.player.can_shuffle.get();
+     }
+ 
+     pub(super) fn display_title(&self) -> Cow<'_, str> {
+@@ -139,6 +109,14 @@ impl PlayerView {
+         }
+     }
+ 
++    pub(super) fn playback_label(&self) -> String {
++        match self.playback_state {
++            PlaybackState::Playing => t!("dropdown-media-playing"),
++            PlaybackState::Paused => t!("dropdown-media-paused"),
++            PlaybackState::Stopped => t!("dropdown-media-stopped"),
++        }
++    }
++
+     pub(super) fn loop_icon(&self) -> &'static str {
+         match self.loop_mode {
+             LoopMode::Track => "ld-repeat-1-symbolic",
+@@ -146,7 +124,7 @@ impl PlayerView {
+         }
+     }
+ 
+-    fn refresh_from_player(&mut self, player: &Player) {
++    pub(super) fn refresh_from_player(&mut self, player: &Player) {
+         self.player_identity = player.identity.get();
+         self.playback_state = player.playback_state.get();
+         self.loop_mode = player.loop_mode.get();
+@@ -165,9 +143,7 @@ impl PlayerView {
+     }
+ 
+     fn refresh_position_now(&self, sender: &ComponentSender<PlayerView>) {
+-        let Some(player) = self.player.clone() else {
+-            return;
+-        };
++        let player = self.player.clone();
+ 
+         sender.oneshot_command(async move {
+             match player.position().await {
+@@ -179,26 +155,4 @@ impl PlayerView {
+             }
+         });
+     }
+-
+-    fn clear_fields(&mut self) {
+-        self.title.clear();
+-        self.artist.clear();
+-        self.album.clear();
+-        self.cover_art = None;
+-        self.playback_state = PlaybackState::Stopped;
+-        self.position = Duration::ZERO;
+-        self.length = None;
+-        self.loop_mode = LoopMode::None;
+-        self.shuffle_mode = ShuffleMode::Off;
+-        self.can_go_previous = false;
+-        self.can_go_next = false;
+-        self.can_seek = false;
+-        self.can_loop = false;
+-        self.can_shuffle = false;
+-        self.player_identity.clear();
+-        self.source_icon = String::from("ld-music-symbolic");
+-        self.seek_slider.set_value(0.0);
+-
+-        self.update_artwork_css();
+-    }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
+index 111f79f..ec9573f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
+@@ -18,10 +18,7 @@ use wayle_media::{core::player::Player, types::*};
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+ pub(crate) use self::messages::*;
+-use crate::{
+-    i18n::t,
+-    shell::{bar::dropdowns::media::helpers, helpers::COMPONENT_CSS_PRIORITY},
+-};
++use crate::shell::{bar::dropdowns::media::helpers, helpers::COMPONENT_CSS_PRIORITY};
+ 
+ static NEXT_ART_CSS_ID: AtomicU64 = AtomicU64::new(1);
+ 
+@@ -31,14 +28,13 @@ fn next_art_css_class() -> String {
+ }
+ 
+ pub(crate) struct PlayerView {
+-    player: Option<Arc<Player>>,
++    player: Arc<Player>,
+     player_watcher: WatcherToken,
+     is_active: bool,
+     art_css_provider: CssProvider,
+     art_css_class: String,
+     seek_slider: DebouncedSlider,
+ 
+-    has_player: bool,
+     title: String,
+     artist: String,
+     album: String,
+@@ -65,259 +61,221 @@ pub(crate) struct PlayerView {
+ impl Component for PlayerView {
+     type Init = PlayerViewInit;
+     type Input = PlayerViewInput;
+-    type Output = PlayerViewOutput;
++    type Output = ();
+     type CommandOutput = PlayerViewCmd;
+ 
+     view! {
+         #[root]
+         gtk::Box {
++            set_css_classes: &["card", "media-player-card"],
+             set_orientation: gtk::Orientation::Vertical,
++            set_hexpand: true,
++
++            gtk::Box {
++                add_css_class: "media-player-source",
++
++                gtk::Image {
++                    add_css_class: "media-source-icon",
++                    #[watch]
++                    set_icon_name: Some(&model.source_icon),
++                },
++
++                gtk::Label {
++                    add_css_class: "media-source-name",
++                    set_hexpand: true,
++                    set_halign: gtk::Align::Start,
++                    set_ellipsize: gtk::pango::EllipsizeMode::End,
++                    #[watch]
++                    set_label: &model.player_identity,
++                },
++
++                gtk::Label {
++                    #[watch]
++                    set_css_classes: match model.playback_state {
++                        PlaybackState::Playing => &["media-player-state", "playing"],
++                        PlaybackState::Paused => &["media-player-state", "paused"],
++                        PlaybackState::Stopped => &["media-player-state", "stopped"],
++                    },
++                    #[watch]
++                    set_label: &model.playback_label(),
++                },
++            },
+ 
+-            if model.has_player {
+-                gtk::Box {
+-                    set_orientation: gtk::Orientation::Vertical,
+-                    set_vexpand: true,
+-
+-                    #[name = "header"]
+-                    gtk::Box {
+-                        add_css_class: "media-header",
+-
+-                        #[name = "header_title"]
+-                        gtk::Label {
+-                            add_css_class: "media-header-title",
+-                            set_label: &t!("dropdown-media-title"),
+-                            set_hexpand: true,
+-                            set_halign: gtk::Align::Start,
+-                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                        },
++            gtk::Box {
++                add_css_class: "media-player-summary",
+ 
+-                        #[name = "source_button"]
+-                        gtk::Button {
+-                            add_css_class: "media-source-button",
+-                            set_cursor_from_name: Some("pointer"),
+-                            connect_clicked => PlayerViewInput::ShowSourcePickerClicked,
+-
+-                            gtk::Box {
+-                                gtk::Image {
+-                                    add_css_class: "media-source-icon",
+-                                    #[watch]
+-                                    set_icon_name: Some(&model.source_icon),
+-                                },
+-
+-                                #[name = "source_name"]
+-                                gtk::Label {
+-                                    add_css_class: "media-source-name",
+-                                    #[watch]
+-                                    set_label: &model.player_identity,
+-                                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                                },
+-
+-                                gtk::Image {
+-                                    add_css_class: "media-source-chevron",
+-                                    set_icon_name: Some("ld-chevron-right-symbolic"),
+-                                },
+-                            },
+-                        },
+-                    },
++                gtk::Box {
++                    add_css_class: "media-player-artwork",
++                    add_css_class: &model.art_css_class,
++                    set_valign: gtk::Align::Start,
+ 
+-                    #[name = "artwork"]
+                     gtk::Box {
+-                        add_css_class: "media-artwork",
+-                        add_css_class: &model.art_css_class,
++                        add_css_class: "media-artwork-placeholder",
++                        set_hexpand: true,
+                         set_vexpand: true,
++                        set_halign: gtk::Align::Center,
++                        set_valign: gtk::Align::Center,
++                        #[watch]
++                        set_visible: model.cover_art.is_none(),
+ 
+-                        #[name = "artwork_placeholder"]
+-                        gtk::Box {
+-                            add_css_class: "media-artwork-placeholder",
+-                            set_hexpand: true,
+-                            set_halign: gtk::Align::Center,
+-                            set_valign: gtk::Align::Center,
+-                            #[watch]
+-                            set_visible: model.cover_art.is_none(),
+-
+-                            gtk::Image {
+-                                add_css_class: "media-artwork-placeholder-icon",
+-                                set_icon_name: Some("ld-disc-3-symbolic"),
+-                            },
++                        gtk::Image {
++                            add_css_class: "media-artwork-placeholder-icon",
++                            set_icon_name: Some("ld-disc-3-symbolic"),
+                         },
+                     },
++                },
+ 
+-                    #[name = "info"]
+-                    gtk::Box {
+-                        add_css_class: "media-info",
+-                        set_orientation: gtk::Orientation::Vertical,
+-                        set_halign: gtk::Align::Fill,
+-
+-                        #[name = "title_label"]
+-                        gtk::Label {
+-                            add_css_class: "media-title",
+-                            #[watch]
+-                            set_label: &model.display_title(),
+-                            #[watch]
+-                            set_class_active: ("placeholder", model.title.is_empty()),
+-                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                            set_max_width_chars: 1,
+-                            set_xalign: 0.5,
+-                        },
++                gtk::Box {
++                    add_css_class: "media-player-info",
++                    set_orientation: gtk::Orientation::Vertical,
++                    set_hexpand: true,
++                    set_valign: gtk::Align::Center,
++
++                    gtk::Label {
++                        add_css_class: "media-title",
++                        set_halign: gtk::Align::Start,
++                        set_xalign: 0.0,
++                        set_ellipsize: gtk::pango::EllipsizeMode::End,
++                        set_max_width_chars: 1,
++                        #[watch]
++                        set_label: &model.display_title(),
++                        #[watch]
++                        set_class_active: ("placeholder", model.title.is_empty()),
++                    },
+ 
+-                        #[name = "artist_label"]
+-                        gtk::Label {
+-                            add_css_class: "media-artist",
+-                            #[watch]
+-                            set_label: &model.display_artist(),
+-                            #[watch]
+-                            set_class_active: ("placeholder", model.artist.is_empty()),
+-                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                            set_max_width_chars: 1,
+-                            set_xalign: 0.5,
+-                        },
++                    gtk::Label {
++                        add_css_class: "media-artist",
++                        set_halign: gtk::Align::Start,
++                        set_xalign: 0.0,
++                        set_ellipsize: gtk::pango::EllipsizeMode::End,
++                        set_max_width_chars: 1,
++                        #[watch]
++                        set_label: &model.display_artist(),
++                        #[watch]
++                        set_class_active: ("placeholder", model.artist.is_empty()),
++                    },
+ 
+-                        #[name = "album_label"]
+-                        gtk::Label {
+-                            add_css_class: "media-album",
+-                            #[watch]
+-                            set_label: &model.display_album(),
+-                            #[watch]
+-                            set_class_active: ("placeholder", model.album.is_empty()),
+-                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                            set_max_width_chars: 1,
+-                            set_xalign: 0.5,
+-                        },
++                    gtk::Label {
++                        add_css_class: "media-album",
++                        set_halign: gtk::Align::Start,
++                        set_xalign: 0.0,
++                        set_ellipsize: gtk::pango::EllipsizeMode::End,
++                        set_max_width_chars: 1,
++                        #[watch]
++                        set_label: &model.display_album(),
++                        #[watch]
++                        set_class_active: ("placeholder", model.album.is_empty()),
+                     },
++                },
++            },
+ 
+-                    #[name = "progress"]
+-                    gtk::Box {
+-                        add_css_class: "media-progress",
+-                        set_orientation: gtk::Orientation::Vertical,
++            gtk::Box {
++                add_css_class: "media-progress",
++                set_orientation: gtk::Orientation::Vertical,
++                #[watch]
++                set_visible: model.length.is_some(),
+ 
+-                        #[local_ref]
+-                        seek_slider -> DebouncedSlider {
+-                            #[watch]
+-                            set_sensitive: model.can_seek,
+-                        },
++                #[local_ref]
++                seek_slider -> DebouncedSlider {
++                    #[watch]
++                    set_sensitive: model.can_seek,
++                },
+ 
+-                        #[name = "progress_times"]
+-                        gtk::Box {
+-                            add_css_class: "media-progress-times",
+-
+-                            #[name = "position_label"]
+-                            gtk::Label {
+-                                add_css_class: "media-time",
+-                                set_hexpand: true,
+-                                set_halign: gtk::Align::Start,
+-                                #[watch]
+-                                set_label: &helpers::format_duration(model.position),
+-                            },
+-
+-                            #[name = "length_label"]
+-                            gtk::Label {
+-                                add_css_class: "media-time",
+-                                set_halign: gtk::Align::End,
+-                                #[watch]
+-                                set_label: &model.length.map_or_else(
+-                                    || String::from("0:00"),
+-                                    helpers::format_duration,
+-                                ),
+-                            },
+-                        },
++                gtk::Box {
++                    add_css_class: "media-progress-times",
++
++                    gtk::Label {
++                        add_css_class: "media-time",
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Start,
++                        #[watch]
++                        set_label: &helpers::format_duration(model.position),
+                     },
+ 
+-                    #[name = "controls"]
+-                    gtk::Box {
+-                        add_css_class: "media-controls",
+-                        set_halign: gtk::Align::Center,
+-
+-                        #[name = "shuffle_button"]
+-                        gtk::Button {
+-                            set_css_classes: &["media-control", "secondary"],
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            #[watch]
+-                            set_class_active: ("active", model.shuffle_mode == ShuffleMode::On),
+-                            #[watch]
+-                            set_sensitive: model.can_shuffle,
+-                            connect_clicked => PlayerViewInput::ShuffleClicked,
+-
+-                            gtk::Image {
+-                                set_icon_name: Some("ld-shuffle-symbolic"),
+-                            },
+-                        },
+-
+-                        #[name = "previous_button"]
+-                        gtk::Button {
+-                            add_css_class: "media-control",
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            #[watch]
+-                            set_sensitive: model.can_go_previous,
+-                            connect_clicked => PlayerViewInput::PreviousClicked,
+-
+-                            gtk::Image {
+-                                set_icon_name: Some("ld-skip-back-symbolic"),
+-                            },
+-                        },
++                    gtk::Label {
++                        add_css_class: "media-time",
++                        set_halign: gtk::Align::End,
++                        #[watch]
++                        set_label: &model.length.map_or_else(
++                            || String::from("0:00"),
++                            helpers::format_duration,
++                        ),
++                    },
++                },
++            },
+ 
+-                        #[name = "play_pause_button"]
+-                        gtk::Button {
+-                            set_css_classes: &["media-control", "main"],
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            connect_clicked => PlayerViewInput::PlayPauseClicked,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(model.play_pause_icon()),
+-                            },
+-                        },
++            gtk::Box {
++                add_css_class: "media-controls",
++                set_halign: gtk::Align::Center,
++
++                gtk::Button {
++                    set_css_classes: &["media-control", "secondary"],
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    #[watch]
++                    set_class_active: ("active", model.shuffle_mode == ShuffleMode::On),
++                    #[watch]
++                    set_sensitive: model.can_shuffle,
++                    connect_clicked => PlayerViewInput::ShuffleClicked,
++
++                    gtk::Image {
++                        set_icon_name: Some("ld-shuffle-symbolic"),
++                    },
++                },
++
++                gtk::Button {
++                    add_css_class: "media-control",
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    #[watch]
++                    set_sensitive: model.can_go_previous,
++                    connect_clicked => PlayerViewInput::PreviousClicked,
++
++                    gtk::Image {
++                        set_icon_name: Some("ld-skip-back-symbolic"),
++                    },
++                },
+ 
+-                        #[name = "next_button"]
+-                        gtk::Button {
+-                            add_css_class: "media-control",
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            #[watch]
+-                            set_sensitive: model.can_go_next,
+-                            connect_clicked => PlayerViewInput::NextClicked,
+-
+-                            gtk::Image {
+-                                set_icon_name: Some("ld-skip-forward-symbolic"),
+-                            },
+-                        },
++                gtk::Button {
++                    set_css_classes: &["media-control", "main"],
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    connect_clicked => PlayerViewInput::PlayPauseClicked,
+ 
+-                        #[name = "loop_button"]
+-                        gtk::Button {
+-                            set_css_classes: &["media-control", "secondary"],
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            #[watch]
+-                            set_class_active: ("active", model.loop_mode != LoopMode::None && model.loop_mode != LoopMode::Unsupported),
+-                            #[watch]
+-                            set_sensitive: model.can_loop,
+-                            connect_clicked => PlayerViewInput::LoopClicked,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(model.loop_icon()),
+-                            },
+-                        },
+-                    },
+-                }
+-            } else {
+-                #[template]
+-                EmptyState {
+-                    #[template_child]
+-                    icon {
+-                        set_icon_name: Some("ld-play-symbolic"),
++                    gtk::Image {
++                        #[watch]
++                        set_icon_name: Some(model.play_pause_icon()),
+                     },
+-                    #[template_child]
+-                    title {
+-                        set_label: &t!("dropdown-media-no-player-title"),
++                },
++
++                gtk::Button {
++                    add_css_class: "media-control",
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    #[watch]
++                    set_sensitive: model.can_go_next,
++                    connect_clicked => PlayerViewInput::NextClicked,
++
++                    gtk::Image {
++                        set_icon_name: Some("ld-skip-forward-symbolic"),
+                     },
+-                    #[template_child]
+-                    description {
+-                        set_label: &t!("dropdown-media-no-player-description"),
++                },
++
++                gtk::Button {
++                    set_css_classes: &["media-control", "secondary"],
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    #[watch]
++                    set_class_active: ("active", model.loop_mode != LoopMode::None && model.loop_mode != LoopMode::Unsupported),
++                    #[watch]
++                    set_sensitive: model.can_loop,
++                    connect_clicked => PlayerViewInput::LoopClicked,
++
++                    gtk::Image {
++                        #[watch]
++                        set_icon_name: Some(model.loop_icon()),
+                     },
+-                }
++                },
+             },
+         }
+     }
+@@ -327,8 +285,6 @@ impl Component for PlayerView {
+         _root: Self::Root,
+         sender: ComponentSender<Self>,
+     ) -> ComponentParts<Self> {
+-        watchers::spawn_static(&sender, &init.media);
+-
+         let art_css_provider = CssProvider::new();
+         #[allow(clippy::expect_used)]
+         let display = Display::default().expect("display required for media dropdown");
+@@ -348,15 +304,14 @@ impl Component for PlayerView {
+             }),
+         );
+ 
+-        let model = Self {
+-            player: None,
++        let mut model = Self {
++            player: init.player,
+             player_watcher: WatcherToken::new(),
+             is_active: false,
+             art_css_provider,
+             art_css_class: next_art_css_class(),
+             seek_slider: seek_slider.clone(),
+ 
+-            has_player: false,
+             title: String::new(),
+             artist: String::new(),
+             album: String::new(),
+@@ -379,6 +334,9 @@ impl Component for PlayerView {
+             source_icon: String::from("ld-music-symbolic"),
+         };
+ 
++        let player = model.player.clone();
++        model.refresh_from_player(&player);
++
+         let seek_slider = &model.seek_slider;
+         let widgets = view_output!();
+         ComponentParts { model, widgets }
+@@ -386,13 +344,7 @@ impl Component for PlayerView {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
+-            PlayerViewInput::SetActive(active) => {
+-                self.set_active(active, &sender);
+-            }
+-
+-            PlayerViewInput::ShowSourcePickerClicked => {
+-                let _ = sender.output(PlayerViewOutput::ShowSourcePicker);
+-            }
++            PlayerViewInput::SetActive(active) => self.set_active(active, &sender),
+ 
+             PlayerViewInput::PlayPauseClicked => {
+                 self.fire_player_command(
+@@ -451,39 +403,19 @@ impl Component for PlayerView {
+     fn update_cmd(
+         &mut self,
+         msg: PlayerViewCmd,
+-        sender: ComponentSender<Self>,
++        _sender: ComponentSender<Self>,
+         _root: &Self::Root,
+     ) {
+         match msg {
+-            PlayerViewCmd::PlayerChanged(player) => {
+-                self.update_player(player, &sender);
+-            }
+-
+-            PlayerViewCmd::MetadataChanged => {
+-                self.refresh_metadata();
+-            }
+-
+-            PlayerViewCmd::CapabilitiesChanged => {
+-                self.refresh_capabilities();
+-            }
+-
+-            PlayerViewCmd::PlaybackStateChanged(state) => {
+-                self.playback_state = state;
+-            }
+-
++            PlayerViewCmd::MetadataChanged => self.refresh_metadata(),
++            PlayerViewCmd::CapabilitiesChanged => self.refresh_capabilities(),
++            PlayerViewCmd::PlaybackStateChanged(state) => self.playback_state = state,
+             PlayerViewCmd::PositionTick(position) => {
+                 self.position = position;
+                 self.seek_slider.set_value(self.progress_fraction() * 100.0);
+             }
+-
+-            PlayerViewCmd::LoopModeChanged(mode) => {
+-                self.loop_mode = mode;
+-            }
+-
+-            PlayerViewCmd::ShuffleModeChanged(mode) => {
+-                self.shuffle_mode = mode;
+-            }
+-
++            PlayerViewCmd::LoopModeChanged(mode) => self.loop_mode = mode,
++            PlayerViewCmd::ShuffleModeChanged(mode) => self.shuffle_mode = mode,
+             PlayerViewCmd::Noop => {}
+         }
+     }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
+index 8f60a8d..160ae73 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
+@@ -3,18 +3,11 @@ use std::sync::Arc;
+ use futures::StreamExt;
+ use relm4::ComponentSender;
+ use tokio_util::sync::CancellationToken;
+-use wayle_media::{MediaService, core::player::Player};
+-use wayle_widgets::{watch, watch_cancellable};
++use wayle_media::core::player::Player;
++use wayle_widgets::watch_cancellable;
+ 
+ use super::{PlayerView, PlayerViewCmd};
+ 
+-pub(super) fn spawn_static(sender: &ComponentSender<PlayerView>, media: &Arc<MediaService>) {
+-    let active_player = media.active_player.clone();
+-    watch!(sender, [active_player.watch()], |out| {
+-        let _ = out.send(PlayerViewCmd::PlayerChanged(active_player.get()));
+-    });
+-}
+-
+ pub(super) fn spawn_player(
+     sender: &ComponentSender<PlayerView>,
+     player: &Arc<Player>,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
+index aebaf29..f1929e6 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
+@@ -1,14 +1,39 @@
+ use std::sync::Arc;
+ 
+ use relm4::ComponentSender;
++use tokio_util::sync::CancellationToken;
+ use wayle_config::ConfigService;
+-use wayle_widgets::watch;
++use wayle_media::{MediaService, core::player::Player};
++use wayle_widgets::{watch, watch_cancellable};
+ 
+ use super::{MediaDropdown, messages::MediaDropdownCmd};
+ 
+-pub(super) fn spawn(sender: &ComponentSender<MediaDropdown>, config: &Arc<ConfigService>) {
++pub(super) fn spawn(
++    sender: &ComponentSender<MediaDropdown>,
++    config: &Arc<ConfigService>,
++    media: &Arc<MediaService>,
++) {
+     let scale = config.config().styling.scale.clone();
+     watch!(sender, [scale.watch()], |out| {
+         let _ = out.send(MediaDropdownCmd::ScaleChanged(scale.get().value()));
+     });
++
++    let player_list = media.player_list.clone();
++    watch!(sender, [player_list.watch()], |out| {
++        let _ = out.send(MediaDropdownCmd::PlayerListChanged(player_list.get()));
++    });
++}
++
++pub(super) fn spawn_playback_state(
++    sender: &ComponentSender<MediaDropdown>,
++    players: &[Arc<Player>],
++    token: CancellationToken,
++) {
++    for player in players {
++        let state = player.playback_state.clone();
++        let player_token = token.clone();
++        watch_cancellable!(sender, player_token, [state.watch()], |out| {
++            let _ = out.send(MediaDropdownCmd::PlaybackStateChanged);
++        });
++    }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 9b15f23..fe3281c 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -17,6 +17,7 @@ use crate::{
+     shell::{
+         bar::dropdowns::{
+             dashboard::{DashboardDropdown, DashboardDropdownMsg},
++            media::{MediaDropdown, MediaDropdownMsg},
+             network::{NetworkDropdown, NetworkDropdownMsg},
+         },
+         services::ShellServices,
+@@ -124,8 +125,9 @@ impl DropdownInstance {
+         }
+ 
+         let is_dashboard = self.controller.is::<Controller<DashboardDropdown>>();
++        let is_media = self.controller.is::<Controller<MediaDropdown>>();
+         let is_network = self.controller.is::<Controller<NetworkDropdown>>();
+-        if !is_dashboard && !is_network {
++        if !is_dashboard && !is_media && !is_network {
+             warn!(
+                 dropdown = name,
+                 "external layer window is not supported by this dropdown"
+@@ -175,6 +177,10 @@ impl DropdownInstance {
+     }
+ 
+     fn external_visibility_changed(&self, visible: bool) {
++        if let Some(controller) = self.controller.downcast_ref::<Controller<MediaDropdown>>() {
++            controller.emit(MediaDropdownMsg::VisibilityChanged(visible));
++        }
++
+         let Some(controller) = self
+             .controller
+             .downcast_ref::<Controller<NetworkDropdown>>()
+@@ -205,6 +211,32 @@ impl DropdownInstance {
+         const GAP: i32 = 6;
+         const OFFSET: i32 = WAYBAR_SIZE + GAP;
+         const WAYBAR_BUTTON_STEP: i32 = 50;
++
++        // The media button sits in Waybar's centre group. With only the edge
++        // nearest the bar anchored, layer-shell centres the panel along that
++        // edge instead of tying it to the left-side dashboard buttons.
++        if name == "media" {
++            match location {
++                Location::Top => {
++                    window.set_anchor(Edge::Top, true);
++                    window.set_margin(Edge::Top, OFFSET);
++                }
++                Location::Bottom => {
++                    window.set_anchor(Edge::Bottom, true);
++                    window.set_margin(Edge::Bottom, OFFSET);
++                }
++                Location::Left => {
++                    window.set_anchor(Edge::Left, true);
++                    window.set_margin(Edge::Left, OFFSET);
++                }
++                Location::Right => {
++                    window.set_anchor(Edge::Right, true);
++                    window.set_margin(Edge::Right, OFFSET);
++                }
++            }
++            return;
++        }
++
+         let along_bar = if name == "network" {
+             GAP + WAYBAR_BUTTON_STEP
+         } else {
+diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_index.scss b/crates/wayle-styling/scss/modules/media_dropdown/_index.scss
+index 73b7bde..4759abd 100644
+--- a/crates/wayle-styling/scss/modules/media_dropdown/_index.scss
++++ b/crates/wayle-styling/scss/modules/media_dropdown/_index.scss
+@@ -1,2 +1,18 @@
+ @import "player_view";
+ @import "source_picker";
++
++window.media-layer-window {
++    background: transparent;
++    box-shadow: none;
++
++    > .dropdown {
++        min-width: 0;
++    }
++
++    &.shadow > .dropdown {
++        box-shadow:
++            0 0 5px rgba(0, 0, 0, 0.3),
++            0 4px 10px rgba(0, 0, 0, 0.3),
++            0 0 0 1px rgba(255, 255, 255, 0.04);
++    }
++}
+diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
+index c623146..0ea198c 100644
+--- a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
++++ b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
+@@ -1,66 +1,77 @@
+-.media-header {
+-    padding: calc(var(--space-sm) * 1.1) var(--space-md);
+-    border-bottom: 1px solid var(--border-default);
+-    border-spacing: var(--space-sm);
+-    border-top-left-radius: var(--rounding-container);
+-    border-top-right-radius: var(--rounding-container);
+-    background: var(--bg-surface);
++.media-player-scroll {
++    min-height: 0;
++}
+ 
+-    .media-header-title {
+-        font-size: var(--text-lg);
+-        font-weight: var(--weight-bold);
+-        color: var(--fg-default);
+-    }
++.media-player-list {
++    padding: var(--space-sm);
++    border-spacing: var(--space-sm);
+ }
+ 
+-button.media-source-button {
++.media-player-card {
++    padding: var(--space-md);
+     border-radius: var(--rounding-element);
+-    transition: color var(--duration-fast);
+-    color: var(--fg-muted);
+-    border-spacing: var(--space-xs);
++    border: 1px solid var(--border-default);
++    background: var(--bg-surface);
++}
+ 
+-    &:hover {
+-        color: var(--fg-default);
+-    }
++.media-player-source {
++    border-spacing: var(--space-sm);
++    margin-bottom: var(--space-sm);
+ 
+     image.media-source-icon {
+         -gtk-icon-size: var(--icon-md);
++        color: var(--accent);
+     }
+ 
+     .media-source-name {
+-        margin-left: var(--space-sm);
+         font-size: var(--text-sm);
+         font-weight: var(--weight-bold);
++        color: var(--fg-default);
+     }
+ 
+-    image.media-source-chevron {
+-        -gtk-icon-size: var(--icon-sm);
++    .media-player-state {
++        padding: calc(var(--space-xs) / 2) var(--space-xs);
++        border-radius: var(--radius-full);
++        font-size: var(--text-xs);
++        font-weight: var(--weight-semibold);
++        color: var(--fg-subtle);
++        background: var(--bg-overlay);
++
++        &.playing {
++            color: var(--accent);
++            background: var(--accent-subtle);
++        }
+     }
+ }
+ 
+-.media-artwork {
++.media-player-summary {
++    border-spacing: var(--space-md);
++}
++
++.media-player-artwork {
++    min-width: calc(4.25rem * var(--global-scale));
++    min-height: calc(4.25rem * var(--global-scale));
++    border-radius: var(--rounding-element);
+     background-color: var(--bg-overlay);
+     background-size: cover;
+     background-position: center;
+-    box-shadow: inset 0 calc(-0.375rem * var(--global-scale)) calc(0.375rem * var(--global-scale)) calc(-0.25rem * var(--global-scale)) var(--bg-elevated);
++    box-shadow: inset 0 0 0 1px var(--border-default);
+ }
+ 
+ .media-artwork-placeholder {
+-    border-radius: var(--rounding-container);
+-    background: var(--bg-hover);
++    border-radius: var(--rounding-element);
+ 
+     image.media-artwork-placeholder-icon {
+         -gtk-icon-size: var(--icon-xl);
+-        margin: var(--icon-xl);
+-        color: var(--accent);
++        color: var(--fg-subtle);
+     }
+ }
+ 
+-.media-info {
+-    padding: var(--space-md) var(--space-md) var(--space-xs);
++.media-player-info {
++    min-width: 0;
+ 
+     .media-title {
+-        font-size: var(--text-lg);
++        font-size: var(--text-md);
+         font-weight: var(--weight-bold);
+         color: var(--fg-default);
+ 
+@@ -71,10 +82,10 @@ button.media-source-button {
+     }
+ 
+     .media-artist {
+-        font-size: var(--text-md);
++        margin-top: var(--space-xs);
++        font-size: var(--text-sm);
+         font-weight: var(--weight-semibold);
+-        color: var(--fg-default);
+-        margin-top: var(--space-sm);
++        color: var(--fg-muted);
+ 
+         &.placeholder {
+             color: var(--fg-subtle);
+@@ -83,10 +94,9 @@ button.media-source-button {
+     }
+ 
+     .media-album {
+-        font-size: var(--text-base);
+-        font-weight: var(--weight-semibold);
++        margin-top: calc(var(--space-xs) / 2);
++        font-size: var(--text-xs);
+         color: var(--fg-subtle);
+-        margin: var(--space-sm) 0;
+ 
+         &.placeholder {
+             font-style: italic;
+@@ -95,17 +105,17 @@ button.media-source-button {
+ }
+ 
+ .media-progress {
+-    padding: 0 calc(var(--space-md) + var(--space-xs));
++    margin-top: var(--space-sm);
+ }
+ 
+ scale.media-seek-slider {
+     trough {
+-        min-height: var(--space-sm);
++        min-height: var(--space-xs);
+         background: var(--bg-hover);
+         border-radius: var(--rounding-element);
+ 
+         highlight {
+-            min-height: var(--space-sm);
++            min-height: var(--space-xs);
+             background: var(--accent);
+             border-radius: var(--rounding-element);
+         }
+@@ -129,17 +139,17 @@ scale.media-seek-slider {
+ }
+ 
+ .media-progress-times {
+-    margin-top: var(--space-xs);
++    margin-top: calc(var(--space-xs) / 2);
+ 
+     .media-time {
+-        font-size: var(--text-md);
++        font-size: var(--text-xs);
+         font-weight: var(--weight-semibold);
+         color: var(--fg-subtle);
+     }
+ }
+ 
+ .media-controls {
+-    padding: var(--space-sm) var(--space-md) var(--space-md);
++    padding-top: var(--space-sm);
+     border-spacing: var(--space-xs);
+ }
+ 
+@@ -150,7 +160,6 @@ button.media-control {
+     transition:
+         background var(--duration-fast),
+         color var(--duration-fast);
+-    margin-bottom: var(--space-sm);
+ 
+     &:hover {
+         background: var(--bg-overlay);
+@@ -159,31 +168,28 @@ button.media-control {
+ 
+     image {
+         -gtk-icon-size: var(--icon-md);
+-        margin: var(--space-md);
++        margin: var(--space-sm);
+     }
+ 
+     &.main {
++        margin: 0 var(--space-xs);
+         background: var(--accent);
+         color: var(--fg-on-accent);
+-        margin-left: var(--space-sm);
+-        margin-right: var(--space-sm);
+ 
+         &:hover {
+             background: var(--accent-hover);
+         }
+ 
+         image {
+-            -gtk-icon-size: var(--icon-xl);
+-            margin: calc(var(--space-sm) + var(--space-xs));
++            -gtk-icon-size: var(--icon-lg);
++            margin: var(--space-sm);
+         }
+     }
+ 
+     &.secondary {
+-        color: var(--fg-muted);
+-
+         image {
+             -gtk-icon-size: var(--icon-sm);
+-            margin: calc(var(--space-xs) + var(--space-xs));
++            margin: var(--space-xs);
+         }
+ 
+         &.active {

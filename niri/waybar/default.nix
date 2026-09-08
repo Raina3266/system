@@ -35,8 +35,8 @@ let
       position = "top";
       expand-center = true;
       # Wayle's native dashboard and Wi-Fi manager are separate buttons at the
-      # far left. In the middle, `custom/media` opens the larger notification/
-      # calendar control centre, while `mpris` carries the current track.
+      # far left. The centre has separate notification and media controls,
+      # while `mpris` carries the current track.
       modules-left = [
         "custom/dashboard"
         "custom/wayle-wifi"
@@ -44,7 +44,8 @@ let
         "custom/ycal"
       ];
       modules-center = [
-        "custom/media"
+        "custom/notifications"
+        "custom/wayle-media"
         "mpris"
         "custom/lyrics"
       ];
@@ -70,6 +71,7 @@ let
         inherit output;
         "custom/dashboard" = system.dashboardModule output;
         "custom/wayle-wifi" = system.wayleWifiModule output;
+        "custom/wayle-media" = system.wayleMediaModule output;
       };
     }) wayleOutputs
   );

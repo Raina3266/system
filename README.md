@@ -442,10 +442,9 @@ A minimal custom module configuration looks like this:
 
 ## Control centre
 
-`Mod+N` and the bar's centre button open `control-centre`, one layer-shell
-panel in two columns: the calendar and the notification list on the left, the
-system readings and the media players on the right. It covers the output it
-opens on, so a click beside it dismisses it, as does Escape.
+`Mod+N` and the notification badge open `control-centre`, a single-column
+layer-shell panel containing the calendar and notification list. It covers the
+output it opens on, so a click beside it dismisses it, as does Escape.
 
 Wayle stays the notification daemon. It owns `org.freedesktop.Notifications`,
 draws the popups, keeps the history and decides Do Not Disturb; this panel only
@@ -458,20 +457,23 @@ application that sent the notification has usually stopped listening for the
 | --- | --- |
 | Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
 | Notifications | `com.wayle.NotificationsExt1`, grouped by app, with urgency, age and per-entry dismissal |
-| Media players | MPRIS over D-Bus, with a seek bar per player |
-| System | CPU, memory, the root filesystem, and the hottest component |
 
-`control-centre waybar` streams the badge for `custom/media`: a bell, a count,
-or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
-properties. Nothing shells out for it.
+`control-centre waybar` streams the badge for `custom/notifications`: a bell, a
+count, or the Do Not Disturb glyph, read from Wayle's
+`com.wayle.Notifications1` properties. Nothing shells out for it.
 
 The far-left dashboard button opens Wayle's native dashboard content in a
 monitor-local layer-shell window. The separate Wi-Fi button beside it opens
 Wayle's native network manager, where networks can be scanned, selected and
 connected. Each Waybar instance passes its output name, so either panel appears
-below its button on the display that was clicked. The dashboard Wi-Fi tile only
-toggles the radio again. The existing right-side network button remains the
-Rofi Wi-Fi/Ethernet manager.
+on the display that was clicked. Wi-Fi is no longer duplicated in the
+dashboard. The existing right-side network button remains the Rofi
+Wi-Fi/Ethernet manager.
+
+The centre media button opens a separate native Wayle media panel. It lists
+every MPRIS source that is playing or paused, with artwork, source, track,
+artist, album, an adjustable progress bar, and independent transport,
+shuffle, and repeat controls.
 
 Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
 signal, saved profile and UUID, security, interface, password, IP addresses,
@@ -490,15 +492,15 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
 The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
-`cargo test -p control-centre` covers the agenda, the MPRIS model, the readings
-and the badge. One test is ignored by default because it needs a notification
-daemon on the session bus:
+`cargo test -p control-centre` covers the agenda and the badge. One test is
+ignored by default because it needs a notification daemon on the session bus:
 
 ```sh
 cargo test -p control-centre -- --ignored
@@ -510,10 +512,7 @@ doing nothing under the pointer.
 
 ### Size
 
-Both lists scroll rather than growing the panel, and the columns are narrow on
-purpose. Three constants in `src/ui.rs` decide the shape: `NOTIFICATION_HEIGHT`
-and `MEDIA_HEIGHT` for how tall each list gets before it scrolls, and
-`WRAP_CHARS` for how much width a wrapping label may ask for — a wrapping label
-reports its *unwrapped* width as the width it wants, so without that cap the
-longest calendar entry sets the panel's width. `.column`'s `min-width` in
-`src/style.css` sets the floor.
+The notification list scrolls rather than growing the panel. Two constants in
+`src/ui.rs` decide the shape: `NOTIFICATION_HEIGHT` controls when it scrolls,
+and `WRAP_CHARS` limits how much width a wrapping label may request.
+`.column`'s `min-width` in `src/style.css` sets the floor.
