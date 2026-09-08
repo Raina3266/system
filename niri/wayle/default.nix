@@ -1,8 +1,9 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # scripts/control-centre keeps the larger notification/calendar panel. Wayle's
-# own bar is visually hidden. The native dashboard opened from Waybar is moved
-# into a real layer-shell window, avoiding GTK popup-grab restrictions.
+# own bar is visually hidden. The native dashboard and Wi-Fi manager opened
+# from Waybar use separate layer-shell windows, avoiding GTK popup-grab
+# restrictions.
 { ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -34,7 +35,7 @@ in
             ./notification-ipc.patch
             ./dashboard-waybar-host.patch
             ./dashboard-layer-window.patch
-            ./dashboard-network.patch
+            ./wayle-wifi.patch
             ./dashboard-power-profile.patch
           ];
       });
@@ -74,14 +75,14 @@ in
 
             bar = {
               # `show = false` keeps Wayle's own bar visually hidden. External
-              # dashboard requests use a separate monitor-local layer surface.
+              # dashboard and Wi-Fi requests use monitor-local layer surfaces.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;
               # The click originates in Waybar, not Wayle. An autohide GTK
               # popover would request an xdg_popup grab using an input serial
               # Wayle never received, so the compositor dismisses it immediately.
-              # The same Waybar button closes the dashboard on the next click.
+              # The same Waybar button closes its panel on the next click.
               "dropdown-autohide" = false;
               layout = [
                 {
@@ -130,7 +131,7 @@ in
           };
           Service = {
             RestartSec = 3;
-            # The native network page pipes the Wi-Fi payload over stdin, so
+            # The standalone network panel pipes the Wi-Fi payload over stdin, so
             # saved passwords never appear in argv or a temporary file.
             Environment = "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}";
           };

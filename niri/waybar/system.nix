@@ -1,8 +1,8 @@
-# Dashboard, media, and Google Calendar/Tasks status modules.
+# Dashboard, Wayle Wi-Fi, media, and Google Calendar/Tasks status modules.
 #
-# The left dashboard button opens Wayle's native system dashboard. The centre
-# media button still carries Wayle's notification count and opens the larger
-# calendar/notification control centre.
+# The two left buttons open Wayle's native dashboard and Wi-Fi manager. The
+# centre media button still carries Wayle's notification count and opens the
+# larger calendar/notification control centre.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -25,9 +25,17 @@ let
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ${lib.escapeShellArg monitor}";
   };
+
+  wayleWifiModule = monitor: {
+    format = "󰤨";
+    tooltip = true;
+    tooltip-format = "Wayle Wi-Fi";
+    on-click =
+      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
+  };
 in
 {
-  inherit dashboardModule;
+  inherit dashboardModule wayleWifiModule;
 
   homeConfig = {
     home.packages = [
@@ -58,9 +66,10 @@ in
 
   modules = {
     # Generic fallback for callers that do not create a bar per output. The
-    # actual Niri bars override this with their connector name so Wayle opens
-    # the dashboard on the monitor whose button was clicked.
+    # actual Niri bars override these with their connector name so Wayle opens
+    # each panel on the monitor whose button was clicked.
     "custom/dashboard" = dashboardModule "";
+    "custom/wayle-wifi" = wayleWifiModule "";
 
     # The bar's centre button opens the larger calendar/notification control centre.
     # control-centre draws the whole panel — notifications, calendar, media and

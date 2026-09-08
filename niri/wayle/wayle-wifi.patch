@@ -1,0 +1,1319 @@
+Separate Wayle's Wi-Fi manager from the dashboard, support its own external
+Waybar layer window, add current-connection details, and render a larger QR.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+index 7d8b079..32b4109 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+@@ -15,6 +15,16 @@ dropdown-network-cancel = Cancel
+ dropdown-network-password-placeholder = Enter password
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = WiFi
++dropdown-network-show-info = Info
++dropdown-network-show-info-tooltip = Show WiFi connection information
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Show WiFi QR code
++dropdown-network-close-details = Close details
++dropdown-network-info-title = Network information
++dropdown-network-info-loading = Reading WiFi information…
++dropdown-network-qr-title = Share { $ssid }
++dropdown-network-qr-description = Scan this code to connect to the WiFi network
++dropdown-network-qr-loading = Creating QR code…
+ dropdown-network-no-networks-title = No Networks Found
+ dropdown-network-no-networks-description = Make sure WiFi is enabled and try scanning again
+ dropdown-network-no-adapter-title = No WiFi Adapter
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+index fe3920a..3311e06 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+@@ -15,6 +15,16 @@ dropdown-network-cancel = Annuler
+ dropdown-network-password-placeholder = Entrez le mot de passe
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = Wi-Fi
++dropdown-network-show-info = Infos
++dropdown-network-show-info-tooltip = Afficher les informations de connexion Wi-Fi
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Afficher le code QR Wi-Fi
++dropdown-network-close-details = Fermer les détails
++dropdown-network-info-title = Informations réseau
++dropdown-network-info-loading = Lecture des informations Wi-Fi…
++dropdown-network-qr-title = Partager { $ssid }
++dropdown-network-qr-description = Scannez ce code pour vous connecter au réseau Wi-Fi
++dropdown-network-qr-loading = Création du code QR…
+ dropdown-network-no-networks-title = Aucun réseau trouvé
+ dropdown-network-no-networks-description = Assurez-vous que le Wi-Fi est activé et relancez la recherche
+ dropdown-network-no-adapter-title = Aucun adaptateur Wi-Fi
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+index 2709bf9..f15ef49 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+@@ -76,8 +76,19 @@ pub(super) struct ConnectionProgress {
+     pub error: Option<String>,
+ }
+ 
++#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
++pub(super) enum DetailPage {
++    #[default]
++    Hidden,
++    Info,
++    Qr,
++}
++
+ #[derive(Debug)]
+ pub(crate) enum ActiveConnectionsInput {
++    ShowWifiInfo,
++    ShowWifiQr,
++    HideDetails,
+     DisconnectWifi,
+     ForgetWifi,
+     DismissError,
+@@ -92,6 +103,14 @@ pub(crate) enum ActiveConnectionsInput {
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum ActiveConnectionsCmd {
++    InfoLoaded {
++        ssid: String,
++        result: Result<String, String>,
++    },
++    QrRendered {
++        ssid: String,
++        result: Result<Vec<u8>, String>,
++    },
+     WifiStateChanged {
+         connectivity: NetworkStatus,
+         ssid: Option<String>,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+index 5f49901..2356bdc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+@@ -2,10 +2,85 @@ use relm4::ComponentSender;
+ use tracing::warn;
+ use wayle_network::core::access_point::Ssid;
+ 
+-use super::ActiveConnections;
++use super::{
++    ActiveConnections,
++    messages::{ActiveConnectionsCmd, DetailPage},
++};
+ use crate::{i18n::t, shell::bar::dropdowns::network::helpers};
+ 
+ impl ActiveConnections {
++    pub(super) fn show_wifi_info(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Info, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::info::load(network, ssid.clone()).await;
++            ActiveConnectionsCmd::InfoLoaded { ssid, result }
++        });
++    }
++
++    pub(super) fn show_wifi_qr(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Qr, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::qr::render(network, ssid.clone()).await;
++            ActiveConnectionsCmd::QrRendered { ssid, result }
++        });
++    }
++
++    fn begin_details(&mut self, page: DetailPage, ssid: &str) {
++        self.detail_page = page;
++        self.detail_loading = true;
++        self.detail_ssid = ssid.to_owned();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) fn hide_details(&mut self) {
++        self.detail_page = DetailPage::Hidden;
++        self.detail_loading = false;
++        self.detail_ssid.clear();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) const fn details_visible(&self) -> bool {
++        !matches!(self.detail_page, DetailPage::Hidden)
++    }
++
++    pub(super) const fn details_page_name(&self) -> &'static str {
++        match self.detail_page {
++            DetailPage::Hidden => "loading",
++            DetailPage::Info => "info",
++            DetailPage::Qr => "qr",
++        }
++    }
++
++    pub(super) fn details_title(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-title", ssid = self.detail_ssid.clone()),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-title"),
++        }
++    }
++
++    pub(super) fn details_loading_label(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-loading"),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-loading"),
++        }
++    }
++
+     pub(super) fn has_wifi_error(&self) -> bool {
+         self.connection.error.is_some() && !self.wifi.connected
+     }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+index 633282d..bef004e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+@@ -1,15 +1,17 @@
++mod info;
+ mod messages;
+ mod methods;
++mod qr;
+ mod watchers;
+ 
+ use std::sync::Arc;
+ 
+ use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
++use relm4::{gtk, gtk::gdk, prelude::*};
+ use wayle_network::{NetworkService, types::states::NetworkStatus};
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+-use self::messages::{ActiveConnectionsCmd, ConnectionProgress, WifiState, WiredState};
++use self::messages::{ActiveConnectionsCmd, ConnectionProgress, DetailPage, WifiState, WiredState};
+ pub(crate) use self::messages::{ActiveConnectionsInit, ActiveConnectionsInput};
+ use crate::{i18n::t, shell::bar::dropdowns::network::helpers};
+ 
+@@ -19,6 +21,12 @@ pub(crate) struct ActiveConnections {
+     wired: WiredState,
+     connection: ConnectionProgress,
+     has_connections: bool,
++    detail_page: DetailPage,
++    detail_loading: bool,
++    detail_ssid: String,
++    detail_error: Option<String>,
++    info_text: String,
++    qr_paintable: Option<gdk::Paintable>,
+     wifi_watcher: WatcherToken,
+     wired_watcher: WatcherToken,
+ }
+@@ -215,6 +223,34 @@ impl Component for ActiveConnections {
+                                 "network-connection-actions",
+                             set_valign: gtk::Align::Center,
+ 
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-info",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-info-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-info"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiInfo,
++                            },
++
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-qr",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-qr-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-qr"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiQr,
++                            },
++
+                             #[template]
+                             GhostButton {
+                                 add_css_class:
+@@ -281,6 +317,129 @@ impl Component for ActiveConnections {
+                     },
+                 },
+             },
++
++            gtk::Revealer {
++                set_transition_type: gtk::RevealerTransitionType::SlideDown,
++                set_transition_duration: 200,
++                #[watch]
++                set_reveal_child: model.details_visible(),
++
++                #[template]
++                Card {
++                    add_css_class: "network-details-card",
++                    set_orientation: gtk::Orientation::Vertical,
++
++                    gtk::Box {
++                        add_css_class: "network-details-header",
++
++                        gtk::Box {
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_hexpand: true,
++
++                            gtk::Label {
++                                add_css_class: "network-details-title",
++                                set_halign: gtk::Align::Start,
++                                #[watch]
++                                set_label: &model.details_title(),
++                            },
++
++                            gtk::Label {
++                                add_css_class: "network-details-description",
++                                set_halign: gtk::Align::Start,
++                                set_label: &t!("dropdown-network-qr-description"),
++                                #[watch]
++                                set_visible: model.detail_page == DetailPage::Qr,
++                            },
++                        },
++
++                        #[template]
++                        GhostIconButton {
++                            set_icon_name: "ld-x-symbolic",
++                            set_tooltip_text: Some(&t!("dropdown-network-close-details")),
++                            connect_clicked => ActiveConnectionsInput::HideDetails,
++                        },
++                    },
++
++                    gtk::Stack {
++                        add_css_class: "network-details-stack",
++                        set_transition_type: gtk::StackTransitionType::Crossfade,
++                        set_transition_duration: 150,
++                        #[watch]
++                        set_visible_child_name: if model.detail_loading {
++                            "loading"
++                        } else if model.detail_error.is_some() {
++                            "error"
++                        } else {
++                            model.details_page_name()
++                        },
++
++                        add_named[Some("loading")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_halign: gtk::Align::Center,
++
++                            gtk::Spinner {
++                                set_spinning: true,
++                            },
++
++                            gtk::Label {
++                                #[watch]
++                                set_label: &model.details_loading_label(),
++                            },
++                        },
++
++                        add_named[Some("qr")] = &gtk::Box {
++                            add_css_class: "network-qr-code",
++                            set_halign: gtk::Align::Center,
++                            set_valign: gtk::Align::Center,
++
++                            gtk::Picture {
++                                set_can_shrink: true,
++                                set_content_fit: gtk::ContentFit::Contain,
++                                set_size_request: (400, 400),
++                                #[watch]
++                                set_paintable: model.qr_paintable.as_ref(),
++                            },
++                        },
++
++                        add_named[Some("info")] = &gtk::ScrolledWindow {
++                            add_css_class: "network-info-scroll",
++                            set_has_frame: false,
++                            set_hscrollbar_policy: gtk::PolicyType::Never,
++                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                            set_min_content_height: 360,
++
++                            gtk::Label {
++                                add_css_class: "network-info-text",
++                                set_xalign: 0.0,
++                                set_yalign: 0.0,
++                                set_selectable: true,
++                                set_wrap: true,
++                                set_wrap_mode: gtk::pango::WrapMode::WordChar,
++                                #[watch]
++                                set_label: &model.info_text,
++                            },
++                        },
++
++                        add_named[Some("error")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            add_css_class: "error",
++                            set_orientation: gtk::Orientation::Vertical,
++
++                            gtk::Image {
++                                set_icon_name: Some("ld-triangle-alert-symbolic"),
++                            },
++
++                            gtk::Label {
++                                set_wrap: true,
++                                set_justify: gtk::Justification::Center,
++                                #[watch]
++                                set_label: model.detail_error.as_deref().unwrap_or_default(),
++                            },
++                        },
++                    },
++                },
++            },
+         }
+     }
+ 
+@@ -309,6 +468,12 @@ impl Component for ActiveConnections {
+             wired,
+             connection: ConnectionProgress::default(),
+             has_connections,
++            detail_page: DetailPage::Hidden,
++            detail_loading: false,
++            detail_ssid: String::new(),
++            detail_error: None,
++            info_text: String::new(),
++            qr_paintable: None,
+             wifi_watcher: WatcherToken::new(),
+             wired_watcher: WatcherToken::new(),
+         };
+@@ -339,6 +504,15 @@ impl Component for ActiveConnections {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            ActiveConnectionsInput::ShowWifiInfo => {
++                self.show_wifi_info(&sender);
++            }
++            ActiveConnectionsInput::ShowWifiQr => {
++                self.show_wifi_qr(&sender);
++            }
++            ActiveConnectionsInput::HideDetails => {
++                self.hide_details();
++            }
+             ActiveConnectionsInput::DisconnectWifi => self.disconnect_wifi(&sender),
+             ActiveConnectionsInput::ForgetWifi => self.forget_wifi(&sender),
+             ActiveConnectionsInput::DismissError => {
+@@ -377,6 +551,58 @@ impl Component for ActiveConnections {
+         _root: &Self::Root,
+     ) {
+         match msg {
++            ActiveConnectionsCmd::InfoLoaded { ssid, result } => {
++                if self.detail_page != DetailPage::Info
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(info) => {
++                        self.info_text = info;
++                        self.detail_error = None;
++                    }
++                    Err(error) => {
++                        self.info_text.clear();
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
++            ActiveConnectionsCmd::QrRendered { ssid, result } => {
++                if self.detail_page != DetailPage::Qr
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(png) => {
++                        let bytes = gtk::glib::Bytes::from_owned(png);
++                        match gdk::Texture::from_bytes(&bytes) {
++                            Ok(texture) => {
++                                self.qr_paintable = Some(texture.upcast());
++                                self.detail_error = None;
++                            }
++                            Err(error) => {
++                                self.qr_paintable = None;
++                                self.detail_error =
++                                    Some(format!("Could not decode the QR image: {error}"));
++                            }
++                        }
++                    }
++                    Err(error) => {
++                        self.qr_paintable = None;
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
+             ActiveConnectionsCmd::WifiStateChanged {
+                 connectivity,
+                 ssid,
+@@ -395,6 +621,8 @@ impl Component for ActiveConnections {
+ 
+                 if self.wifi.connected {
+                     self.connection = ConnectionProgress::default();
++                } else {
++                    self.hide_details();
+                 }
+                 self.update_has_connections();
+             }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+new file mode 100644
+index 0000000..3960ca8
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+@@ -0,0 +1,283 @@
++use std::{collections::HashSet, sync::Arc};
++
++use wayle_network::{
++    NetworkService,
++    core::{
++        access_point::{AccessPoint, SecurityType, Ssid},
++        settings_connection::ConnectionSettings,
++    },
++    types::{
++        flags::{NM80211ApFlags, NM80211ApSecurityFlags},
++        wifi::NM80211Mode,
++    },
++};
++use zbus::zvariant::OwnedValue;
++
++const SECURITY_SETTING: &str = "802-11-wireless-security";
++
++pub(super) async fn load(
++    network: Arc<NetworkService>,
++    expected_ssid: String,
++) -> Result<String, String> {
++    let wifi = network
++        .wifi
++        .get()
++        .ok_or_else(|| String::from("No WiFi adapter is available."))?;
++    let ssid = wifi
++        .ssid
++        .get()
++        .filter(|ssid| ssid == &expected_ssid)
++        .ok_or_else(|| String::from("The WiFi connection changed while reading its details."))?;
++
++    let access_point = network
++        .access_point(wifi.device.active_access_point.get())
++        .await
++        .map_err(|error| format!("Could not read the active access point: {error}"))?;
++    let profile = active_profile(&network, &ssid).await;
++
++    let profile_line = profile
++        .as_ref()
++        .map(|profile| format!("{} ({})", profile.id.get(), profile.uuid.get()))
++        .unwrap_or_else(|| String::from("Not saved"));
++    let password = password_description(profile.as_ref(), access_point.security.get()).await;
++
++    let ipv4 = network
++        .ip4_config(wifi.device.core.ip4_config.get())
++        .await
++        .ok();
++    let ipv6 = network
++        .ip6_config(wifi.device.core.ip6_config.get())
++        .await
++        .ok();
++
++    let ipv4_address = ipv4
++        .as_ref()
++        .and_then(|config| config.address_data.get().into_iter().next())
++        .map(|address| address.address.to_string())
++        .or_else(|| wifi.ip4_address.get())
++        .unwrap_or_else(|| String::from("Not assigned"));
++    let ipv6_address = ipv6
++        .as_ref()
++        .and_then(|config| config.address_data.get().into_iter().next())
++        .map(|address| address.address.to_string())
++        .unwrap_or_else(|| String::from("Not assigned"));
++    let dns = dns_servers(ipv4.as_ref(), ipv6.as_ref());
++
++    let frequency = access_point.frequency.get();
++    let channel = channel_for_frequency(frequency)
++        .map(|channel| channel.to_string())
++        .unwrap_or_else(|| String::from("Unknown"));
++    let bitrate = wifi.device.bitrate.get();
++    let link_rate = if bitrate == 0 {
++        String::from("Unknown")
++    } else {
++        format!("{:.1} Mbps", f64::from(bitrate) / 1000.0)
++    };
++
++    Ok(format!(
++        "Network (SSID: {ssid})\n\n\
++         Signal:     {}%\n\
++         Profile:    {profile_line}\n\
++         Security:   {}\n\
++         Interface:  {}\n\
++         Password:   {password}\n\n\
++         Addresses\n\n\
++         IPv4:       {ipv4_address}\n\
++         IPv6:       {ipv6_address}\n\
++         DNS:        {dns}\n\n\
++         Radio\n\n\
++         BSSID:      {}\n\
++         Frequency:  {frequency} MHz ({})\n\
++         Channel:    {channel}\n\
++         Mode:       {}\n\
++         Link rate:  {link_rate}",
++        access_point.strength.get(),
++        security_label(&access_point),
++        wifi.device.core.interface.get(),
++        access_point.bssid.get(),
++        frequency_band(frequency),
++        mode_label(access_point.mode.get()),
++    ))
++}
++
++pub(super) async fn active_profile(
++    network: &NetworkService,
++    ssid: &str,
++) -> Option<ConnectionSettings> {
++    let stored_ssid = Ssid::new(ssid.as_bytes().to_vec());
++    let profiles = network.settings.connections_for_ssid(&stored_ssid);
++    let wifi = network.wifi.get()?;
++    let active = network
++        .connection(wifi.device.core.active_connection.get())
++        .await
++        .ok();
++    let active_uuid = active.as_ref().map(|connection| connection.uuid.get());
++
++    active_uuid
++        .and_then(|uuid| {
++            profiles
++                .iter()
++                .find(|profile| profile.uuid.get() == uuid)
++                .cloned()
++        })
++        .or_else(|| profiles.into_iter().next())
++}
++
++async fn password_description(
++    profile: Option<&ConnectionSettings>,
++    security: SecurityType,
++) -> String {
++    if security == SecurityType::None {
++        return String::from("None (open network)");
++    }
++    if security == SecurityType::Enterprise {
++        return String::from("Managed by the enterprise profile");
++    }
++    let Some(profile) = profile else {
++        return String::from("Unavailable (network is not saved)");
++    };
++
++    let Ok(secrets) = profile.get_secrets(SECURITY_SETTING).await else {
++        return String::from("Unavailable from NetworkManager");
++    };
++    secrets
++        .get(SECURITY_SETTING)
++        .and_then(|security| {
++            security
++                .get("psk")
++                .or_else(|| security.get("wep-key0"))
++                .and_then(string_value)
++        })
++        .filter(|password| !password.is_empty())
++        .unwrap_or_else(|| String::from("Unavailable from NetworkManager"))
++}
++
++fn dns_servers(
++    ipv4: Option<&wayle_network::core::config::ip4_config::Ip4Config>,
++    ipv6: Option<&wayle_network::core::config::ip6_config::Ip6Config>,
++) -> String {
++    let mut seen = HashSet::new();
++    let mut servers = Vec::new();
++
++    if let Some(ipv4) = ipv4 {
++        for server in ipv4.nameserver_data.get() {
++            let server = server.to_string();
++            if seen.insert(server.clone()) {
++                servers.push(server);
++            }
++        }
++    }
++    if let Some(ipv6) = ipv6 {
++        for server in ipv6.nameservers.get() {
++            let server = server.to_string();
++            if seen.insert(server.clone()) {
++                servers.push(server);
++            }
++        }
++    }
++
++    if servers.is_empty() {
++        String::from("Not assigned")
++    } else {
++        servers.join(", ")
++    }
++}
++
++fn security_label(access_point: &AccessPoint) -> &'static str {
++    let wpa = access_point.wpa_flags.get();
++    let rsn = access_point.rsn_flags.get();
++    let combined = wpa | rsn;
++    let enterprise = combined.contains(NM80211ApSecurityFlags::KEY_MGMT_802_1X);
++    let suite_b = combined.contains(NM80211ApSecurityFlags::KEY_MGMT_EAP_SUITE_B_192);
++    let sae = combined.contains(NM80211ApSecurityFlags::KEY_MGMT_SAE);
++    let psk = combined.contains(NM80211ApSecurityFlags::KEY_MGMT_PSK);
++
++    if suite_b {
++        "WPA3 Enterprise"
++    } else if enterprise && sae {
++        "WPA2/WPA3 Enterprise"
++    } else if enterprise {
++        "WPA2 Enterprise"
++    } else if sae && psk {
++        "WPA2/WPA3"
++    } else if sae {
++        "WPA3"
++    } else if combined
++        .intersects(NM80211ApSecurityFlags::KEY_MGMT_OWE | NM80211ApSecurityFlags::KEY_MGMT_OWE_TM)
++    {
++        "WPA3 OWE"
++    } else if wpa.contains(NM80211ApSecurityFlags::KEY_MGMT_PSK)
++        && rsn.contains(NM80211ApSecurityFlags::KEY_MGMT_PSK)
++    {
++        "WPA/WPA2"
++    } else if rsn.contains(NM80211ApSecurityFlags::KEY_MGMT_PSK) {
++        "WPA2"
++    } else if wpa.contains(NM80211ApSecurityFlags::KEY_MGMT_PSK) {
++        "WPA"
++    } else if access_point.flags.get().contains(NM80211ApFlags::PRIVACY) {
++        "WEP"
++    } else {
++        "Open"
++    }
++}
++
++fn frequency_band(frequency: u32) -> &'static str {
++    if frequency >= 59_400 {
++        "60 GHz"
++    } else if frequency >= 5_925 {
++        "6 GHz"
++    } else if frequency >= 4_900 {
++        "5 GHz"
++    } else {
++        "2.4 GHz"
++    }
++}
++
++fn channel_for_frequency(frequency: u32) -> Option<u32> {
++    match frequency {
++        2_484 => Some(14),
++        2_412..=2_472 if (frequency - 2_407).is_multiple_of(5) => Some((frequency - 2_407) / 5),
++        4_915..=4_980 if (frequency - 4_000).is_multiple_of(5) => Some((frequency - 4_000) / 5),
++        5_000..=5_895 if (frequency - 5_000).is_multiple_of(5) => Some((frequency - 5_000) / 5),
++        5_935 => Some(2),
++        5_955..=7_115 if (frequency - 5_950).is_multiple_of(5) => Some((frequency - 5_950) / 5),
++        58_320..=70_200 if (frequency - 56_160).is_multiple_of(2_160) => {
++            Some((frequency - 56_160) / 2_160)
++        }
++        _ => None,
++    }
++}
++
++const fn mode_label(mode: NM80211Mode) -> &'static str {
++    match mode {
++        NM80211Mode::Unknown => "Unknown",
++        NM80211Mode::Adhoc => "Ad-hoc",
++        NM80211Mode::Infra => "Infrastructure",
++        NM80211Mode::Ap => "Access point",
++        NM80211Mode::Mesh => "Mesh",
++    }
++}
++
++fn string_value(value: &OwnedValue) -> Option<String> {
++    String::try_from(value.clone()).ok()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn common_wifi_frequencies_map_to_channels() {
++        assert_eq!(channel_for_frequency(2_437), Some(6));
++        assert_eq!(channel_for_frequency(5_180), Some(36));
++        assert_eq!(channel_for_frequency(5_935), Some(2));
++        assert_eq!(channel_for_frequency(6_115), Some(33));
++    }
++
++    #[test]
++    fn frequency_bands_include_wifi_6e() {
++        assert_eq!(frequency_band(2_437), "2.4 GHz");
++        assert_eq!(frequency_band(5_180), "5 GHz");
++        assert_eq!(frequency_band(6_115), "6 GHz");
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+new file mode 100644
+index 0000000..86976aa
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+@@ -0,0 +1,192 @@
++use std::{env, ffi::OsString, process::Stdio, sync::Arc};
++
++use tokio::io::AsyncWriteExt;
++use wayle_network::{NetworkService, core::settings_connection::ConnectionSettings};
++use zbus::zvariant::OwnedValue;
++
++const SECURITY_SETTING: &str = "802-11-wireless-security";
++
++pub(super) async fn render(network: Arc<NetworkService>, ssid: String) -> Result<Vec<u8>, String> {
++    let profile = super::info::active_profile(&network, &ssid)
++        .await
++        .ok_or_else(|| {
++            String::from("No saved NetworkManager profile was found for this connection.")
++        })?;
++    let payload = payload_for_profile(&profile, &ssid).await?;
++    encode(&payload).await
++}
++
++async fn payload_for_profile(profile: &ConnectionSettings, ssid: &str) -> Result<String, String> {
++    let settings = profile
++        .get_settings()
++        .await
++        .map_err(|error| format!("Could not read the saved WiFi profile: {error}"))?;
++
++    let hidden = settings
++        .get("802-11-wireless")
++        .and_then(|wireless| wireless.get("hidden"))
++        .and_then(bool_value)
++        .unwrap_or(false);
++
++    let Some(security) = settings.get(SECURITY_SETTING) else {
++        return Ok(wifi_qr_payload(ssid, "nopass", None, hidden));
++    };
++
++    let key_mgmt = security.get("key-mgmt").and_then(string_value);
++    if matches!(key_mgmt.as_deref(), Some("owe")) {
++        return Err(String::from(
++            "Enhanced Open (OWE) networks are not supported by the WiFi QR format.",
++        ));
++    }
++    if matches!(
++        key_mgmt.as_deref(),
++        Some("wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x")
++    ) {
++        return Err(String::from(
++            "Enterprise WiFi credentials cannot be represented by this QR format.",
++        ));
++    }
++
++    let secrets = profile
++        .get_secrets(SECURITY_SETTING)
++        .await
++        .map_err(|error| format!("NetworkManager did not provide the saved password: {error}"))?;
++    let secrets = secrets.get(SECURITY_SETTING).ok_or_else(|| {
++        String::from("NetworkManager did not return a saved password for this profile.")
++    })?;
++
++    let (authentication, password) = match key_mgmt.as_deref() {
++        Some("wpa-psk" | "wpa-none" | "sae") => {
++            ("WPA", secret_string(secrets.get("psk"), "WPA password")?)
++        }
++        Some("none") => ("WEP", secret_string(secrets.get("wep-key0"), "WEP key")?),
++        Some(other) => {
++            return Err(format!(
++                "The saved WiFi security type ({other}) cannot be shared as a QR code."
++            ));
++        }
++        None => {
++            if let Some(password) = secrets.get("psk").and_then(string_value) {
++                ("WPA", password)
++            } else if let Some(password) = secrets.get("wep-key0").and_then(string_value) {
++                ("WEP", password)
++            } else {
++                return Err(String::from(
++                    "NetworkManager did not return a saved password for this profile.",
++                ));
++            }
++        }
++    };
++
++    Ok(wifi_qr_payload(
++        ssid,
++        authentication,
++        Some(&password),
++        hidden,
++    ))
++}
++
++fn secret_string(value: Option<&OwnedValue>, name: &str) -> Result<String, String> {
++    value
++        .and_then(string_value)
++        .filter(|value| !value.is_empty())
++        .ok_or_else(|| format!("NetworkManager did not return the saved {name}."))
++}
++
++fn string_value(value: &OwnedValue) -> Option<String> {
++    String::try_from(value.clone()).ok()
++}
++
++fn bool_value(value: &OwnedValue) -> Option<bool> {
++    bool::try_from(value.clone()).ok()
++}
++
++async fn encode(payload: &str) -> Result<Vec<u8>, String> {
++    let mut child = tokio::process::Command::new(qrencode_binary())
++        .args(["-t", "PNG", "-s", "10", "-m", "4", "-o", "-"])
++        .stdin(Stdio::piped())
++        .stdout(Stdio::piped())
++        .stderr(Stdio::piped())
++        .spawn()
++        .map_err(|error| format!("Could not start qrencode: {error}"))?;
++
++    let mut input = child
++        .stdin
++        .take()
++        .ok_or_else(|| String::from("qrencode standard input is unavailable."))?;
++    input
++        .write_all(payload.as_bytes())
++        .await
++        .map_err(|error| format!("Could not send WiFi details to qrencode: {error}"))?;
++    drop(input);
++
++    let output = child
++        .wait_with_output()
++        .await
++        .map_err(|error| format!("Could not read the QR image: {error}"))?;
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(format!("qrencode failed: {}", detail.trim()));
++    }
++    if output.stdout.is_empty() {
++        return Err(String::from("qrencode returned an empty image."));
++    }
++
++    Ok(output.stdout)
++}
++
++fn qrencode_binary() -> OsString {
++    env::var_os("WAYLE_QRENCODE").unwrap_or_else(|| OsString::from("qrencode"))
++}
++
++fn wifi_qr_payload(
++    ssid: &str,
++    authentication: &str,
++    password: Option<&str>,
++    hidden: bool,
++) -> String {
++    let mut payload = format!(
++        "WIFI:T:{};S:{};",
++        wifi_qr_escape(authentication),
++        wifi_qr_escape(ssid)
++    );
++    if let Some(password) = password {
++        payload.push_str("P:");
++        payload.push_str(&wifi_qr_escape(password));
++        payload.push(';');
++    }
++    payload.push_str(if hidden { "H:true;;" } else { "H:false;;" });
++    payload
++}
++
++fn wifi_qr_escape(value: &str) -> String {
++    let mut escaped = String::with_capacity(value.len());
++    for character in value.chars() {
++        if matches!(character, '\\' | ';' | ',' | ':' | '"') {
++            escaped.push('\\');
++        }
++        escaped.push(character);
++    }
++    escaped
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn payload_escapes_wifi_qr_delimiters() {
++        assert_eq!(
++            wifi_qr_payload("Cafe;Guest", "WPA", Some("a:b,c\\d"), false),
++            "WIFI:T:WPA;S:Cafe\\;Guest;P:a\\:b\\,c\\\\d;H:false;;"
++        );
++    }
++
++    #[test]
++    fn payload_marks_hidden_open_networks() {
++        assert_eq!(
++            wifi_qr_payload("Hidden", "nopass", None, true),
++            "WIFI:T:nopass;S:Hidden;H:true;;"
++        );
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+index f0192d5..95b13b8 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+@@ -12,6 +12,7 @@ pub(crate) struct NetworkDropdownInit {
+ 
+ #[derive(Debug)]
+ pub(crate) enum NetworkDropdownMsg {
++    Reset,
+     WifiToggled(bool),
+     ScanRequested,
+     AvailableNetworks(AvailableNetworksOutput),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+index b8c2483..9ddd1f0 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+@@ -15,17 +15,18 @@ use wayle_network::NetworkService;
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+ pub(super) use self::factory::Factory;
++pub(crate) use self::messages::NetworkDropdownMsg;
+ use self::{
+     active_connections::{ActiveConnections, ActiveConnectionsInit, ActiveConnectionsInput},
+     available_networks::{
+         AvailableNetworks, AvailableNetworksInit, AvailableNetworksInput, AvailableNetworksOutput,
+     },
+-    messages::{NetworkDropdownCmd, NetworkDropdownInit, NetworkDropdownMsg},
++    messages::{NetworkDropdownCmd, NetworkDropdownInit},
+ };
+ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+-const BASE_WIDTH: f32 = 382.0;
+-const BASE_HEIGHT: f32 = 512.0;
++const BASE_WIDTH: f32 = 520.0;
++const BASE_HEIGHT: f32 = 700.0;
+ 
+ pub(crate) struct NetworkDropdown {
+     network: Arc<NetworkService>,
+@@ -57,7 +58,12 @@ impl Component for NetworkDropdown {
+             set_height_request: model.scaled_height,
+ 
+             #[template]
++            #[name = "network_container"]
+             Dropdown {
++                #[watch]
++                set_width_request: model.scaled_width,
++                #[watch]
++                set_height_request: model.scaled_height,
+                 set_overflow: gtk::Overflow::Hidden,
+ 
+                 #[template]
+@@ -176,6 +182,10 @@ impl Component for NetworkDropdown {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            NetworkDropdownMsg::Reset => {
++                self.active_connections
++                    .emit(ActiveConnectionsInput::HideDetails);
++            }
+             NetworkDropdownMsg::WifiToggled(active) => {
+                 self.toggle_wifi(active, &sender);
+             }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 211b931..9b15f23 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -15,7 +15,10 @@ use wayle_widgets::prelude::{BarButton, BarButtonInput};
+ use crate::{
+     process,
+     shell::{
+-        bar::dropdowns::dashboard::{DashboardDropdown, DashboardDropdownMsg},
++        bar::dropdowns::{
++            dashboard::{DashboardDropdown, DashboardDropdownMsg},
++            network::{NetworkDropdown, NetworkDropdownMsg},
++        },
+         services::ShellServices,
+     },
+ };
+@@ -97,32 +100,44 @@ impl DropdownInstance {
+         }
+     }
+ 
+-    /// Toggles the dashboard in a real layer-shell window.
++    /// Toggles a dropdown in a real layer-shell window.
+     ///
+     /// A request initiated by Waybar cannot safely create a GTK popover: the
+     /// input serial belongs to another client. A normal layer surface has no
+     /// popup grab requirement, so it can be shown reliably from D-Bus.
+-    fn toggle_external_window(&self, monitor: &gdk::Monitor, style: DropdownStyle) -> bool {
++    fn toggle_external_window(
++        &self,
++        name: &str,
++        monitor: &gdk::Monitor,
++        style: DropdownStyle,
++    ) -> bool {
+         if let Some(window) = self.external_window.borrow().as_ref() {
+             if window.is_visible() {
+                 window.set_visible(false);
++                self.external_visibility_changed(false);
+             } else {
+                 window.set_keyboard_mode(KeyboardMode::OnDemand);
+                 window.present();
++                self.external_visibility_changed(true);
+             }
+             return true;
+         }
+ 
+-        let Some(controller) = self
+-            .controller
+-            .downcast_ref::<Controller<DashboardDropdown>>()
+-        else {
+-            warn!("external layer window is only supported by the dashboard dropdown");
++        let is_dashboard = self.controller.is::<Controller<DashboardDropdown>>();
++        let is_network = self.controller.is::<Controller<NetworkDropdown>>();
++        if !is_dashboard && !is_network {
++            warn!(
++                dropdown = name,
++                "external layer window is not supported by this dropdown"
++            );
+             return false;
+-        };
++        }
+ 
+         let Some(content) = self.popover.child() else {
+-            warn!("dashboard popover has no content for its external layer window");
++            warn!(
++                dropdown = name,
++                "popover has no content for its external layer window"
++            );
+             return false;
+         };
+         self.popover.set_child(Option::<&gtk::Widget>::None);
+@@ -131,56 +146,94 @@ impl DropdownInstance {
+         window.set_application(Some(&relm4::main_application()));
+         window.set_decorated(false);
+         window.set_resizable(false);
+-        window.add_css_class("dashboard-dropdown");
+-        window.add_css_class("dashboard-layer-window");
++        window.add_css_class(&format!("{name}-dropdown"));
++        window.add_css_class(&format!("{name}-layer-window"));
+         window.set_opacity(style.opacity);
+         if style.shadow_enabled {
+             window.add_css_class("shadow");
+         }
+ 
+         window.init_layer_shell();
+-        window.set_namespace(Some("wayle-dashboard"));
++        window.set_namespace(Some(&format!("wayle-{name}")));
+         window.set_layer(Layer::Overlay);
+         window.set_keyboard_mode(KeyboardMode::OnDemand);
+         window.set_exclusive_zone(0);
+         window.set_monitor(Some(monitor));
+-        Self::position_external_window(&window, style.location);
++        Self::position_external_window(&window, style.location, name);
+         window.set_child(Some(&content));
+ 
+-        controller.emit(DashboardDropdownMsg::SetExternalHost(window.clone()));
++        if let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<DashboardDropdown>>()
++        {
++            controller.emit(DashboardDropdownMsg::SetExternalHost(window.clone()));
++        }
+         window.present();
+         self.external_window.replace(Some(window));
++        self.external_visibility_changed(true);
+         true
+     }
+ 
+-    fn position_external_window(window: &gtk::Window, location: Location) {
++    fn external_visibility_changed(&self, visible: bool) {
++        let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<NetworkDropdown>>()
++        else {
++            return;
++        };
++
++        if visible {
++            controller.emit(NetworkDropdownMsg::ScanRequested);
++        } else {
++            controller.emit(NetworkDropdownMsg::Reset);
++        }
++    }
++
++    fn hide_external_window(&self) {
++        let external_window = self.external_window.borrow();
++        let Some(window) = external_window.as_ref() else {
++            return;
++        };
++        if window.is_visible() {
++            window.set_visible(false);
++            self.external_visibility_changed(false);
++        }
++    }
++
++    fn position_external_window(window: &gtk::Window, location: Location, name: &str) {
+         const WAYBAR_SIZE: i32 = 40;
+         const GAP: i32 = 6;
+         const OFFSET: i32 = WAYBAR_SIZE + GAP;
++        const WAYBAR_BUTTON_STEP: i32 = 50;
++        let along_bar = if name == "network" {
++            GAP + WAYBAR_BUTTON_STEP
++        } else {
++            GAP
++        };
+ 
+         match location {
+             Location::Top => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Left, true);
+                 window.set_margin(Edge::Top, OFFSET);
+-                window.set_margin(Edge::Left, GAP);
++                window.set_margin(Edge::Left, along_bar);
+             }
+             Location::Bottom => {
+                 window.set_anchor(Edge::Bottom, true);
+                 window.set_anchor(Edge::Left, true);
+                 window.set_margin(Edge::Bottom, OFFSET);
+-                window.set_margin(Edge::Left, GAP);
++                window.set_margin(Edge::Left, along_bar);
+             }
+             Location::Left => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Left, true);
+-                window.set_margin(Edge::Top, GAP);
++                window.set_margin(Edge::Top, along_bar);
+                 window.set_margin(Edge::Left, OFFSET);
+             }
+             Location::Right => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Right, true);
+-                window.set_margin(Edge::Top, GAP);
++                window.set_margin(Edge::Top, along_bar);
+                 window.set_margin(Edge::Right, OFFSET);
+             }
+         }
+@@ -509,7 +562,13 @@ impl DropdownRegistry {
+             return false;
+         };
+ 
+-        dropdown.toggle_external_window(monitor, dropdown_style(self))
++        for (other_name, other) in self.cache.borrow().iter() {
++            if other_name != name {
++                other.hide_external_window();
++            }
++        }
++
++        dropdown.toggle_external_window(name, monitor, dropdown_style(self))
+     }
+ 
+     #[allow(clippy::cognitive_complexity)]
+diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index 1d7c81b..5344f91 100644
+--- a/crates/wayle-shell/src/shell/bar/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/mod.rs
+@@ -269,7 +269,7 @@ impl Component for Bar {
+                 apply_layer(root, configured, &self.services.config);
+             }
+             BarCmd::ToggleDropdown(name) => {
+-                let toggled = if name == "dashboard" {
++                let toggled = if matches!(name.as_str(), "dashboard" | "network") {
+                     self.dropdowns.toggle_external_window(&name, &self.monitor)
+                 } else {
+                     self.dropdowns.toggle_external(&name, &self.external_anchor)
+diff --git a/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss b/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
+index 667dc8d..a0ac3d6 100644
+--- a/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
++++ b/crates/wayle-styling/scss/modules/network_dropdown/_active_connection.scss
+@@ -98,3 +98,61 @@
+ button.network-action-forget:hover {
+     color: var(--status-error);
+ }
++
++.network-details-card {
++    margin-top: var(--space-sm);
++    padding: var(--space-md);
++}
++
++.network-details-header {
++    margin-bottom: var(--space-md);
++}
++
++.network-details-title {
++    font-size: var(--text-md);
++    font-weight: var(--weight-bold);
++    color: var(--fg-default);
++}
++
++.network-details-description {
++    font-size: var(--text-sm);
++    font-weight: var(--weight-medium);
++    color: var(--fg-subtle);
++}
++
++.network-details-stack,
++.network-details-status {
++    min-height: calc(25rem * var(--global-scale));
++}
++
++.network-details-status {
++    border-spacing: var(--space-sm);
++    color: var(--fg-subtle);
++
++    spinner,
++    image {
++        -gtk-icon-size: var(--icon-lg);
++    }
++
++    &.error {
++        color: var(--status-error);
++    }
++}
++
++.network-qr-code {
++    padding: var(--space-sm);
++    border-radius: var(--rounding-element);
++    background: white;
++}
++
++.network-info-scroll {
++    background: transparent;
++}
++
++.network-info-text {
++    padding: var(--space-sm);
++    font-family: monospace;
++    font-size: var(--text-sm);
++    font-weight: var(--weight-medium);
++    color: var(--fg-default);
++}
+diff --git a/crates/wayle-styling/scss/modules/network_dropdown/_index.scss b/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
+index 95d7c4c..c4e5bf8 100644
+--- a/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
++++ b/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
+@@ -2,6 +2,22 @@
+ @import "network_list";
+ @import "password_form";
+ 
++window.network-layer-window {
++    background: transparent;
++    box-shadow: none;
++
++    > .dropdown {
++        min-width: 0;
++    }
++
++    &.shadow > .dropdown {
++        box-shadow:
++            0 0 5px rgba(0, 0, 0, 0.3),
++            0 4px 10px rgba(0, 0, 0, 0.3),
++            0 0 0 1px rgba(255, 255, 255, 0.04);
++    }
++}
++
+ button.network-scan-btn {
+     margin-right: var(--space-sm);
+     image {

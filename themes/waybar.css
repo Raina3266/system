@@ -38,6 +38,7 @@ window#waybar.bottom {
 #custom-timer,
 #custom-files,
 #custom-dashboard,
+#custom-wayle-wifi,
 #custom-media,
 #mpris,
 #tray {
@@ -140,6 +141,7 @@ window#waybar.bottom {
 #custom-files:hover,
 #custom-timer:hover,
 #custom-dashboard:hover,
+#custom-wayle-wifi:hover,
 #custom-media:hover,
 #mpris:hover,
 #custom-obsidian:hover,

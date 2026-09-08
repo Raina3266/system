@@ -466,13 +466,18 @@ or the Do Not Disturb glyph, read from Wayle's `com.wayle.Notifications1`
 properties. Nothing shells out for it.
 
 The far-left dashboard button opens Wayle's native dashboard content in a
-monitor-local layer-shell window. Each Waybar instance passes its output name,
-so the dashboard appears below the button on the display that was clicked.
-The Wi-Fi tile opens Wayle's native network page, where networks can be scanned,
-selected and connected. Right-clicking the tile still toggles the Wi-Fi radio.
-Hover the active Wi-Fi connection and press `QR` to show a share code; open,
-WEP, WPA/WPA2 and WPA3 Personal profiles are supported, while Enterprise and
-Enhanced Open profiles show an explanation instead.
+monitor-local layer-shell window. The separate Wi-Fi button beside it opens
+Wayle's native network manager, where networks can be scanned, selected and
+connected. Each Waybar instance passes its output name, so either panel appears
+below its button on the display that was clicked. The dashboard Wi-Fi tile only
+toggles the radio again. The existing right-side network button remains the
+Rofi Wi-Fi/Ethernet manager.
+
+Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
+signal, saved profile and UUID, security, interface, password, IP addresses,
+DNS, BSSID, frequency and band, channel, mode, and link rate. Press `QR` for a
+larger share code; open, WEP, WPA/WPA2 and WPA3 Personal profiles are supported,
+while Enterprise and Enhanced Open profiles show an explanation instead.
 
 ### What is still patched
 
@@ -483,7 +488,7 @@ The local patches are:
 | `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to dismiss and to silence, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
 | `dashboard-waybar-host.patch` | Adds the D-Bus dropdown request used by the external Waybar and removes the dashboard's session power actions. |
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
-| `dashboard-network.patch` | Opens Wayle's native scan/connect UI from the dashboard Wi-Fi tile and generates an inline QR code from the connected NetworkManager profile without putting its password in argv or a temporary file. |
+| `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
