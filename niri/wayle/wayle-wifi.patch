@@ -474,10 +474,10 @@ index 633282d..bef004e 100644
              }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
 new file mode 100644
-index 0000000..3960ca8
+index 0000000..bf4e032
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,343 @@
 +use std::{collections::HashSet, sync::Arc};
 +
 +use wayle_network::{
@@ -490,6 +490,7 @@ index 0000000..3960ca8
 +        flags::{NM80211ApFlags, NM80211ApSecurityFlags},
 +        wifi::NM80211Mode,
 +    },
++    wifi::Wifi,
 +};
 +use zbus::zvariant::OwnedValue;
 +
@@ -509,17 +510,18 @@ index 0000000..3960ca8
 +        .filter(|ssid| ssid == &expected_ssid)
 +        .ok_or_else(|| String::from("The WiFi connection changed while reading its details."))?;
 +
-+    let access_point = network
-+        .access_point(wifi.device.active_access_point.get())
-+        .await
-+        .map_err(|error| format!("Could not read the active access point: {error}"))?;
++    let access_point = active_access_point(&wifi, &ssid);
 +    let profile = active_profile(&network, &ssid).await;
 +
 +    let profile_line = profile
 +        .as_ref()
 +        .map(|profile| format!("{} ({})", profile.id.get(), profile.uuid.get()))
 +        .unwrap_or_else(|| String::from("Not saved"));
-+    let password = password_description(profile.as_ref(), access_point.security.get()).await;
++    let password = password_description(
++        profile.as_ref(),
++        access_point.as_ref().map(|point| point.security.get()),
++    )
++    .await;
 +
 +    let ipv4 = network
 +        .ip4_config(wifi.device.core.ip4_config.get())
@@ -543,22 +545,51 @@ index 0000000..3960ca8
 +        .unwrap_or_else(|| String::from("Not assigned"));
 +    let dns = dns_servers(ipv4.as_ref(), ipv6.as_ref());
 +
-+    let frequency = access_point.frequency.get();
-+    let channel = channel_for_frequency(frequency)
++    // The signal and the frequency are also published by the WiFi model itself,
++    // which keeps following the active access point, so those two rows survive
++    // even when the access point object cannot be resolved at all.
++    let signal = access_point
++        .as_ref()
++        .map(|point| point.strength.get())
++        .or_else(|| wifi.strength.get())
++        .map(|strength| format!("{strength}%"))
++        .unwrap_or_else(unknown);
++    let frequency = access_point
++        .as_ref()
++        .map(|point| point.frequency.get())
++        .or_else(|| wifi.frequency.get());
++    let frequency_line = frequency
++        .map(|frequency| format!("{frequency} MHz ({})", frequency_band(frequency)))
++        .unwrap_or_else(unknown);
++    let channel = frequency
++        .and_then(channel_for_frequency)
 +        .map(|channel| channel.to_string())
-+        .unwrap_or_else(|| String::from("Unknown"));
++        .unwrap_or_else(unknown);
++    let security = access_point
++        .as_ref()
++        .map(|point| String::from(security_label(point)))
++        .unwrap_or_else(unknown);
++    let bssid = access_point
++        .as_ref()
++        .map(|point| point.bssid.get().to_string())
++        .unwrap_or_else(unknown);
++    let mode = access_point
++        .as_ref()
++        .map(|point| String::from(mode_label(point.mode.get())))
++        .unwrap_or_else(unknown);
++
 +    let bitrate = wifi.device.bitrate.get();
 +    let link_rate = if bitrate == 0 {
-+        String::from("Unknown")
++        unknown()
 +    } else {
 +        format!("{:.1} Mbps", f64::from(bitrate) / 1000.0)
 +    };
 +
 +    Ok(format!(
 +        "Network (SSID: {ssid})\n\n\
-+         Signal:     {}%\n\
++         Signal:     {signal}\n\
 +         Profile:    {profile_line}\n\
-+         Security:   {}\n\
++         Security:   {security}\n\
 +         Interface:  {}\n\
 +         Password:   {password}\n\n\
 +         Addresses\n\n\
@@ -566,18 +597,43 @@ index 0000000..3960ca8
 +         IPv6:       {ipv6_address}\n\
 +         DNS:        {dns}\n\n\
 +         Radio\n\n\
-+         BSSID:      {}\n\
-+         Frequency:  {frequency} MHz ({})\n\
++         BSSID:      {bssid}\n\
++         Frequency:  {frequency_line}\n\
 +         Channel:    {channel}\n\
-+         Mode:       {}\n\
++         Mode:       {mode}\n\
 +         Link rate:  {link_rate}",
-+        access_point.strength.get(),
-+        security_label(&access_point),
 +        wifi.device.core.interface.get(),
-+        access_point.bssid.get(),
-+        frequency_band(frequency),
-+        mode_label(access_point.mode.get()),
 +    ))
++}
++
++fn unknown() -> String {
++    String::from("Unknown")
++}
++
++/// Resolves the access point the device is associated with, from the live list
++/// the WiFi model maintains.
++///
++/// NetworkManager gives an access point a new object path whenever it recreates
++/// it, which it does after scans, roams and reconnects. `wayle-network` reads
++/// the device's `ActiveAccessPoint` path when it builds the WiFi model and does
++/// not refresh it afterwards, so asking NetworkManager for that path fails with
++/// "object not found" as soon as the network has moved on. Use the cached path
++/// only while it still names an access point that exists, and otherwise take the
++/// strongest access point advertising the network we are connected to.
++fn active_access_point(wifi: &Wifi, ssid: &str) -> Option<Arc<AccessPoint>> {
++    let active_path = wifi.device.active_access_point.get();
++    let access_points = wifi.access_points.get();
++
++    access_points
++        .iter()
++        .find(|access_point| *access_point.object_path() == active_path)
++        .or_else(|| {
++            access_points
++                .iter()
++                .filter(|access_point| access_point.ssid.get().to_string_lossy() == ssid)
++                .max_by_key(|access_point| access_point.strength.get())
++        })
++        .cloned()
 +}
 +
 +pub(super) async fn active_profile(
@@ -605,14 +661,18 @@ index 0000000..3960ca8
 +
 +async fn password_description(
 +    profile: Option<&ConnectionSettings>,
-+    security: SecurityType,
++    security: Option<SecurityType>,
 +) -> String {
-+    if security == SecurityType::None {
-+        return String::from("None (open network)");
++    match security {
++        Some(SecurityType::None) => return String::from("None (open network)"),
++        Some(SecurityType::Enterprise) => {
++            return String::from("Managed by the enterprise profile");
++        }
++        // Without an access point the saved profile is the only thing left to
++        // read, and it answers for itself whether the network has a password.
++        _ => {}
 +    }
-+    if security == SecurityType::Enterprise {
-+        return String::from("Managed by the enterprise profile");
-+    }
++
 +    let Some(profile) = profile else {
 +        return String::from("Unavailable (network is not saved)");
 +    };

@@ -490,13 +490,27 @@ Rofi Wi-Fi/Ethernet manager.
 The centre media button opens a separate native Wayle media panel. It lists
 every MPRIS source that is playing or paused, with artwork, source, track,
 artist, album, an adjustable progress bar, and independent transport,
-shuffle, and repeat controls.
+shuffle, and repeat controls. Each card is compact: the elapsed and total times
+sit at the ends of the control row instead of on a row of their own, and the
+padding around every element is tighter. No text is smaller than it was.
 
 Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
 signal, saved profile and UUID, security, interface, password, IP addresses,
 DNS, BSSID, frequency and band, channel, mode, and link rate. Press `QR` for a
 larger share code; open, WEP, WPA/WPA2 and WPA3 Personal profiles are supported,
 while Enterprise and Enhanced Open profiles show an explanation instead.
+
+`Info` resolves the access point from the list Wayle keeps live rather than from
+the device's cached `ActiveAccessPoint` path. `wayle-network` reads that path
+once, when it builds the Wi-Fi model, and never refreshes it; NetworkManager
+gives an access point a new object path every time it recreates one, which it
+does after scans, roams and reconnects, so the cached path goes stale and asking
+for it fails with `object not found at path`. The cached path is used while it
+still names an access point that exists, and otherwise the strongest access
+point advertising the connected SSID stands in. If neither is available, the
+signal and frequency fall back to the values the Wi-Fi model itself publishes
+and the remaining radio rows read **Unknown**, instead of the whole panel being
+replaced by an error.
 
 ### Bluetooth and audio panel
 
@@ -552,9 +566,9 @@ The local patches are:
 | `notification-history.patch` | Keeps Chrome and Chromium transient popups in Wayle's native history. |
 | `dashboard-waybar-host.patch` | Adds the D-Bus dropdown request used by the external Waybar and removes the dashboard's session power actions. |
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
-| `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
+| `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with compact cards that keep the original text sizes. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
