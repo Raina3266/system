@@ -1,0 +1,2056 @@
+Turn Wayle's audio dropdown into a Bluetooth and audio panel opened from
+Waybar's audio button, with the tabs the Rofi menu it replaces used.
+
+Pair hosts Wayle's own Bluetooth dropdown, so the Bluetooth component's root
+becomes a box and its factory supplies the standalone popover. Output and
+Input keep the native default-device row and device picker, and the picker
+now expands a device whose profile exposes several plugged-in ports into one
+row per port, activating the port before it makes the device default. Play is
+the native per-application volume list plus a route button, which opens the
+same device list in a mode that moves one playback stream instead.
+
+The panel is registered for the external layer-shell window path and anchors
+to the bar's trailing edge, where the Waybar audio button lives.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
+index d6a66a6..6bd5de4 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
+@@ -1,8 +1,13 @@
+ ### Audio Dropdown
+ 
+ dropdown-audio-title = Audio
++dropdown-audio-tab-pair = Pair
++dropdown-audio-tab-play = Play
+ dropdown-audio-output = Output
+ dropdown-audio-input = Input
++dropdown-audio-playback = Playback
++dropdown-audio-route = Route
++dropdown-audio-route-tooltip = Choose an output for this stream
+ dropdown-audio-output-devices = Output Devices
+ dropdown-audio-input-devices = Input Devices
+ dropdown-audio-app-volume = Application Volume
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl b/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
+index e8c2ac8..2d9800e 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
+@@ -1,8 +1,13 @@
+ ### Menu déroulant audio
+ 
+ dropdown-audio-title = Audio
++dropdown-audio-tab-pair = Appairer
++dropdown-audio-tab-play = Lecture
+ dropdown-audio-output = Sortie
+ dropdown-audio-input = Entrée
++dropdown-audio-playback = Lecture
++dropdown-audio-route = Destination
++dropdown-audio-route-tooltip = Choisir une sortie pour ce flux
+ dropdown-audio-output-devices = Périphériques de sortie
+ dropdown-audio-input-devices = Périphériques d'entrée
+ dropdown-audio-app-volume = Volume des applications
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
+index cedf2e1..319e71c 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
+@@ -1,32 +1,69 @@
+ use std::sync::Arc;
+ 
+-use wayle_audio::AudioService;
++use wayle_audio::{
++    AudioService,
++    core::{
++        device::{input::InputDevice, output::OutputDevice},
++        stream::AudioStream,
++    },
++};
+ 
+ use crate::shell::bar::dropdowns::audio::VolumeSectionKind;
+ 
+-#[derive(Debug)]
++/// What activating a row does.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub(crate) enum DevicePickerMode {
++    /// A top-level tab: the row's device becomes the system default.
++    Default,
++    /// The Play tab's route picker: the row's device receives one stream.
++    Route,
++}
++
++/// Live device a row activates.
++#[derive(Clone)]
++pub(crate) enum RowDevice {
++    Output(Arc<OutputDevice>),
++    Input(Arc<InputDevice>),
++}
++
++/// One selectable row: a device, or one of its available ports.
++#[derive(Clone)]
+ pub(crate) struct DeviceInfo {
+     pub description: String,
+     pub subtitle: Option<String>,
+     pub icon: &'static str,
+     pub is_active: bool,
++    pub device: RowDevice,
++    /// Port to activate before the row's action, when the device exposes more
++    /// than one available port.
++    pub port: Option<String>,
+ }
+ 
+ pub(crate) struct DevicePickerInit {
+     pub audio: Arc<AudioService>,
+     pub kind: VolumeSectionKind,
+     pub title: String,
++    pub mode: DevicePickerMode,
+ }
+ 
+ #[derive(Debug)]
+ pub(crate) enum DevicePickerInput {
+     DeviceSelected(usize),
+     BackClicked,
++    /// Route mode only: the stream every selection moves, with the application
++    /// name shown in the header.
++    SetStream {
++        stream: Option<Arc<AudioStream>>,
++        app: String,
++    },
+ }
+ 
+ #[derive(Debug)]
+ pub(crate) enum DevicePickerCmd {
+-    DevicesChanged(Vec<DeviceInfo>),
++    /// A device appeared or disappeared, or the default device changed.
++    DeviceListChanged,
++    /// A port or the routed stream's destination changed.
++    RowsChanged,
+ }
+ 
+ #[derive(Debug)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
+index 12b2061..26b355c 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
+@@ -1,118 +1,339 @@
+-use std::sync::Arc;
+-
+ use relm4::prelude::*;
+ use tracing::warn;
+-use wayle_audio::{
+-    AudioService,
+-    core::device::{input::InputDevice, output::OutputDevice},
+-};
++use wayle_audio::{Error, types::device::DevicePort};
+ 
+ use super::{
+     DevicePicker,
+-    messages::{DeviceInfo, DevicePickerOutput},
++    messages::{DeviceInfo, DevicePickerMode, RowDevice},
+ };
+ use crate::shell::bar::dropdowns::audio::{VolumeSectionKind, helpers};
+ 
++impl RowDevice {
++    fn active_port(&self) -> Option<String> {
++        match self {
++            Self::Output(device) => device.active_port.get(),
++            Self::Input(device) => device.active_port.get(),
++        }
++    }
++
++    async fn set_port(&self, port: String) -> Result<(), Error> {
++        match self {
++            Self::Output(device) => device.set_port(port).await,
++            Self::Input(device) => device.set_port(port).await,
++        }
++    }
++
++    async fn set_as_default(&self) -> Result<(), Error> {
++        match self {
++            Self::Output(device) => device.set_as_default().await,
++            Self::Input(device) => device.set_as_default().await,
++        }
++    }
++}
++
+ impl DevicePicker {
+-    pub(super) fn apply_device_list(&mut self, list: Vec<DeviceInfo>) {
++    pub(super) fn rebuild_rows(&mut self) {
++        self.rows = self.build_rows();
++
+         let mut guard = self.devices.guard();
+         guard.clear();
+-        for info in list {
+-            guard.push_back(info);
++        for row in &self.rows {
++            guard.push_back(row.clone());
+         }
+     }
+ 
+-    pub(super) fn select_device(&self, index: usize, sender: &ComponentSender<Self>) {
+-        let _ = sender.output(DevicePickerOutput::NavigateBack);
+-
++    fn build_rows(&self) -> Vec<DeviceInfo> {
+         match self.kind {
+             VolumeSectionKind::Output => {
+-                let Some(device) = self.cached_output_devices.get(index).cloned() else {
+-                    return;
+-                };
+-                sender.command(|_out, _shutdown| async move {
+-                    if let Err(err) = device.set_as_default().await {
+-                        warn!(error = %err, "failed to set default output");
++                let target = match self.mode {
++                    DevicePickerMode::Default => self
++                        .audio
++                        .default_output
++                        .get()
++                        .map(|device| device.key.index),
++                    DevicePickerMode::Route => {
++                        self.stream.as_ref().map(|stream| stream.device_index.get())
+                     }
+-                });
++                };
++
++                let devices = self.audio.output_devices.get();
++                devices
++                    .iter()
++                    .flat_map(|device| {
++                        device_rows(
++                            RowDevice::Output(device.clone()),
++                            &device.description.get(),
++                            helpers::output_device_icon(
++                                &device.name.get(),
++                                &device.description.get(),
++                                &device.properties.get(),
++                            ),
++                            &device.ports.get(),
++                            &device.active_port.get(),
++                            target == Some(device.key.index),
++                        )
++                    })
++                    .collect()
+             }
+             VolumeSectionKind::Input => {
+-                let mut physical_inputs = self
+-                    .cached_input_devices
++                let target = self
++                    .audio
++                    .default_input
++                    .get()
++                    .map(|device| device.key.index);
++
++                let devices = self.audio.input_devices.get();
++                devices
+                     .iter()
+-                    .filter(|device| !device.is_monitor.get());
+-                let Some(device) = physical_inputs.nth(index).cloned() else {
+-                    return;
+-                };
+-                sender.command(|_out, _shutdown| async move {
+-                    if let Err(err) = device.set_as_default().await {
+-                        warn!(error = %err, "failed to set default input");
+-                    }
+-                });
++                    .filter(|device| !device.is_monitor.get())
++                    .flat_map(|device| {
++                        device_rows(
++                            RowDevice::Input(device.clone()),
++                            &device.description.get(),
++                            helpers::input_device_icon(
++                                &device.name.get(),
++                                &device.description.get(),
++                                &device.properties.get(),
++                            ),
++                            &device.ports.get(),
++                            &device.active_port.get(),
++                            target == Some(device.key.index),
++                        )
++                    })
++                    .collect()
+             }
+         }
+     }
+ 
+-    pub(super) fn build_device_list(
+-        audio: &AudioService,
+-        kind: VolumeSectionKind,
+-    ) -> Vec<DeviceInfo> {
+-        match kind {
+-            VolumeSectionKind::Output => {
+-                build_output_device_list(&audio.output_devices.get(), &audio.default_output.get())
++    /// Activates the row's port when it names one, then makes its device the
++    /// default or moves the routed stream onto it.
++    ///
++    /// The picker stays where it is: the checked row follows the audio server's
++    /// answer rather than the click.
++    pub(super) fn select_device(&self, index: usize, sender: &ComponentSender<Self>) {
++        let Some(row) = self.rows.get(index).cloned() else {
++            return;
++        };
++
++        let mode = self.mode;
++        let audio = self.audio.clone();
++        let stream = self.stream.clone();
++
++        sender.command(move |_out, _shutdown| async move {
++            if let Some(port) = row.port.clone()
++                && row.device.active_port().as_deref() != Some(port.as_str())
++                && let Err(err) = row.device.set_port(port).await
++            {
++                warn!(error = %err, "failed to activate device port");
++                return;
+             }
+-            VolumeSectionKind::Input => {
+-                build_input_device_list(&audio.input_devices.get(), &audio.default_input.get())
++
++            match mode {
++                DevicePickerMode::Default => {
++                    if let Err(err) = row.device.set_as_default().await {
++                        warn!(error = %err, "failed to set default device");
++                    }
++                }
++                DevicePickerMode::Route => {
++                    let (Some(stream), RowDevice::Output(device)) = (stream, &row.device) else {
++                        return;
++                    };
++
++                    // The stream can end while its picker is open; route the
++                    // row the user chose or nothing at all.
++                    if !audio
++                        .playback_streams
++                        .get()
++                        .iter()
++                        .any(|live| live.key == stream.key)
++                    {
++                        warn!("playback stream ended before it could be routed");
++                        return;
++                    }
++
++                    if let Err(err) = stream.move_to_device(device.key).await {
++                        warn!(error = %err, "failed to route playback stream");
++                    }
++                }
+             }
+-        }
++        });
+     }
+ }
+ 
+-pub(super) fn build_output_device_list(
+-    devices: &[Arc<OutputDevice>],
+-    default: &Option<Arc<OutputDevice>>,
++/// Expands one device into its selectable rows.
++fn device_rows(
++    device: RowDevice,
++    description: &str,
++    icon: &'static str,
++    ports: &[DevicePort],
++    active_port: &Option<String>,
++    device_is_target: bool,
+ ) -> Vec<DeviceInfo> {
+-    devices
+-        .iter()
+-        .map(|device| DeviceInfo {
+-            description: device.description.get(),
+-            subtitle: helpers::active_port_description(
+-                &device.active_port.get(),
+-                &device.ports.get(),
+-            ),
+-            icon: helpers::output_device_icon(
+-                &device.name.get(),
+-                &device.description.get(),
+-                &device.properties.get(),
+-            ),
+-            is_active: default
+-                .as_ref()
+-                .is_some_and(|default_device| default_device.key == device.key),
++    port_rows(description, ports, active_port, device_is_target)
++        .into_iter()
++        .map(|row| DeviceInfo {
++            description: row.description,
++            subtitle: row.subtitle,
++            icon,
++            is_active: row.is_active,
++            device: device.clone(),
++            port: row.port,
+         })
+         .collect()
+ }
+ 
+-pub(super) fn build_input_device_list(
+-    devices: &[Arc<InputDevice>],
+-    default: &Option<Arc<InputDevice>>,
+-) -> Vec<DeviceInfo> {
+-    devices
+-        .iter()
+-        .filter(|device| !device.is_monitor.get())
+-        .map(|device| DeviceInfo {
+-            description: device.description.get(),
+-            subtitle: helpers::active_port_description(
+-                &device.active_port.get(),
+-                &device.ports.get(),
+-            ),
+-            icon: helpers::input_device_icon(
+-                &device.name.get(),
+-                &device.description.get(),
+-                &device.properties.get(),
+-            ),
+-            is_active: default
+-                .as_ref()
+-                .is_some_and(|default_device| default_device.key == device.key),
++/// One row's text, checked state and port, without the device handle.
++#[derive(Debug, PartialEq, Eq)]
++struct RowShape {
++    description: String,
++    subtitle: Option<String>,
++    is_active: bool,
++    port: Option<String>,
++}
++
++/// Splits a device into the rows that stand for its outputs.
++///
++/// A device whose profile exposes several plugged-in ports becomes one row per
++/// port, because speakers and a headphone jack are separate destinations to
++/// choose between. Ports the card reports as unplugged are left out; ports of
++/// unknown availability stay selectable. Anything else stays a single device
++/// row subtitled with the port it is currently using.
++fn port_rows(
++    description: &str,
++    ports: &[DevicePort],
++    active_port: &Option<String>,
++    device_is_target: bool,
++) -> Vec<RowShape> {
++    let mut selectable: Vec<&DevicePort> = ports.iter().filter(|port| port.available).collect();
++
++    if selectable.len() < 2 {
++        return vec![RowShape {
++            description: description.to_owned(),
++            subtitle: helpers::active_port_description(active_port, ports),
++            is_active: device_is_target,
++            port: None,
++        }];
++    }
++
++    selectable.sort_by(|left, right| right.priority.cmp(&left.priority));
++
++    selectable
++        .into_iter()
++        .map(|port| RowShape {
++            description: port.description.clone(),
++            subtitle: Some(description.to_owned()),
++            is_active: device_is_target && active_port.as_deref() == Some(port.name.as_str()),
++            port: Some(port.name.clone()),
+         })
+         .collect()
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn port(name: &str, description: &str, priority: u32, available: bool) -> DevicePort {
++        DevicePort {
++            name: name.to_owned(),
++            description: description.to_owned(),
++            priority,
++            available,
++        }
++    }
++
++    fn shapes(ports: &[DevicePort], active: Option<&str>, is_target: bool) -> Vec<RowShape> {
++        port_rows(
++            "Built-in Audio",
++            ports,
++            &active.map(str::to_owned),
++            is_target,
++        )
++    }
++
++    #[test]
++    fn single_port_device_stays_one_row() {
++        let ports = [port("analog-output-speaker", "Speaker", 10_000, true)];
++        let rows = shapes(&ports, Some("analog-output-speaker"), true);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].description, "Built-in Audio");
++        assert_eq!(rows[0].subtitle.as_deref(), Some("Speaker"));
++        assert_eq!(rows[0].port, None);
++        assert!(rows[0].is_active);
++    }
++
++    #[test]
++    fn device_without_ports_has_no_subtitle() {
++        let rows = shapes(&[], None, false);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].subtitle, None);
++        assert!(!rows[0].is_active);
++    }
++
++    #[test]
++    fn plugged_ports_become_their_own_rows() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), true);
++
++        assert_eq!(rows.len(), 2);
++        assert_eq!(rows[0].description, "Speaker");
++        assert_eq!(rows[0].subtitle.as_deref(), Some("Built-in Audio"));
++        assert_eq!(rows[1].description, "Headphones");
++    }
++
++    #[test]
++    fn only_the_active_port_of_the_target_device_is_checked() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), true);
++
++        assert!(!rows[0].is_active);
++        assert!(rows[1].is_active);
++    }
++
++    #[test]
++    fn ports_of_a_device_that_is_not_the_target_are_unchecked() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), false);
++
++        assert!(rows.iter().all(|row| !row.is_active));
++    }
++
++    #[test]
++    fn unplugged_ports_are_hidden() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, false),
++        ];
++        let rows = shapes(&ports, Some("analog-output-speaker"), true);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].description, "Built-in Audio");
++        assert_eq!(rows[0].subtitle.as_deref(), Some("Speaker"));
++    }
++
++    #[test]
++    fn rows_follow_port_priority() {
++        let ports = [
++            port("hdmi-output-1", "HDMI / DisplayPort 2", 100, true),
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("hdmi-output-0", "HDMI / DisplayPort 1", 500, true),
++        ];
++        let rows = shapes(&ports, None, false);
++
++        let order: Vec<&str> = rows.iter().map(|row| row.description.as_str()).collect();
++        assert_eq!(
++            order,
++            ["Speaker", "HDMI / DisplayPort 1", "HDMI / DisplayPort 2"]
++        );
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
+index dac5a43..37b24b4 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
+@@ -7,7 +7,8 @@ use std::sync::Arc;
+ 
+ use gtk::prelude::*;
+ use relm4::{factory::FactoryVecDeque, gtk, prelude::*};
+-use wayle_audio::AudioService;
++use wayle_audio::{AudioService, core::stream::AudioStream};
++use wayle_widgets::WatcherToken;
+ 
+ use self::device_item::DeviceOptionItem;
+ pub(super) use self::messages::*;
+@@ -16,10 +17,13 @@ use crate::shell::bar::dropdowns::audio::VolumeSectionKind;
+ pub(crate) struct DevicePicker {
+     audio: Arc<AudioService>,
+     kind: VolumeSectionKind,
++    mode: DevicePickerMode,
+     title: String,
++    rows: Vec<DeviceInfo>,
+     devices: FactoryVecDeque<DeviceOptionItem>,
+-    cached_output_devices: Vec<Arc<wayle_audio::core::device::output::OutputDevice>>,
+-    cached_input_devices: Vec<Arc<wayle_audio::core::device::input::InputDevice>>,
++    stream: Option<Arc<AudioStream>>,
++    device_watcher: WatcherToken,
++    stream_watcher: WatcherToken,
+ }
+ 
+ #[relm4::component(pub(crate))]
+@@ -41,11 +45,16 @@ impl Component for DevicePicker {
+                 wayle_widgets::prelude::GhostIconButton {
+                     add_css_class: "picker-back",
+                     set_icon_name: "ld-arrow-left-symbolic",
++                    // The device tabs are reached from the tab bar; only the
++                    // route picker is a page you come back from.
++                    #[watch]
++                    set_visible: model.mode == DevicePickerMode::Route,
+                     connect_clicked => DevicePickerInput::BackClicked,
+                 },
+ 
+                 gtk::Label {
+                     add_css_class: "picker-title",
++                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+                     #[watch]
+                     set_label: &model.title,
+                 },
+@@ -83,22 +92,20 @@ impl Component for DevicePicker {
+ 
+         watchers::spawn(&sender, &init.audio, init.kind);
+ 
+-        let initial_list = Self::build_device_list(&init.audio, init.kind);
+-        let (cached_output, cached_input) = match init.kind {
+-            VolumeSectionKind::Output => (init.audio.output_devices.get(), Vec::new()),
+-            VolumeSectionKind::Input => (Vec::new(), init.audio.input_devices.get()),
+-        };
+-
+         let mut model = Self {
+             audio: init.audio,
+             kind: init.kind,
++            mode: init.mode,
+             title: init.title,
++            rows: Vec::new(),
+             devices,
+-            cached_output_devices: cached_output,
+-            cached_input_devices: cached_input,
++            stream: None,
++            device_watcher: WatcherToken::new(),
++            stream_watcher: WatcherToken::new(),
+         };
+ 
+-        model.apply_device_list(initial_list);
++        model.rebuild_rows();
++        model.resume_device_watchers(&sender);
+ 
+         let device_list = model.devices.widget();
+         let widgets = view_output!();
+@@ -113,27 +120,46 @@ impl Component for DevicePicker {
+             DevicePickerInput::BackClicked => {
+                 let _ = sender.output(DevicePickerOutput::NavigateBack);
+             }
++            DevicePickerInput::SetStream { stream, app } => {
++                self.title = app;
++                self.stream = stream;
++                self.resume_stream_watcher(&sender);
++                self.rebuild_rows();
++            }
+         }
+     }
+ 
+     fn update_cmd(
+         &mut self,
+         msg: Self::CommandOutput,
+-        _sender: ComponentSender<Self>,
++        sender: ComponentSender<Self>,
+         _root: &Self::Root,
+     ) {
+         match msg {
+-            DevicePickerCmd::DevicesChanged(list) => {
+-                match self.kind {
+-                    VolumeSectionKind::Output => {
+-                        self.cached_output_devices = self.audio.output_devices.get();
+-                    }
+-                    VolumeSectionKind::Input => {
+-                        self.cached_input_devices = self.audio.input_devices.get();
+-                    }
+-                }
+-                self.apply_device_list(list);
++            DevicePickerCmd::DeviceListChanged => {
++                self.rebuild_rows();
++                self.resume_device_watchers(&sender);
++            }
++            DevicePickerCmd::RowsChanged => {
++                self.rebuild_rows();
+             }
+         }
+     }
+ }
++
++impl DevicePicker {
++    /// Re-arms the per-device port watchers after the device list changed.
++    fn resume_device_watchers(&mut self, sender: &ComponentSender<Self>) {
++        let token = self.device_watcher.reset();
++        watchers::spawn_per_device(sender, &self.audio, self.kind, token);
++    }
++
++    /// Follows the routed stream's destination so the checked row is the one
++    /// the audio server actually chose.
++    fn resume_stream_watcher(&mut self, sender: &ComponentSender<Self>) {
++        let token = self.stream_watcher.reset();
++        if let Some(stream) = &self.stream {
++            watchers::spawn_stream(sender, stream, token);
++        }
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
+index 4ae004e..eba663f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
+@@ -1,14 +1,11 @@
+ use std::sync::Arc;
+ 
+ use relm4::ComponentSender;
+-use wayle_audio::AudioService;
+-use wayle_widgets::watch;
++use tokio_util::sync::CancellationToken;
++use wayle_audio::{AudioService, core::stream::AudioStream};
++use wayle_widgets::{watch, watch_cancellable};
+ 
+-use super::{
+-    DevicePicker,
+-    messages::DevicePickerCmd,
+-    methods::{build_input_device_list, build_output_device_list},
+-};
++use super::{DevicePicker, messages::DevicePickerCmd};
+ use crate::shell::bar::dropdowns::audio::VolumeSectionKind;
+ 
+ pub(super) fn spawn(
+@@ -24,9 +21,7 @@ pub(super) fn spawn(
+                 sender,
+                 [output_devices.watch(), default_output.watch()],
+                 |out| {
+-                    let list =
+-                        build_output_device_list(&output_devices.get(), &default_output.get());
+-                    let _ = out.send(DevicePickerCmd::DevicesChanged(list));
++                    let _ = out.send(DevicePickerCmd::DeviceListChanged);
+                 }
+             );
+         }
+@@ -37,10 +32,60 @@ pub(super) fn spawn(
+                 sender,
+                 [input_devices.watch(), default_input.watch()],
+                 |out| {
+-                    let list = build_input_device_list(&input_devices.get(), &default_input.get());
+-                    let _ = out.send(DevicePickerCmd::DevicesChanged(list));
++                    let _ = out.send(DevicePickerCmd::DeviceListChanged);
+                 }
+             );
+         }
+     }
+ }
++
++/// Watches every device's ports, so plugging a jack in or out adds and removes
++/// its row without waiting for the device list itself to change.
++pub(super) fn spawn_per_device(
++    sender: &ComponentSender<DevicePicker>,
++    audio: &Arc<AudioService>,
++    kind: VolumeSectionKind,
++    token: CancellationToken,
++) {
++    match kind {
++        VolumeSectionKind::Output => {
++            for device in audio.output_devices.get() {
++                let ports = device.ports.clone();
++                let active_port = device.active_port.clone();
++                watch_cancellable!(
++                    sender,
++                    token.clone(),
++                    [ports.watch(), active_port.watch()],
++                    |out| {
++                        let _ = out.send(DevicePickerCmd::RowsChanged);
++                    }
++                );
++            }
++        }
++        VolumeSectionKind::Input => {
++            for device in audio.input_devices.get() {
++                let ports = device.ports.clone();
++                let active_port = device.active_port.clone();
++                watch_cancellable!(
++                    sender,
++                    token.clone(),
++                    [ports.watch(), active_port.watch()],
++                    |out| {
++                        let _ = out.send(DevicePickerCmd::RowsChanged);
++                    }
++                );
++            }
++        }
++    }
++}
++
++pub(super) fn spawn_stream(
++    sender: &ComponentSender<DevicePicker>,
++    stream: &Arc<AudioStream>,
++    token: CancellationToken,
++) {
++    let device_index = stream.device_index.clone();
++    watch_cancellable!(sender, token, [device_index.watch()], |out| {
++        let _ = out.send(DevicePickerCmd::RowsChanged);
++    });
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
+index b636f55..9ba4adc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
+@@ -11,9 +11,14 @@ pub(crate) struct Factory;
+ impl DropdownFactory for Factory {
+     fn create(services: &ShellServices) -> Option<DropdownInstance> {
+         let audio = require_service("audio", "audio", services.audio.clone())?;
++        let bluetooth = services.bluetooth.clone();
+         let config = services.config.clone();
+ 
+-        let init = AudioDropdownInit { audio, config };
++        let init = AudioDropdownInit {
++            audio,
++            bluetooth,
++            config,
++        };
+         let controller = AudioDropdown::builder().launch(init).detach();
+ 
+         let popover = controller.widget().clone();
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
+index 9ce92dd..15a4bd9 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
+@@ -2,7 +2,7 @@ use gtk::{glib, pango, prelude::*};
+ use relm4::{gtk, prelude::*};
+ use wayle_widgets::prelude::DebouncedSlider;
+ 
+-use crate::shell::bar::dropdowns::audio::helpers;
++use crate::{i18n::t, shell::bar::dropdowns::audio::helpers};
+ 
+ pub(super) struct AppVolumeInit {
+     pub name: String,
+@@ -25,12 +25,14 @@ pub(super) enum AppVolumeItemMsg {
+     SetBackendState { volume: f64, muted: bool },
+     VolumeCommitted(f64),
+     ToggleMute,
++    Route,
+ }
+ 
+ #[derive(Debug)]
+ pub(super) enum AppVolumeItemOutput {
+     VolumeChanged(u32, f64),
+     ToggleMute(u32),
++    Route(u32),
+ }
+ 
+ #[relm4::factory(pub(super))]
+@@ -77,6 +79,19 @@ impl FactoryComponent for AppVolumeItem {
+                     set_label: &format!("{:.0}%", self.slider.value()),
+                 },
+ 
++                gtk::Button {
++                    add_css_class: "audio-route-btn",
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    set_tooltip_text: Some(&t!("dropdown-audio-route-tooltip")),
++                    connect_clicked => AppVolumeItemMsg::Route,
++
++                    gtk::Image {
++                        add_css_class: "audio-route-icon",
++                        set_icon_name: Some("ld-arrow-right-symbolic"),
++                    },
++                },
++
+                 gtk::Button {
+                     add_css_class: "audio-mute-btn",
+                     set_valign: gtk::Align::Center,
+@@ -152,6 +167,9 @@ impl FactoryComponent for AppVolumeItem {
+             AppVolumeItemMsg::ToggleMute => {
+                 let _ = sender.output(AppVolumeItemOutput::ToggleMute(self.stream_index));
+             }
++            AppVolumeItemMsg::Route => {
++                let _ = sender.output(AppVolumeItemOutput::Route(self.stream_index));
++            }
+         }
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
+index 6291e28..0f14d74 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
+@@ -12,6 +12,16 @@ pub(crate) struct AppVolumesInit {
+ pub(crate) enum AppVolumesInput {
+     AppVolumeChanged(u32, f64),
+     ToggleAppMute(u32),
++    RouteApp(u32),
++}
++
++#[derive(Debug)]
++pub(crate) enum AppVolumesOutput {
++    /// The panel should open its route picker for this stream.
++    RouteRequested {
++        stream: Arc<AudioStream>,
++        app: String,
++    },
+ }
+ 
+ #[derive(Debug)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
+index c60b8bf..b0c443a 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
+@@ -14,6 +14,7 @@ use crate::shell::bar::dropdowns::audio::{
+     main_section::app_volumes::{
+         AppVolumes,
+         app_volume_item::{AppVolumeInit, AppVolumeItemMsg},
++        messages::AppVolumesOutput,
+     },
+ };
+ 
+@@ -137,6 +138,19 @@ impl AppVolumes {
+         });
+     }
+ 
++    /// Hands the panel the stream its route picker should move.
++    pub(super) fn request_route(&self, stream_index: u32, sender: &ComponentSender<Self>) {
++        let Some(stream) = self.find_stream(stream_index) else {
++            return;
++        };
++        let app = helpers::app_display_name(&stream.application_name.get(), &stream.name.get());
++
++        let _ = sender.output(AppVolumesOutput::RouteRequested {
++            stream: stream.clone(),
++            app,
++        });
++    }
++
+     pub(super) fn toggle_app_mute(&self, stream_index: u32, sender: &ComponentSender<Self>) {
+         let Some(stream) = self.find_stream(stream_index) else {
+             return;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
+index f1928f3..d01615f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
+@@ -11,7 +11,7 @@ use wayle_audio::core::stream::AudioStream;
+ use wayle_config::ConfigService;
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+-pub(crate) use self::messages::AppVolumesInit;
++pub(crate) use self::messages::{AppVolumesInit, AppVolumesOutput};
+ use self::{
+     app_volume_item::{AppVolumeItem, AppVolumeItemOutput},
+     messages::{AppVolumesCmd, AppVolumesInput},
+@@ -29,7 +29,7 @@ pub(crate) struct AppVolumes {
+ impl Component for AppVolumes {
+     type Init = AppVolumesInit;
+     type Input = AppVolumesInput;
+-    type Output = ();
++    type Output = AppVolumesOutput;
+     type CommandOutput = AppVolumesCmd;
+ 
+     view! {
+@@ -38,6 +38,15 @@ impl Component for AppVolumes {
+             set_orientation: gtk::Orientation::Vertical,
+             set_vexpand: true,
+ 
++            gtk::Box {
++                add_css_class: "picker-header",
++
++                gtk::Label {
++                    add_css_class: "picker-title",
++                    set_label: &t!("dropdown-audio-playback"),
++                },
++            },
++
+             gtk::ScrolledWindow {
+                 add_css_class: "app-volumes-scroll",
+                 set_vexpand: true,
+@@ -93,6 +102,7 @@ impl Component for AppVolumes {
+                 AppVolumeItemOutput::ToggleMute(stream_index) => {
+                     AppVolumesInput::ToggleAppMute(stream_index)
+                 }
++                AppVolumeItemOutput::Route(stream_index) => AppVolumesInput::RouteApp(stream_index),
+             });
+ 
+         watchers::spawn_top_level(&sender, &init.audio, &init.config);
+@@ -121,6 +131,9 @@ impl Component for AppVolumes {
+             AppVolumesInput::ToggleAppMute(stream_index) => {
+                 self.toggle_app_mute(stream_index, &sender);
+             }
++            AppVolumesInput::RouteApp(stream_index) => {
++                self.request_route(stream_index, &sender);
++            }
+         }
+     }
+ 
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs
+deleted file mode 100644
+index 962d41b..0000000
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs
++++ /dev/null
+@@ -1,22 +0,0 @@
+-use std::sync::Arc;
+-
+-use wayle_audio::AudioService;
+-
+-use super::volume_section::VolumeSectionOutput;
+-
+-pub(crate) struct DefaultDevicesInit {
+-    pub audio: Arc<AudioService>,
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum DefaultDevicesInput {
+-    OutputSection(VolumeSectionOutput),
+-    InputSection(VolumeSectionOutput),
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum DefaultDevicesOutput {
+-    ShowOutputDevices,
+-    ShowInputDevices,
+-    HasDeviceChanged(bool),
+-}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
+index 8a1c269..2e2ffef 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
+@@ -1,107 +1,3 @@
+-pub(crate) mod volume_section;
+-
+-mod messages;
+-
+-use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
+-
+-pub(super) use self::messages::*;
+-use self::volume_section::{
+-    VolumeSection, VolumeSectionInit, VolumeSectionKind, VolumeSectionOutput,
+-};
+-
+-pub(crate) struct DefaultDevices {
+-    has_output: bool,
+-    has_input: bool,
+-    output_section: Controller<VolumeSection>,
+-    input_section: Controller<VolumeSection>,
+-}
+-
+-#[relm4::component(pub(crate))]
+-impl SimpleComponent for DefaultDevices {
+-    type Init = DefaultDevicesInit;
+-    type Input = DefaultDevicesInput;
+-    type Output = DefaultDevicesOutput;
+-
+-    view! {
+-        #[root]
+-        gtk::Box {
+-            add_css_class: "audio-devices",
+-            set_orientation: gtk::Orientation::Vertical,
+-
+-            #[local_ref]
+-            output_section_widget -> gtk::Box {},
++//! The default output and input rows, one per audio tab.
+ 
+-            #[local_ref]
+-            input_section_widget -> gtk::Box {},
+-        }
+-    }
+-
+-    fn init(
+-        init: Self::Init,
+-        _root: Self::Root,
+-        sender: ComponentSender<Self>,
+-    ) -> ComponentParts<Self> {
+-        let output_section = VolumeSection::builder()
+-            .launch(VolumeSectionInit {
+-                audio: init.audio.clone(),
+-                kind: VolumeSectionKind::Output,
+-            })
+-            .forward(sender.input_sender(), DefaultDevicesInput::OutputSection);
+-
+-        let input_section = VolumeSection::builder()
+-            .launch(VolumeSectionInit {
+-                audio: init.audio.clone(),
+-                kind: VolumeSectionKind::Input,
+-            })
+-            .forward(sender.input_sender(), DefaultDevicesInput::InputSection);
+-
+-        let has_output = !init.audio.output_devices.get().is_empty();
+-        let has_input = init
+-            .audio
+-            .input_devices
+-            .get()
+-            .iter()
+-            .any(|device| !device.is_monitor.get());
+-
+-        let model = Self {
+-            has_output,
+-            has_input,
+-            output_section,
+-            input_section,
+-        };
+-
+-        let output_section_widget = model.output_section.widget();
+-        let input_section_widget = model.input_section.widget();
+-        let widgets = view_output!();
+-
+-        ComponentParts { model, widgets }
+-    }
+-
+-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+-        match msg {
+-            DefaultDevicesInput::OutputSection(output) => match output {
+-                VolumeSectionOutput::ShowDevices => {
+-                    let _ = sender.output(DefaultDevicesOutput::ShowOutputDevices);
+-                }
+-                VolumeSectionOutput::HasDeviceChanged(has) => {
+-                    self.has_output = has;
+-                    let _ = sender.output(DefaultDevicesOutput::HasDeviceChanged(
+-                        self.has_output || self.has_input,
+-                    ));
+-                }
+-            },
+-            DefaultDevicesInput::InputSection(output) => match output {
+-                VolumeSectionOutput::ShowDevices => {
+-                    let _ = sender.output(DefaultDevicesOutput::ShowInputDevices);
+-                }
+-                VolumeSectionOutput::HasDeviceChanged(has) => {
+-                    self.has_input = has;
+-                    let _ = sender.output(DefaultDevicesOutput::HasDeviceChanged(
+-                        self.has_output || self.has_input,
+-                    ));
+-                }
+-            },
+-        }
+-    }
+-}
++pub(crate) mod volume_section;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
+index 92ae6a1..f4300d9 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
+@@ -17,6 +17,9 @@ pub(crate) enum VolumeSectionKind {
+ pub(crate) struct VolumeSectionInit {
+     pub audio: Arc<wayle_audio::AudioService>,
+     pub kind: VolumeSectionKind,
++    /// Whether the device name opens a picker. False when the caller already
++    /// shows the device list beneath this row.
++    pub show_picker_link: bool,
+ }
+ 
+ #[derive(Debug)]
+@@ -35,7 +38,6 @@ pub(crate) enum VolumeSectionCmd {
+ #[derive(Debug)]
+ pub(crate) enum VolumeSectionOutput {
+     ShowDevices,
+-    HasDeviceChanged(bool),
+ }
+ 
+ #[derive(Debug, Clone)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
+index 46b7d77..875f99d 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
+@@ -15,6 +15,7 @@ use crate::i18n::t;
+ pub(crate) struct VolumeSection {
+     audio: Arc<AudioService>,
+     kind: VolumeSectionKind,
++    show_picker_link: bool,
+     device: Option<ActiveDevice>,
+     device_name: String,
+     device_icon: &'static str,
+@@ -71,6 +72,8 @@ impl Component for VolumeSection {
+                         add_css_class: "audio-device-trigger-btn",
+                         set_cursor_from_name: Some("pointer"),
+                         set_halign: gtk::Align::Start,
++                        #[watch]
++                        set_visible: model.show_picker_link,
+                         connect_clicked => VolumeSectionInput::ShowDevicesClicked,
+ 
+                         gtk::Box {
+@@ -89,6 +92,18 @@ impl Component for VolumeSection {
+                             },
+                         },
+                     },
++
++                    // The audio panel puts the list of devices directly under
++                    // this row, so there is nowhere for the chevron to go.
++                    gtk::Label {
++                        add_css_class: "audio-device-name-text",
++                        set_halign: gtk::Align::Start,
++                        set_ellipsize: gtk::pango::EllipsizeMode::End,
++                        #[watch]
++                        set_visible: !model.show_picker_link,
++                        #[watch]
++                        set_label: &model.device_name,
++                    },
+                 },
+ 
+                 gtk::Button {
+@@ -195,6 +210,7 @@ impl Component for VolumeSection {
+         let mut model = Self {
+             audio: init.audio,
+             kind: init.kind,
++            show_picker_link: init.show_picker_link,
+             device: default_device,
+             device_name,
+             device_icon,
+@@ -206,8 +222,6 @@ impl Component for VolumeSection {
+ 
+         model.resume_device_watcher(&sender);
+ 
+-        let _ = sender.output(VolumeSectionOutput::HasDeviceChanged(has_device));
+-
+         let slider_widget = model.slider.upcast_ref::<gtk::Box>();
+         let widgets = view_output!();
+ 
+@@ -238,7 +252,6 @@ impl Component for VolumeSection {
+             VolumeSectionCmd::DeviceChanged(device) => {
+                 let device = device.or_else(|| self.current_default());
+ 
+-                let had_device = self.has_device;
+                 self.has_device = self.check_has_device();
+ 
+                 if let Some(ref device) = device {
+@@ -247,10 +260,6 @@ impl Component for VolumeSection {
+                 self.device = device;
+ 
+                 self.resume_device_watcher(&sender);
+-
+-                if self.has_device != had_device {
+-                    let _ = sender.output(VolumeSectionOutput::HasDeviceChanged(self.has_device));
+-                }
+             }
+             VolumeSectionCmd::VolumeOrMuteChanged => {
+                 if let Some(ref device) = self.device {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs
+deleted file mode 100644
+index dd63abb..0000000
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs
++++ /dev/null
+@@ -1,22 +0,0 @@
+-use std::sync::Arc;
+-
+-use wayle_audio::AudioService;
+-use wayle_config::ConfigService;
+-
+-use super::default_devices::DefaultDevicesOutput;
+-
+-pub(crate) struct MainSectionInit {
+-    pub audio: Arc<AudioService>,
+-    pub config: Arc<ConfigService>,
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum MainSectionInput {
+-    DefaultDevices(DefaultDevicesOutput),
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum MainSectionOutput {
+-    ShowOutputDevices,
+-    ShowInputDevices,
+-}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
+index db54f9c..ffd7e18 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
+@@ -1,137 +1,7 @@
+-mod app_volumes;
+-pub(crate) mod default_devices;
+-mod messages;
+-
+-use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
+-use wayle_widgets::prelude::*;
+-
+-pub(super) use self::messages::*;
+-use self::{
+-    app_volumes::AppVolumes,
+-    default_devices::{DefaultDevices, DefaultDevicesInit, DefaultDevicesOutput},
+-};
+-use crate::i18n::t;
+-
+-pub(crate) struct MainSection {
+-    has_any_device: bool,
+-    default_devices: Controller<DefaultDevices>,
+-    app_volumes: Controller<AppVolumes>,
+-}
+-
+-#[relm4::component(pub(crate))]
+-impl SimpleComponent for MainSection {
+-    type Init = MainSectionInit;
+-    type Input = MainSectionInput;
+-    type Output = MainSectionOutput;
+-
+-    view! {
+-        #[root]
+-        gtk::Box {
+-            set_orientation: gtk::Orientation::Vertical,
+-
+-            gtk::Box {
+-                add_css_class: "audio-fixed",
+-                set_orientation: gtk::Orientation::Vertical,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-
+-                #[local_ref]
+-                default_devices_widget -> gtk::Box {},
+-            },
+-
+-            gtk::Label {
+-                add_css_class: "section-label",
+-                set_label: &t!("dropdown-audio-app-volume"),
+-                set_halign: gtk::Align::Start,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-            },
+-
+-            #[local_ref]
+-            app_volumes_widget -> gtk::Box {
+-                set_vexpand: true,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-            },
++//! Pieces the audio panel's tabs are built from.
++//!
++//! The panel replaced the single scrolling page these once shared, so this
++//! module is only the path to them.
+ 
+-            gtk::Box {
+-                #[watch]
+-                set_visible: !model.has_any_device,
+-                set_vexpand: true,
+-                set_valign: gtk::Align::Center,
+-
+-                #[template]
+-                EmptyState {
+-                    #[template_child]
+-                    icon {
+-                        set_icon_name: Some("ld-volume-x-symbolic"),
+-                    },
+-                    #[template_child]
+-                    title {
+-                        set_label: &t!("dropdown-audio-no-devices-title"),
+-                    },
+-                    #[template_child]
+-                    description {
+-                        set_label: &t!("dropdown-audio-no-devices-description"),
+-                    },
+-                },
+-            },
+-        }
+-    }
+-
+-    fn init(
+-        init: Self::Init,
+-        _root: Self::Root,
+-        sender: ComponentSender<Self>,
+-    ) -> ComponentParts<Self> {
+-        let has_output = !init.audio.output_devices.get().is_empty();
+-        let has_input = init
+-            .audio
+-            .input_devices
+-            .get()
+-            .iter()
+-            .any(|device| !device.is_monitor.get());
+-
+-        let default_devices = DefaultDevices::builder()
+-            .launch(DefaultDevicesInit {
+-                audio: init.audio.clone(),
+-            })
+-            .forward(sender.input_sender(), MainSectionInput::DefaultDevices);
+-
+-        let app_volumes = AppVolumes::builder()
+-            .launch(app_volumes::AppVolumesInit {
+-                audio: init.audio,
+-                config: init.config,
+-            })
+-            .detach();
+-
+-        let model = Self {
+-            has_any_device: has_output || has_input,
+-            default_devices,
+-            app_volumes,
+-        };
+-
+-        let default_devices_widget = model.default_devices.widget();
+-        let app_volumes_widget = model.app_volumes.widget();
+-        let widgets = view_output!();
+-
+-        ComponentParts { model, widgets }
+-    }
+-
+-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+-        match msg {
+-            MainSectionInput::DefaultDevices(output) => match output {
+-                DefaultDevicesOutput::ShowOutputDevices => {
+-                    let _ = sender.output(MainSectionOutput::ShowOutputDevices);
+-                }
+-                DefaultDevicesOutput::ShowInputDevices => {
+-                    let _ = sender.output(MainSectionOutput::ShowInputDevices);
+-                }
+-                DefaultDevicesOutput::HasDeviceChanged(has) => {
+-                    self.has_any_device = has;
+-                }
+-            },
+-        }
+-    }
+-}
++pub(crate) mod app_volumes;
++pub(crate) mod default_devices;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
+index 04b09d5..585d8c9 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
+@@ -1,20 +1,36 @@
+ use std::sync::Arc;
+ 
+ use wayle_audio::AudioService;
++use wayle_bluetooth::BluetoothService;
+ use wayle_config::ConfigService;
++use wayle_core::DeferredService;
+ 
+-use super::{device_picker::DevicePickerOutput, main_section::MainSectionOutput};
++use super::{
++    AudioPage,
++    device_picker::DevicePickerOutput,
++    main_section::{
++        app_volumes::AppVolumesOutput, default_devices::volume_section::VolumeSectionOutput,
++    },
++};
+ 
+ pub(crate) struct AudioDropdownInit {
+     pub audio: Arc<AudioService>,
++    pub bluetooth: DeferredService<BluetoothService>,
+     pub config: Arc<ConfigService>,
+ }
+ 
+ #[derive(Debug)]
+ pub(crate) enum AudioDropdownMsg {
+-    MainSection(MainSectionOutput),
++    /// Wayle's own dropdown machinery, or the external Waybar window, showed or
++    /// hid the panel.
++    VisibilityChanged(bool),
++    TabSelected(AudioPage),
++    OutputVolume(VolumeSectionOutput),
++    InputVolume(VolumeSectionOutput),
+     OutputPicker(DevicePickerOutput),
+     InputPicker(DevicePickerOutput),
++    RoutePicker(DevicePickerOutput),
++    Playback(AppVolumesOutput),
+ }
+ 
+ #[derive(Debug)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
+index 4617c10..fd7b60e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
+@@ -11,40 +11,79 @@ use wayle_widgets::prelude::*;
+ 
+ pub(super) use self::factory::Factory;
+ pub(crate) use self::main_section::default_devices::volume_section::VolumeSectionKind;
++pub(super) use self::messages::AudioDropdownMsg;
+ use self::{
+-    device_picker::{DevicePicker, DevicePickerInit, DevicePickerOutput},
+-    main_section::{MainSection, MainSectionInit, MainSectionOutput},
+-    messages::{AudioDropdownCmd, AudioDropdownInit, AudioDropdownMsg},
++    device_picker::{
++        DevicePicker, DevicePickerInit, DevicePickerInput, DevicePickerMode, DevicePickerOutput,
++    },
++    main_section::{
++        app_volumes::{AppVolumes, AppVolumesInit, AppVolumesOutput},
++        default_devices::volume_section::{VolumeSection, VolumeSectionInit, VolumeSectionOutput},
++    },
++    messages::{AudioDropdownCmd, AudioDropdownInit},
++};
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::{
++        bluetooth::{
++            BluetoothDropdown,
++            messages::{BluetoothDropdownInit, BluetoothDropdownMsg},
++        },
++        scaled_dimension,
++    },
+ };
+-use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+ const BASE_WIDTH: f32 = 382.0;
+-const BASE_HEIGHT: f32 = 512.0;
++const BASE_HEIGHT: f32 = 560.0;
+ 
++/// The panel's pages.
++///
++/// The first four are the tabs; `Route` is the Play tab's destination picker
++/// and is reached from a stream's route button.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-pub(super) enum AudioPage {
+-    Main,
+-    OutputDevices,
+-    InputDevices,
++pub(crate) enum AudioPage {
++    Pair,
++    Output,
++    Input,
++    Play,
++    Route,
+ }
+ 
+ impl AudioPage {
+     fn name(self) -> &'static str {
+         match self {
+-            Self::Main => "main",
+-            Self::OutputDevices => "output",
+-            Self::InputDevices => "input",
++            Self::Pair => "pair",
++            Self::Output => "output",
++            Self::Input => "input",
++            Self::Play => "play",
++            Self::Route => "route",
++        }
++    }
++
++    /// The tab that stays lit while the page is shown. The route picker
++    /// belongs to Play.
++    fn tab(self) -> Self {
++        match self {
++            Self::Route => Self::Play,
++            page => page,
+         }
+     }
+ }
+ 
++/// Bluetooth and audio in one panel: pair and connect devices, choose the
++/// output and input, and set each application's volume and destination.
+ pub(crate) struct AudioDropdown {
+     scaled_width: i32,
+     scaled_height: i32,
+     active_page: AudioPage,
+-    main_section: Controller<MainSection>,
++
++    bluetooth: Controller<BluetoothDropdown>,
++    output_volume: Controller<VolumeSection>,
++    input_volume: Controller<VolumeSection>,
+     output_picker: Controller<DevicePicker>,
+     input_picker: Controller<DevicePicker>,
++    playback: Controller<AppVolumes>,
++    route_picker: Controller<DevicePicker>,
+ }
+ 
+ #[relm4::component(pub(crate))]
+@@ -67,16 +106,56 @@ impl Component for AudioDropdown {
+             #[template]
+             Dropdown {
+ 
+-                #[template]
+-                DropdownHeader {
+-                    #[template_child]
+-                    icon {
+-                        set_visible: true,
+-                        set_icon_name: Some("ld-volume-2-symbolic"),
++                gtk::Box {
++                    add_css_class: "audio-tabs",
++                    set_homogeneous: true,
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Pair),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Pair),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-tab-pair"),
++                        },
++                    },
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Output),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Output),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-output"),
++                        },
+                     },
+-                    #[template_child]
+-                    label {
+-                        set_label: &t!("dropdown-audio-title"),
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Input),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Input),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-input"),
++                        },
++                    },
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Play),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Play),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-tab-play"),
++                        },
+                     },
+                 },
+ 
+@@ -86,14 +165,21 @@ impl Component for AudioDropdown {
+                     set_vexpand: true,
+                     set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+                     set_transition_duration: 200,
++
++                    #[local_ref]
++                    add_named[Some("pair")] = bluetooth_widget -> gtk::Box {},
++
+                     #[local_ref]
+-                    add_named[Some("main")] = main_section_widget -> gtk::Box {},
++                    add_named[Some("output")] = output_page_widget -> gtk::Box {},
+ 
+                     #[local_ref]
+-                    add_named[Some("output")] = output_picker_widget -> gtk::Box {},
++                    add_named[Some("input")] = input_page_widget -> gtk::Box {},
+ 
+                     #[local_ref]
+-                    add_named[Some("input")] = input_picker_widget -> gtk::Box {},
++                    add_named[Some("play")] = playback_widget -> gtk::Box {},
++
++                    #[local_ref]
++                    add_named[Some("route")] = route_picker_widget -> gtk::Box {},
+ 
+                     #[watch]
+                     set_visible_child_name: model.active_page.name(),
+@@ -107,18 +193,35 @@ impl Component for AudioDropdown {
+         _root: Self::Root,
+         sender: ComponentSender<Self>,
+     ) -> ComponentParts<Self> {
+-        let main_section = MainSection::builder()
+-            .launch(MainSectionInit {
+-                audio: init.audio.clone(),
++        let bluetooth = BluetoothDropdown::builder()
++            .launch(BluetoothDropdownInit {
++                bluetooth: init.bluetooth,
+                 config: init.config.clone(),
+             })
+-            .forward(sender.input_sender(), AudioDropdownMsg::MainSection);
++            .detach();
++
++        let output_volume = VolumeSection::builder()
++            .launch(VolumeSectionInit {
++                audio: init.audio.clone(),
++                kind: VolumeSectionKind::Output,
++                show_picker_link: false,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::OutputVolume);
++
++        let input_volume = VolumeSection::builder()
++            .launch(VolumeSectionInit {
++                audio: init.audio.clone(),
++                kind: VolumeSectionKind::Input,
++                show_picker_link: false,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::InputVolume);
+ 
+         let output_picker = DevicePicker::builder()
+             .launch(DevicePickerInit {
+                 audio: init.audio.clone(),
+                 kind: VolumeSectionKind::Output,
+                 title: t!("dropdown-audio-output-devices"),
++                mode: DevicePickerMode::Default,
+             })
+             .forward(sender.input_sender(), AudioDropdownMsg::OutputPicker);
+ 
+@@ -127,42 +230,89 @@ impl Component for AudioDropdown {
+                 audio: init.audio.clone(),
+                 kind: VolumeSectionKind::Input,
+                 title: t!("dropdown-audio-input-devices"),
++                mode: DevicePickerMode::Default,
+             })
+             .forward(sender.input_sender(), AudioDropdownMsg::InputPicker);
+ 
++        let playback = AppVolumes::builder()
++            .launch(AppVolumesInit {
++                audio: init.audio.clone(),
++                config: init.config.clone(),
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::Playback);
++
++        let route_picker = DevicePicker::builder()
++            .launch(DevicePickerInit {
++                audio: init.audio,
++                kind: VolumeSectionKind::Output,
++                title: t!("dropdown-audio-route"),
++                mode: DevicePickerMode::Route,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::RoutePicker);
++
+         let scale = init.config.config().styling.scale.get().value();
+         watchers::spawn(&sender, &init.config);
+ 
+         let model = Self {
+             scaled_width: scaled_dimension(BASE_WIDTH, scale),
+             scaled_height: scaled_dimension(BASE_HEIGHT, scale),
+-            active_page: AudioPage::Main,
+-            main_section,
++            active_page: AudioPage::Pair,
++            bluetooth,
++            output_volume,
++            input_volume,
+             output_picker,
+             input_picker,
++            playback,
++            route_picker,
+         };
+ 
+-        let main_section_widget = model.main_section.widget();
+-        let output_picker_widget = model.output_picker.widget();
+-        let input_picker_widget = model.input_picker.widget();
+-        let widgets = view_output!();
++        let bluetooth_widget = model.bluetooth.widget();
++        let playback_widget = model.playback.widget();
++        let route_picker_widget = model.route_picker.widget();
++
++        let output_page = page_box(model.output_volume.widget(), model.output_picker.widget());
++        let input_page = page_box(model.input_volume.widget(), model.input_picker.widget());
++        let output_page_widget = &output_page;
++        let input_page_widget = &input_page;
+ 
++        let widgets = view_output!();
+         ComponentParts { model, widgets }
+     }
+ 
+     fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
+-            AudioDropdownMsg::MainSection(output) => match output {
+-                MainSectionOutput::ShowOutputDevices => {
+-                    self.active_page = AudioPage::OutputDevices;
++            AudioDropdownMsg::VisibilityChanged(visible) => {
++                if visible && self.active_page == AudioPage::Pair {
++                    self.bluetooth.emit(BluetoothDropdownMsg::ScanRequested);
+                 }
+-                MainSectionOutput::ShowInputDevices => {
+-                    self.active_page = AudioPage::InputDevices;
++            }
++            AudioDropdownMsg::TabSelected(page) => {
++                if page == AudioPage::Pair && self.active_page != AudioPage::Pair {
++                    self.bluetooth.emit(BluetoothDropdownMsg::ScanRequested);
+                 }
+-            },
++                self.active_page = page;
++            }
++            AudioDropdownMsg::OutputVolume(VolumeSectionOutput::ShowDevices) => {
++                self.active_page = AudioPage::Output;
++            }
++            AudioDropdownMsg::InputVolume(VolumeSectionOutput::ShowDevices) => {
++                self.active_page = AudioPage::Input;
++            }
+             AudioDropdownMsg::OutputPicker(DevicePickerOutput::NavigateBack)
+-            | AudioDropdownMsg::InputPicker(DevicePickerOutput::NavigateBack) => {
+-                self.active_page = AudioPage::Main;
++            | AudioDropdownMsg::InputPicker(DevicePickerOutput::NavigateBack) => {}
++            AudioDropdownMsg::RoutePicker(DevicePickerOutput::NavigateBack) => {
++                self.route_picker.emit(DevicePickerInput::SetStream {
++                    stream: None,
++                    app: t!("dropdown-audio-route"),
++                });
++                self.active_page = AudioPage::Play;
++            }
++            AudioDropdownMsg::Playback(AppVolumesOutput::RouteRequested { stream, app }) => {
++                self.route_picker.emit(DevicePickerInput::SetStream {
++                    stream: Some(stream),
++                    app,
++                });
++                self.active_page = AudioPage::Route;
+             }
+         }
+     }
+@@ -181,3 +331,12 @@ impl Component for AudioDropdown {
+         }
+     }
+ }
++
++/// A device tab: the current default device above the list it is chosen from.
++fn page_box(volume: &gtk::Box, picker: &gtk::Box) -> gtk::Box {
++    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
++    page.add_css_class("audio-page");
++    page.append(volume);
++    page.append(picker);
++    page
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
+index db0423e..f55dc9e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
+@@ -1,4 +1,5 @@
+-use relm4::prelude::*;
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
+ 
+ use super::{BluetoothDropdown, messages::BluetoothDropdownInit};
+ use crate::shell::{
+@@ -16,7 +17,13 @@ impl DropdownFactory for Factory {
+         };
+         let controller = BluetoothDropdown::builder().launch(init).detach();
+ 
+-        let popover = controller.widget().clone();
++        // The component's root is a plain box so the audio panel can host it,
++        // so the standalone dropdown supplies the popover here.
++        let popover = gtk::Popover::new();
++        popover.set_css_classes(&["dropdown", "bluetooth-dropdown"]);
++        popover.set_has_arrow(false);
++        popover.set_child(Some(controller.widget()));
++
+         Some(DropdownInstance::new(popover, Box::new(controller)))
+     }
+ }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+index a3bebc7..11e7a23 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+@@ -49,13 +49,13 @@ impl Component for BluetoothDropdown {
+     type CommandOutput = BluetoothDropdownCmd;
+ 
+     view! {
++        // A box, not a popover: the audio panel embeds this component as its
++        // Pair page, and `bluetooth::Factory` puts the standalone dropdown's
++        // popover around it.
+         #[root]
+-        gtk::Popover {
+-            set_css_classes: &[
+-                "dropdown",
+-                "bluetooth-dropdown",
+-            ],
+-            set_has_arrow: false,
++        gtk::Box {
++            add_css_class: "bluetooth-section",
++            set_orientation: gtk::Orientation::Vertical,
+             #[watch]
+             set_width_request: model.scaled_width,
+             #[watch]
+@@ -64,6 +64,7 @@ impl Component for BluetoothDropdown {
+             #[template]
+             Dropdown {
+                 set_overflow: gtk::Overflow::Hidden,
++                set_vexpand: true,
+ 
+                 #[template]
+                 DropdownHeader {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index fe3281c..f8d38f6 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -16,6 +16,7 @@ use crate::{
+     process,
+     shell::{
+         bar::dropdowns::{
++            audio::{AudioDropdown, AudioDropdownMsg},
+             dashboard::{DashboardDropdown, DashboardDropdownMsg},
+             media::{MediaDropdown, MediaDropdownMsg},
+             network::{NetworkDropdown, NetworkDropdownMsg},
+@@ -124,10 +125,11 @@ impl DropdownInstance {
+             return true;
+         }
+ 
++        let is_audio = self.controller.is::<Controller<AudioDropdown>>();
+         let is_dashboard = self.controller.is::<Controller<DashboardDropdown>>();
+         let is_media = self.controller.is::<Controller<MediaDropdown>>();
+         let is_network = self.controller.is::<Controller<NetworkDropdown>>();
+-        if !is_dashboard && !is_media && !is_network {
++        if !is_audio && !is_dashboard && !is_media && !is_network {
+             warn!(
+                 dropdown = name,
+                 "external layer window is not supported by this dropdown"
+@@ -177,6 +179,10 @@ impl DropdownInstance {
+     }
+ 
+     fn external_visibility_changed(&self, visible: bool) {
++        if let Some(controller) = self.controller.downcast_ref::<Controller<AudioDropdown>>() {
++            controller.emit(AudioDropdownMsg::VisibilityChanged(visible));
++        }
++
+         if let Some(controller) = self.controller.downcast_ref::<Controller<MediaDropdown>>() {
+             controller.emit(MediaDropdownMsg::VisibilityChanged(visible));
+         }
+@@ -237,6 +243,40 @@ impl DropdownInstance {
+             return;
+         }
+ 
++        // The audio button is in Waybar's right-hand group, one button in from
++        // the trailing edge, so its panel follows that edge instead.
++        if name == "audio" {
++            let along_bar = GAP + WAYBAR_BUTTON_STEP;
++
++            match location {
++                Location::Top => {
++                    window.set_anchor(Edge::Top, true);
++                    window.set_anchor(Edge::Right, true);
++                    window.set_margin(Edge::Top, OFFSET);
++                    window.set_margin(Edge::Right, along_bar);
++                }
++                Location::Bottom => {
++                    window.set_anchor(Edge::Bottom, true);
++                    window.set_anchor(Edge::Right, true);
++                    window.set_margin(Edge::Bottom, OFFSET);
++                    window.set_margin(Edge::Right, along_bar);
++                }
++                Location::Left => {
++                    window.set_anchor(Edge::Bottom, true);
++                    window.set_anchor(Edge::Left, true);
++                    window.set_margin(Edge::Bottom, along_bar);
++                    window.set_margin(Edge::Left, OFFSET);
++                }
++                Location::Right => {
++                    window.set_anchor(Edge::Bottom, true);
++                    window.set_anchor(Edge::Right, true);
++                    window.set_margin(Edge::Bottom, along_bar);
++                    window.set_margin(Edge::Right, OFFSET);
++                }
++            }
++            return;
++        }
++
+         let along_bar = if name == "network" {
+             GAP + WAYBAR_BUTTON_STEP
+         } else {
+diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index acca37d..35180f7 100644
+--- a/crates/wayle-shell/src/shell/bar/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/mod.rs
+@@ -269,11 +269,12 @@ impl Component for Bar {
+                 apply_layer(root, configured, &self.services.config);
+             }
+             BarCmd::ToggleDropdown(name) => {
+-                let toggled = if matches!(name.as_str(), "dashboard" | "media" | "network") {
+-                    self.dropdowns.toggle_external_window(&name, &self.monitor)
+-                } else {
+-                    self.dropdowns.toggle_external(&name, &self.external_anchor)
+-                };
++                let toggled =
++                    if matches!(name.as_str(), "audio" | "dashboard" | "media" | "network") {
++                        self.dropdowns.toggle_external_window(&name, &self.monitor)
++                    } else {
++                        self.dropdowns.toggle_external(&name, &self.external_anchor)
++                    };
+ 
+                 if !toggled {
+                     tracing::warn!(
+diff --git a/crates/wayle-styling/scss/modules/audio_dropdown/_index.scss b/crates/wayle-styling/scss/modules/audio_dropdown/_index.scss
+index 1c0c05e..2c40678 100644
+--- a/crates/wayle-styling/scss/modules/audio_dropdown/_index.scss
++++ b/crates/wayle-styling/scss/modules/audio_dropdown/_index.scss
+@@ -2,3 +2,20 @@
+ @import "slider";
+ @import "device_picker";
+ @import "app_volume";
++@import "panel";
++
++window.audio-layer-window {
++    background: transparent;
++    box-shadow: none;
++
++    > .dropdown {
++        min-width: 0;
++    }
++
++    &.shadow > .dropdown {
++        box-shadow:
++            0 0 5px rgba(0, 0, 0, 0.3),
++            0 4px 10px rgba(0, 0, 0, 0.3),
++            0 0 0 1px rgba(255, 255, 255, 0.04);
++    }
++}
+diff --git a/crates/wayle-styling/scss/modules/audio_dropdown/_panel.scss b/crates/wayle-styling/scss/modules/audio_dropdown/_panel.scss
+new file mode 100644
+index 0000000..e938c76
+--- /dev/null
++++ b/crates/wayle-styling/scss/modules/audio_dropdown/_panel.scss
+@@ -0,0 +1,93 @@
++// The tab bar stands in for the dropdown header, so it carries the header's
++// padding and its separating border.
++.audio-tabs {
++    padding: var(--space-sm) var(--space-md);
++    border-spacing: var(--space-xs);
++    border-bottom: 1px solid var(--border-default);
++    background: var(--bg-elevated);
++    border-top-left-radius: var(--rounding-container);
++    border-top-right-radius: var(--rounding-container);
++
++    button.audio-tab {
++        border-radius: var(--rounding-element);
++        background: transparent;
++        padding: var(--space-xs) var(--space-sm);
++        transition:
++            background var(--duration-fast),
++            color var(--duration-fast);
++
++        label {
++            font-size: var(--text-md);
++            font-weight: var(--weight-medium);
++            color: var(--fg-muted);
++        }
++
++        &:hover {
++            background: var(--bg-overlay);
++
++            label {
++                color: var(--fg-default);
++            }
++        }
++
++        &.active {
++            background: var(--accent-subtle);
++
++            label {
++                color: var(--accent);
++                font-weight: var(--weight-semibold);
++            }
++        }
++    }
++}
++
++// The default-device row sits directly above the list it is chosen from, so it
++// spans the page rather than sitting in its own card.
++.audio-page {
++    .audio-device {
++        padding-left: 0;
++        padding-right: 0;
++    }
++
++    .picker-header {
++        padding-top: var(--space-sm);
++    }
++}
++
++// The Pair tab hosts the Bluetooth dropdown's own content, which arrives with
++// the container chrome and padding it uses when it is a dropdown of its own.
++.bluetooth-section > .dropdown {
++    background: transparent;
++    border: none;
++    box-shadow: none;
++    border-radius: 0;
++    min-width: 0;
++
++    > .dropdown-content {
++        padding: 0;
++    }
++
++    > .dropdown-header {
++        border-radius: var(--rounding-element);
++        margin-bottom: var(--space-sm);
++    }
++}
++
++button.audio-route-btn {
++    background: var(--bg-overlay);
++    color: var(--fg-muted);
++    margin-right: var(--space-xs);
++    transition:
++        background var(--duration-fast),
++        color var(--duration-fast);
++
++    image.audio-route-icon {
++        -gtk-icon-size: var(--icon-md);
++        margin: calc(var(--space-xs) * 1.5);
++    }
++
++    &:hover {
++        color: var(--fg-default);
++        background: var(--bg-hover);
++    }
++}

@@ -1,8 +1,8 @@
-# Dashboard, Wayle Wi-Fi/media, and Calendar/Tasks modules.
+# Dashboard, Wayle Wi-Fi/media/audio, and Calendar/Tasks modules.
 #
 # The dashboard button carries the current battery reading and opens Wayle's
 # native dashboard, which now also contains notifications and the seven-day
-# calendar. Dedicated buttons open Wayle's Wi-Fi and media panels.
+# calendar. Dedicated buttons open Wayle's Wi-Fi, media and audio panels.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -82,6 +82,21 @@ let
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
 
+  # Left-click opens Wayle's Bluetooth and audio panel; the status glyph and
+  # tooltip still come from `rofi-audio status`, which already reports the
+  # adapter, the default output and input, and connected devices. Right-click
+  # remains the adapter's on/off switch.
+  audioModule = monitor: {
+    exec = "${packages.rofiAudio}/bin/rofi-audio status";
+    interval = 5;
+    return-type = "json";
+    tooltip = true;
+    escape = false;
+    on-click =
+      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio ${lib.escapeShellArg monitor}";
+    on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
+  };
+
   wayleMediaModule = monitor: {
     format = "{}";
     return-type = "json";
@@ -96,12 +111,13 @@ let
   };
 in
 {
-  inherit dashboardModule wayleMediaModule wayleWifiModule;
+  inherit audioModule dashboardModule wayleMediaModule wayleWifiModule;
 
   homeConfig = {
     home.packages = [
       pkgs.mprisence
       packages.ycal.package
+      packages.rofiAudio
     ];
     programs.google-chrome = {
       commandLineArgs = [
@@ -129,6 +145,7 @@ in
     # Generic fallback for callers that do not create a bar per output. The
     # actual Niri bars override these with their connector name so Wayle opens
     # each panel on the monitor whose button was clicked.
+    "custom/audio" = audioModule "";
     "custom/dashboard" = dashboardModule "";
     "custom/wayle-wifi" = wayleWifiModule "";
     "custom/wayle-media" = wayleMediaModule "";

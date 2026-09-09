@@ -9,7 +9,6 @@
     packages.previewPanel
     packages.rofiClipboard
     packages.rofiNetwork
-    packages.rofiAudio
   ];
 
   modules = {
@@ -44,16 +43,6 @@
       "exec-on-event" = false;
       on-click = "${packages.rofiClipboard}/bin/rofi-clipboard";
       on-click-right = "${packages.rofiClipboard}/bin/rofi-clipboard clear";
-    };
-
-    "custom/audio" = {
-      exec = "${packages.rofiAudio}/bin/rofi-audio status";
-      interval = 5;
-      return-type = "json";
-      tooltip = true;
-      escape = false;
-      on-click = "${packages.rofiAudio}/bin/rofi-audio";
-      on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
     };
 
     tray = {

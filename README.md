@@ -9,8 +9,9 @@ This repository contains six Rust utilities used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
 - `webcam-crop` — an on-demand virtual webcam cropper and supervisor
 
-It also documents the [Wayle notification center](#notification-center) opened
-from the Waybar notification button.
+It also documents the [Wayle dashboard](#wayle-dashboard) opened from the
+far-left Waybar button and the [Bluetooth and audio panel](#bluetooth-and-audio-panel)
+opened from the audio button.
 
 ## rofi-audio
 
@@ -23,6 +24,12 @@ hand.
 
 The package in `scripts/packages.nix` and the existing Waybar launcher provide
 all four tabs.
+
+The Waybar button now opens Wayle's
+[Bluetooth and audio panel](#bluetooth-and-audio-panel), which has the same four
+tabs. `rofi-audio` keeps the Rofi menu described below — run it from a terminal
+or a binding of your own — and stays the Waybar entry's status backend and its
+right-click Bluetooth switch.
 
 ### Modes
 
@@ -190,11 +197,16 @@ and the Pair tab spawns the other two.
     "interval": 5,
     "return-type": "json",
     "escape": false,
-    "on-click": "/path/to/rofi-audio",
+    "on-click": "busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio eDP-1",
     "on-click-right": "/path/to/rofi-audio bluetooth-power toggle"
   }
 }
 ```
+
+The configured `on-click` opens Wayle's
+[Bluetooth and audio panel](#bluetooth-and-audio-panel) on the monitor whose
+button was clicked; each Waybar instance passes its own output name. Use
+`/path/to/rofi-audio` instead to keep the Rofi menu on the button.
 
 The text is a single glyph:
 
@@ -205,8 +217,8 @@ The text is a single glyph:
 | On, device connected | 󰂱 |
 
 Giving the slot to Bluetooth while the adapter is on costs nothing: the level is
-back as soon as the adapter is off, and the [notification center](#notification-center)
-carries a volume slider besides. The module also sets a `class` — `bluetooth-connected`,
+back as soon as the adapter is off, and the panel the button opens carries a
+volume slider besides. The module also sets a `class` — `bluetooth-connected`,
 `bluetooth-on`, `muted`, `active`, or `unavailable` — so the glyph can be
 recoloured per state from `waybar.css`.
 
@@ -447,11 +459,21 @@ layer-shell window. The button shows the current battery percentage and uses the
 same charging, low, warning and blinking-critical states as the old battery
 module.
 
-The dashboard uses Wayle's own notification service and native notification
-groups, icons, actions, dismiss controls, Do Not Disturb switch and Clear All
-button. Long bodies can be expanded. Each group initially shows at most three
-messages and the bounded notification area scrolls when its contents are taller.
-Chrome and Chromium transient notifications are retained in Wayle's history.
+The dashboard is the agenda and the notification list. It uses Wayle's own
+notification service and native notification groups, icons, actions, dismiss
+controls, Do Not Disturb switch and Clear All button. Long bodies can be
+expanded. Each group initially shows at most three messages and the bounded
+notification area scrolls when its contents are taller. Chrome and Chromium
+transient notifications are retained in Wayle's history.
+
+Everything the other Waybar buttons already own has been taken out of it: the
+Bluetooth and Do Not Disturb tiles, the volume card, and the battery and network
+row. Quick actions are one row — airplane mode, idle inhibit and the power
+profile. Do Not Disturb keeps the switch inside the notification card, and
+airplane mode still turns Bluetooth off and back on. The space that frees goes to
+the two lists: the agenda grows from 190 to 320 pixels, notifications from 270 to
+460, and the panel itself from 760 to 900 before it scrolls. Each is a ceiling,
+so a quiet day still gets a short panel.
 
 The calendar card is the one small adapter Wayle does not provide natively. It
 reads the next seven days from `~/.cache/waybar-ycal/events.json`, the same cache
@@ -476,6 +498,51 @@ DNS, BSSID, frequency and band, channel, mode, and link rate. Press `QR` for a
 larger share code; open, WEP, WPA/WPA2 and WPA3 Personal profiles are supported,
 while Enterprise and Enhanced Open profiles show an explanation instead.
 
+### Bluetooth and audio panel
+
+The right-side audio button opens Wayle's Bluetooth and audio panel in its own
+monitor-local layer-shell window. It has the same four tabs as
+[`rofi-audio`](#rofi-audio), built from Wayle's own components wherever Wayle
+provides one:
+
+| Tab | Contents | Native |
+| --- | --- | --- |
+| Pair | Wayle's Bluetooth dropdown: paired and discovered devices, connect, disconnect, forget, the adapter switch, the scan button, and the pairing card for PINs and passkeys | yes |
+| Output | The default output's volume and mute, then every output device and its available ports | ports added |
+| Input | The default input's volume and mute, then every microphone and its available ports | ports added |
+| Play | Wayle's per-application volume list, with a route button on each stream | route added |
+
+Only three things were not already there. Device rows expand into port rows, so
+**Speaker** and **Headphones** on one card are separate destinations: selecting
+one activates its port and then makes its device the default. Ports the card
+reports as unplugged are hidden; ports of unknown availability stay selectable,
+and rows follow PulseAudio's port priority. A device with fewer than two
+available ports stays a single row subtitled with the port it is using. The route
+button opens that same list for one playback stream and calls Wayle's
+`move_to_device` instead of changing the system default, so the rest of the
+system keeps playing where it was; the picker stays open with the stream's
+current destination checked, and `Back` returns to Play. A stream that ends while
+its picker is open is not routed.
+
+The panel is opened over D-Bus, like the dashboard and the media and Wi-Fi
+panels:
+
+```sh
+busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 \
+  DropdownToggle ss audio eDP-1
+```
+
+Switching to Pair, and opening the panel while Pair is the current tab, starts a
+timed Bluetooth discovery. As in `rofi-audio`, that leaves a powered-off adapter
+off: use the tab's switch, or right-click the Waybar button.
+
+Card **profile** switching is the one `rofi-audio` feature with no counterpart
+here. `wayle-audio` exposes ports, the active port, `set_port` and
+`set_as_default`, but no card or profile API, so the panel can only offer ports
+of the profile that is currently active. On a laptop whose HiFi profile exposes
+either the speakers or the headphone jack but not both, use `rofi-audio` for that
+switch.
+
 ### What is still patched
 
 The local patches are:
@@ -489,6 +556,8 @@ The local patches are:
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
 | `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
+| `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
+| `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
 The Wayle patches apply to v0.7.0.
@@ -497,8 +566,15 @@ The Wayle patches apply to v0.7.0.
 
 `cargo test -p control-centre` covers the remaining Waybar media-title streamer.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`, and the
-Wayle patch stack is checked against v0.7.0 before updates are committed.
+device/port row rules have seven in `wayle-audio-panel.patch`. The Wayle patch
+stack is checked against v0.7.0 before updates are committed.
 
 ```sh
 cargo test -p control-centre
+```
+
+Wayle's own tests need a checkout of v0.7.0 with the patch stack applied:
+
+```sh
+cargo test -p wayle-shell --lib
 ```

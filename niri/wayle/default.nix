@@ -1,9 +1,9 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # Wayle's native dashboard also owns notification history and the seven-day
-# agenda. Its own bar is visually hidden. The dashboard, Wi-Fi manager, and
-# media panel opened from Waybar use separate layer-shell windows, avoiding GTK
-# popup-grab restrictions.
+# agenda. Its own bar is visually hidden. The dashboard, Wi-Fi manager, media
+# panel, and Bluetooth/audio panel opened from Waybar use separate layer-shell
+# windows, avoiding GTK popup-grab restrictions.
 { ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -39,6 +39,8 @@ in
             ./dashboard-power-profile.patch
             ./wayle-media-panel.patch
             ./dashboard-notifications.patch
+            ./wayle-audio-panel.patch
+            ./dashboard-slim.patch
           ];
       });
     })
@@ -77,7 +79,8 @@ in
 
             bar = {
               # `show = false` keeps Wayle's own bar visually hidden. External
-              # dashboard, Wi-Fi and media requests use monitor-local layer surfaces.
+              # dashboard, Wi-Fi, media and audio requests use monitor-local
+              # layer surfaces.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;

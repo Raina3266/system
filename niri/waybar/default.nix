@@ -36,7 +36,8 @@ let
       expand-center = true;
       # Wayle's native dashboard and Wi-Fi manager are separate buttons at the
       # far left. The dashboard button also carries the battery reading; the
-      # centre keeps media controls and the current track.
+      # centre keeps media controls and the current track, and the audio button
+      # on the right opens Wayle's Bluetooth and audio panel.
       modules-left = [
         "custom/dashboard"
         "custom/wayle-wifi"
@@ -67,6 +68,7 @@ let
       name = "topBar-${output}";
       value = topBar // {
         inherit output;
+        "custom/audio" = system.audioModule output;
         "custom/dashboard" = system.dashboardModule output;
         "custom/wayle-wifi" = system.wayleWifiModule output;
         "custom/wayle-media" = system.wayleMediaModule output;
