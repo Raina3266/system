@@ -35,8 +35,8 @@ let
       position = "top";
       expand-center = true;
       # Wayle's native dashboard and Wi-Fi manager are separate buttons at the
-      # far left. The centre has separate notification and media controls,
-      # while `mpris` carries the current track.
+      # far left. The centre has notification and media controls; the media
+      # button carries the current track itself.
       modules-left = [
         "custom/dashboard"
         "custom/wayle-wifi"
@@ -46,7 +46,6 @@ let
       modules-center = [
         "custom/notifications"
         "custom/wayle-media"
-        "mpris"
         "custom/lyrics"
       ];
       modules-right = [

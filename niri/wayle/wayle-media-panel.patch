@@ -159,7 +159,7 @@ index e62b8e2..29e36e5 100644
  pub(crate) enum MediaDropdownCmd {
      ScaleChanged(f32),
 +    PlayerListChanged(Vec<Arc<Player>>),
-+    PlaybackStateChanged,
++    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 index f2e3b13..f1f5076 100644
@@ -390,14 +390,14 @@ index f2e3b13..f1f5076 100644
          _root: &Self::Root,
      ) {
          match msg {
-@@ -151,6 +173,48 @@ impl Component for MediaDropdown {
+@@ -151,6 +173,157 @@ impl Component for MediaDropdown {
                  self.scaled_width = scaled_dimension(BASE_WIDTH, scale);
                  self.scaled_height = scaled_dimension(BASE_HEIGHT, scale);
              }
 +            MediaDropdownCmd::PlayerListChanged(players) => {
 +                self.update_player_list(players, &sender);
 +            }
-+            MediaDropdownCmd::PlaybackStateChanged => {
++            MediaDropdownCmd::PlayersChanged => {
 +                self.sync_player_views(self.media.player_list.get());
 +            }
 +        }
@@ -412,10 +412,13 @@ index f2e3b13..f1f5076 100644
 +    }
 +
 +    fn sync_player_views(&mut self, players: Vec<Arc<Player>>) {
-+        let players: Vec<_> = players
-+            .into_iter()
-+            .filter(|player| player.playback_state.get() != PlaybackState::Stopped)
-+            .collect();
++        let mut players = deduplicate_players(
++            players
++                .into_iter()
++                .filter(|player| player.playback_state.get() != PlaybackState::Stopped)
++                .collect(),
++        );
++        players.sort_by_key(|player| playback_rank(player.playback_state.get()));
 +        let player_ids: Vec<_> = players.iter().map(|player| player.id.clone()).collect();
 +
 +        if player_ids == self.player_ids {
@@ -439,6 +442,112 @@ index f2e3b13..f1f5076 100644
 +        self.player_ids = player_ids;
      }
  }
++
++fn playback_rank(state: PlaybackState) -> u8 {
++    match state {
++        PlaybackState::Playing => 0,
++        PlaybackState::Paused => 1,
++        PlaybackState::Stopped => 2,
++    }
++}
++
++fn deduplicate_players(players: Vec<Arc<Player>>) -> Vec<Arc<Player>> {
++    let mut keep = vec![true; players.len()];
++    for bridge_index in 0..players.len() {
++        if !keep[bridge_index] || !is_mprisence(&players[bridge_index]) {
++            continue;
++        }
++        let Some(proxy_index) = (0..players.len()).find(|&index| {
++            keep[index]
++                && index != bridge_index
++                && is_browser_or_proxy(&players[index])
++                && matching_metadata(&players[bridge_index], &players[index])
++        }) else {
++            continue;
++        };
++        let bridge = &players[bridge_index];
++        let proxy = &players[proxy_index];
++        let bridge_playing = bridge.playback_state.get() == PlaybackState::Playing;
++        let proxy_playing = proxy.playback_state.get() == PlaybackState::Playing;
++        if proxy_playing && !bridge_playing {
++            keep[bridge_index] = false;
++        } else if (bridge_playing && !proxy_playing)
++            || metadata_richness(bridge) >= metadata_richness(proxy)
++        {
++            keep[proxy_index] = false;
++        } else {
++            keep[bridge_index] = false;
++        }
++    }
++    players
++        .into_iter()
++        .zip(keep)
++        .filter_map(|(player, keep)| keep.then_some(player))
++        .collect()
++}
++
++fn is_mprisence(player: &Player) -> bool {
++    player.id.bus_name().to_ascii_lowercase().contains("mprisence")
++}
++
++fn is_browser_or_proxy(player: &Player) -> bool {
++    let id = player.id.bus_name().to_ascii_lowercase();
++    [
++        "playerctld", "plasma-browser-integration", "chromium", "chrome",
++        "firefox", "brave", "vivaldi", "microsoft-edge", "opera", "zen",
++    ]
++    .iter()
++    .any(|candidate| id.contains(candidate))
++}
++
++fn matching_metadata(left: &Player, right: &Player) -> bool {
++    let left_title = normalized(&left.metadata.title.get());
++    if left_title.is_empty() || left_title != normalized(&right.metadata.title.get()) {
++        return false;
++    }
++    same_non_empty(&left.metadata.artist.get(), &right.metadata.artist.get())
++        || same_non_empty(&left.metadata.album.get(), &right.metadata.album.get())
++        || same_optional(&left.metadata.art_url.get(), &right.metadata.art_url.get())
++        || near_duration(left.metadata.length.get(), right.metadata.length.get())
++}
++
++fn normalized(value: &str) -> String {
++    value.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
++}
++
++fn same_non_empty(left: &str, right: &str) -> bool {
++    let left = normalized(left);
++    !left.is_empty() && left == normalized(right)
++}
++
++fn same_optional(left: &Option<String>, right: &Option<String>) -> bool {
++    left.as_deref()
++        .zip(right.as_deref())
++        .is_some_and(|(left, right)| same_non_empty(left, right))
++}
++
++fn near_duration(
++    left: Option<std::time::Duration>,
++    right: Option<std::time::Duration>,
++) -> bool {
++    left.zip(right).is_some_and(|(left, right)| {
++        let difference = if left >= right { left - right } else { right - left };
++        difference <= std::time::Duration::from_secs(2)
++    })
++}
++
++fn metadata_richness(player: &Player) -> usize {
++    [
++        !player.metadata.title.get().trim().is_empty(),
++        !player.metadata.artist.get().trim().is_empty(),
++        !player.metadata.album.get().trim().is_empty(),
++        player.metadata.art_url.get().is_some(),
++        player.metadata.length.get().is_some(),
++    ]
++    .into_iter()
++    .filter(|present| *present)
++    .count()
++}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 index a4a0c29..fe0495a 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
@@ -817,10 +926,10 @@ index 111f79f..ec9573f 100644
 +
 +                    gtk::Label {
 +                        add_css_class: "media-title",
-+                        set_halign: gtk::Align::Start,
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Fill,
 +                        set_xalign: 0.0,
 +                        set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                        set_max_width_chars: 1,
 +                        #[watch]
 +                        set_label: &model.display_title(),
 +                        #[watch]
@@ -840,10 +949,10 @@ index 111f79f..ec9573f 100644
 -                        },
 +                    gtk::Label {
 +                        add_css_class: "media-artist",
-+                        set_halign: gtk::Align::Start,
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Fill,
 +                        set_xalign: 0.0,
 +                        set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                        set_max_width_chars: 1,
 +                        #[watch]
 +                        set_label: &model.display_artist(),
 +                        #[watch]
@@ -863,10 +972,10 @@ index 111f79f..ec9573f 100644
 -                        },
 +                    gtk::Label {
 +                        add_css_class: "media-album",
-+                        set_halign: gtk::Align::Start,
++                        set_hexpand: true,
++                        set_halign: gtk::Align::Fill,
 +                        set_xalign: 0.0,
 +                        set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                        set_max_width_chars: 1,
 +                        #[watch]
 +                        set_label: &model.display_album(),
 +                        #[watch]
@@ -882,8 +991,8 @@ index 111f79f..ec9573f 100644
 +            gtk::Box {
 +                add_css_class: "media-progress",
 +                set_orientation: gtk::Orientation::Vertical,
-+                #[watch]
-+                set_visible: model.length.is_some(),
++                // Some MPRIS publishers omit duration; keep the row visible.
++                set_visible: true,
  
 -                        #[local_ref]
 -                        seek_slider -> DebouncedSlider {
@@ -893,7 +1002,7 @@ index 111f79f..ec9573f 100644
 +                #[local_ref]
 +                seek_slider -> DebouncedSlider {
 +                    #[watch]
-+                    set_sensitive: model.can_seek,
++                    set_sensitive: model.can_seek && model.length.is_some(),
 +                },
  
 -                        #[name = "progress_times"]
@@ -1235,7 +1344,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs b/crat
 index aebaf29..f1929e6 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
-@@ -1,14 +1,39 @@
+@@ -1,14 +1,44 @@
  use std::sync::Arc;
  
  use relm4::ComponentSender;
@@ -1271,9 +1380,14 @@ index aebaf29..f1929e6 100644
 +) {
 +    for player in players {
 +        let state = player.playback_state.clone();
-+        let player_token = token.clone();
-+        watch_cancellable!(sender, player_token, [state.watch()], |out| {
-+            let _ = out.send(MediaDropdownCmd::PlaybackStateChanged);
++        let state_token = token.clone();
++        watch_cancellable!(sender, state_token, [state.watch()], |out| {
++            let _ = out.send(MediaDropdownCmd::PlayersChanged);
++        });
++        let metadata = player.metadata.clone();
++        let metadata_token = token.clone();
++        watch_cancellable!(sender, metadata_token, [metadata.watch()], |out| {
++            let _ = out.send(MediaDropdownCmd::PlayersChanged);
 +        });
 +    }
  }
@@ -1395,7 +1509,7 @@ index c623146..0ea198c 100644
  
 -button.media-source-button {
 +.media-player-card {
-+    padding: var(--space-md);
++    padding: var(--space-sm);
      border-radius: var(--rounding-element);
 -    transition: color var(--duration-fast);
 -    color: var(--fg-muted);
@@ -1409,7 +1523,7 @@ index c623146..0ea198c 100644
 -    }
 +.media-player-source {
 +    border-spacing: var(--space-sm);
-+    margin-bottom: var(--space-sm);
++    margin-bottom: var(--space-xs);
  
      image.media-source-icon {
          -gtk-icon-size: var(--icon-md);
@@ -1442,12 +1556,12 @@ index c623146..0ea198c 100644
  
 -.media-artwork {
 +.media-player-summary {
-+    border-spacing: var(--space-md);
++    border-spacing: var(--space-sm);
 +}
 +
 +.media-player-artwork {
-+    min-width: calc(4.25rem * var(--global-scale));
-+    min-height: calc(4.25rem * var(--global-scale));
++    min-width: calc(3rem * var(--global-scale));
++    min-height: calc(3rem * var(--global-scale));
 +    border-radius: var(--rounding-element);
      background-color: var(--bg-overlay);
      background-size: cover;

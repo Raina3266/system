@@ -41,7 +41,6 @@ window#waybar.bottom {
 #custom-wayle-wifi,
 #custom-notifications,
 #custom-wayle-media,
-#mpris,
 #tray {
     color: #7afcff;
     background-color: transparent;
@@ -145,7 +144,6 @@ window#waybar.bottom {
 #custom-wayle-wifi:hover,
 #custom-notifications:hover,
 #custom-wayle-media:hover,
-#mpris:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
 #custom-whatsapp:hover,
@@ -187,8 +185,9 @@ tooltip label {
     color: #5c6776;
 }
 
-/* A paused track dims, the way the centre button's playback half used to. */
-#mpris.paused {
+/* Keep the title visible while making non-playing media unobtrusive. */
+#custom-wayle-media.paused,
+#custom-wayle-media.inactive {
     color: #5c6776;
 }
 

@@ -34,9 +34,13 @@ let
   };
 
   wayleMediaModule = monitor: {
-    format = "󰎆";
+    format = "{}";
+    return-type = "json";
+    exec = "${packages.controlCentre}/bin/control-centre media-waybar";
     tooltip = true;
-    tooltip-format = "Media players";
+    escape = true;
+    "restart-interval" = 2;
+    "exec-on-event" = false;
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss media ${lib.escapeShellArg monitor}";
     on-click-middle = "${pkgs.wayle}/bin/wayle media play-pause";
@@ -94,25 +98,8 @@ in
       on-click = "${packages.controlCentre}/bin/control-centre toggle";
     };
 
-    # The current track stays beside the dedicated media-panel button. Waybar
-    # reads MPRIS itself, so nothing in this repository has to. {dynamic}
-    # drops the artist rather than leaving a trailing separator when a player
-    # reports none; click, scroll and the rest stay Waybar's own defaults.
-    mpris = {
-      format = "{status_icon}  {dynamic}";
-      format-stopped = "";
-      status-icons = {
-        playing = "󰐊";
-        paused = "󰏤";
-      };
-      dynamic-order = [
-        "title"
-        "artist"
-      ];
-      dynamic-len = 40;
-      tooltip-format = "{player} - {status}";
-    };
-
+    # The media button above reads Wayle's own D-Bus service, so it and the
+    # popup select and deduplicate the same native player list.
     "custom/lyrics" = {
       hide-empty-text = true;
       return-type = "json";

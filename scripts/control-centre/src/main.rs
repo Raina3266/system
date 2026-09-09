@@ -12,6 +12,7 @@ use gtk::prelude::*;
 use gtk::{gdk, glib};
 
 mod calendar;
+mod media_badge;
 mod ui;
 mod wayle;
 
@@ -31,15 +32,25 @@ fn main() -> ExitCode {
                 }
             };
         }
+        Some("media-waybar") => {
+            return match media_badge::watch() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("control-centre: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
         Some("toggle") | None => {}
         Some("help" | "--help" | "-h") => {
             println!(
                 "control-centre\n\n\
                  Usage:\n  \
                  control-centre toggle\n  \
-                 control-centre waybar\n\n\
-                 `toggle` opens or closes the panel; `waybar` streams the bar\n\
-                 badge as JSON."
+                 control-centre waybar\n  \
+                 control-centre media-waybar\n\n\
+                 `toggle` opens or closes the panel; `waybar` streams the\n\
+                 notification badge; `media-waybar` streams the active title."
             );
             return ExitCode::SUCCESS;
         }
