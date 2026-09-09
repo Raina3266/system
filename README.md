@@ -461,25 +461,35 @@ module.
 
 The dashboard is the agenda and the notification list. It uses Wayle's own
 notification service and native notification groups, icons, actions, dismiss
-controls, Do Not Disturb switch and Clear All button. Long bodies can be
-expanded. Each group initially shows at most three messages and the bounded
-notification area scrolls when its contents are taller. Chrome and Chromium
-transient notifications are retained in Wayle's history.
+controls, Do Not Disturb switch and Clear All button. Each group initially shows
+at most three messages and the bounded notification area scrolls when its
+contents are taller. Chrome and Chromium transient notifications are retained in
+Wayle's history.
+
+A notification shows two lines of its title and two of its body; the chevron
+expands both and collapses them again. The chevron appears whenever collapsing
+hides something — a body, or a summary long enough to need a third line.
 
 Everything the other Waybar buttons already own has been taken out of it: the
 Bluetooth and Do Not Disturb tiles, the volume card, and the battery and network
 row. Quick actions are one row — airplane mode, idle inhibit and the power
-profile. Do Not Disturb keeps the switch inside the notification card, and
-airplane mode still turns Bluetooth off and back on. The space that frees goes to
-the two lists: the agenda grows from 190 to 320 pixels, notifications from 270 to
-460, and the panel itself from 760 to 900 before it scrolls. Each is a ceiling,
-so a quiet day still gets a short panel.
+profile. Airplane mode still turns Bluetooth off and back on. Do Not Disturb is
+the switch beside the notification card's title. The header's settings button is
+gone too: this Wayle configuration is declared in Home Manager, so anything
+Wayle's settings app writes is replaced on the next rebuild. The space that
+frees goes to the two lists: the agenda grows from 190 to 320 pixels,
+notifications from 270 to 460, and the panel itself from 760 to 900 before it
+scrolls. Each is a ceiling, so a quiet day still gets a short panel.
+
+Every card title — `CALENDAR`, `NOTIFICATIONS`, `SYSTEM` — is drawn in the
+palette's red, the colour the calendar's date range already used.
 
 The calendar card is the one small adapter Wayle does not provide natively. It
 reads the next seven days from `~/.cache/waybar-ycal/events.json`, the same cache
 written by `waybar-ycal`, and renders the result with Wayle widgets and styling.
-The old standalone GTK notification/calendar panel and its Waybar notification
-button have been removed.
+A timed event's `HH:MM-HH:MM` is split off the label that cache stores and shown
+on its own line above the event. The old standalone GTK notification/calendar
+panel and its Waybar notification button have been removed.
 
 The separate Wi-Fi button opens Wayle's native network manager, where networks
 can be scanned, selected and connected. Each Waybar instance passes its output
@@ -524,7 +534,7 @@ provides one:
 | Pair | Wayle's Bluetooth dropdown: paired and discovered devices, connect, disconnect, forget, the adapter switch, the scan button, and the pairing card for PINs and passkeys | yes |
 | Output | The default output's volume and mute, then every output device and its available ports | ports added |
 | Input | The default input's volume and mute, then every microphone and its available ports | ports added |
-| Play | Wayle's per-application volume list, with a route button on each stream | route added |
+| Play | Wayle's per-application volume list, with a route button at the end of each stream's row | route added |
 
 Only three things were not already there. Device rows expand into port rows, so
 **Speaker** and **Headphones** on one card are separate destinations: selecting
@@ -572,6 +582,7 @@ The local patches are:
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
+| `dashboard-polish.patch` | Drops the header's settings button, moves Do Not Disturb beside the notification card's title, expands a notification's title along with its body, puts an event's time above the event, and colours every card title red. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
 The Wayle patches apply to v0.7.0.

@@ -332,7 +332,7 @@ index fbeb76f..48942f6 100644
          let state = self.idle_inhibit.state();
          if state.active.get() {
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
-index f29a655..52e7750 100644
+index f29a655..a87bbe3 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
 @@ -9,7 +9,6 @@ use relm4::{gtk, prelude::*};
@@ -365,7 +365,7 @@ index f29a655..52e7750 100644
      has_power_profiles: bool,
  
      pre_airplane_wifi: bool,
-@@ -64,43 +60,6 @@ impl Component for QuickActionsSection {
+@@ -64,45 +60,8 @@ impl Component for QuickActionsSection {
                  set_row_spacing: 4,
                  set_column_spacing: 8,
  
@@ -407,8 +407,11 @@ index f29a655..52e7750 100644
 -                },
 -
                  #[name = "airplane_btn"]
-                 attach[1, 0, 1, 1] = &gtk::Button {
+-                attach[1, 0, 1, 1] = &gtk::Button {
++                attach[0, 0, 1, 1] = &gtk::Button {
                      add_css_class: "quick-action",
+                     #[watch]
+                     set_class_active: ("active", model.airplane_active),
 @@ -133,45 +92,8 @@ impl Component for QuickActionsSection {
                      },
                  },

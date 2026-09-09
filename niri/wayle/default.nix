@@ -41,6 +41,7 @@ in
             ./dashboard-notifications.patch
             ./wayle-audio-panel.patch
             ./dashboard-slim.patch
+            ./dashboard-polish.patch
           ];
       });
     })

@@ -1,0 +1,491 @@
+Correct the dashboard details reported after the first pass.
+
+The header's settings button is dropped: this session's Wayle configuration
+is declared in Home Manager, so anything the settings app writes is replaced
+on the next rebuild. Do Not Disturb moves up beside the notification card's
+title, which also gives the card back a row.
+
+A notification's title now wraps to the same two lines the body already used
+and the chevron expands both, so a long summary is no longer cut off however
+often it is pressed. The chevron is offered for a long summary even when there
+is no body, since a GTK label only reports that it is ellipsized after it has
+been laid out.
+
+The calendar puts an event's time on its own line above the event, split off
+the `"<title> HH:MM-HH:MM"` label `waybar-ycal` caches, and the agenda is given
+more room between its lines.
+
+Every card title is drawn in the palette's red, the colour the calendar's date
+range already used.
+
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+index baa939b..15019e7 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+@@ -15,6 +15,9 @@ struct AgendaEntry {
+     order: u8,
+     icon: &'static str,
+     title: String,
++    /// `HH:MM-HH:MM`, split off the title so it can be shown above the entry.
++    /// `None` for all-day events and tasks.
++    time: Option<String>,
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -108,7 +111,7 @@ impl Component for CalendarSection {
+         _sender: ComponentSender<Self>,
+     ) -> ComponentParts<Self> {
+         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+-        let mut model = Self {
++        let model = Self {
+             agenda: read_agenda(),
+             body,
+         };
+@@ -142,6 +145,13 @@ impl CalendarSection {
+             self.body.append(&heading);
+ 
+             for entry in &day.entries {
++                if let Some(time) = &entry.time {
++                    let time_label = gtk::Label::new(Some(time));
++                    time_label.add_css_class("dashboard-calendar-time");
++                    time_label.set_xalign(0.0);
++                    self.body.append(&time_label);
++                }
++
+                 let label = gtk::Label::new(Some(&format!("{}  {}", entry.icon, entry.title)));
+                 label.add_css_class("dashboard-calendar-entry");
+                 label.set_xalign(0.0);
+@@ -198,17 +208,22 @@ fn entries_for(parsed: &Value, date: &str) -> Vec<AgendaEntry> {
+     let mut entries = items
+         .iter()
+         .filter_map(|item| match item {
+-            Value::String(title) => Some(AgendaEntry {
+-                order: 1,
+-                icon: "󰃭",
+-                title: title.clone(),
+-            }),
++            Value::String(label) => {
++                let (title, time) = split_time(label);
++                Some(AgendaEntry {
++                    order: 1,
++                    icon: "󰃭",
++                    title,
++                    time,
++                })
++            }
+             Value::Object(task) => {
+                 let done = task.get("done").and_then(Value::as_bool).unwrap_or(false);
+                 Some(AgendaEntry {
+                     order: if done { 2 } else { 0 },
+                     icon: if done { "󰄲" } else { "󰄱" },
+                     title: task.get("title").and_then(Value::as_str)?.to_owned(),
++                    time: None,
+                 })
+             }
+             _ => None,
+@@ -218,11 +233,71 @@ fn entries_for(parsed: &Value, date: &str) -> Vec<AgendaEntry> {
+     entries
+ }
+ 
++/// Splits `waybar-ycal`'s `"<title> HH:MM-HH:MM"` label into its two halves.
++///
++/// The cache appends the time range to a timed event's summary and leaves an
++/// all-day event as the summary alone, so anything that does not end in a time
++/// range is returned unchanged.
++fn split_time(label: &str) -> (String, Option<String>) {
++    let Some((title, tail)) = label.rsplit_once(' ') else {
++        return (label.to_owned(), None);
++    };
++
++    let Some((start, end)) = tail.split_once('-') else {
++        return (label.to_owned(), None);
++    };
++
++    if is_clock_time(start) && is_clock_time(end) {
++        (title.trim_end().to_owned(), Some(tail.to_owned()))
++    } else {
++        (label.to_owned(), None)
++    }
++}
++
++fn is_clock_time(value: &str) -> bool {
++    let Some((hours, minutes)) = value.split_once(':') else {
++        return false;
++    };
++
++    hours.len() == 2
++        && minutes.len() == 2
++        && hours.chars().all(|digit| digit.is_ascii_digit())
++        && minutes.chars().all(|digit| digit.is_ascii_digit())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use chrono::NaiveDate;
+ 
+-    use super::build_agenda;
++    use super::{build_agenda, split_time};
++
++    #[test]
++    fn timed_events_keep_their_time_apart_from_the_title() {
++        let (title, time) = split_time("Video appointment with Johns, Brian (Mr) 19:00-19:30");
++        assert_eq!(title, "Video appointment with Johns, Brian (Mr)");
++        assert_eq!(time.as_deref(), Some("19:00-19:30"));
++    }
++
++    #[test]
++    fn all_day_events_have_no_time() {
++        let (title, time) = split_time("Teachers' Day");
++        assert_eq!(title, "Teachers' Day");
++        assert_eq!(time, None);
++    }
++
++    #[test]
++    fn a_title_ending_in_a_range_that_is_not_a_time_is_left_alone() {
++        let (title, time) = split_time("Sprint 12-14");
++        assert_eq!(title, "Sprint 12-14");
++        assert_eq!(time, None);
++    }
++
++    #[test]
++    fn a_title_that_is_only_a_time_range_keeps_the_time() {
++        let (title, time) = split_time("Standup 09:00-09:15");
++        assert_eq!(title, "Standup");
++        assert_eq!(time.as_deref(), Some("09:00-09:15"));
++    }
+ 
+     #[test]
+     fn agenda_includes_today_and_the_following_six_days_only() {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+index dd3effb..cb6c383 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+@@ -25,7 +25,6 @@ pub(crate) struct DashboardDropdownInit {
+ pub(crate) enum DashboardDropdownMsg {
+     VisibilityChanged(bool),
+     SetExternalHost(gtk::Window),
+-    OpenSettings,
+ }
+ 
+ #[derive(Debug)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+index 6030d7f..a0c750d 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+@@ -6,11 +6,6 @@ mod quick_actions;
+ mod system_stats;
+ mod watchers;
+ 
+-use std::{
+-    process::{Command, Stdio},
+-    thread,
+-};
+-
+ use gtk::prelude::*;
+ use relm4::{gtk, prelude::*};
+ use wayle_widgets::prelude::*;
+@@ -27,24 +22,6 @@ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
+ const BASE_WIDTH: f32 = 380.0;
+ 
+-fn spawn_settings_app() {
+-    match Command::new("wayle-settings")
+-        .stdin(Stdio::null())
+-        .stdout(Stdio::null())
+-        .stderr(Stdio::null())
+-        .spawn()
+-    {
+-        Ok(mut child) => {
+-            thread::spawn(move || {
+-                let _ = child.wait();
+-            });
+-        }
+-        Err(err) => {
+-            tracing::warn!(error = %err, "failed to spawn wayle-settings");
+-        }
+-    }
+-}
+-
+ pub(crate) struct DashboardDropdown {
+     scaled_width: i32,
+     external_host: Option<gtk::Window>,
+@@ -88,16 +65,6 @@ impl Component for DashboardDropdown {
+                     label {
+                         set_label: &t!("dropdown-dashboard-title"),
+                     },
+-                    #[template_child]
+-                    actions {
+-                        #[template]
+-                        GhostIconButton {
+-                            add_css_class: "dashboard-settings-btn",
+-                            set_icon_name: "ld-settings-symbolic",
+-                            set_tooltip_text: Some(&t!("dropdown-dashboard-open-settings")),
+-                            connect_clicked => DashboardDropdownMsg::OpenSettings,
+-                        },
+-                    },
+                 },
+ 
+                 gtk::ScrolledWindow {
+@@ -197,7 +164,7 @@ impl Component for DashboardDropdown {
+         ComponentParts { model, widgets }
+     }
+ 
+-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
++    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
+             DashboardDropdownMsg::VisibilityChanged(visible) => {
+                 self.system_stats.emit(SystemStatsInput::SetActive(visible));
+@@ -218,13 +185,6 @@ impl Component for DashboardDropdown {
+                     self.calendar.emit(CalendarSectionInput::Refresh);
+                 }
+             }
+-            DashboardDropdownMsg::OpenSettings => {
+-                root.popdown();
+-                if let Some(window) = &self.external_host {
+-                    window.set_visible(false);
+-                }
+-                spawn_settings_app();
+-            }
+         }
+     }
+ 
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+index 721cca2..8ef65e3 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+@@ -65,7 +65,6 @@ impl Component for NotificationSection {
+ 
+                 gtk::Box {
+                     add_css_class: "card-title",
+-                    set_hexpand: true,
+ 
+                     gtk::Image {
+                         #[watch]
+@@ -81,6 +80,26 @@ impl Component for NotificationSection {
+                     },
+                 },
+ 
++                #[template]
++                Switch {
++                    add_css_class: "notification-dropdown-dnd-switch",
++                    set_valign: gtk::Align::Center,
++                    set_tooltip_text: Some(&t!("notification-dropdown-dnd-label")),
++                    set_visible: model.notification.is_some(),
++                    #[watch]
++                    #[block_signal(dnd_toggle)]
++                    set_active: model.dnd,
++                    connect_state_set[sender] => move |switch, active| {
++                        sender.input(NotificationSectionInput::DndToggled(active));
++                        switch.set_state(active);
++                        gtk::glib::Propagation::Stop
++                    } @dnd_toggle,
++                },
++
++                gtk::Box {
++                    set_hexpand: true,
++                },
++
+                 #[template]
+                 GhostButton {
+                     add_css_class: "notification-dropdown-clear-all",
+@@ -96,30 +115,6 @@ impl Component for NotificationSection {
+                 },
+             },
+ 
+-            gtk::Box {
+-                add_css_class: "notification-dropdown-dnd-row",
+-                set_visible: model.notification.is_some(),
+-
+-                gtk::Label {
+-                    add_css_class: "notification-dropdown-dnd-label",
+-                    set_hexpand: true,
+-                    set_halign: gtk::Align::Start,
+-                    set_label: &t!("notification-dropdown-dnd-label"),
+-                },
+-
+-                #[template]
+-                Switch {
+-                    #[watch]
+-                    #[block_signal(dnd_toggle)]
+-                    set_active: model.dnd,
+-                    connect_state_set[sender] => move |switch, active| {
+-                        sender.input(NotificationSectionInput::DndToggled(active));
+-                        switch.set_state(active);
+-                        gtk::glib::Propagation::Stop
+-                    } @dnd_toggle,
+-                },
+-            },
+-
+             gtk::Label {
+                 add_css_class: "dashboard-section-empty",
+                 set_halign: gtk::Align::Start,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
+index 30897ca..736b501 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
+@@ -11,6 +11,18 @@ use crate::{
+ const MAX_ACTIONS_PER_ROW: usize = 3;
+ 
+ impl NotificationItem {
++    /// Whether collapsing hides anything, and so whether the chevron is worth
++    /// showing at all.
++    pub(super) fn can_expand(&self) -> bool {
++        let has_body = self
++            .notification
++            .body
++            .get()
++            .is_some_and(|body| !body.trim().is_empty());
++
++        has_body || self.notification.summary.get().chars().count() > super::LONG_SUMMARY_CHARS
++    }
++
+     pub(super) fn apply_icon(&self, icon: &gtk::Image, icon_container: &gtk::Box) {
+         match &self.resolved_icon {
+             ResolvedIcon::Named(name) => {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+index a0e5a83..2746a60 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+@@ -12,6 +12,17 @@ use crate::shell::notification_popup::helpers::{
+     ResolvedIcon, relative_time, sanitize_markup, urgency_css_class,
+ };
+ 
++/// Lines the title and the body each keep while the item is collapsed.
++const COLLAPSED_LINES: i32 = 2;
++
++/// Summary length past which the title is assumed to need more than
++/// [`COLLAPSED_LINES`] lines at the panel's width.
++///
++/// A GTK label only reports that it is ellipsized after it has been laid out,
++/// which is too late to decide whether to offer the chevron, so the chevron is
++/// offered on a title this long even when there is no body to reveal.
++const LONG_SUMMARY_CHARS: usize = 60;
++
+ pub(crate) struct NotificationItem {
+     pub(crate) notification: Arc<Notification>,
+ 
+@@ -63,8 +74,13 @@ impl FactoryComponent for NotificationItem {
+                         gtk::Label {
+                             add_css_class: "notification-dropdown-item-title",
+                             set_hexpand: true,
+-                            set_halign: gtk::Align::Start,
++                            set_halign: gtk::Align::Fill,
++                            set_xalign: 0.0,
++                            set_wrap: true,
++                            set_wrap_mode: gtk::pango::WrapMode::WordChar,
+                             set_ellipsize: gtk::pango::EllipsizeMode::End,
++                            #[watch]
++                            set_lines: if self.expanded { -1 } else { COLLAPSED_LINES },
+                             set_label: &self.notification.summary.get(),
+                         },
+ 
+@@ -78,11 +94,8 @@ impl FactoryComponent for NotificationItem {
+                         gtk::Button {
+                             set_css_classes: &["ghost-icon", "notification-dropdown-item-expand"],
+                             set_cursor_from_name: Some("pointer"),
+-                            set_visible: self
+-                                .notification
+-                                .body
+-                                .get()
+-                                .is_some_and(|body| !body.trim().is_empty()),
++                            set_valign: gtk::Align::Start,
++                            set_visible: self.can_expand(),
+                             #[watch]
+                             set_icon_name: if self.expanded {
+                                 "ld-chevron-up-symbolic"
+@@ -101,7 +114,8 @@ impl FactoryComponent for NotificationItem {
+ 
+                     gtk::Label {
+                         add_css_class: "notification-dropdown-item-body",
+-                        set_halign: gtk::Align::Start,
++                        set_halign: gtk::Align::Fill,
++                        set_xalign: 0.0,
+                         set_use_markup: true,
+                         #[watch]
+                         set_ellipsize: if self.expanded {
+@@ -110,7 +124,7 @@ impl FactoryComponent for NotificationItem {
+                             gtk::pango::EllipsizeMode::End
+                         },
+                         #[watch]
+-                        set_lines: if self.expanded { -1 } else { 2 },
++                        set_lines: if self.expanded { -1 } else { COLLAPSED_LINES },
+                         set_wrap: true,
+                         set_wrap_mode: gtk::pango::WrapMode::WordChar,
+                         set_label: &self
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss
+index 1aac6b4..de7762d 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss
+@@ -22,7 +22,8 @@
+     }
+ 
+     .dashboard-calendar-day {
+-        margin-top: var(--space-xs);
++        margin-top: var(--space-md);
++        margin-bottom: var(--space-xs);
+         font-size: var(--text-md);
+         font-weight: var(--weight-semibold);
+         color: var(--accent);
+@@ -32,8 +33,18 @@
+         }
+     }
+ 
++    // The time the event runs, above the event itself.
++    .dashboard-calendar-time {
++        margin-top: var(--space-sm);
++        font-size: var(--text-xs);
++        font-weight: var(--weight-semibold);
++        color: var(--fg-muted);
++        letter-spacing: 0.04em;
++    }
++
+     .dashboard-calendar-entry {
+-        margin-top: calc(var(--space-xs) / 2);
++        margin-top: var(--space-xs);
++        margin-bottom: var(--space-xs);
+         font-size: var(--text-base);
+         font-weight: var(--weight-medium);
+         color: var(--status-info);
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+index 6c2783d..ccafcad 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+@@ -32,17 +32,21 @@
+         margin-bottom: var(--space-sm);
+     }
+ 
++    // Every card announces itself in the palette's red, the same colour the
++    // calendar's date range already uses.
+     .card-title {
+         font-size: var(--text-2xs);
+-        font-weight: var(--weight-semibold);
+-        color: var(--fg-subtle);
++        font-weight: var(--weight-bold);
++        color: var(--status-error);
+         text-transform: uppercase;
+         letter-spacing: 0.06em;
+         border-spacing: var(--space-xs);
++        margin-right: var(--space-sm);
+ 
+         image {
+             -gtk-icon-size: var(--icon-md);
+             margin-right: var(--space-sm);
++            color: var(--status-error);
+         }
+     }
+ }
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss
+index 5dcb6fd..e9bcfbd 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss
+@@ -21,7 +21,8 @@
+         margin-bottom: var(--space-sm);
+     }
+ 
+-    .notification-dropdown-dnd-row {
+-        margin: 0 0 var(--space-sm);
++    // Do Not Disturb sits in the card header now, beside the title.
++    .notification-dropdown-dnd-switch {
++        margin-right: var(--space-sm);
+     }
+ }
