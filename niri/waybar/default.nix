@@ -35,8 +35,8 @@ let
       position = "top";
       expand-center = true;
       # Wayle's native dashboard and Wi-Fi manager are separate buttons at the
-      # far left. The centre has notification and media controls; the media
-      # button carries the current track itself.
+      # far left. The dashboard button also carries the battery reading; the
+      # centre keeps media controls and the current track.
       modules-left = [
         "custom/dashboard"
         "custom/wayle-wifi"
@@ -44,7 +44,6 @@ let
         "custom/ycal"
       ];
       modules-center = [
-        "custom/notifications"
         "custom/wayle-media"
         "custom/lyrics"
       ];

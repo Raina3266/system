@@ -305,9 +305,6 @@ dependencies = [
 name = "control-centre"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "gtk4",
- "gtk4-layer-shell",
  "serde",
  "serde_json",
  "zbus",

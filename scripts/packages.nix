@@ -69,9 +69,8 @@ let
       root = ./.;
       fileset = lib.fileset.unions [
         (craneLib.fileset.cargoTomlAndLock ./.)
-        # The member's whole directory, not crane's commonCargoSources, which
-        # keeps only .rs and .toml: control-centre include_str!()s a stylesheet
-        # and would lose it.
+        # The member's whole directory, not crane's commonCargoSources, so any
+        # non-Rust runtime assets remain part of that package's source.
         (./. + "/${pname}")
       ];
     };
@@ -132,8 +131,7 @@ let
 in
 rec {
   inherit withParentDeath;
-  # gtk4 and the hook that wraps it live in commonArgs now, so there is nothing
-  # left for this crate to add.
+  # The former panel now only streams Wayle's media title to Waybar.
   controlCentre = mkWorkspacePackage "control-centre" { };
 
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {

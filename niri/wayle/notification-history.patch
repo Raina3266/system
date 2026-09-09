@@ -1,0 +1,85 @@
+Keep Chrome web notifications in Wayle's native notification history.
+
+Chrome marks web notifications transient. Wayle displays those as popups but
+normally drops them from history, so they disappear from its notification
+panel. Mirror only Chrome/Chromium transient popups into Wayle's existing
+in-memory history; the native notification dropdown and dashboard continue to
+own rendering, dismissal, actions, grouping, and Do Not Disturb.
+
+diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
+index abe3e41..6b78a1d 100644
+--- a/crates/wayle-shell/src/watchers/notification.rs
++++ b/crates/wayle-shell/src/watchers/notification.rs
+@@ -3,7 +3,7 @@
+ use std::sync::Arc;
+ 
+ use futures::StreamExt;
+-use wayle_notification::NotificationService;
++use wayle_notification::{NotificationService, core::notification::Notification};
+ 
+ use crate::shell::ShellServices;
+ 
+@@ -15,6 +15,63 @@ pub fn spawn(services: &ShellServices) {
+ 
+     let config = services.config.config();
+     spawn_blocklist_watcher(&config.modules.notifications, notification);
++    spawn_chrome_history_watcher(notification);
++}
++
++/// Chrome marks web notifications transient. Wayle correctly displays those
++/// as popups but normally omits them from history; retain Chrome's entries so
++/// its native notification panels can still reopen them.
++fn spawn_chrome_history_watcher(service: &Arc<NotificationService>) {
++    let popups = service.popups.clone();
++    let history = service.notifications.clone();
++    let mut stream = popups.watch();
++
++    tokio::spawn(async move {
++        while stream.next().await.is_some() {
++            let mut current = history.get();
++            let mut changed = false;
++
++            for popup in popups
++                .get()
++                .iter()
++                .filter(|item| retain_transient(item.as_ref()))
++            {
++                if current.iter().any(|item| item.id == popup.id) {
++                    continue;
++                }
++                current.insert(0, popup.clone());
++                changed = true;
++            }
++
++            if changed {
++                history.set(current);
++            }
++        }
++    });
++}
++
++fn retain_transient(notification: &Notification) -> bool {
++    if !notification.is_transient.get() {
++        return false;
++    }
++
++    let desktop_entry = notification
++        .desktop_entry
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let app_name = notification
++        .app_name
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++
++    desktop_entry == "google-chrome"
++        || desktop_entry == "chromium"
++        || desktop_entry == "chromium-browser"
++        || desktop_entry.starts_with("chrome-")
++        || app_name.contains("chrome")
++        || app_name.contains("chromium")
+ }
+ 
+ fn spawn_blocklist_watcher(

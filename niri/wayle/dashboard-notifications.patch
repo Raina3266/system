@@ -1,0 +1,1039 @@
+Merge notifications and a seven-day agenda into Wayle's native dashboard.
+
+The notification card reuses Wayle's NotificationService, grouping, actions,
+dismissal, Do Not Disturb, icons, and relative-time refresh. Notification bodies
+can expand beyond the native two-line preview, and the bounded list scrolls.
+
+Wayle has no native external-calendar event source, so the calendar card is a
+small adapter for the existing waybar-ycal JSON cache. The dashboard's duplicate
+Now Playing card is removed; media remains in its dedicated native panel. The
+dashboard content is height-bounded so the merged view stays usable on laptops.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+index ce40e044923a70f4b940449172be3263967883b9..12b1dd8e8fb5997083dc9153e9dd29e54baaecb6 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+@@ -20,6 +20,13 @@ dropdown-dashboard-now-playing = Now Playing
+ dropdown-dashboard-no-media-title = No Media
+ dropdown-dashboard-no-media-description = No media playing
+ 
++## Calendar and Notifications
++dropdown-dashboard-calendar = Calendar
++dropdown-dashboard-calendar-today = Today
++dropdown-dashboard-calendar-empty = Nothing scheduled in the next 7 days
++dropdown-dashboard-notifications = Notifications
++dropdown-dashboard-notifications-unavailable = Notification service unavailable
++
+ ## Battery
+ dropdown-dashboard-battery = Battery
+ dropdown-dashboard-battery-charging = Charging
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+index aa799bc857588a30ee356d6ecb479003c0354c9d..cb0c65e2e4a2cdb0f2d40f7214ebac75cb99c95f 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+@@ -20,6 +20,13 @@ dropdown-dashboard-now-playing = En cours de lecture
+ dropdown-dashboard-no-media-title = Aucun média
+ dropdown-dashboard-no-media-description = Aucun média en cours de lecture
+ 
++## Calendrier et notifications
++dropdown-dashboard-calendar = Calendrier
++dropdown-dashboard-calendar-today = Aujourd'hui
++dropdown-dashboard-calendar-empty = Aucun événement prévu dans les 7 prochains jours
++dropdown-dashboard-notifications = Notifications
++dropdown-dashboard-notifications-unavailable = Service de notifications indisponible
++
+ ## Batterie
+ dropdown-dashboard-battery = Batterie
+ dropdown-dashboard-battery-charging = En charge
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc20663e5d4d850f6c1234651f7e33a25c1837b4
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+@@ -0,0 +1,242 @@
++use std::{env, fs, path::PathBuf};
++
++use chrono::{Duration, Local, NaiveDate};
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use serde_json::Value;
++
++use crate::i18n::t;
++
++const DAYS: i64 = 7;
++const WRAP_CHARS: i32 = 34;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct AgendaEntry {
++    order: u8,
++    icon: &'static str,
++    title: String,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct AgendaDay {
++    heading: String,
++    entries: Vec<AgendaEntry>,
++}
++
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++struct Agenda {
++    range: String,
++    days: Vec<AgendaDay>,
++}
++
++#[derive(Debug)]
++pub(crate) enum CalendarSectionInput {
++    Refresh,
++}
++
++pub(crate) struct CalendarSection {
++    agenda: Agenda,
++    body: gtk::Box,
++}
++
++#[relm4::component(pub(crate))]
++impl Component for CalendarSection {
++    type Init = ();
++    type Input = CalendarSectionInput;
++    type Output = ();
++    type CommandOutput = ();
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "dashboard-calendar-section"],
++            set_orientation: gtk::Orientation::Vertical,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++                    set_hexpand: true,
++
++                    gtk::Image {
++                        set_icon_name: Some("tb-calendar-time-symbolic"),
++                    },
++
++                    gtk::Label {
++                        set_label: &t!("dropdown-dashboard-calendar"),
++                    },
++                },
++
++                gtk::Label {
++                    add_css_class: "dashboard-calendar-range",
++                    set_halign: gtk::Align::End,
++                    #[watch]
++                    set_label: &model.agenda.range,
++                },
++            },
++
++            gtk::Label {
++                add_css_class: "dashboard-section-empty",
++                set_halign: gtk::Align::Start,
++                set_label: &t!("dropdown-dashboard-calendar-empty"),
++                #[watch]
++                set_visible: model.agenda.days.is_empty(),
++            },
++
++            gtk::ScrolledWindow {
++                add_css_class: "dashboard-calendar-scroll",
++                set_hscrollbar_policy: gtk::PolicyType::Never,
++                set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                set_max_content_height: 190,
++                set_propagate_natural_height: true,
++                #[watch]
++                set_visible: !model.agenda.days.is_empty(),
++
++                #[local_ref]
++                body_widget -> gtk::Box {
++                    add_css_class: "dashboard-calendar-body",
++                    set_orientation: gtk::Orientation::Vertical,
++                },
++            },
++        }
++    }
++
++    fn init(
++        _init: Self::Init,
++        _root: Self::Root,
++        _sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        let mut model = Self {
++            agenda: read_agenda(),
++            body,
++        };
++        model.rebuild_body();
++
++        let body_widget = &model.body;
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            CalendarSectionInput::Refresh => {
++                self.agenda = read_agenda();
++                self.rebuild_body();
++            }
++        }
++    }
++}
++
++impl CalendarSection {
++    fn rebuild_body(&self) {
++        while let Some(child) = self.body.first_child() {
++            self.body.remove(&child);
++        }
++
++        for day in &self.agenda.days {
++            let heading = gtk::Label::new(Some(&day.heading));
++            heading.add_css_class("dashboard-calendar-day");
++            heading.set_xalign(0.0);
++            self.body.append(&heading);
++
++            for entry in &day.entries {
++                let label = gtk::Label::new(Some(&format!("{}  {}", entry.icon, entry.title)));
++                label.add_css_class("dashboard-calendar-entry");
++                label.set_xalign(0.0);
++                label.set_wrap(true);
++                label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
++                label.set_max_width_chars(WRAP_CHARS);
++                self.body.append(&label);
++            }
++        }
++    }
++}
++
++fn cache_path() -> PathBuf {
++    env::var_os("HOME")
++        .map_or_else(PathBuf::new, PathBuf::from)
++        .join(".cache/waybar-ycal/events.json")
++}
++
++fn read_agenda() -> Agenda {
++    let cache = fs::read_to_string(cache_path()).unwrap_or_default();
++    build_agenda(&cache, Local::now().date_naive())
++}
++
++fn build_agenda(cache: &str, start: NaiveDate) -> Agenda {
++    let end = start + Duration::days(DAYS - 1);
++    let range = format!("{} – {}", start.format("%-d %b"), end.format("%-d %b"));
++    let parsed = serde_json::from_str::<Value>(cache).unwrap_or(Value::Null);
++
++    let mut days = Vec::new();
++    for offset in 0..DAYS {
++        let date = start + Duration::days(offset);
++        let entries = entries_for(&parsed, &date.format("%Y-%m-%d").to_string());
++        if entries.is_empty() {
++            continue;
++        }
++        days.push(AgendaDay {
++            heading: if offset == 0 {
++                t!("dropdown-dashboard-calendar-today")
++            } else {
++                date.format("%A %-d %b").to_string()
++            },
++            entries,
++        });
++    }
++
++    Agenda { range, days }
++}
++
++fn entries_for(parsed: &Value, date: &str) -> Vec<AgendaEntry> {
++    let Some(Value::Array(items)) = parsed.get(date) else {
++        return Vec::new();
++    };
++
++    let mut entries = items
++        .iter()
++        .filter_map(|item| match item {
++            Value::String(title) => Some(AgendaEntry {
++                order: 1,
++                icon: "󰃭",
++                title: title.clone(),
++            }),
++            Value::Object(task) => {
++                let done = task.get("done").and_then(Value::as_bool).unwrap_or(false);
++                Some(AgendaEntry {
++                    order: if done { 2 } else { 0 },
++                    icon: if done { "󰄲" } else { "󰄱" },
++                    title: task.get("title").and_then(Value::as_str)?.to_owned(),
++                })
++            }
++            _ => None,
++        })
++        .collect::<Vec<_>>();
++    entries.sort_by_key(|entry| entry.order);
++    entries
++}
++
++#[cfg(test)]
++mod tests {
++    use chrono::NaiveDate;
++
++    use super::build_agenda;
++
++    #[test]
++    fn agenda_includes_today_and_the_following_six_days_only() {
++        let cache = r#"{
++            "2026-09-09": ["Today"],
++            "2026-09-15": ["Day seven"],
++            "2026-09-16": ["Too late"]
++        }"#;
++        let Some(start) = NaiveDate::from_ymd_opt(2026, 9, 9) else {
++            panic!("test date must be valid");
++        };
++        let agenda = build_agenda(cache, start);
++        assert_eq!(agenda.days.len(), 2);
++        assert_eq!(agenda.days[0].entries[0].title, "Today");
++        assert_eq!(agenda.days[1].entries[0].title, "Day seven");
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
+index 056cffb1b326fbc1e10e4fc993b86db2a841343c..2d415991f9c4e04dbe7c87565ebb24eb3fc7623b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
+@@ -15,7 +15,6 @@ impl DropdownFactory for Factory {
+             battery: services.battery.clone(),
+             bluetooth: services.bluetooth.clone(),
+             config: services.config.clone(),
+-            media: services.media.clone(),
+             network: services.network.clone(),
+             notification: services.notification.clone(),
+             power_profiles: services.power_profiles.clone(),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+index 6203abfb4734380e0ac9a2c69acda96a24a2ec43..cc9370a23030df80d3dd9d2e69b48ff0ed9a0edd 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+@@ -6,7 +6,6 @@ use wayle_battery::BatteryService;
+ use wayle_bluetooth::BluetoothService;
+ use wayle_config::ConfigService;
+ use wayle_core::DeferredService;
+-use wayle_media::MediaService;
+ use wayle_network::NetworkService;
+ use wayle_notification::NotificationService;
+ use wayle_power_profiles::PowerProfilesService;
+@@ -19,7 +18,6 @@ pub(crate) struct DashboardDropdownInit {
+     pub battery: Option<Arc<BatteryService>>,
+     pub bluetooth: DeferredService<BluetoothService>,
+     pub config: Arc<ConfigService>,
+-    pub media: Option<Arc<MediaService>>,
+     pub network: Option<Arc<NetworkService>>,
+     pub notification: Option<Arc<NotificationService>>,
+     pub power_profiles: DeferredService<PowerProfilesService>,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+index dfb7d8b9d4247bd7fa03319d8593d654c1831ddc..9d132e68b3de260640b4f790c6e60948686d6777 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+@@ -1,9 +1,10 @@
+ mod battery_section;
++mod calendar_section;
+ mod controls;
+ mod factory;
+-mod media_section;
+ mod messages;
+ mod network_section;
++mod notification_section;
+ mod quick_actions;
+ mod system_stats;
+ mod watchers;
+@@ -19,10 +20,11 @@ use wayle_widgets::prelude::*;
+ 
+ use self::{
+     battery_section::{BatterySection, BatterySectionInit},
++    calendar_section::{CalendarSection, CalendarSectionInput},
+     controls::{ControlsInit, ControlsSection},
+-    media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
+     messages::{DashboardDropdownCmd, DashboardDropdownInit},
+     network_section::{NetworkSection, NetworkSectionInit, NetworkSectionInput},
++    notification_section::{NotificationSection, NotificationSectionInit},
+     quick_actions::{QuickActionsInit, QuickActionsSection},
+     system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
+ };
+@@ -55,7 +57,8 @@ pub(crate) struct DashboardDropdown {
+ 
+     quick_actions: Controller<QuickActionsSection>,
+     controls: Controller<ControlsSection>,
+-    media: Controller<MediaSection>,
++    calendar: Controller<CalendarSection>,
++    notifications: Controller<NotificationSection>,
+     battery: Option<Controller<BatterySection>>,
+     network: Controller<NetworkSection>,
+     system_stats: Controller<SystemStatsSection>,
+@@ -106,25 +109,36 @@ impl Component for DashboardDropdown {
+                     },
+                 },
+ 
+-                #[template]
+-                #[name = "content"]
+-                DropdownContent {
+-                    set_vexpand: true,
++                gtk::ScrolledWindow {
++                    add_css_class: "dashboard-scroll",
++                    set_hscrollbar_policy: gtk::PolicyType::Never,
++                    set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                    set_max_content_height: 760,
++                    set_propagate_natural_height: true,
++
++                    #[template]
++                    #[name = "content"]
++                    DropdownContent {
++                        set_vexpand: true,
++
++                        #[local_ref]
++                        quick_actions_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    quick_actions_widget -> gtk::Box {},
++                        #[local_ref]
++                        controls_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    controls_widget -> gtk::Box {},
++                        #[local_ref]
++                        calendar_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    media_widget -> gtk::Box {},
++                        #[local_ref]
++                        notifications_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    info_row_widget -> gtk::Box {},
++                        #[local_ref]
++                        info_row_widget -> gtk::Box {},
+ 
+-                    #[local_ref]
+-                    system_stats_widget -> gtk::Box {},
++                        #[local_ref]
++                        system_stats_widget -> gtk::Box {},
++                    },
+                 },
+             },
+         }
+@@ -151,9 +165,12 @@ impl Component for DashboardDropdown {
+             })
+             .detach();
+ 
+-        let media = MediaSection::builder()
+-            .launch(MediaSectionInit {
+-                media: init.media.clone(),
++        let calendar = CalendarSection::builder().launch(()).detach();
++
++        let notifications = NotificationSection::builder()
++            .launch(NotificationSectionInit {
++                notification: init.notification.clone(),
++                config: init.config.clone(),
+             })
+             .detach();
+ 
+@@ -194,7 +211,8 @@ impl Component for DashboardDropdown {
+ 
+             quick_actions,
+             controls,
+-            media,
++            calendar,
++            notifications,
+             battery,
+             network,
+             system_stats,
+@@ -215,11 +233,14 @@ impl Component for DashboardDropdown {
+         model
+             .system_stats
+             .emit(SystemStatsInput::SetActive(is_visible));
+-        model.media.emit(MediaSectionInput::SetActive(is_visible));
++        if is_visible {
++            model.calendar.emit(CalendarSectionInput::Refresh);
++        }
+ 
+         let quick_actions_widget = model.quick_actions.widget();
+         let controls_widget = model.controls.widget();
+-        let media_widget = model.media.widget();
++        let calendar_widget = model.calendar.widget();
++        let notifications_widget = model.notifications.widget();
+         let system_stats_widget = model.system_stats.widget();
+ 
+         let info_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+@@ -245,7 +266,9 @@ impl Component for DashboardDropdown {
+             DashboardDropdownMsg::VisibilityChanged(visible) => {
+                 self.network.emit(NetworkSectionInput::SetActive(visible));
+                 self.system_stats.emit(SystemStatsInput::SetActive(visible));
+-                self.media.emit(MediaSectionInput::SetActive(visible));
++                if visible {
++                    self.calendar.emit(CalendarSectionInput::Refresh);
++                }
+             }
+             DashboardDropdownMsg::SetExternalHost(window) => {
+                 let is_visible = window.is_visible();
+@@ -258,7 +281,9 @@ impl Component for DashboardDropdown {
+                     .emit(NetworkSectionInput::SetActive(is_visible));
+                 self.system_stats
+                     .emit(SystemStatsInput::SetActive(is_visible));
+-                self.media.emit(MediaSectionInput::SetActive(is_visible));
++                if is_visible {
++                    self.calendar.emit(CalendarSectionInput::Refresh);
++                }
+             }
+             DashboardDropdownMsg::OpenSettings => {
+                 root.popdown();
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc70886f9a88e1a2ca8bf47b6b1e859e7d74e34c
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+@@ -0,0 +1,281 @@
++use std::{sync::Arc, time::Duration};
++
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use wayle_config::ConfigService;
++use wayle_notification::NotificationService;
++use wayle_widgets::{prelude::*, watch};
++
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::notification::{
++        helpers::group_by_app,
++        notification_group::{
++            NotificationGroup,
++            messages::{NotificationGroupInit, NotificationGroupInput, NotificationGroupOutput},
++        },
++    },
++};
++
++const TIME_TICK_INTERVAL: Duration = Duration::from_secs(30);
++
++pub(crate) struct NotificationSectionInit {
++    pub notification: Option<Arc<NotificationService>>,
++    pub config: Arc<ConfigService>,
++}
++
++#[derive(Debug)]
++pub(crate) enum NotificationSectionInput {
++    DndToggled(bool),
++    ClearAll,
++    NotificationDismissed,
++}
++
++#[derive(Debug)]
++pub(crate) enum NotificationSectionCmd {
++    NotificationsChanged,
++    DndChanged(bool),
++    IconSourceChanged,
++    TimeTick,
++}
++
++pub(crate) struct NotificationSection {
++    notification: Option<Arc<NotificationService>>,
++    config: Arc<ConfigService>,
++    dnd: bool,
++    notification_count: usize,
++    groups: FactoryVecDeque<NotificationGroup>,
++}
++
++#[relm4::component(pub(crate))]
++impl Component for NotificationSection {
++    type Init = NotificationSectionInit;
++    type Input = NotificationSectionInput;
++    type Output = ();
++    type CommandOutput = NotificationSectionCmd;
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "notification-dropdown", "dashboard-notification-section"],
++            set_orientation: gtk::Orientation::Vertical,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++                    set_hexpand: true,
++
++                    gtk::Image {
++                        #[watch]
++                        set_icon_name: Some(if model.dnd {
++                            "ld-bell-off-symbolic"
++                        } else {
++                            "ld-bell-symbolic"
++                        }),
++                    },
++
++                    gtk::Label {
++                        set_label: &t!("dropdown-dashboard-notifications"),
++                    },
++                },
++
++                #[template]
++                GhostButton {
++                    add_css_class: "notification-dropdown-clear-all",
++                    #[watch]
++                    set_visible: model.notification_count > 0,
++                    connect_clicked[sender] => move |_| {
++                        sender.input(NotificationSectionInput::ClearAll);
++                    },
++                    #[template_child]
++                    label {
++                        set_label: &t!("notification-dropdown-clear-all"),
++                    },
++                },
++            },
++
++            gtk::Box {
++                add_css_class: "notification-dropdown-dnd-row",
++                set_visible: model.notification.is_some(),
++
++                gtk::Label {
++                    add_css_class: "notification-dropdown-dnd-label",
++                    set_hexpand: true,
++                    set_halign: gtk::Align::Start,
++                    set_label: &t!("notification-dropdown-dnd-label"),
++                },
++
++                #[template]
++                Switch {
++                    #[watch]
++                    #[block_signal(dnd_toggle)]
++                    set_active: model.dnd,
++                    connect_state_set[sender] => move |switch, active| {
++                        sender.input(NotificationSectionInput::DndToggled(active));
++                        switch.set_state(active);
++                        gtk::glib::Propagation::Stop
++                    } @dnd_toggle,
++                },
++            },
++
++            gtk::Label {
++                add_css_class: "dashboard-section-empty",
++                set_halign: gtk::Align::Start,
++                #[watch]
++                set_label: &model.empty_label(),
++                #[watch]
++                set_visible: model.notification_count == 0,
++            },
++
++            gtk::ScrolledWindow {
++                add_css_class: "dashboard-notification-scroll",
++                set_hscrollbar_policy: gtk::PolicyType::Never,
++                set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                set_max_content_height: 270,
++                set_propagate_natural_height: true,
++                #[watch]
++                set_visible: model.notification_count > 0,
++
++                #[local_ref]
++                groups_widget -> gtk::Box {
++                    add_css_class: "notification-dropdown-groups",
++                    set_orientation: gtk::Orientation::Vertical,
++                },
++            },
++        }
++    }
++
++    fn init(
++        init: Self::Init,
++        _root: Self::Root,
++        sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let groups = FactoryVecDeque::builder()
++            .launch(gtk::Box::default())
++            .forward(sender.input_sender(), |output| match output {
++                NotificationGroupOutput::Dismissed => {
++                    NotificationSectionInput::NotificationDismissed
++                }
++            });
++
++        let mut model = Self {
++            dnd: init
++                .notification
++                .as_ref()
++                .is_some_and(|notification| notification.dnd.get()),
++            notification: init.notification,
++            config: init.config,
++            notification_count: 0,
++            groups,
++        };
++
++        model.rebuild_groups();
++        model.spawn_watchers(&sender);
++
++        let groups_widget = model.groups.widget();
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            NotificationSectionInput::DndToggled(active) => {
++                if let Some(notification) = &self.notification {
++                    notification.set_dnd(active);
++                }
++            }
++            NotificationSectionInput::ClearAll => {
++                if let Some(notification) = &self.notification {
++                    for item in notification.notifications.get() {
++                        item.dismiss();
++                    }
++                }
++            }
++            NotificationSectionInput::NotificationDismissed => {}
++        }
++    }
++
++    fn update_cmd(
++        &mut self,
++        msg: Self::CommandOutput,
++        _sender: ComponentSender<Self>,
++        _root: &Self::Root,
++    ) {
++        match msg {
++            NotificationSectionCmd::NotificationsChanged => self.rebuild_groups(),
++            NotificationSectionCmd::DndChanged(dnd) => self.dnd = dnd,
++            NotificationSectionCmd::IconSourceChanged => self.rebuild_groups(),
++            NotificationSectionCmd::TimeTick => {
++                for index in 0..self.groups.len() {
++                    self.groups.send(index, NotificationGroupInput::RefreshTime);
++                }
++            }
++        }
++    }
++}
++
++impl NotificationSection {
++    fn empty_label(&self) -> String {
++        if self.notification.is_some() {
++            t!("notification-dropdown-empty-title")
++        } else {
++            t!("dropdown-dashboard-notifications-unavailable")
++        }
++    }
++
++    fn rebuild_groups(&mut self) {
++        let notifications = self
++            .notification
++            .as_ref()
++            .map(|notification| notification.notifications.get())
++            .unwrap_or_default();
++        self.notification_count = notifications.len();
++
++        let icon_source = self.config.config().modules.notifications.icon_source.get();
++        let mut guard = self.groups.guard();
++        guard.clear();
++        for group in group_by_app(&notifications) {
++            guard.push_back(NotificationGroupInit {
++                app_name: group.app_name,
++                notifications: group.notifications,
++                icon_source,
++            });
++        }
++    }
++
++    fn spawn_watchers(&self, sender: &ComponentSender<Self>) {
++        let Some(notification) = &self.notification else {
++            return;
++        };
++
++        let notifications = notification.notifications.clone();
++        watch!(sender, [notifications.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::NotificationsChanged);
++        });
++
++        let dnd = notification.dnd.clone();
++        watch!(sender, [dnd.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::DndChanged(dnd.get()));
++        });
++
++        let icon_source = self.config.config().modules.notifications.icon_source.clone();
++        watch!(sender, [icon_source.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::IconSourceChanged);
++        });
++
++        sender.command(|out, shutdown| async move {
++            let shutdown_fut = shutdown.wait();
++            tokio::pin!(shutdown_fut);
++            loop {
++                tokio::select! {
++                    () = &mut shutdown_fut => break,
++                    () = tokio::time::sleep(TIME_TICK_INTERVAL) => {
++                        let _ = out.send(NotificationSectionCmd::TimeTick);
++                    }
++                }
++            }
++        });
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
+index 6a2f6b9cbd1385a4ea593bbbb00dc7a8a51a2cc9..3c562cc1ffdd020690d044ca530bf3cf249d94ab 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
+@@ -2,7 +2,7 @@ use std::{cmp::Reverse, collections::HashMap, sync::Arc};
+ 
+ use wayle_notification::core::notification::Notification;
+ 
+-pub(super) struct NotificationGroupData {
++pub(crate) struct NotificationGroupData {
+     pub app_name: Option<String>,
+     pub notifications: Vec<Arc<Notification>>,
+ }
+@@ -11,7 +11,7 @@ pub(super) struct NotificationGroupData {
+ ///
+ /// Groups are ordered by most recent notification timestamp (newest first).
+ /// Within each group, notifications are ordered newest first.
+-pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<NotificationGroupData> {
++pub(crate) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<NotificationGroupData> {
+     let mut groups: HashMap<Option<String>, Vec<Arc<Notification>>> = HashMap::new();
+ 
+     for notification in notifications {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+index 85f1f5de1ec42f82fc7cd87ccfa338b080a6d7e2..dfe3d026300ddaa8fa0059290a543845bf29c20d 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+@@ -1,9 +1,9 @@
+ mod factory;
+-mod helpers;
++pub(crate) mod helpers;
+ mod messages;
+ mod methods;
+-mod notification_group;
+-mod notification_item;
++pub(crate) mod notification_group;
++pub(crate) mod notification_item;
+ mod watchers;
+ 
+ use std::sync::Arc;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
+index 7fe95af8daea04d240a5adbe6764ac326cf4c093..917e8604f82b2aa40b9b5b10959a3bc6351441b6 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
+@@ -12,6 +12,7 @@ pub(crate) struct NotificationItemInit {
+ #[derive(Debug)]
+ pub(crate) enum NotificationItemInput {
+     RefreshTime,
++    ToggleExpanded,
+ }
+ 
+ #[derive(Debug)]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+index 0f41547e87074b16a832a579bd59a7ef6e82d566..a0e5a8333085476c22547b5bb0876687a5ffc2a5 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+@@ -17,6 +17,7 @@ pub(crate) struct NotificationItem {
+ 
+     resolved_icon: ResolvedIcon,
+     time_label: String,
++    expanded: bool,
+ }
+ 
+ #[relm4::factory(pub(crate))]
+@@ -73,6 +74,23 @@ impl FactoryComponent for NotificationItem {
+                             set_label: &self.time_label,
+                         },
+ 
++                        #[name = "expand_btn"]
++                        gtk::Button {
++                            set_css_classes: &["ghost-icon", "notification-dropdown-item-expand"],
++                            set_cursor_from_name: Some("pointer"),
++                            set_visible: self
++                                .notification
++                                .body
++                                .get()
++                                .is_some_and(|body| !body.trim().is_empty()),
++                            #[watch]
++                            set_icon_name: if self.expanded {
++                                "ld-chevron-up-symbolic"
++                            } else {
++                                "ld-chevron-down-symbolic"
++                            },
++                        },
++
+                         #[name = "dismiss_btn"]
+                         gtk::Button {
+                             set_css_classes: &["ghost-icon", "notification-dropdown-item-dismiss"],
+@@ -85,8 +103,14 @@ impl FactoryComponent for NotificationItem {
+                         add_css_class: "notification-dropdown-item-body",
+                         set_halign: gtk::Align::Start,
+                         set_use_markup: true,
+-                        set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                        set_lines: 2,
++                        #[watch]
++                        set_ellipsize: if self.expanded {
++                            gtk::pango::EllipsizeMode::None
++                        } else {
++                            gtk::pango::EllipsizeMode::End
++                        },
++                        #[watch]
++                        set_lines: if self.expanded { -1 } else { 2 },
+                         set_wrap: true,
+                         set_wrap_mode: gtk::pango::WrapMode::WordChar,
+                         set_label: &self
+@@ -115,6 +139,7 @@ impl FactoryComponent for NotificationItem {
+             notification: init.notification,
+             resolved_icon: init.resolved_icon,
+             time_label,
++            expanded: false,
+         }
+     }
+ 
+@@ -137,6 +162,11 @@ impl FactoryComponent for NotificationItem {
+             output_sender.emit(NotificationItemOutput::Dismissed(id));
+         });
+ 
++        let input_sender = sender.input_sender().clone();
++        widgets.expand_btn.connect_clicked(move |_| {
++            input_sender.emit(NotificationItemInput::ToggleExpanded);
++        });
++
+         self.setup_default_action(&widgets.main_row);
+ 
+         widgets
+@@ -148,6 +178,7 @@ impl FactoryComponent for NotificationItem {
+                 self.time_label =
+                     Self::time_to_string(relative_time(&self.notification.timestamp.get()));
+             }
++            NotificationItemInput::ToggleExpanded => self.expanded = !self.expanded,
+         }
+     }
+ }
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss
+new file mode 100644
+index 0000000000000000000000000000000000000000..1aac6b4d791e5682a4be0e2e513da7110816be74
+--- /dev/null
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_calendar.scss
+@@ -0,0 +1,41 @@
++.dashboard-dropdown {
++    .dashboard-calendar-range {
++        font-size: var(--text-2xs);
++        font-weight: var(--weight-semibold);
++        color: var(--status-error);
++        text-transform: uppercase;
++        letter-spacing: 0.06em;
++    }
++
++    .dashboard-calendar-scroll {
++        min-height: 0;
++        background: transparent;
++
++        undershoot,
++        overshoot {
++            background: transparent;
++        }
++    }
++
++    .dashboard-calendar-body {
++        margin-right: var(--space-sm);
++    }
++
++    .dashboard-calendar-day {
++        margin-top: var(--space-xs);
++        font-size: var(--text-md);
++        font-weight: var(--weight-semibold);
++        color: var(--accent);
++
++        &:first-child {
++            margin-top: 0;
++        }
++    }
++
++    .dashboard-calendar-entry {
++        margin-top: calc(var(--space-xs) / 2);
++        font-size: var(--text-base);
++        font-weight: var(--weight-medium);
++        color: var(--status-info);
++    }
++}
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+index e5e1d1a81550c19ec74dbb1b99896512e371beb3..6c2783d4023bb0669b00fe41d2633d739d376628 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+@@ -7,6 +7,16 @@
+         border-spacing: var(--space-sm);
+     }
+ 
++    .dashboard-scroll {
++        min-height: 0;
++        background: transparent;
++
++        undershoot,
++        overshoot {
++            background: transparent;
++        }
++    }
++
+     .dashboard-card {
+         border-radius: var(--rounding-element);
+         min-width: 0;
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_index.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_index.scss
+index f3c37a3b8942be91eb97f3bc357b305427e0696b..f381361991166adea072e71103a5418395234b22 100644
+--- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_index.scss
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_index.scss
+@@ -1,7 +1,8 @@
+ @import "dashboard";
+ @import "quick_actions";
+ @import "controls";
+-@import "media";
++@import "calendar";
++@import "notifications";
+ @import "battery";
+ @import "network";
+ @import "system_stats";
+diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss
+new file mode 100644
+index 0000000000000000000000000000000000000000..5dcb6fd963d0c91bcc0ebdb127890ae21e6f774f
+--- /dev/null
++++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_notifications.scss
+@@ -0,0 +1,27 @@
++.dashboard-dropdown {
++    .dashboard-notification-section {
++        padding-bottom: var(--space-md);
++    }
++
++    .dashboard-notification-scroll {
++        min-height: 0;
++        margin-top: var(--space-sm);
++        background: transparent;
++
++        undershoot,
++        overshoot {
++            background: transparent;
++        }
++    }
++
++    .dashboard-section-empty {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-medium);
++        color: var(--fg-subtle);
++        margin-bottom: var(--space-sm);
++    }
++
++    .notification-dropdown-dnd-row {
++        margin: 0 0 var(--space-sm);
++    }
++}
+diff --git a/crates/wayle-styling/scss/modules/notification_dropdown/_item.scss b/crates/wayle-styling/scss/modules/notification_dropdown/_item.scss
+index 911d1a4250ad11247b4e83e83bdc39d1215489df..59ce547ac0d8ea44b1d29fd086cbd100ae829dbb 100644
+--- a/crates/wayle-styling/scss/modules/notification_dropdown/_item.scss
++++ b/crates/wayle-styling/scss/modules/notification_dropdown/_item.scss
+@@ -70,6 +70,7 @@ image.notification-dropdown-item-icon-img {
+     color: var(--fg-muted);
+ }
+ 
++button.notification-dropdown-item-expand,
+ button.notification-dropdown-item-dismiss {
+     > image {
+         -gtk-icon-size: var(--icon-xs);
+@@ -81,6 +82,10 @@ button.notification-dropdown-item-dismiss {
+     }
+ }
+ 
++button.notification-dropdown-item-expand:hover image {
++    color: var(--accent);
++}
++
+ .notification-dropdown-item-actions {
+     border-top: 1px solid var(--border-subtle);
+ }

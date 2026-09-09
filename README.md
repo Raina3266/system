@@ -440,35 +440,30 @@ A minimal custom module configuration looks like this:
 
 ---
 
-## Control centre
+## Wayle dashboard
 
-`Mod+N` and the notification badge open `control-centre`, a single-column
-layer-shell panel containing the calendar and notification list. It covers the
-output it opens on, so a click beside it dismisses it, as does Escape.
+`Mod+N` and the far-left Waybar button open Wayle's dashboard in a monitor-local
+layer-shell window. The button shows the current battery percentage and uses the
+same charging, low, warning and blinking-critical states as the old battery
+module.
 
-Wayle stays the notification daemon. It owns `org.freedesktop.Notifications`,
-draws the popups, keeps the history and decides Do Not Disturb; this panel only
-renders that history and asks Wayle to dismiss or silence it. A notification's
-own action buttons are not drawn: only the daemon can run one, and the
-application that sent the notification has usually stopped listening for the
-`ActionInvoked` signal by the time the button is there to press.
+The dashboard uses Wayle's own notification service and native notification
+groups, icons, actions, dismiss controls, Do Not Disturb switch and Clear All
+button. Long bodies can be expanded. Each group initially shows at most three
+messages and the bounded notification area scrolls when its contents are taller.
+Chrome and Chromium transient notifications are retained in Wayle's history.
 
-| Card | Source |
-| --- | --- |
-| Calendar | `~/.cache/waybar-ycal/events.json`, the cache `waybar-ycal` writes |
-| Notifications | `com.wayle.NotificationsExt1`, grouped by app, with urgency, age and per-entry dismissal |
+The calendar card is the one small adapter Wayle does not provide natively. It
+reads the next seven days from `~/.cache/waybar-ycal/events.json`, the same cache
+written by `waybar-ycal`, and renders the result with Wayle widgets and styling.
+The old standalone GTK notification/calendar panel and its Waybar notification
+button have been removed.
 
-`control-centre waybar` streams the badge for `custom/notifications`: a bell, a
-count, or the Do Not Disturb glyph, read from Wayle's
-`com.wayle.Notifications1` properties. Nothing shells out for it.
-
-The far-left dashboard button opens Wayle's native dashboard content in a
-monitor-local layer-shell window. The separate Wi-Fi button beside it opens
-Wayle's native network manager, where networks can be scanned, selected and
-connected. Each Waybar instance passes its output name, so either panel appears
-on the display that was clicked. Wi-Fi is no longer duplicated in the
-dashboard. The existing right-side network button remains the Rofi
-Wi-Fi/Ethernet manager.
+The separate Wi-Fi button opens Wayle's native network manager, where networks
+can be scanned, selected and connected. Each Waybar instance passes its output
+name, so the panel appears on the display that was clicked. Wi-Fi is no longer
+duplicated in the dashboard. The existing right-side network button remains the
+Rofi Wi-Fi/Ethernet manager.
 
 The centre media button opens a separate native Wayle media panel. It lists
 every MPRIS source that is playing or paused, with artwork, source, track,
@@ -487,32 +482,23 @@ The local patches are:
 
 | Patch | Purpose |
 | --- | --- |
-| `notification-ipc.patch` | Wayle publishes an id and three strings per notification, with no icon, image, actions, urgency or timestamp, so nothing else can draw its list. This adds `com.wayle.NotificationsExt1` carrying the whole entry, the calls to dismiss and to silence, and a Changed signal so the panel redraws when something happens. It also keeps Chrome's transient popups in history, which upstream drops. |
+| `notification-history.patch` | Keeps Chrome and Chromium transient popups in Wayle's native history. |
 | `dashboard-waybar-host.patch` | Adds the D-Bus dropdown request used by the external Waybar and removes the dashboard's session power actions. |
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
 | `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source. |
+| `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
 
 The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
-`cargo test -p control-centre` covers the agenda and the badge. One test is
-ignored by default because it needs a notification daemon on the session bus:
+`cargo test -p control-centre` covers the remaining Waybar media-title streamer.
+The seven-day agenda has a unit test in `dashboard-notifications.patch`, and the
+Wayle patch stack is checked against v0.7.0 before updates are committed.
 
 ```sh
-cargo test -p control-centre -- --ignored
+cargo test -p control-centre
 ```
-
-It calls List, Dismiss, ToggleDnd and DismissAll for real, so a method name or
-signature that drifts from `notification-ipc.patch` fails there rather than
-doing nothing under the pointer.
-
-### Size
-
-The notification list scrolls rather than growing the panel. Two constants in
-`src/ui.rs` decide the shape: `NOTIFICATION_HEIGHT` controls when it scrolls,
-and `WRAP_CHARS` limits how much width a wrapping label may request.
-`.column`'s `min-width` in `src/style.css` sets the floor.

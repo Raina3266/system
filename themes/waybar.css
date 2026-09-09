@@ -39,7 +39,6 @@ window#waybar.bottom {
 #custom-files,
 #custom-dashboard,
 #custom-wayle-wifi,
-#custom-notifications,
 #custom-wayle-media,
 #tray {
     color: #7afcff;
@@ -142,7 +141,6 @@ window#waybar.bottom {
 #custom-timer:hover,
 #custom-dashboard:hover,
 #custom-wayle-wifi:hover,
-#custom-notifications:hover,
 #custom-wayle-media:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,
@@ -173,16 +171,24 @@ tooltip label {
 
 /* ── States ── */
 
-/* The notification badge is pink with something waiting and dimmed under Do
-   Not Disturb. Its dedicated media button and current track sit beside it. */
-
-#custom-notifications.notification {
-    color: #ff7edb;
-    text-shadow: 0 0 6px rgba(255, 126, 219, 0.5);
+/* The dashboard button carries the battery state. */
+#custom-dashboard.warning:not(.charging),
+#custom-dashboard.low:not(.charging) {
+    color: #f29e74;
+    text-shadow: 0 0 6px rgba(242, 158, 116, 0.5);
 }
 
-#custom-notifications.dnd {
-    color: #5c6776;
+#custom-dashboard.critical:not(.charging) {
+    color: #ff3333;
+    text-shadow: 0 0 10px rgba(255, 51, 51, 0.7);
+    animation: dashboard-battery-blink 1s steps(2) infinite;
+}
+
+@keyframes dashboard-battery-blink {
+    to {
+        color: #1a1a2e;
+        text-shadow: none;
+    }
 }
 
 /* Keep the title visible while making non-playing media unobtrusive. */

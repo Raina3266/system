@@ -76,7 +76,6 @@ in
     xrandr # Display layout info for X11 apps
     snixembed # System tray bridge for Qt5-xcb apps
     mediactl
-    repoPackages.controlCentre # Mod+N in config.kdl
   ];
 
   # fcitx5 theme: cyberpunk color palette matching waybar/rofi.

@@ -8,13 +8,7 @@ name = "control-centre"
 path = "src/main.rs"
 
 [dependencies]
-# The panel itself: a layer-shell surface anchored under Waybar.
-gtk = { package = "gtk4", version = "=0.11.4", features = ["v4_6"] }
-gtk4-layer-shell = "=0.8.0"
-# Wayle's notification state over the session bus.
+# Wayle's media state over the session bus.
 zbus = "=5.18.0"
-# The calendar cache waybar-ycal writes.
 serde_json = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-# Deriving the D-Bus type of a notification entry.
 serde = { version = "1", features = ["derive"] }

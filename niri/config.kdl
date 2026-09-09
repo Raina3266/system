@@ -134,7 +134,7 @@ binds {
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
     Mod+D hotkey-overlay-title="Open Dolphin" { spawn "dolphin"; }
     Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }
-    Mod+N hotkey-overlay-title="Control Centre" { spawn "control-centre" "toggle"; }
+    Mod+N hotkey-overlay-title="Wayle Dashboard" { spawn-sh "busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ''"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
