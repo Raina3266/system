@@ -172,7 +172,7 @@ index f2e3b13..f1f5076 100644
 -pub(crate) mod source_picker;
  mod watchers;
  
-+use std::sync::Arc;
++use std::{collections::HashSet, sync::Arc};
 +
  use gtk::prelude::*;
  use relm4::{gtk, prelude::*};
@@ -307,7 +307,7 @@ index f2e3b13..f1f5076 100644
                  },
              },
          }
-@@ -85,57 +124,40 @@ impl Component for MediaDropdown {
+@@ -85,57 +124,43 @@ impl Component for MediaDropdown {
          root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -375,13 +375,16 @@ index f2e3b13..f1f5076 100644
              MediaDropdownMsg::VisibilityChanged(visible) => {
 -                self.player_view.emit(PlayerViewInput::SetActive(visible));
 +                self.is_active = visible;
++                if visible {
++                    self.sync_player_views(self.media.player_list.get());
++                }
 +                for player_view in &self.player_views {
 +                    player_view.emit(PlayerViewInput::SetActive(visible));
 +                }
              }
          }
      }
-@@ -143,7 +165,7 @@ impl Component for MediaDropdown {
+@@ -143,7 +168,7 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -390,7 +393,7 @@ index f2e3b13..f1f5076 100644
          _root: &Self::Root,
      ) {
          match msg {
-@@ -151,6 +173,157 @@ impl Component for MediaDropdown {
+@@ -151,6 +176,189 @@ impl Component for MediaDropdown {
                  self.scaled_width = scaled_dimension(BASE_WIDTH, scale);
                  self.scaled_height = scaled_dimension(BASE_HEIGHT, scale);
              }
@@ -452,7 +455,34 @@ index f2e3b13..f1f5076 100644
 +}
 +
 +fn deduplicate_players(players: Vec<Arc<Player>>) -> Vec<Arc<Player>> {
++    let mut seen_ids = HashSet::new();
++    let players: Vec<_> = players
++        .into_iter()
++        .filter(|player| seen_ids.insert(player.id.clone()))
++        .collect();
++
 +    let mut keep = vec![true; players.len()];
++    for left_index in 0..players.len() {
++        if !keep[left_index] {
++            continue;
++        }
++        for right_index in (left_index + 1)..players.len() {
++            if !keep[right_index]
++                || !same_player_snapshot(&players[left_index], &players[right_index])
++            {
++                continue;
++            }
++            let left_playing = players[left_index].playback_state.get() == PlaybackState::Playing;
++            let right_playing = players[right_index].playback_state.get() == PlaybackState::Playing;
++            if left_playing && !right_playing {
++                keep[right_index] = false;
++            } else {
++                keep[left_index] = false;
++                break;
++            }
++        }
++    }
++
 +    for bridge_index in 0..players.len() {
 +        if !keep[bridge_index] || !is_mprisence(&players[bridge_index]) {
 +            continue;
@@ -484,6 +514,11 @@ index f2e3b13..f1f5076 100644
 +        .zip(keep)
 +        .filter_map(|(player, keep)| keep.then_some(player))
 +        .collect()
++}
++
++fn same_player_snapshot(left: &Player, right: &Player) -> bool {
++    same_non_empty(&left.identity.get(), &right.identity.get())
++        && matching_metadata(left, right)
 +}
 +
 +fn is_mprisence(player: &Player) -> bool {
