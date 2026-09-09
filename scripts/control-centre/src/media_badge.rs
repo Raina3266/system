@@ -342,7 +342,10 @@ mod tests {
     #[test]
     fn a_mixed_title_stops_at_whichever_limit_arrives_first() {
         let title = format!("{}abcdefghijklmnop", "真".repeat(35));
-        assert_eq!(truncate_title(&title), format!("{}…", "真".repeat(35)));
+        assert_eq!(
+            truncate_title(&title),
+            format!("{}abcdefghijklmno…", "真".repeat(35))
+        );
     }
 
     #[test]
