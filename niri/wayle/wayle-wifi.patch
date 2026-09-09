@@ -1220,7 +1220,7 @@ index 1d7c81b..5344f91 100644
              }
              BarCmd::ToggleDropdown(name) => {
 -                let toggled = if name == "dashboard" {
-+                let toggled = if matches!(name.as_str(), "dashboard" | "network") {
++                let toggled = if matches!(name.as_str(), "dashboard" | "media" | "network") {
                      self.dropdowns.toggle_external_window(&name, &self.monitor)
                  } else {
                      self.dropdowns.toggle_external(&name, &self.external_anchor)
