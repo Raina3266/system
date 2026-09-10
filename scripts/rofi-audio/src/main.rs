@@ -7,6 +7,7 @@ mod bluetooth;
 mod model;
 mod rofi;
 mod waybar;
+mod wayle;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
@@ -54,13 +55,30 @@ async fn run() -> AppResult<()> {
             waybar::set_bluetooth_power(&argument).await?;
             Ok(())
         }
+        Some("wayle-list") => {
+            let kind = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("wayle-list kind is missing"))?;
+            wayle::list(&kind)
+        }
+        Some("wayle-set-default") => {
+            let kind = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("wayle-set-default kind is missing"))?;
+            let key = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("wayle-set-default key is missing"))?;
+            wayle::set_default(&kind, &key)
+        }
         Some("help" | "--help" | "-h") => {
             print!(
                 "rofi-audio\n\n\
                  Usage:\n  \
                  rofi-audio\n  \
                  rofi-audio status\n  \
-                 rofi-audio bluetooth-power [on|off|toggle]\n"
+                 rofi-audio bluetooth-power [on|off|toggle]\n  \
+                 rofi-audio wayle-list <output|input>\n  \
+                 rofi-audio wayle-set-default <output|input> <key>\n"
             );
             Ok(())
         }

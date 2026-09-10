@@ -547,13 +547,16 @@ provides one:
 | Input | The default input's volume and mute, then every microphone and its available ports | ports added |
 | Play | Wayle's per-application volume list, with a route button at the end of each stream's row | route added |
 
-Only three things were not already there. Device rows expand into port rows, so
-**Speaker** and **Headphones** on one card are separate destinations: selecting
-one activates its port and then makes its device the default. Ports the card
-reports as unplugged are hidden; ports of unknown availability stay selectable,
-and rows follow PulseAudio's port priority. A device with fewer than two
-available ports stays a single row subtitled with the port it is using. The route
-button opens that same list for one playback stream and calls Wayle's
+The audio-specific additions reuse `rofi-audio`'s profile-aware selection
+backend, so **Speaker** and **Headphones** remain separate destinations even
+when the laptop exposes them through mutually exclusive ALSA profiles. Selecting
+one revalidates the card and port, chooses a compatible profile that preserves
+the current microphone inputs, waits for the new sink, and then makes it the
+default. USB, Bluetooth and virtual devices use the same list. Rows show only
+the distinguishing port or model name; the full PulseAudio description remains
+in the tooltip. Ports reported as unplugged are hidden and unknown availability
+stays selectable. The panel is two thirds of its former width. The route button
+opens the native device list for one playback stream and calls Wayle's
 `move_to_device` instead of changing the system default, so the rest of the
 system keeps playing where it was; the picker stays open with the stream's
 current destination checked, and `Back` returns to Play. A stream that ends while
@@ -571,12 +574,12 @@ Switching to Pair, and opening the panel while Pair is the current tab, starts a
 timed Bluetooth discovery. As in `rofi-audio`, that leaves a powered-off adapter
 off: use the tab's switch, or right-click the Waybar button.
 
-Card **profile** switching is the one `rofi-audio` feature with no counterpart
-here. `wayle-audio` exposes ports, the active port, `set_port` and
-`set_as_default`, but no card or profile API, so the panel can only offer ports
-of the profile that is currently active. On a laptop whose HiFi profile exposes
-either the speakers or the headphone jack but not both, use `rofi-audio` for that
-switch.
+`wayle-audio` itself has no card/profile API, so a small machine interface calls
+the already-tested `rofi-audio` logic rather than duplicating that hardware
+policy inside the Wayle patch. It also reconciles Wayle's reactive default after
+a profile change: PulseAudio can announce the new default before Wayle has added
+the replacement sink, which otherwise leaves the removed Speaker object shown
+in the header after Headphones became live.
 
 ### What is still patched
 
@@ -592,6 +595,7 @@ The local patches are:
 | `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized compact cards that keep the original text sizes and a play/pause button that names the command instead of toggling. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
+| `wayle-audio-profile-bridge.patch` | Uses `rofi-audio`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
 | `dashboard-polish.patch` | Drops the header's settings button, moves Do Not Disturb beside the notification card's title, expands a notification's title along with its body, puts an event's time above the event, and colours every card title red. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
@@ -601,9 +605,10 @@ The Wayle patches apply to v0.7.0.
 ### Verifying a change
 
 `cargo test -p control-centre` covers the remaining Waybar media-title streamer.
-The seven-day agenda has a unit test in `dashboard-notifications.patch`, and the
-device/port row rules have seven in `wayle-audio-panel.patch`. The Wayle patch
-stack is checked against v0.7.0 before updates are committed.
+The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
+device/port rules and profile bridge have focused parsing, naming and row-shape
+tests. The Wayle patch stack is checked against v0.7.0 before updates are
+committed.
 
 ```sh
 cargo test -p control-centre

@@ -4,7 +4,7 @@
 # agenda. Its own bar is visually hidden. The dashboard, Wi-Fi manager, media
 # panel, and Bluetooth/audio panel opened from Waybar use separate layer-shell
 # windows, avoiding GTK popup-grab restrictions.
-{ ... }:
+{ repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
   # unrelated tracked file changes. Copy each patch to its own content-based
@@ -40,6 +40,7 @@ in
             ./wayle-media-panel.patch
             ./dashboard-notifications.patch
             ./wayle-audio-panel.patch
+            ./wayle-audio-profile-bridge.patch
             ./dashboard-slim.patch
             ./dashboard-polish.patch
           ];
@@ -137,9 +138,12 @@ in
           };
           Service = {
             RestartSec = 3;
-            # The standalone network panel pipes the Wi-Fi payload over stdin, so
-            # saved passwords never appear in argv or a temporary file.
-            Environment = "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}";
+            # The network panel gets its QR encoder, and the audio panel gets
+            # the profile-aware selector shared with the former Rofi UI.
+            Environment = [
+              "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}"
+              "WAYLE_AUDIO_HELPER=${lib.getExe repoPackages.rofiAudio}"
+            ];
           };
         };
       }
