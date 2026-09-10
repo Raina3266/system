@@ -83,18 +83,18 @@ let
   };
 
   # Left-click opens Wayle's Bluetooth and audio panel; the status glyph and
-  # tooltip still come from `rofi-audio status`, which already reports the
+  # tooltip still come from `audio-control status`, which already reports the
   # adapter, the default output and input, and connected devices. Right-click
   # remains the adapter's on/off switch.
   audioModule = monitor: {
-    exec = "${packages.rofiAudio}/bin/rofi-audio status";
+    exec = "${packages.audioControl}/bin/audio-control status";
     interval = 5;
     return-type = "json";
     tooltip = true;
     escape = false;
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio ${lib.escapeShellArg monitor}";
-    on-click-right = "${packages.rofiAudio}/bin/rofi-audio bluetooth-power toggle";
+    on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
 
   wayleMediaModule = monitor: {
@@ -120,7 +120,7 @@ in
     home.packages = [
       pkgs.mprisence
       packages.ycal.package
-      packages.rofiAudio
+      packages.audioControl
     ];
     programs.google-chrome = {
       commandLineArgs = [

@@ -96,7 +96,7 @@ fn run_with(
     let before = match backend.snapshot(mode) {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            eprintln!("rofi-audio: cannot list audio: {error}");
+            eprintln!("audio-control: cannot list audio: {error}");
             close_picker(state);
             state.set_message("Audio service is unavailable.");
             return if mode.is_stream() {

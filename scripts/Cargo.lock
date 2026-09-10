@@ -146,6 +146,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "audio-control"
+version = "0.1.0"
+dependencies = [
+ "bluer",
+ "futures-util",
+ "libpulse-binding",
+ "pulsectl-rs",
+ "tokio",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1247,17 +1258,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rofi-audio"
-version = "0.1.0"
-dependencies = [
- "bluer",
- "futures-util",
- "libpulse-binding",
- "pulsectl-rs",
- "tokio",
-]
 
 [[package]]
 name = "rofi-clipboard"

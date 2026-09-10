@@ -1,9 +1,9 @@
 [workspace]
 members = [
+  "audio-control",
   "control-centre",
   "ocr-screenshot",
   "preview-panel",
-  "rofi-audio",
   "rofi-clipboard",
   "rofi-filesearch",
   "rofi-network",
@@ -22,6 +22,6 @@ edition = "2024"
 # though — on rofi-clipboard, the smallest crate here that has dependencies,
 # `lto = true` with `codegen-units = 1` took 27s to build the binary and its test
 # harness against 9s on the defaults, and the gap widens on preview-panel (gtk4)
-# and rofi-audio (bluer). Keep strip so the closure stays small.
+# and audio-control (bluer). Keep strip so the closure stays small.
 [profile.release]
 strip = true

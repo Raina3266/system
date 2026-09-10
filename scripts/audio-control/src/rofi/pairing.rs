@@ -9,7 +9,7 @@ use crate::bluetooth::Backend;
 use crate::model::{CodeKind, Picker, hex_decode, hex_encode};
 use crate::{AppResult, bluetooth};
 
-const CONNECT_RESULT_FILENAME: &str = "rofi-audio-connect-result";
+const CONNECT_RESULT_FILENAME: &str = "audio-control-connect-result";
 /// How long a script invocation waits for a detached connect before handing
 /// control back to Rofi. Long enough for most pairings, short enough that the
 /// menu never feels frozen.
@@ -22,7 +22,7 @@ pub(super) struct UiState {
     pub(super) message: Option<String>,
     /// Row key whose connection is being performed by a detached `connect-bg`
     /// subprocess. While set, the subprocess owns the outcome and writes it to
-    /// $XDG_RUNTIME_DIR/rofi-audio-connect-result.
+    /// $XDG_RUNTIME_DIR/audio-control-connect-result.
     pub(super) pending_connect: Option<String>,
     /// Row key we are waiting for the user to type a pairing code for. When
     /// set, the filter input becomes the code entry box: the typed text is

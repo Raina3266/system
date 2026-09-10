@@ -2,8 +2,8 @@
 
 This repository contains six Rust utilities used by the desktop configuration:
 
+- [`audio-control`](#audio-control) — a Bluetooth manager and audio mixer for devices and playback streams
 - `preview-panel` — a reusable GTK4 text and image preview window
-- [`rofi-audio`](#rofi-audio) — a Bluetooth manager and audio mixer for devices and playback streams
 - [`rofi-clipboard`](#rofi-clipboard) — a clipboard + Memo manager with a Rofi interface
 - `rofi-network` — Wi-Fi and Ethernet controls with a Rofi interface
 - [`waybar-timer`](#waybar-timer) — an interactive countdown timer for Waybar
@@ -13,9 +13,9 @@ It also documents the [Wayle dashboard](#wayle-dashboard) opened from the
 far-left Waybar button and the [Bluetooth and audio panel](#bluetooth-and-audio-panel)
 opened from the audio button.
 
-## rofi-audio
+## audio-control
 
-`scripts/rofi-audio` replaces the former `custom/audio` shell script and
+`scripts/audio-control` replaces the former `custom/audio` shell script and
 `custom/bt` Waybar module with one program and one Waybar entry. Bluetooth is
 driven by [`bluer`](https://crates.io/crates/bluer), the official BlueZ crate,
 and the audio tabs by [`pulsectl-rs`](https://crates.io/crates/pulsectl-rs) over
@@ -27,7 +27,7 @@ all four tabs.
 
 The Waybar button now opens Wayle's
 [Bluetooth and audio panel](#bluetooth-and-audio-panel), which has the same four
-tabs. `rofi-audio` keeps the Rofi menu described below — run it from a terminal
+tabs. `audio-control` keeps the Rofi menu described below — run it from a terminal
 or a binding of your own — and stays the Waybar entry's status backend and its
 right-click Bluetooth switch.
 
@@ -46,7 +46,7 @@ The internal mode name remains `bluetooth`.
 Applications may expose several streams. They remain separate; no MPRIS support
 is required. Start playback in an application for its stream to
 appear. Muted or paused streams are dimmed, and lists refresh every two seconds.
-The popup width is configured in `themes/rofi-audio.rasi`.
+The popup width is configured in `themes/audio-control.rasi`.
 Tabs size themselves to their labels instead of splitting the width equally,
 so a longer label such as Output gets more space than Pair.
 There is no Recording tab or per-application input routing. The Input tab still
@@ -177,12 +177,12 @@ service, which auto-confirms them.
 ### Commands
 
 ```text
-rofi-audio [launch]
-rofi-audio status
-rofi-audio bluetooth-power [on|off|toggle]
-rofi-audio script <bluetooth|output|input|playback>
-rofi-audio connect-bg <row-key>
-rofi-audio scan-bg
+audio-control [launch]
+audio-control status
+audio-control bluetooth-power [on|off|toggle]
+audio-control script <bluetooth|output|input|playback>
+audio-control connect-bg <row-key>
+audio-control scan-bg
 ```
 
 `script`, `connect-bg`, and `scan-bg` are internal: Rofi invokes the first,
@@ -193,12 +193,12 @@ and the Pair tab spawns the other two.
 ```jsonc
 {
   "custom/audio": {
-    "exec": "/path/to/rofi-audio status",
+    "exec": "/path/to/audio-control status",
     "interval": 5,
     "return-type": "json",
     "escape": false,
     "on-click": "busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio eDP-1",
-    "on-click-right": "/path/to/rofi-audio bluetooth-power toggle"
+    "on-click-right": "/path/to/audio-control bluetooth-power toggle"
   }
 }
 ```
@@ -206,7 +206,7 @@ and the Pair tab spawns the other two.
 The configured `on-click` opens Wayle's
 [Bluetooth and audio panel](#bluetooth-and-audio-panel) on the monitor whose
 button was clicked; each Waybar instance passes its own output name. Use
-`/path/to/rofi-audio` instead to keep the Rofi menu on the button.
+`/path/to/audio-control` instead to keep the Rofi menu on the button.
 
 The text is a single glyph:
 
@@ -230,12 +230,12 @@ switch; `bluetooth-power on` and `off` are available for bindings of your own.
 
 | Variable | Purpose |
 | --- | --- |
-| `ROFI_AUDIO_ROFI` | Override the `rofi` executable |
-| `ROFI_AUDIO_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/rofi-audio.rasi`) |
-| `ROFI_AUDIO_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `10`) |
+| `AUDIO_CONTROL_ROFI` | Override the `rofi` executable |
+| `AUDIO_CONTROL_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/audio-control.rasi`) |
+| `AUDIO_CONTROL_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `10`) |
 
-Styling lives in `themes/rofi-audio.rasi`, symlinked to
-`~/.config/rofi/rofi-audio.rasi` so edits apply without a rebuild.
+Styling lives in `themes/audio-control.rasi`, symlinked to
+`~/.config/rofi/audio-control.rasi` so edits apply without a rebuild.
 
 ### Development checks
 
@@ -243,9 +243,9 @@ From the repository root, with its Rust development environment:
 
 ```sh
 nix develop .#rust
-cargo fmt --manifest-path scripts/Cargo.toml --package rofi-audio -- --check
-cargo test --manifest-path scripts/Cargo.toml --package rofi-audio --locked
-cargo clippy --manifest-path scripts/Cargo.toml --package rofi-audio --locked -- -D warnings
+cargo fmt --manifest-path scripts/Cargo.toml --package audio-control -- --check
+cargo test --manifest-path scripts/Cargo.toml --package audio-control --locked
+cargo clippy --manifest-path scripts/Cargo.toml --package audio-control --locked -- -D warnings
 ```
 
 Unit tests include port-row identities, availability, active/default marking,
@@ -537,7 +537,7 @@ replaced by an error.
 
 The right-side audio button opens Wayle's Bluetooth and audio panel in its own
 monitor-local layer-shell window. It has the same four tabs as
-[`rofi-audio`](#rofi-audio), built from Wayle's own components wherever Wayle
+[`audio-control`](#audio-control), built from Wayle's own components wherever Wayle
 provides one:
 
 | Tab | Contents | Native |
@@ -547,7 +547,7 @@ provides one:
 | Input | The default input's volume and mute, then every microphone and its available ports | ports added |
 | Play | Wayle's per-application volume list, with a route button at the end of each stream's row | route added |
 
-The audio-specific additions reuse `rofi-audio`'s profile-aware selection
+The audio-specific additions reuse `audio-control`'s profile-aware selection
 backend, so **Speaker** and **Headphones** remain separate destinations even
 when the laptop exposes them through mutually exclusive ALSA profiles. Selecting
 one revalidates the card and port, chooses a compatible profile that preserves
@@ -571,11 +571,11 @@ busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 \
 ```
 
 Switching to Pair, and opening the panel while Pair is the current tab, starts a
-timed Bluetooth discovery. As in `rofi-audio`, that leaves a powered-off adapter
+timed Bluetooth discovery. As in `audio-control`, that leaves a powered-off adapter
 off: use the tab's switch, or right-click the Waybar button.
 
 `wayle-audio` itself has no card/profile API, so a small machine interface calls
-the already-tested `rofi-audio` logic rather than duplicating that hardware
+the already-tested `audio-control` logic rather than duplicating that hardware
 policy inside the Wayle patch. It also reconciles Wayle's reactive default after
 a profile change: PulseAudio can announce the new default before Wayle has added
 the replacement sink, which otherwise leaves the removed Speaker object shown
@@ -595,7 +595,7 @@ The local patches are:
 | `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized compact cards that keep the original text sizes and a play/pause button that names the command instead of toggling. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
-| `wayle-audio-profile-bridge.patch` | Uses `rofi-audio`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
+| `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
 | `dashboard-polish.patch` | Drops the header's settings button, moves Do Not Disturb beside the notification card's title, expands a notification's title along with its body, puts an event's time above the event, and colours every card title red. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |

@@ -19,7 +19,7 @@ use pairing::{
 const PRESERVE_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
 
 /// Rofi maps `-kb-custom-N` to `ROFI_RETV` 9 + N. The action-bar buttons
-/// are wired to these in rofi-audio.rasi.
+/// are wired to these in audio-control.rasi.
 ///
 /// Connect/disconnect and confirm have no button and no hotkey of their own:
 /// both are `RETV_ACTIVATE`, which Rofi raises on Enter and on a double-click
@@ -140,7 +140,7 @@ async fn run_bluetooth(retv: u8, selected_key: Option<&str>, state: &mut UiState
         Ok(backend) => backend,
         Err(error) => {
             // The raw D-Bus error runs to several lines; the panel has one.
-            eprintln!("rofi-audio: cannot reach BlueZ: {error}");
+            eprintln!("audio-control: cannot reach BlueZ: {error}");
             state.set_message("Bluetooth service is unavailable.");
             return Devices::Bluetooth(Vec::new());
         }
@@ -310,20 +310,20 @@ async fn forget(
 }
 
 fn rofi_binary() -> PathBuf {
-    env::var_os("ROFI_AUDIO_ROFI")
+    env::var_os("AUDIO_CONTROL_ROFI")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
 
 fn theme_path() -> AppResult<PathBuf> {
-    if let Some(path) = env::var_os("ROFI_AUDIO_THEME") {
+    if let Some(path) = env::var_os("AUDIO_CONTROL_THEME") {
         return Ok(PathBuf::from(path));
     }
     if let Some(config) = env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(config).join("rofi").join("rofi-audio.rasi"));
+        return Ok(PathBuf::from(config).join("rofi/audio-control.rasi"));
     }
     let home = env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".config/rofi/rofi-audio.rasi"))
+    Ok(PathBuf::from(home).join(".config/rofi/audio-control.rasi"))
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ pub type AppResult<T> = Result<T, AppError>;
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("rofi-audio: {error}");
+        eprintln!("audio-control: {error}");
         std::process::exit(2);
     }
 }
@@ -35,7 +35,7 @@ async fn run() -> AppResult<()> {
             // Detached background pair-and-connect; spawned by the Bluetooth
             // tab so the rofi script can render "Connecting…" immediately and
             // so the BlueZ pairing agent outlives that script invocation.
-            // Writes the outcome to $XDG_RUNTIME_DIR/rofi-audio-connect-result.
+            // Writes the outcome to $XDG_RUNTIME_DIR/audio-control-connect-result.
             let key = arguments
                 .next()
                 .ok_or_else(|| io::Error::other("connect-bg key is missing"))?;
@@ -72,13 +72,13 @@ async fn run() -> AppResult<()> {
         }
         Some("help" | "--help" | "-h") => {
             print!(
-                "rofi-audio\n\n\
+                "audio-control\n\n\
                  Usage:\n  \
-                 rofi-audio\n  \
-                 rofi-audio status\n  \
-                 rofi-audio bluetooth-power [on|off|toggle]\n  \
-                 rofi-audio wayle-list <output|input>\n  \
-                 rofi-audio wayle-set-default <output|input> <key>\n"
+                 audio-control\n  \
+                 audio-control status\n  \
+                 audio-control bluetooth-power [on|off|toggle]\n  \
+                 audio-control wayle-list <output|input>\n  \
+                 audio-control wayle-set-default <output|input> <key>\n"
             );
             Ok(())
         }

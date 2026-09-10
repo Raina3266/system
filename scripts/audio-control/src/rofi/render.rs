@@ -215,7 +215,7 @@ pub(super) fn write_bluetooth_row(output: &mut Vec<u8>, entry: &BluetoothEntry) 
         "meta",
         &format!("{} {}", entry.name, entry.address),
     );
-    // urgent renders cyan and active renders white in rofi-audio.rasi;
+    // urgent renders cyan and active renders white in audio-control.rasi;
     // everything else stays dim.
     if entry.connected {
         write_row_option(output, &mut first, "urgent", "true");

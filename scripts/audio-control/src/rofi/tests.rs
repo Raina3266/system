@@ -107,7 +107,7 @@ fn script_rows_use_one_metadata_nul() {
 
 /// The `prompt` header names the mode-switcher tab, so it has to carry the
 /// tab's text. The input bar hides the prompt widget instead of shortening
-/// this string — see the `inputbar` block in rofi-audio.rasi.
+/// this string — see the `inputbar` block in audio-control.rasi.
 #[test]
 fn prompts_name_their_tab() {
     assert_eq!(Mode::Bluetooth.prompt(), "󰂯 Pair");

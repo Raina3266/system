@@ -1,5 +1,5 @@
 [package]
-name = "rofi-audio"
+name = "audio-control"
 version.workspace = true
 edition.workspace = true
 

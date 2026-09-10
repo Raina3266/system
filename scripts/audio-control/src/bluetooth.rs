@@ -18,9 +18,9 @@ const DEFAULT_SCAN_SECONDS: u64 = 10;
 /// pairing code before giving up and letting BlueZ cancel the attempt.
 const CODE_TIMEOUT: Duration = Duration::from_secs(120);
 const CODE_POLL: Duration = Duration::from_millis(100);
-const REQUEST_FILENAME: &str = "rofi-audio-pair-request";
-const RESPONSE_FILENAME: &str = "rofi-audio-pair-response";
-const SCANNING_FILENAME: &str = "rofi-audio-scanning";
+const REQUEST_FILENAME: &str = "audio-control-pair-request";
+const RESPONSE_FILENAME: &str = "audio-control-pair-response";
+const SCANNING_FILENAME: &str = "audio-control-scanning";
 
 pub struct Backend {
     session: Session,
@@ -99,7 +99,7 @@ impl Backend {
     /// While it runs, a marker file lets the short-lived script invocations
     /// tell that a scan is in flight.
     pub async fn scan(&self) -> AppResult<()> {
-        let seconds = env::var("ROFI_AUDIO_SCAN_SECONDS")
+        let seconds = env::var("AUDIO_CONTROL_SCAN_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(DEFAULT_SCAN_SECONDS);

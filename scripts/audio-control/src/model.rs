@@ -27,7 +27,7 @@ impl Mode {
     /// to the same string (`script.c` assigns the `prompt` header to
     /// `sw->display_name`, and `rofi_view_update_prompt` reads it back), so
     /// the input bar drops the `prompt` widget entirely and shows a static
-    /// filter glyph instead — see the `inputbar` block in rofi-audio.rasi.
+    /// filter glyph instead — see the `inputbar` block in audio-control.rasi.
     pub fn prompt(self) -> &'static str {
         match self {
             Self::Bluetooth => "󰂯 Pair",

@@ -142,7 +142,7 @@ in
             # the profile-aware selector shared with the former Rofi UI.
             Environment = [
               "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}"
-              "WAYLE_AUDIO_HELPER=${lib.getExe repoPackages.rofiAudio}"
+              "WAYLE_AUDIO_HELPER=${lib.getExe repoPackages.audioControl}"
             ];
           };
         };

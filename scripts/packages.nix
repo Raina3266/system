@@ -193,11 +193,11 @@ rec {
     '';
   };
 
-  rofiAudio = mkWorkspacePackage "rofi-audio" {
+  audioControl = mkWorkspacePackage "audio-control" {
     dontWrapGApps = true;
     postInstall = ''
-      wrapProgram "$out/bin/rofi-audio" \
-        --set ROFI_AUDIO_ROFI "${pkgs.lib.getExe pkgs.rofi}"
+      wrapProgram "$out/bin/audio-control" \
+        --set AUDIO_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}"
     '';
   };
 
