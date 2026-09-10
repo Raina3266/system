@@ -67,7 +67,7 @@ in
               palette = {
                 bg = "#180A10";
                 surface = "#210E15";
-                elevated = "#0F0C17";
+                elevated = "#0E0616";
                 fg = "#F8F8F2";
                 "fg-muted" = "#6B6670";
                 primary = "#D656C7";

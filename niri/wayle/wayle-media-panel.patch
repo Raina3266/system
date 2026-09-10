@@ -775,7 +775,7 @@ index d52db43..f843f79 100644
 -    }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-index 111f79f..864185a 100644
+index 111f79f..e8cd217 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 @@ -18,10 +18,7 @@ use wayle_media::{core::player::Player, types::*};
@@ -806,7 +806,7 @@ index 111f79f..864185a 100644
      title: String,
      artist: String,
      album: String,
-@@ -65,259 +61,222 @@ pub(crate) struct PlayerView {
+@@ -65,259 +61,225 @@ pub(crate) struct PlayerView {
  impl Component for PlayerView {
      type Init = PlayerViewInit;
      type Input = PlayerViewInput;
@@ -860,7 +860,10 @@ index 111f79f..864185a 100644
 -                    set_vexpand: true,
 +                    add_css_class: "media-player-artwork",
 +                    add_css_class: &model.art_css_class,
++                    set_halign: gtk::Align::Start,
 +                    set_valign: gtk::Align::Start,
++                    set_hexpand: false,
++                    set_vexpand: false,
  
 -                    #[name = "header"]
                      gtk::Box {
@@ -1254,7 +1257,7 @@ index 111f79f..864185a 100644
              },
          }
      }
-@@ -327,8 +286,6 @@ impl Component for PlayerView {
+@@ -327,8 +289,6 @@ impl Component for PlayerView {
          _root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1263,7 +1266,7 @@ index 111f79f..864185a 100644
          let art_css_provider = CssProvider::new();
          #[allow(clippy::expect_used)]
          let display = Display::default().expect("display required for media dropdown");
-@@ -348,15 +305,14 @@ impl Component for PlayerView {
+@@ -348,15 +308,14 @@ impl Component for PlayerView {
              }),
          );
  
@@ -1281,7 +1284,7 @@ index 111f79f..864185a 100644
              title: String::new(),
              artist: String::new(),
              album: String::new(),
-@@ -379,6 +335,9 @@ impl Component for PlayerView {
+@@ -379,6 +338,9 @@ impl Component for PlayerView {
              source_icon: String::from("ld-music-symbolic"),
          };
  
@@ -1291,7 +1294,7 @@ index 111f79f..864185a 100644
          let seek_slider = &model.seek_slider;
          let widgets = view_output!();
          ComponentParts { model, widgets }
-@@ -386,13 +345,7 @@ impl Component for PlayerView {
+@@ -386,13 +348,7 @@ impl Component for PlayerView {
  
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
@@ -1306,7 +1309,7 @@ index 111f79f..864185a 100644
  
              PlayerViewInput::PlayPauseClicked => {
                  self.fire_player_command(
-@@ -451,39 +404,19 @@ impl Component for PlayerView {
+@@ -451,39 +407,19 @@ impl Component for PlayerView {
      fn update_cmd(
          &mut self,
          msg: PlayerViewCmd,
@@ -1519,10 +1522,10 @@ index 73b7bde..4759abd 100644
 +    }
 +}
 diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-index c623146..5f8a3cc 100644
+index c623146..abe6411 100644
 --- a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
 +++ b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-@@ -1,66 +1,76 @@
+@@ -1,66 +1,75 @@
 -.media-header {
 -    padding: calc(var(--space-sm) * 1.1) var(--space-md);
 -    border-bottom: 1px solid var(--border-default);
@@ -1552,7 +1555,6 @@ index c623146..5f8a3cc 100644
 -    color: var(--fg-muted);
 -    border-spacing: var(--space-xs);
 +    border: 1px solid var(--border-default);
-+    background: var(--bg-surface);
 +}
  
 -    &:hover {
@@ -1630,7 +1632,7 @@ index c623146..5f8a3cc 100644
          font-weight: var(--weight-bold);
          color: var(--fg-default);
  
-@@ -71,10 +81,10 @@ button.media-source-button {
+@@ -71,10 +80,10 @@ button.media-source-button {
      }
  
      .media-artist {
@@ -1644,7 +1646,7 @@ index c623146..5f8a3cc 100644
  
          &.placeholder {
              color: var(--fg-subtle);
-@@ -83,10 +93,8 @@ button.media-source-button {
+@@ -83,10 +92,8 @@ button.media-source-button {
      }
  
      .media-album {
@@ -1656,7 +1658,7 @@ index c623146..5f8a3cc 100644
  
          &.placeholder {
              font-style: italic;
-@@ -95,17 +103,17 @@ button.media-source-button {
+@@ -95,17 +102,17 @@ button.media-source-button {
  }
  
  .media-progress {
@@ -1677,7 +1679,7 @@ index c623146..5f8a3cc 100644
              background: var(--accent);
              border-radius: var(--rounding-element);
          }
-@@ -128,18 +136,19 @@ scale.media-seek-slider {
+@@ -128,18 +135,19 @@ scale.media-seek-slider {
      }
  }
  
@@ -1706,7 +1708,7 @@ index c623146..5f8a3cc 100644
      border-spacing: var(--space-xs);
  }
  
-@@ -150,7 +159,6 @@ button.media-control {
+@@ -150,7 +158,6 @@ button.media-control {
      transition:
          background var(--duration-fast),
          color var(--duration-fast);
@@ -1714,7 +1716,7 @@ index c623146..5f8a3cc 100644
  
      &:hover {
          background: var(--bg-overlay);
-@@ -159,31 +167,28 @@ button.media-control {
+@@ -159,31 +166,28 @@ button.media-control {
  
      image {
          -gtk-icon-size: var(--icon-md);

@@ -502,7 +502,9 @@ every MPRIS source that is playing or paused, with artwork, source, track,
 artist, album, an adjustable progress bar, and independent transport,
 shuffle, and repeat controls. Each card is compact: the elapsed and total times
 sit at the ends of the control row instead of on a row of their own, and the
-padding around every element is tighter. No text is smaller than it was.
+padding around every element is tighter. No text is smaller than it was. Cards
+are the same size whether or not a player publishes cover art, and, like every
+other card in Wayle, are painted on the palette's elevated layer.
 
 Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
 signal, saved profile and UUID, security, interface, password, IP addresses,
@@ -578,7 +580,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with compact cards that keep the original text sizes. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized compact cards that keep the original text sizes. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
