@@ -101,6 +101,10 @@ let
         # that crate stops hitting the artifact cache.
         inherit (commonArgs) strictDeps nativeBuildInputs buildInputs;
         postPatch = stubSiblings pname + (extra.postPatch or "");
+        # Every member names its [[bin]] after the crate. Say so, rather than
+        # leaving lib.getExe to guess it: the guess still resolves, but warns
+        # on every evaluation that it is deprecated.
+        meta = (extra.meta or { }) // { mainProgram = pname; };
       }
     );
 
