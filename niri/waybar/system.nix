@@ -107,10 +107,10 @@ let
     "exec-on-event" = false;
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss media ${lib.escapeShellArg monitor}";
-    # Middle-click stops everything: `Pause` on every player, rather than a
+    # Right-click stops everything: `Pause` on every player, rather than a
     # toggle aimed at whichever one Wayle considers active. Pausing a player
     # that is already paused does nothing, so the others are left alone.
-    on-click-middle = "${pkgs.playerctl}/bin/playerctl --all-players pause";
+    on-click-right = "${pkgs.playerctl}/bin/playerctl --all-players pause";
   };
 in
 {

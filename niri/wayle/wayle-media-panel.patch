@@ -162,10 +162,10 @@ index e62b8e2..aa7705e 100644
 +    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-index f2e3b13..a9f0e5d 100644
+index f2e3b13..01ffe16 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-@@ -2,45 +2,40 @@ mod factory;
+@@ -2,45 +2,44 @@ mod factory;
  mod helpers;
  mod messages;
  pub(crate) mod player_view;
@@ -178,11 +178,7 @@ index f2e3b13..a9f0e5d 100644
  use gtk::prelude::*;
  use relm4::{gtk, prelude::*};
 -use wayle_widgets::prelude::*;
-+use wayle_media::{
-+    MediaService,
-+    core::player::Player,
-+    types::{PlaybackState, PlayerId},
-+};
++use wayle_media::{MediaService, core::player::Player, types::PlaybackState};
 +use wayle_widgets::{WatcherToken, prelude::*};
  
  pub(super) use self::factory::Factory;
@@ -214,25 +210,39 @@ index f2e3b13..a9f0e5d 100644
 -        }
 -    }
 -}
-+const BASE_WIDTH: f32 = 410.0;
-+const BASE_HEIGHT: f32 = 520.0;
++const BASE_WIDTH: f32 = 470.0;
++/// Cards past this many are reached by scrolling. Up to it, the panel is only
++/// as tall as the cards it holds.
++const VISIBLE_CARDS: i32 = 4;
++const BASE_CARD_GAP: f32 = 8.0;
++/// Only used until a real card can be measured, which needs the list to be in
++/// a window so GTK has the styling that decides a card's height.
++const BASE_CARD_HEIGHT: f32 = 127.0;
  
  pub(crate) struct MediaDropdown {
 +    media: Arc<MediaService>,
      scaled_width: i32,
-     scaled_height: i32,
+-    scaled_height: i32,
 -    active_page: MediaPage,
 -    player_view: Controller<PlayerView>,
 -    source_picker: Controller<SourcePicker>,
++    card_gap: i32,
++    fallback_card_height: i32,
++    list_height: i32,
 +    is_active: bool,
-+    player_ids: Vec<PlayerId>,
++    groups: Vec<PlayerGroup>,
 +    player_views: Vec<Controller<PlayerView>>,
 +    player_state_watcher: WatcherToken,
 +    player_list: gtk::Box,
  }
  
  #[relm4::component(pub(crate))]
-@@ -62,19 +57,64 @@ impl Component for MediaDropdown {
+@@ -57,24 +56,71 @@ impl Component for MediaDropdown {
+             set_has_arrow: false,
+             #[watch]
+             set_width_request: model.scaled_width,
+-            #[watch]
+-            set_height_request: model.scaled_height,
  
              #[template]
              Dropdown {
@@ -240,8 +250,6 @@ index f2e3b13..a9f0e5d 100644
 -                gtk::Stack {
 +                #[watch]
 +                set_width_request: model.scaled_width,
-+                #[watch]
-+                set_height_request: model.scaled_height,
 +
 +                #[template]
 +                DropdownHeader {
@@ -270,17 +278,23 @@ index f2e3b13..a9f0e5d 100644
  
 -                    #[local_ref]
 -                    add_named[Some("sources")] = source_picker_widget -> gtk::Box {},
++                    // The panel is as tall as the cards it holds, up to the
++                    // height of VISIBLE_CARDS of them; past that it scrolls.
 +                    gtk::ScrolledWindow {
 +                        add_css_class: "media-player-scroll",
-+                        set_vexpand: true,
 +                        set_hscrollbar_policy: gtk::PolicyType::Never,
++                        set_propagate_natural_height: true,
 +                        #[watch]
-+                        set_visible: !model.player_ids.is_empty(),
++                        set_max_content_height: model.list_height,
++                        #[watch]
++                        set_visible: !model.groups.is_empty(),
 +
 +                        #[local_ref]
 +                        player_list_widget -> gtk::Box {
 +                            add_css_class: "media-player-list",
 +                            set_orientation: gtk::Orientation::Vertical,
++                            #[watch]
++                            set_spacing: model.card_gap,
 +                        },
 +                    },
  
@@ -290,7 +304,7 @@ index f2e3b13..a9f0e5d 100644
 +                    EmptyState {
 +                        add_css_class: "media-empty",
 +                        #[watch]
-+                        set_visible: model.player_ids.is_empty(),
++                        set_visible: model.groups.is_empty(),
 +                        #[template_child]
 +                        icon {
 +                            set_icon_name: Some("ld-play-symbolic"),
@@ -307,7 +321,7 @@ index f2e3b13..a9f0e5d 100644
                  },
              },
          }
-@@ -85,57 +125,43 @@ impl Component for MediaDropdown {
+@@ -85,57 +131,49 @@ impl Component for MediaDropdown {
          root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -332,12 +346,15 @@ index f2e3b13..a9f0e5d 100644
 +        let mut model = Self {
 +            media: init.media,
              scaled_width: scaled_dimension(BASE_WIDTH, scale),
-             scaled_height: scaled_dimension(BASE_HEIGHT, scale),
+-            scaled_height: scaled_dimension(BASE_HEIGHT, scale),
 -            active_page: MediaPage::Main,
 -            player_view,
 -            source_picker,
++            card_gap: scaled_dimension(BASE_CARD_GAP, scale),
++            fallback_card_height: scaled_dimension(BASE_CARD_HEIGHT, scale),
++            list_height: 0,
 +            is_active: root.is_visible(),
-+            player_ids: Vec::new(),
++            groups: Vec::new(),
 +            player_views: Vec::new(),
 +            player_state_watcher: WatcherToken::new(),
 +            player_list: gtk::Box::new(gtk::Orientation::Vertical, 0),
@@ -377,6 +394,10 @@ index f2e3b13..a9f0e5d 100644
 +                self.is_active = visible;
 +                if visible {
 +                    self.sync_player_views(self.media.player_list.get());
++                    // A card only has a height once it is in a window, which
++                    // it now is, so this is the first measurement that can be
++                    // anything but the fallback.
++                    self.list_height = self.measure_list_height();
 +                }
 +                for player_view in &self.player_views {
 +                    player_view.emit(PlayerViewInput::SetActive(visible));
@@ -384,7 +405,7 @@ index f2e3b13..a9f0e5d 100644
              }
          }
      }
-@@ -143,7 +169,7 @@ impl Component for MediaDropdown {
+@@ -143,14 +181,322 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -393,10 +414,13 @@ index f2e3b13..a9f0e5d 100644
          _root: &Self::Root,
      ) {
          match msg {
-@@ -151,6 +177,217 @@ impl Component for MediaDropdown {
+             MediaDropdownCmd::ScaleChanged(scale) => {
                  self.scaled_width = scaled_dimension(BASE_WIDTH, scale);
-                 self.scaled_height = scaled_dimension(BASE_HEIGHT, scale);
-             }
+-                self.scaled_height = scaled_dimension(BASE_HEIGHT, scale);
++                self.card_gap = scaled_dimension(BASE_CARD_GAP, scale);
++                self.fallback_card_height = scaled_dimension(BASE_CARD_HEIGHT, scale);
++                self.list_height = self.measure_list_height();
++            }
 +            MediaDropdownCmd::PlayerListChanged(players) => {
 +                self.update_player_list(players, &sender);
 +            }
@@ -422,9 +446,8 @@ index f2e3b13..a9f0e5d 100644
 +                .collect(),
 +        );
 +        groups.sort_by_key(|group| playback_rank(group.player.playback_state.get()));
-+        let player_ids: Vec<_> = groups.iter().map(|group| group.player.id.clone()).collect();
 +
-+        if player_ids == self.player_ids {
++        if same_groups(&self.groups, &groups) {
 +            return;
 +        }
 +
@@ -433,11 +456,11 @@ index f2e3b13..a9f0e5d 100644
 +        }
 +        self.player_views.clear();
 +
-+        for group in groups {
++        for group in &groups {
 +            let player_view = PlayerView::builder()
 +                .launch(PlayerViewInit {
-+                    player: group.player,
-+                    duplicates: group.duplicates,
++                    player: Arc::clone(&group.player),
++                    duplicates: group.duplicates.clone(),
 +                })
 +                .detach();
 +            player_view.emit(PlayerViewInput::SetActive(self.is_active));
@@ -445,8 +468,46 @@ index f2e3b13..a9f0e5d 100644
 +            self.player_views.push(player_view);
 +        }
 +
-+        self.player_ids = player_ids;
++        self.groups = groups;
++        self.list_height = self.measure_list_height();
 +    }
++
++    /// The height of a full list: `VISIBLE_CARDS` cards and the gaps between
++    /// them. Every card is the same size, so one of them gives the height of
++    /// all of them. Before the list is in a window GTK has no styling to
++    /// measure against and reports a card as far shorter than it will be
++    /// drawn, so an unrooted list keeps the fallback until it is shown.
++    fn measure_list_height(&self) -> i32 {
++        let card_height = self
++            .player_list
++            .first_child()
++            .filter(|_| self.player_list.root().is_some())
++            .map(|card| card.measure(gtk::Orientation::Vertical, -1).1)
++            .filter(|height| *height > 0)
++            .unwrap_or(self.fallback_card_height);
++
++        card_height * VISIBLE_CARDS + self.card_gap * (VISIBLE_CARDS - 1)
++    }
++}
++
++/// Whether the cards already on screen stand for exactly the same players.
++///
++/// The players themselves are compared, not their bus names: a bridge that
++/// republishes a browser tab claims the same name each time it recreates a
++/// player, and a card holding the replaced one is frozen — its state never
++/// changes again, so its play/pause button keeps sending the command the
++/// player is already in and the press does nothing.
++fn same_groups(current: &[PlayerGroup], next: &[PlayerGroup]) -> bool {
++    current.len() == next.len()
++        && current.iter().zip(next).all(|(current, next)| {
++            Arc::ptr_eq(&current.player, &next.player)
++                && current.duplicates.len() == next.duplicates.len()
++                && current
++                    .duplicates
++                    .iter()
++                    .zip(&next.duplicates)
++                    .all(|(current, next)| Arc::ptr_eq(current, next))
++        })
 +}
 +
 +fn playback_rank(state: PlaybackState) -> u8 {
@@ -470,6 +531,11 @@ index f2e3b13..a9f0e5d 100644
 +        .filter(|player| seen_ids.insert(player.id.clone()))
 +        .collect();
 +
++    // Which card each dropped player was folded into, recorded as it is
++    // dropped. Re-deriving it afterwards from a resemblance test loses the
++    // pairs the bridge rule matched, which are exactly the ones that disagree
++    // about their own state and so most need both ends to hear a command.
++    let mut merged_into: Vec<Option<usize>> = vec![None; players.len()];
 +    let mut keep = vec![true; players.len()];
 +    for left_index in 0..players.len() {
 +        if !keep[left_index] {
@@ -485,10 +551,12 @@ index f2e3b13..a9f0e5d 100644
 +            let right_playing = players[right_index].playback_state.get() == PlaybackState::Playing;
 +            if left_playing && !right_playing {
 +                keep[right_index] = false;
++                merged_into[right_index] = Some(left_index);
 +            } else {
 +                keep[left_index] = false;
++                merged_into[left_index] = Some(right_index);
 +                break;
-+            }
+             }
          }
      }
 +
@@ -508,40 +576,55 @@ index f2e3b13..a9f0e5d 100644
 +        let proxy = &players[proxy_index];
 +        let bridge_playing = bridge.playback_state.get() == PlaybackState::Playing;
 +        let proxy_playing = proxy.playback_state.get() == PlaybackState::Playing;
-+        if proxy_playing && !bridge_playing {
-+            keep[bridge_index] = false;
++        let (dropped, kept) = if proxy_playing && !bridge_playing {
++            (bridge_index, proxy_index)
 +        } else if (bridge_playing && !proxy_playing)
 +            || metadata_richness(bridge) >= metadata_richness(proxy)
 +        {
-+            keep[proxy_index] = false;
++            (proxy_index, bridge_index)
 +        } else {
-+            keep[bridge_index] = false;
++            (bridge_index, proxy_index)
++        };
++        keep[dropped] = false;
++        merged_into[dropped] = Some(kept);
++    }
++
++    // Everything a card replaced is still a way to reach the same playback,
++    // including a player folded into one that was itself folded into a third.
++    let mut duplicates: Vec<Vec<Arc<Player>>> = vec![Vec::new(); players.len()];
++    for index in 0..players.len() {
++        if keep[index] {
++            continue;
++        }
++        if let Some(card) = surviving_card(index, &merged_into, &keep) {
++            duplicates[card].push(Arc::clone(&players[index]));
 +        }
 +    }
-+    // Everything a card replaced is still a way to reach the same playback.
-+    let dropped: Vec<Arc<Player>> = players
-+        .iter()
-+        .zip(&keep)
-+        .filter(|(_, keep)| !**keep)
-+        .map(|(player, _)| Arc::clone(player))
-+        .collect();
 +
 +    players
 +        .into_iter()
 +        .zip(keep)
-+        .filter_map(|(player, keep)| keep.then_some(player))
-+        .map(|player| {
-+            let duplicates = dropped
-+                .iter()
-+                .filter(|dropped| same_player_snapshot(&player, dropped))
-+                .map(Arc::clone)
-+                .collect();
-+            PlayerGroup {
++        .zip(duplicates)
++        .filter_map(|((player, keep), duplicates)| {
++            keep.then_some(PlayerGroup {
 +                player,
 +                duplicates,
-+            }
++            })
 +        })
 +        .collect()
++}
++
++/// Follows the chain of merges from a dropped player to the card that ended up
++/// standing for it, stopping if the records ever form a loop.
++fn surviving_card(start: usize, merged_into: &[Option<usize>], keep: &[bool]) -> Option<usize> {
++    let mut index = merged_into[start]?;
++    for _ in 0..merged_into.len() {
++        if keep[index] {
++            return Some(index);
++        }
++        index = merged_into[index]?;
++    }
++    None
 +}
 +
 +fn same_player_snapshot(left: &Player, right: &Player) -> bool {
@@ -593,10 +676,46 @@ index f2e3b13..a9f0e5d 100644
 +    left: Option<std::time::Duration>,
 +    right: Option<std::time::Duration>,
 +) -> bool {
-+    left.zip(right).is_some_and(|(left, right)| {
-+        let difference = if left >= right { left - right } else { right - left };
-+        difference <= std::time::Duration::from_secs(2)
-+    })
++    left.zip(right)
++        .is_some_and(|(left, right)| left.abs_diff(right) <= std::time::Duration::from_secs(2))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::surviving_card;
++
++    #[test]
++    fn surviving_card_follows_a_chain_of_merges() {
++        // 0 was folded into 1, which was itself folded into 2.
++        let merged_into = [Some(1), Some(2), None];
++        let keep = [false, false, true];
++
++        assert_eq!(surviving_card(0, &merged_into, &keep), Some(2));
++    }
++
++    #[test]
++    fn surviving_card_stops_at_the_first_survivor() {
++        let merged_into = [Some(1), None, None];
++        let keep = [false, true, true];
++
++        assert_eq!(surviving_card(0, &merged_into, &keep), Some(1));
++    }
++
++    #[test]
++    fn surviving_card_gives_up_on_a_loop() {
++        let merged_into = [Some(1), Some(0)];
++        let keep = [false, false];
++
++        assert_eq!(surviving_card(0, &merged_into, &keep), None);
++    }
++
++    #[test]
++    fn surviving_card_gives_up_when_the_chain_ends_nowhere() {
++        let merged_into = [Some(1), None];
++        let keep = [false, false];
++
++        assert_eq!(surviving_card(0, &merged_into, &keep), None);
++    }
 +}
 +
 +fn metadata_richness(player: &Player) -> usize {
@@ -654,7 +773,7 @@ index a4a0c29..c28236b 100644
      PlaybackStateChanged(PlaybackState),
      PositionTick(Duration),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
-index d52db43..f843f79 100644
+index d52db43..1ef76a0 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
 @@ -1,4 +1,4 @@
@@ -663,18 +782,23 @@ index d52db43..f843f79 100644
  
  use relm4::ComponentSender;
  use wayle_media::{core::player::Player, types::*};
-@@ -16,7 +16,9 @@ impl PlayerView {
+@@ -16,7 +16,14 @@ impl PlayerView {
          let _ = self.player_watcher.reset();
  
          if active {
 -            self.update_player(self.player.clone(), sender);
++            // Nothing was delivered while the card was hidden, so read the
++            // player back before the watchers start reporting changes to it.
++            let player = Arc::clone(&self.player);
++            self.refresh_from_player(&player);
++
 +            let token = self.player_watcher.reset();
 +            super::watchers::spawn_player(sender, &self.player, token);
 +            self.refresh_position_now(sender);
          }
      }
  
-@@ -29,9 +31,7 @@ impl PlayerView {
+@@ -29,9 +36,7 @@ impl PlayerView {
          F: FnOnce(Arc<Player>) -> Fut + Send + 'static,
          Fut: Future<Output = Result<(), wayle_media::Error>> + Send,
      {
@@ -685,7 +809,7 @@ index d52db43..f843f79 100644
          sender.oneshot_command(async move {
              if let Err(err) = action(player).await {
                  tracing::warn!(error = %err, "{label}");
-@@ -40,34 +40,8 @@ impl PlayerView {
+@@ -40,34 +45,8 @@ impl PlayerView {
          });
      }
  
@@ -721,7 +845,7 @@ index d52db43..f843f79 100644
          self.title = metadata.title.get();
          self.artist = metadata.artist.get();
          self.album = metadata.album.get();
-@@ -77,15 +51,11 @@ impl PlayerView {
+@@ -77,15 +56,11 @@ impl PlayerView {
      }
  
      pub(super) fn refresh_capabilities(&mut self) {
@@ -742,7 +866,7 @@ index d52db43..f843f79 100644
      }
  
      pub(super) fn display_title(&self) -> Cow<'_, str> {
-@@ -139,6 +109,14 @@ impl PlayerView {
+@@ -139,6 +114,14 @@ impl PlayerView {
          }
      }
  
@@ -757,7 +881,7 @@ index d52db43..f843f79 100644
      pub(super) fn loop_icon(&self) -> &'static str {
          match self.loop_mode {
              LoopMode::Track => "ld-repeat-1-symbolic",
-@@ -146,7 +124,7 @@ impl PlayerView {
+@@ -146,7 +129,7 @@ impl PlayerView {
          }
      }
  
@@ -766,7 +890,7 @@ index d52db43..f843f79 100644
          self.player_identity = player.identity.get();
          self.playback_state = player.playback_state.get();
          self.loop_mode = player.loop_mode.get();
-@@ -165,9 +143,7 @@ impl PlayerView {
+@@ -165,9 +148,7 @@ impl PlayerView {
      }
  
      fn refresh_position_now(&self, sender: &ComponentSender<PlayerView>) {
@@ -777,7 +901,7 @@ index d52db43..f843f79 100644
  
          sender.oneshot_command(async move {
              match player.position().await {
-@@ -179,26 +155,4 @@ impl PlayerView {
+@@ -179,26 +160,4 @@ impl PlayerView {
              }
          });
      }
@@ -805,7 +929,7 @@ index d52db43..f843f79 100644
 -    }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-index 111f79f..7f96c28 100644
+index 111f79f..57dc1b0 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 @@ -18,9 +18,9 @@ use wayle_media::{core::player::Player, types::*};
@@ -838,7 +962,7 @@ index 111f79f..7f96c28 100644
      title: String,
      artist: String,
      album: String,
-@@ -65,259 +65,225 @@ pub(crate) struct PlayerView {
+@@ -65,259 +65,230 @@ pub(crate) struct PlayerView {
  impl Component for PlayerView {
      type Init = PlayerViewInit;
      type Input = PlayerViewInput;
@@ -851,54 +975,14 @@ index 111f79f..7f96c28 100644
          gtk::Box {
 +            set_css_classes: &["card", "media-player-card"],
              set_orientation: gtk::Orientation::Vertical,
-+            set_hexpand: true,
-+
-+            gtk::Box {
-+                add_css_class: "media-player-source",
-+
-+                gtk::Image {
-+                    add_css_class: "media-source-icon",
-+                    #[watch]
-+                    set_icon_name: Some(&model.source_icon),
-+                },
-+
-+                gtk::Label {
-+                    add_css_class: "media-source-name",
-+                    set_hexpand: true,
-+                    set_halign: gtk::Align::Start,
-+                    set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                    #[watch]
-+                    set_label: &model.player_identity,
-+                },
-+
-+                gtk::Label {
-+                    #[watch]
-+                    set_css_classes: match model.playback_state {
-+                        PlaybackState::Playing => &["media-player-state", "playing"],
-+                        PlaybackState::Paused => &["media-player-state", "paused"],
-+                        PlaybackState::Stopped => &["media-player-state", "stopped"],
-+                    },
-+                    #[watch]
-+                    set_label: &model.playback_label(),
-+                },
-+            },
-+
-+            gtk::Box {
-+                add_css_class: "media-player-summary",
- 
+-
 -            if model.has_player {
-                 gtk::Box {
+-                gtk::Box {
 -                    set_orientation: gtk::Orientation::Vertical,
 -                    set_vexpand: true,
-+                    add_css_class: "media-player-artwork",
-+                    add_css_class: &model.art_css_class,
-+                    set_halign: gtk::Align::Start,
-+                    set_valign: gtk::Align::Start,
-+                    set_hexpand: false,
-+                    set_vexpand: false,
- 
+-
 -                    #[name = "header"]
-                     gtk::Box {
+-                    gtk::Box {
 -                        add_css_class: "media-header",
 -
 -                        #[name = "header_title"]
@@ -909,14 +993,7 @@ index 111f79f..7f96c28 100644
 -                            set_halign: gtk::Align::Start,
 -                            set_ellipsize: gtk::pango::EllipsizeMode::End,
 -                        },
-+                        add_css_class: "media-artwork-placeholder",
-+                        set_hexpand: true,
-+                        set_vexpand: true,
-+                        set_halign: gtk::Align::Center,
-+                        set_valign: gtk::Align::Center,
-+                        #[watch]
-+                        set_visible: model.cover_art.is_none(),
- 
+-
 -                        #[name = "source_button"]
 -                        gtk::Button {
 -                            add_css_class: "media-source-button",
@@ -943,23 +1020,85 @@ index 111f79f..7f96c28 100644
 -                                    set_icon_name: Some("ld-chevron-right-symbolic"),
 -                                },
 -                            },
-+                        gtk::Image {
-+                            add_css_class: "media-artwork-placeholder-icon",
-+                            set_icon_name: Some("ld-disc-3-symbolic"),
-                         },
-                     },
+-                        },
++            set_hexpand: true,
++
++            // Source and artist share the top line: an icon in front of each
++            // says which is which, so neither needs a line of its own.
++            gtk::Box {
++                add_css_class: "media-player-source",
++
++                gtk::Image {
++                    add_css_class: "media-source-icon",
++                    #[watch]
++                    set_icon_name: Some(&model.source_icon),
 +                },
++
++                gtk::Label {
++                    add_css_class: "media-source-name",
++                    set_halign: gtk::Align::Start,
++                    set_ellipsize: gtk::pango::EllipsizeMode::End,
++                    #[watch]
++                    set_label: &model.player_identity,
++                },
++
++                gtk::Image {
++                    add_css_class: "media-artist-icon",
++                    set_icon_name: Some("ld-mic-symbolic"),
++                },
++
++                gtk::Label {
++                    add_css_class: "media-artist",
++                    set_hexpand: true,
++                    set_halign: gtk::Align::Start,
++                    set_ellipsize: gtk::pango::EllipsizeMode::End,
++                    #[watch]
++                    set_label: &model.display_artist(),
++                    #[watch]
++                    set_class_active: ("placeholder", model.artist.is_empty()),
++                },
++
++                gtk::Label {
++                    #[watch]
++                    set_css_classes: match model.playback_state {
++                        PlaybackState::Playing => &["media-player-state", "playing"],
++                        PlaybackState::Paused => &["media-player-state", "paused"],
++                        PlaybackState::Stopped => &["media-player-state", "stopped"],
+                     },
++                    #[watch]
++                    set_label: &model.playback_label(),
++                },
++            },
  
 -                    #[name = "artwork"]
 -                    gtk::Box {
 -                        add_css_class: "media-artwork",
 -                        add_css_class: &model.art_css_class,
--                        set_vexpand: true,
++            gtk::Box {
++                add_css_class: "media-player-summary",
++
++                // A square with the art drawn into its background. The size
++                // is fixed here rather than left to the art so every card is
++                // the same height whether or not a player publishes one.
 +                gtk::Box {
-+                    add_css_class: "media-player-info",
-+                    set_orientation: gtk::Orientation::Vertical,
-+                    set_hexpand: true,
++                    set_css_classes: &["media-player-artwork", &model.art_css_class],
++                    set_halign: gtk::Align::Start,
 +                    set_valign: gtk::Align::Center,
++                    set_hexpand: false,
++                    set_vexpand: false,
++                    set_overflow: gtk::Overflow::Hidden,
++
++                    gtk::Image {
++                        add_css_class: "media-artwork-placeholder-icon",
++                        set_hexpand: true,
+                         set_vexpand: true,
++                        set_halign: gtk::Align::Center,
++                        set_valign: gtk::Align::Center,
++                        set_icon_name: Some("ld-disc-3-symbolic"),
++                        #[watch]
++                        set_visible: model.cover_art.is_none(),
++                    },
++                },
  
 -                        #[name = "artwork_placeholder"]
 -                        gtk::Box {
@@ -969,7 +1108,12 @@ index 111f79f..7f96c28 100644
 -                            set_valign: gtk::Align::Center,
 -                            #[watch]
 -                            set_visible: model.cover_art.is_none(),
--
++                gtk::Box {
++                    add_css_class: "media-player-info",
++                    set_orientation: gtk::Orientation::Vertical,
++                    set_hexpand: true,
++                    set_valign: gtk::Align::Center,
+ 
 -                            gtk::Image {
 -                                add_css_class: "media-artwork-placeholder-icon",
 -                                set_icon_name: Some("ld-disc-3-symbolic"),
@@ -992,7 +1136,7 @@ index 111f79f..7f96c28 100644
 -                        add_css_class: "media-info",
 -                        set_orientation: gtk::Orientation::Vertical,
 +                    gtk::Label {
-+                        add_css_class: "media-artist",
++                        add_css_class: "media-album",
 +                        set_hexpand: true,
                          set_halign: gtk::Align::Fill,
 -
@@ -1034,19 +1178,22 @@ index 111f79f..7f96c28 100644
 +                        set_xalign: 0.0,
 +                        set_ellipsize: gtk::pango::EllipsizeMode::End,
 +                        #[watch]
-+                        set_label: &model.display_artist(),
++                        set_label: &model.display_album(),
 +                        #[watch]
-+                        set_class_active: ("placeholder", model.artist.is_empty()),
++                        set_class_active: ("placeholder", model.album.is_empty()),
                      },
  
 -                    #[name = "progress"]
--                    gtk::Box {
--                        add_css_class: "media-progress",
--                        set_orientation: gtk::Orientation::Vertical,
--
--                        #[local_ref]
--                        seek_slider -> DebouncedSlider {
--                            #[watch]
+                     gtk::Box {
+                         add_css_class: "media-progress",
+                         set_orientation: gtk::Orientation::Vertical,
++                        // Some MPRIS publishers omit duration; keep the row
++                        // visible so every card is the same height.
++                        set_visible: true,
+ 
+                         #[local_ref]
+                         seek_slider -> DebouncedSlider {
+                             #[watch]
 -                            set_sensitive: model.can_seek,
 -                        },
 -
@@ -1073,17 +1220,8 @@ index 111f79f..7f96c28 100644
 -                                    helpers::format_duration,
 -                                ),
 -                            },
--                        },
-+                    gtk::Label {
-+                        add_css_class: "media-album",
-+                        set_hexpand: true,
-+                        set_halign: gtk::Align::Fill,
-+                        set_xalign: 0.0,
-+                        set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                        #[watch]
-+                        set_label: &model.display_album(),
-+                        #[watch]
-+                        set_class_active: ("placeholder", model.album.is_empty()),
++                            set_sensitive: model.can_seek && model.length.is_some(),
+                         },
                      },
 +                },
 +            },
@@ -1122,19 +1260,7 @@ index 111f79f..7f96c28 100644
 -                                set_icon_name: Some("ld-skip-back-symbolic"),
 -                            },
 -                        },
-+            gtk::Box {
-+                add_css_class: "media-progress",
-+                set_orientation: gtk::Orientation::Vertical,
-+                // Some MPRIS publishers omit duration; keep the row visible.
-+                set_visible: true,
-+
-+                #[local_ref]
-+                seek_slider -> DebouncedSlider {
-+                    #[watch]
-+                    set_sensitive: model.can_seek && model.length.is_some(),
-+                },
-+            },
- 
+-
 -                        #[name = "play_pause_button"]
 -                        gtk::Button {
 -                            set_css_classes: &["media-control", "main"],
@@ -1145,6 +1271,20 @@ index 111f79f..7f96c28 100644
 -                            gtk::Image {
 -                                #[watch]
 -                                set_icon_name: Some(model.play_pause_icon()),
+-                            },
+-                        },
+-
+-                        #[name = "next_button"]
+-                        gtk::Button {
+-                            add_css_class: "media-control",
+-                            set_valign: gtk::Align::Center,
+-                            set_cursor_from_name: Some("pointer"),
+-                            #[watch]
+-                            set_sensitive: model.can_go_next,
+-                            connect_clicked => PlayerViewInput::NextClicked,
+-
+-                            gtk::Image {
+-                                set_icon_name: Some("ld-skip-forward-symbolic"),
 -                            },
 -                        },
 +            gtk::CenterBox {
@@ -1190,25 +1330,6 @@ index 111f79f..7f96c28 100644
 +                    },
 +                },
  
--                        #[name = "next_button"]
--                        gtk::Button {
--                            add_css_class: "media-control",
--                            set_valign: gtk::Align::Center,
--                            set_cursor_from_name: Some("pointer"),
--                            #[watch]
--                            set_sensitive: model.can_go_next,
--                            connect_clicked => PlayerViewInput::NextClicked,
--
--                            gtk::Image {
--                                set_icon_name: Some("ld-skip-forward-symbolic"),
--                            },
--                        },
-+                gtk::Button {
-+                    set_css_classes: &["media-control", "main"],
-+                    set_valign: gtk::Align::Center,
-+                    set_cursor_from_name: Some("pointer"),
-+                    connect_clicked => PlayerViewInput::PlayPauseClicked,
- 
 -                        #[name = "loop_button"]
 -                        gtk::Button {
 -                            set_css_classes: &["media-control", "secondary"],
@@ -1219,16 +1340,18 @@ index 111f79f..7f96c28 100644
 -                            #[watch]
 -                            set_sensitive: model.can_loop,
 -                            connect_clicked => PlayerViewInput::LoopClicked,
--
++                gtk::Button {
++                    set_css_classes: &["media-control", "main"],
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    connect_clicked => PlayerViewInput::PlayPauseClicked,
+ 
 -                            gtk::Image {
 -                                #[watch]
 -                                set_icon_name: Some(model.loop_icon()),
 -                            },
 -                        },
-+                    gtk::Image {
-+                        #[watch]
-+                        set_icon_name: Some(model.play_pause_icon()),
-                     },
+-                    },
 -                }
 -            } else {
 -                #[template]
@@ -1236,6 +1359,13 @@ index 111f79f..7f96c28 100644
 -                    #[template_child]
 -                    icon {
 -                        set_icon_name: Some("ld-play-symbolic"),
++                    gtk::Image {
++                        #[watch]
++                        set_icon_name: Some(model.play_pause_icon()),
+                     },
+-                    #[template_child]
+-                    title {
+-                        set_label: &t!("dropdown-media-no-player-title"),
 +                },
 +
 +                gtk::Button {
@@ -1250,8 +1380,8 @@ index 111f79f..7f96c28 100644
 +                        set_icon_name: Some("ld-skip-forward-symbolic"),
                      },
 -                    #[template_child]
--                    title {
--                        set_label: &t!("dropdown-media-no-player-title"),
+-                    description {
+-                        set_label: &t!("dropdown-media-no-player-description"),
 +                },
 +
 +                gtk::Button {
@@ -1268,10 +1398,6 @@ index 111f79f..7f96c28 100644
 +                        #[watch]
 +                        set_icon_name: Some(model.loop_icon()),
                      },
--                    #[template_child]
--                    description {
--                        set_label: &t!("dropdown-media-no-player-description"),
--                    },
 -                }
 +                },
 +                },
@@ -1289,7 +1415,7 @@ index 111f79f..7f96c28 100644
              },
          }
      }
-@@ -327,8 +293,6 @@ impl Component for PlayerView {
+@@ -327,8 +298,6 @@ impl Component for PlayerView {
          _root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1298,7 +1424,7 @@ index 111f79f..7f96c28 100644
          let art_css_provider = CssProvider::new();
          #[allow(clippy::expect_used)]
          let display = Display::default().expect("display required for media dropdown");
-@@ -348,15 +312,15 @@ impl Component for PlayerView {
+@@ -348,15 +317,15 @@ impl Component for PlayerView {
              }),
          );
  
@@ -1317,7 +1443,7 @@ index 111f79f..7f96c28 100644
              title: String::new(),
              artist: String::new(),
              album: String::new(),
-@@ -379,6 +343,9 @@ impl Component for PlayerView {
+@@ -379,6 +348,9 @@ impl Component for PlayerView {
              source_icon: String::from("ld-music-symbolic"),
          };
  
@@ -1327,7 +1453,7 @@ index 111f79f..7f96c28 100644
          let seek_slider = &model.seek_slider;
          let widgets = view_output!();
          ComponentParts { model, widgets }
-@@ -386,20 +353,20 @@ impl Component for PlayerView {
+@@ -386,20 +358,24 @@ impl Component for PlayerView {
  
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
@@ -1346,9 +1472,13 @@ index 111f79f..7f96c28 100644
 -                    |player| async move { player.play_pause().await },
 -                    "play/pause failed",
 -                );
-+                // The button already knows which way it is going, so say so
-+                // rather than asking the player to work it out.
++                // The direction comes from the player rather than from the
++                // card: the card is only told about a change while the panel
++                // is open, so a press right after it opens would otherwise
++                // send whichever command the player is already obeying.
++                self.playback_state = self.player.playback_state.get();
 +                let play = self.playback_state != PlaybackState::Playing;
++
 +                let mut targets = Vec::with_capacity(1 + self.duplicates.len());
 +                targets.push(Arc::clone(&self.player));
 +                targets.extend(self.duplicates.iter().map(Arc::clone));
@@ -1360,7 +1490,7 @@ index 111f79f..7f96c28 100644
              }
  
              PlayerViewInput::NextClicked => {
-@@ -451,39 +418,19 @@ impl Component for PlayerView {
+@@ -451,39 +427,19 @@ impl Component for PlayerView {
      fn update_cmd(
          &mut self,
          msg: PlayerViewCmd,
@@ -1433,10 +1563,10 @@ index 8f60a8d..160ae73 100644
      player: &Arc<Player>,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
 new file mode 100644
-index 0000000..b1b5e7e
+index 0000000..6113aa3
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,116 @@
 +//! Play and pause commands that name what they want.
 +//!
 +//! `PlayPause` leaves the decision to the player. A bridge that republishes a
@@ -1446,15 +1576,21 @@ index 0000000..b1b5e7e
 +//! it also makes the command idempotent, which is what lets a card send it to
 +//! every player it stands for.
 +
-+use std::sync::Arc;
++use std::{sync::Arc, time::Duration};
 +
-+use tokio::sync::OnceCell;
++use tokio::{sync::OnceCell, time::sleep};
 +use tracing::warn;
-+use wayle_media::core::player::Player;
++use wayle_media::{core::player::Player, types::PlaybackState};
 +use zbus::Connection;
 +
 +const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 +const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
++
++/// How long a player is given to reach the state it was asked for. Long
++/// enough that a browser tab waking up is not mistaken for one that ignored
++/// the command.
++const SETTLE_TIMEOUT: Duration = Duration::from_millis(1200);
++const SETTLE_POLL: Duration = Duration::from_millis(50);
 +
 +static SESSION: OnceCell<Connection> = OnceCell::const_new();
 +
@@ -1465,18 +1601,64 @@ index 0000000..b1b5e7e
 +/// both and let whichever one is listening act.
 +pub(super) async fn set_playing(players: Vec<Arc<Player>>, play: bool) {
 +    let method = if play { "Play" } else { "Pause" };
++    let mut players = players.into_iter();
++    let Some(card_player) = players.next() else {
++        return;
++    };
 +
 +    for player in players {
-+        if let Err(error) = send(&player, method).await {
-+            warn!(
-+                player = %player.id,
-+                %error,
-+                "{method} failed, asking the player to toggle instead"
-+            );
-+            if let Err(error) = player.play_pause().await {
-+                warn!(player = %player.id, %error, "play/pause failed");
-+            }
++        request(&player, method).await;
++    }
++    request(&card_player, method).await;
++
++    // MPRIS asks a player that cannot honour a command to ignore it rather
++    // than report an error, and some publishers answer `Play` and `Pause`
++    // that way while still acting on `PlayPause`. Only the card's own player
++    // is toggled, and only once it has had time to settle, so a player that
++    // was merely slow is not sent back where it came from.
++    if settles(&card_player, play).await {
++        return;
++    }
++
++    warn!(
++        player = %card_player.id,
++        "{method} left the player where it was, toggling instead"
++    );
++    if let Err(error) = card_player.play_pause().await {
++        warn!(player = %card_player.id, %error, "play/pause failed");
++    }
++}
++
++async fn request(player: &Player, method: &str) {
++    let Err(error) = send(player, method).await else {
++        return;
++    };
++
++    warn!(
++        player = %player.id,
++        %error,
++        "{method} failed, asking the player to toggle instead"
++    );
++    if let Err(error) = player.play_pause().await {
++        warn!(player = %player.id, %error, "play/pause failed");
++    }
++}
++
++/// Waits for a player to reach the requested state, up to [`SETTLE_TIMEOUT`].
++///
++/// A player asked to pause has obeyed whether it reports itself paused or
++/// stopped; only playing means the press was ignored.
++async fn settles(player: &Player, play: bool) -> bool {
++    let mut waited = Duration::ZERO;
++    loop {
++        if (player.playback_state.get() == PlaybackState::Playing) == play {
++            return true;
 +        }
++        if waited >= SETTLE_TIMEOUT {
++            return false;
++        }
++        sleep(SETTLE_POLL).await;
++        waited += SETTLE_POLL;
 +    }
 +}
 +
@@ -1643,10 +1825,10 @@ index 73b7bde..4759abd 100644
 +    }
 +}
 diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-index c623146..abe6411 100644
+index c623146..c325159 100644
 --- a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
 +++ b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-@@ -1,66 +1,75 @@
+@@ -1,80 +1,100 @@
 -.media-header {
 -    padding: calc(var(--space-sm) * 1.1) var(--space-md);
 -    border-bottom: 1px solid var(--border-default);
@@ -1654,23 +1836,26 @@ index c623146..abe6411 100644
 -    border-top-left-radius: var(--rounding-container);
 -    border-top-right-radius: var(--rounding-container);
 -    background: var(--bg-surface);
-+.media-player-scroll {
-+    min-height: 0;
-+}
- 
+-
 -    .media-header-title {
 -        font-size: var(--text-lg);
 -        font-weight: var(--weight-bold);
 -        color: var(--fg-default);
 -    }
++.media-player-scroll {
++    min-height: 0;
++}
++
++// The gap between cards is set on the box itself, so that the height of four
++// cards and three gaps is a number the panel can be sized from.
 +.media-player-list {
-+    padding: var(--space-xs);
-+    border-spacing: var(--space-xs);
++    padding: 0;
++    border-spacing: 0;
  }
  
 -button.media-source-button {
 +.media-player-card {
-+    padding: var(--space-xs) var(--space-sm);
++    padding: var(--space-sm) var(--space-md);
      border-radius: var(--rounding-element);
 -    transition: color var(--duration-fast);
 -    color: var(--fg-muted);
@@ -1683,6 +1868,7 @@ index c623146..abe6411 100644
 -    }
 +.media-player-source {
 +    border-spacing: var(--space-xs);
++    margin-bottom: var(--space-xs);
  
      image.media-source-icon {
          -gtk-icon-size: var(--icon-md);
@@ -1697,9 +1883,28 @@ index c623146..abe6411 100644
      }
  
 -    image.media-source-chevron {
--        -gtk-icon-size: var(--icon-sm);
++    // Separates the artist from the source it is playing through, so the two
++    // do not read as one run of text when both are short.
++    image.media-artist-icon {
+         -gtk-icon-size: var(--icon-sm);
++        margin-left: var(--space-sm);
++        color: var(--fg-subtle);
++    }
++
++    .media-artist {
++        font-size: var(--text-sm);
++        font-weight: var(--weight-semibold);
++        color: var(--fg-muted);
++
++        &.placeholder {
++            color: var(--fg-subtle);
++            font-style: italic;
++        }
++    }
++
 +    .media-player-state {
-+        padding: calc(var(--space-xs) / 2) var(--space-xs);
++        margin-left: var(--space-sm);
++        padding: calc(var(--space-xs) / 2) var(--space-sm);
 +        border-radius: var(--radius-full);
 +        font-size: var(--text-xs);
 +        font-weight: var(--weight-semibold);
@@ -1715,31 +1920,36 @@ index c623146..abe6411 100644
  
 -.media-artwork {
 +.media-player-summary {
-+    border-spacing: var(--space-sm);
++    border-spacing: var(--space-md);
 +}
 +
++// Square, and large enough to read as a picture rather than a marker. `cover`
++// fills it from the middle of the art, so covers that are not square are
++// cropped instead of stretched.
 +.media-player-artwork {
-+    min-width: calc(2.75rem * var(--global-scale));
-+    min-height: calc(2.75rem * var(--global-scale));
++    min-width: calc(3.5rem * var(--global-scale));
++    min-height: calc(3.5rem * var(--global-scale));
 +    border-radius: var(--rounding-element);
      background-color: var(--bg-overlay);
      background-size: cover;
      background-position: center;
 -    box-shadow: inset 0 calc(-0.375rem * var(--global-scale)) calc(0.375rem * var(--global-scale)) calc(-0.25rem * var(--global-scale)) var(--bg-elevated);
++    background-repeat: no-repeat;
 +    box-shadow: inset 0 0 0 1px var(--border-default);
  }
  
- .media-artwork-placeholder {
+-.media-artwork-placeholder {
 -    border-radius: var(--rounding-container);
 -    background: var(--bg-hover);
-+    border-radius: var(--rounding-element);
- 
-     image.media-artwork-placeholder-icon {
-         -gtk-icon-size: var(--icon-xl);
+-
+-    image.media-artwork-placeholder-icon {
+-        -gtk-icon-size: var(--icon-xl);
 -        margin: var(--icon-xl);
 -        color: var(--accent);
-+        color: var(--fg-subtle);
-     }
+-    }
++image.media-artwork-placeholder-icon {
++    -gtk-icon-size: var(--icon-xl);
++    color: var(--fg-subtle);
  }
  
 -.media-info {
@@ -1749,37 +1959,38 @@ index c623146..abe6411 100644
  
      .media-title {
 -        font-size: var(--text-lg);
-+        font-size: var(--text-md);
-         font-weight: var(--weight-bold);
-         color: var(--fg-default);
- 
-@@ -71,10 +80,10 @@ button.media-source-button {
-     }
- 
-     .media-artist {
--        font-size: var(--text-md);
-+        margin-top: calc(var(--space-xs) / 2);
-+        font-size: var(--text-sm);
-         font-weight: var(--weight-semibold);
+-        font-weight: var(--weight-bold);
 -        color: var(--fg-default);
+-
+-        &.placeholder {
+-            color: var(--fg-subtle);
+-            font-style: italic;
+-        }
+-    }
+-
+-    .media-artist {
+         font-size: var(--text-md);
+-        font-weight: var(--weight-semibold);
++        font-weight: var(--weight-bold);
+         color: var(--fg-default);
 -        margin-top: var(--space-sm);
-+        color: var(--fg-muted);
  
          &.placeholder {
              color: var(--fg-subtle);
-@@ -83,10 +92,8 @@ button.media-source-button {
+@@ -83,10 +103,9 @@ button.media-source-button {
      }
  
      .media-album {
 -        font-size: var(--text-base);
 -        font-weight: var(--weight-semibold);
++        margin-top: calc(var(--space-xs) / 2);
 +        font-size: var(--text-xs);
          color: var(--fg-subtle);
 -        margin: var(--space-sm) 0;
  
          &.placeholder {
              font-style: italic;
-@@ -95,17 +102,17 @@ button.media-source-button {
+@@ -95,17 +114,17 @@ button.media-source-button {
  }
  
  .media-progress {
@@ -1800,7 +2011,7 @@ index c623146..abe6411 100644
              background: var(--accent);
              border-radius: var(--rounding-element);
          }
-@@ -128,18 +135,19 @@ scale.media-seek-slider {
+@@ -128,18 +147,19 @@ scale.media-seek-slider {
      }
  }
  
@@ -1829,7 +2040,7 @@ index c623146..abe6411 100644
      border-spacing: var(--space-xs);
  }
  
-@@ -150,7 +158,6 @@ button.media-control {
+@@ -150,7 +170,6 @@ button.media-control {
      transition:
          background var(--duration-fast),
          color var(--duration-fast);
@@ -1837,7 +2048,7 @@ index c623146..abe6411 100644
  
      &:hover {
          background: var(--bg-overlay);
-@@ -159,31 +166,28 @@ button.media-control {
+@@ -159,31 +178,28 @@ button.media-control {
  
      image {
          -gtk-icon-size: var(--icon-md);

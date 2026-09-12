@@ -500,11 +500,20 @@ Rofi Wi-Fi/Ethernet manager.
 The centre media button opens a separate native Wayle media panel. It lists
 every MPRIS source that is playing or paused, with artwork, source, track,
 artist, album, an adjustable progress bar, and independent transport,
-shuffle, and repeat controls. Each card is compact: the elapsed and total times
-sit at the ends of the control row instead of on a row of their own, and the
-padding around every element is tighter. No text is smaller than it was. Cards
-are the same size whether or not a player publishes cover art, and, like every
-other card in Wayle, are painted on the palette's elevated layer.
+shuffle, and repeat controls. Each card's first line carries the source and the
+artist together, an icon in front of each saying which is which, so neither
+needs a line of its own; the cover, the title and the album sit below it, and
+the elapsed and total times sit at the ends of the control row rather than on a
+row of their own. The cover is a 3.5rem square that crops rather than stretches
+whatever the player publishes, and a player that publishes nothing gets the same
+square with a disc in it, so cards stay the same size either way. Like every
+other card in Wayle, they are painted on the palette's elevated layer.
+
+The panel is only as tall as the cards it holds, up to four of them; a fifth
+source is reached by scrolling. Its height comes from measuring a card once the
+panel is on screen rather than from a fixed number, so it follows the
+configured scale and stays right if the card's contents change. Two players
+therefore get a short panel instead of a tall one with space under it.
 
 The play/pause button sends `Play` or `Pause`, not `PlayPause`. A toggle leaves
 the decision to the player, and `mprisence`, which republishes a browser tab as
@@ -512,8 +521,34 @@ its own MPRIS player, decides from its own copy of the tab's state; when the two
 disagree the toggle resolves to the state the tab is already in and the press
 does nothing. Naming the command also makes it idempotent, so a card that stands
 for both a bridge and the player it mirrors sends to both and lets whichever one
-is listening act. Middle-clicking the Waybar media button pauses everything at
+is listening act. Right-clicking the Waybar media button pauses everything at
 once, through `playerctl --all-players pause`.
+
+Three things decide the direction of that command, because a card that gets any
+of them wrong is a card whose play/pause button appears to do nothing:
+
+- The direction is read from the player at the moment of the press, not from
+  the copy the card holds. The card is only told about changes while the panel
+  is open, so a press moments after it opens would otherwise send whichever
+  command the player is already obeying.
+- A card is rebuilt when the player behind it is replaced, not only when the
+  list of bus names changes. `mprisence` claims the same name each time it
+  recreates a player for a tab, and a card left holding the replaced one is
+  frozen: its state never changes again, so every press sends the command that
+  player is already in.
+- The players a card stands for are recorded as they are folded into it, rather
+  than worked out afterwards from a resemblance test. The bridge rule pairs a
+  bridge with the browser it mirrors even though the two disagree about their
+  identity, and those are exactly the pairs that most need both ends to hear the
+  command.
+
+If the player is still where it started after all that, the card falls back to
+`PlayPause`. MPRIS asks a player that cannot honour a command to ignore it
+rather than report an error, and some publishers answer `Play` and `Pause` that
+way while still acting on the toggle. The fallback waits long enough that a
+player which was merely slow is not sent back where it came from, and it goes
+only to the card's own player, never to the duplicates that already took the
+idempotent command.
 
 Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
 signal, saved profile and UUID, security, interface, password, IP addresses,
@@ -592,7 +627,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized compact cards that keep the original text sizes and a play/pause button that names the command instead of toggling. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that pair the source with the artist on one line, a panel that is as tall as the cards it holds up to four of them, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
