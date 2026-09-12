@@ -2,27 +2,29 @@ Turn Wayle's native media dropdown into a monitor-local multi-player panel,
 and remove Wi-Fi's duplicate dashboard tile now that it has its own panel.
 
 diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
-index 509b6f6..4679ae0 100644
+index 509b6f6..8460db3 100644
 --- a/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
 +++ b/crates/wayle-shell/locales/en-US/dropdowns/_media.ftl
-@@ -7,3 +7,6 @@ dropdown-media-sources = Media Sources
+@@ -7,3 +7,7 @@ dropdown-media-sources = Media Sources
  dropdown-media-unknown-title = Unknown Title
  dropdown-media-unknown-artist = Unknown Artist
  dropdown-media-unknown-album = Unknown Album
 +dropdown-media-playing = Playing
 +dropdown-media-paused = Paused
 +dropdown-media-stopped = Stopped
++dropdown-media-no-control = This source does not accept playback commands
 diff --git a/crates/wayle-shell/locales/fr/dropdowns/_media.ftl b/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
-index d6b7965..23daadf 100644
+index d6b7965..6712b3e 100644
 --- a/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
 +++ b/crates/wayle-shell/locales/fr/dropdowns/_media.ftl
-@@ -7,3 +7,6 @@ dropdown-media-sources = Sources de médias
+@@ -7,3 +7,7 @@ dropdown-media-sources = Sources de médias
  dropdown-media-unknown-title = Titre inconnu
  dropdown-media-unknown-artist = Artiste inconnu
  dropdown-media-unknown-album = Album inconnu
 +dropdown-media-playing = Lecture
 +dropdown-media-paused = En pause
 +dropdown-media-stopped = Arrêté
++dropdown-media-no-control = Cette source n'accepte pas les commandes de lecture
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
 index dbc5e36..a0c33cf 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
@@ -130,6 +132,787 @@ index 6900372..f29a655 100644
              QuickActionsInput::BluetoothToggled => self.toggle_bluetooth(&sender),
              QuickActionsInput::AirplaneToggled => self.toggle_airplane(&sender),
              QuickActionsInput::DndToggled => self.toggle_dnd(&sender),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/embedded.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/embedded.rs
+new file mode 100644
+index 0000000..430504c
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/embedded.rs
+@@ -0,0 +1,463 @@
++//! Cover art carried inside the track file.
++//!
++//! Three container formats cover a local library: FLAC's PICTURE block, an
++//! ID3v2 APIC frame in an MP3, and MP4's `covr` atom. Each keeps the picture
++//! whole and says how long it is, so pulling one out is a walk over lengths
++//! rather than a decode; that is why this does not pull in a tag-reading
++//! crate, which the pinned Cargo.lock could not take anyway.
++
++use std::{
++    fs::File,
++    io::{Read, Seek, SeekFrom},
++    path::Path,
++};
++
++/// A picture, and enough of its type to name the file it is written to.
++pub(in crate::shell::bar::dropdowns::media) struct Picture {
++    pub bytes: Vec<u8>,
++}
++
++impl Picture {
++    /// Read from the picture itself rather than from the MIME type beside it,
++    /// which taggers get wrong often enough to matter.
++    pub fn extension(&self) -> &'static str {
++        match self.bytes.as_slice() {
++            [0x89, b'P', b'N', b'G', ..] => "png",
++            [b'G', b'I', b'F', ..] => "gif",
++            [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "webp",
++            [b'B', b'M', ..] => "bmp",
++            _ => "jpg",
++        }
++    }
++}
++
++/// Pulls the cover out of a track, if the format is one of the three that
++/// carry one and the file actually has one.
++pub(super) fn extract(path: &Path, max_bytes: usize) -> Option<Picture> {
++    let mut file = File::open(path).ok()?;
++    let mut magic = [0u8; 12];
++    let read = read_upto(&mut file, &mut magic)?;
++    let magic = &magic[..read];
++
++    let bytes = if magic.starts_with(b"fLaC") {
++        flac(&mut file, max_bytes)
++    } else if magic.starts_with(b"ID3") {
++        id3(&mut file, max_bytes)
++    } else if magic.len() >= 8 && &magic[4..8] == b"ftyp" {
++        mp4(&mut file, max_bytes)
++    } else {
++        None
++    }?;
++
++    (!bytes.is_empty()).then_some(Picture { bytes })
++}
++
++// --- FLAC -------------------------------------------------------------------
++
++const FLAC_PICTURE_BLOCK: u8 = 6;
++/// Room for the MIME type and description that sit in front of a picture, so
++/// a block is not read short of the picture the cap would allow.
++const HEADROOM: usize = 8 * 1024;
++
++/// Walks the metadata blocks that follow `fLaC` looking for a PICTURE.
++fn flac(file: &mut File, max_bytes: usize) -> Option<Vec<u8>> {
++    file.seek(SeekFrom::Start(4)).ok()?;
++
++    loop {
++        let mut header = [0u8; 4];
++        file.read_exact(&mut header).ok()?;
++        let last = header[0] & 0x80 != 0;
++        let kind = header[0] & 0x7F;
++        let length = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
++
++        if kind == FLAC_PICTURE_BLOCK {
++            let block = read_exact_vec(file, length.min(max_bytes.saturating_add(HEADROOM)))?;
++            return flac_picture(&block, max_bytes);
++        }
++        if last {
++            return None;
++        }
++        file.seek(SeekFrom::Current(length as i64)).ok()?;
++    }
++}
++
++/// A PICTURE block is a run of big-endian lengths: type, MIME, description,
++/// four image dimensions, then the picture.
++fn flac_picture(block: &[u8], max_bytes: usize) -> Option<Vec<u8>> {
++    let mut cursor = 4usize; // picture type
++    cursor += 4 + be_u32(block, cursor)? as usize; // MIME
++    cursor += 4 + be_u32(block, cursor)? as usize; // description
++    cursor += 16; // width, height, colour depth, indexed colours
++    let length = be_u32(block, cursor)? as usize;
++    cursor += 4;
++    slice(block, cursor, length, max_bytes)
++}
++
++// --- ID3v2 (MP3) ------------------------------------------------------------
++
++/// Walks the frames of an ID3v2 tag looking for an APIC.
++fn id3(file: &mut File, max_bytes: usize) -> Option<Vec<u8>> {
++    file.seek(SeekFrom::Start(0)).ok()?;
++    let mut header = [0u8; 10];
++    file.read_exact(&mut header).ok()?;
++    let major = header[3];
++    let tag_length = syncsafe(&header[6..10])?;
++
++    let tag = read_exact_vec(file, tag_length.min(max_bytes.saturating_add(HEADROOM)))?;
++    let mut cursor = 0usize;
++
++    while cursor + 10 <= tag.len() {
++        let id = tag.get(cursor..cursor + 4)?;
++        if id == [0, 0, 0, 0] {
++            return None; // padding
++        }
++        // Only 2.4 stores frame lengths syncsafe; 2.3 writes them plainly, and
++        // reading a 2.3 length the 2.4 way walks off into the audio.
++        let length = if major >= 4 {
++            syncsafe(tag.get(cursor + 4..cursor + 8)?)?
++        } else {
++            be_u32(&tag, cursor + 4)? as usize
++        };
++        let body = cursor + 10;
++        if id == b"APIC" {
++            let frame = tag.get(body..body.checked_add(length)?)?;
++            return apic(frame, max_bytes);
++        }
++        cursor = body.checked_add(length)?;
++    }
++    None
++}
++
++/// APIC is: encoding, a null-terminated MIME string, a picture type, a
++/// description in that encoding, then the picture.
++fn apic(frame: &[u8], max_bytes: usize) -> Option<Vec<u8>> {
++    let encoding = *frame.first()?;
++    let mime_end = frame.iter().skip(1).position(|byte| *byte == 0)? + 1;
++    let mut cursor = mime_end + 1 + 1; // MIME terminator, picture type
++
++    // UTF-16 descriptions terminate with two zero bytes on an even boundary.
++    cursor += if encoding == 1 || encoding == 2 {
++        let start = cursor;
++        let mut index = start;
++        loop {
++            let pair = frame.get(index..index + 2)?;
++            index += 2;
++            if pair == [0, 0] {
++                break index - start;
++            }
++        }
++    } else {
++        frame.get(cursor..)?.iter().position(|byte| *byte == 0)? + 1
++    };
++
++    slice(frame, cursor, frame.len().checked_sub(cursor)?, max_bytes)
++}
++
++// --- MP4 / M4A --------------------------------------------------------------
++
++/// Descends `moov > udta > meta > ilst > covr > data` to the picture.
++fn mp4(file: &mut File, max_bytes: usize) -> Option<Vec<u8>> {
++    let end = file.seek(SeekFrom::End(0)).ok()?;
++    let ilst = descend(file, 0, end, &[b"moov", b"udta", b"meta", b"ilst"])?;
++    let (covr_start, covr_end) = boxes(file, ilst.0, ilst.1, b"covr")?;
++    let (data_start, data_end) = boxes(file, covr_start, covr_end, b"data")?;
++
++    // A `data` payload opens with a version/flags word and a reserved word.
++    let start = data_start.checked_add(8)?;
++    let length = data_end.checked_sub(start)? as usize;
++    if length > max_bytes {
++        return None;
++    }
++    file.seek(SeekFrom::Start(start)).ok()?;
++    read_exact_vec(file, length)
++}
++
++fn descend(file: &mut File, mut start: u64, mut end: u64, path: &[&[u8; 4]]) -> Option<(u64, u64)> {
++    for (depth, name) in path.iter().enumerate() {
++        let (child_start, child_end) = boxes(file, start, end, name)?;
++        // `meta` is a full box: four bytes of version and flags sit in front
++        // of its children, unlike every other container on this path.
++        start = if *name == b"meta" {
++            child_start.checked_add(4)?
++        } else {
++            child_start
++        };
++        end = child_end;
++        let _ = depth;
++    }
++    Some((start, end))
++}
++
++/// Finds one child box by name, returning where its payload starts and ends.
++fn boxes(file: &mut File, start: u64, end: u64, name: &[u8; 4]) -> Option<(u64, u64)> {
++    let mut cursor = start;
++    while cursor + 8 <= end {
++        file.seek(SeekFrom::Start(cursor)).ok()?;
++        let mut header = [0u8; 8];
++        file.read_exact(&mut header).ok()?;
++        let mut size = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
++        let mut payload = cursor + 8;
++
++        if size == 1 {
++            // A 64-bit size follows the header instead.
++            let mut large = [0u8; 8];
++            file.read_exact(&mut large).ok()?;
++            size = u64::from_be_bytes(large);
++            payload += 8;
++        } else if size == 0 {
++            size = end - cursor; // runs to the end of its parent
++        }
++        if size < 8 {
++            return None;
++        }
++
++        let box_end = cursor.checked_add(size)?.min(end);
++        if &header[4..8] == name {
++            return Some((payload, box_end));
++        }
++        cursor = box_end.max(cursor + 8);
++    }
++    None
++}
++
++// --- shared -----------------------------------------------------------------
++
++fn be_u32(bytes: &[u8], at: usize) -> Option<u32> {
++    let word = bytes.get(at..at + 4)?;
++    Some(u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
++}
++
++/// ID3 stores lengths seven bits to the byte, so a length can never contain a
++/// run of bits that looks like an MPEG frame sync.
++fn syncsafe(bytes: &[u8]) -> Option<usize> {
++    let word = bytes.get(0..4)?;
++    if word.iter().any(|byte| byte & 0x80 != 0) {
++        return None;
++    }
++    Some(word
++        .iter()
++        .fold(0usize, |total, byte| (total << 7) | *byte as usize))
++}
++
++/// A picture larger than the cap is refused rather than cut short: half a
++/// JPEG draws as nothing, so a truncated one is worse than none.
++fn slice(bytes: &[u8], at: usize, length: usize, max_bytes: usize) -> Option<Vec<u8>> {
++    if length > max_bytes {
++        return None;
++    }
++    Some(bytes.get(at..at.checked_add(length)?)?.to_vec())
++}
++
++fn read_upto(file: &mut File, buffer: &mut [u8]) -> Option<usize> {
++    let mut filled = 0;
++    while filled < buffer.len() {
++        match file.read(&mut buffer[filled..]) {
++            Ok(0) => break,
++            Ok(read) => filled += read,
++            Err(_) => return None,
++        }
++    }
++    Some(filled)
++}
++
++fn read_exact_vec(file: &mut File, length: usize) -> Option<Vec<u8>> {
++    let mut buffer = vec![0u8; length];
++    file.read_exact(&mut buffer).ok()?;
++    Some(buffer)
++}
++
++#[cfg(test)]
++mod tests {
++    use std::io::Write;
++
++    use super::*;
++
++    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4];
++    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 9, 9, 9, 9];
++
++    fn write(name: &str, bytes: &[u8]) -> std::path::PathBuf {
++        let path = std::env::temp_dir().join(format!(
++            "wayle-embedded-{}-{:?}-{name}",
++            std::process::id(),
++            std::thread::current().id()
++        ));
++        let mut file = std::fs::File::create(&path).expect("temp file");
++        file.write_all(bytes).expect("write");
++        path
++    }
++
++    fn flac_file(picture: &[u8], mime: &[u8]) -> Vec<u8> {
++        let mut block = Vec::new();
++        block.extend_from_slice(&3u32.to_be_bytes()); // front cover
++        block.extend_from_slice(&(mime.len() as u32).to_be_bytes());
++        block.extend_from_slice(mime);
++        block.extend_from_slice(&4u32.to_be_bytes());
++        block.extend_from_slice(b"desc");
++        block.extend_from_slice(&[0u8; 16]); // dimensions
++        block.extend_from_slice(&(picture.len() as u32).to_be_bytes());
++        block.extend_from_slice(picture);
++
++        let mut out = Vec::from(*b"fLaC");
++        // A STREAMINFO block first, so the walk has to skip one to get there.
++        out.push(0);
++        out.extend_from_slice(&[0, 0, 34]);
++        out.extend_from_slice(&[0u8; 34]);
++        out.push(0x80 | FLAC_PICTURE_BLOCK);
++        let length = block.len() as u32;
++        out.extend_from_slice(&length.to_be_bytes()[1..]);
++        out.extend_from_slice(&block);
++        out
++    }
++
++    fn id3_file(picture: &[u8], major: u8) -> Vec<u8> {
++        let mut frame = vec![0u8]; // latin-1 description
++        frame.extend_from_slice(b"image/png\0");
++        frame.push(3); // front cover
++        frame.extend_from_slice(b"cover\0");
++        frame.extend_from_slice(picture);
++
++        let mut tag = Vec::from(*b"APIC");
++        let length = frame.len() as u32;
++        if major >= 4 {
++            tag.extend_from_slice(&[
++                ((length >> 21) & 0x7F) as u8,
++                ((length >> 14) & 0x7F) as u8,
++                ((length >> 7) & 0x7F) as u8,
++                (length & 0x7F) as u8,
++            ]);
++        } else {
++            tag.extend_from_slice(&length.to_be_bytes());
++        }
++        tag.extend_from_slice(&[0, 0]); // frame flags
++        tag.extend_from_slice(&frame);
++
++        let mut out = Vec::from(*b"ID3");
++        out.extend_from_slice(&[major, 0, 0]);
++        let size = tag.len() as u32;
++        out.extend_from_slice(&[
++            ((size >> 21) & 0x7F) as u8,
++            ((size >> 14) & 0x7F) as u8,
++            ((size >> 7) & 0x7F) as u8,
++            (size & 0x7F) as u8,
++        ]);
++        out.extend_from_slice(&tag);
++        out.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]); // an audio frame
++        out
++    }
++
++    fn mp4_box(name: &[u8; 4], payload: &[u8]) -> Vec<u8> {
++        let mut out = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
++        out.extend_from_slice(name);
++        out.extend_from_slice(payload);
++        out
++    }
++
++    fn mp4_file(picture: &[u8]) -> Vec<u8> {
++        let mut data = vec![0, 0, 0, 13, 0, 0, 0, 0]; // version/flags, reserved
++        data.extend_from_slice(picture);
++        let covr = mp4_box(b"covr", &mp4_box(b"data", &data));
++        let ilst = mp4_box(b"ilst", &covr);
++        let mut meta_payload = vec![0u8; 4]; // meta's version and flags
++        meta_payload.extend_from_slice(&ilst);
++        let meta = mp4_box(b"meta", &meta_payload);
++        let udta = mp4_box(b"udta", &meta);
++        let moov = mp4_box(b"moov", &udta);
++
++        let mut out = mp4_box(b"ftyp", b"M4A \0\0\0\0");
++        out.extend_from_slice(&mp4_box(b"free", &[0u8; 8]));
++        out.extend_from_slice(&moov);
++        out
++    }
++
++    #[test]
++    fn a_flac_picture_block_is_found_past_streaminfo() {
++        let path = write("a.flac", &flac_file(PNG, b"image/png"));
++        let picture = extract(&path, 1 << 20).expect("picture");
++
++        assert_eq!(picture.bytes, PNG);
++        assert_eq!(picture.extension(), "png");
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn an_id3v23_apic_frame_is_found() {
++        let path = write("b.mp3", &id3_file(JPEG, 3));
++        let picture = extract(&path, 1 << 20).expect("picture");
++
++        assert_eq!(picture.bytes, JPEG);
++        assert_eq!(picture.extension(), "jpg");
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn an_id3v24_apic_frame_is_found() {
++        let path = write("c.mp3", &id3_file(PNG, 4));
++        let picture = extract(&path, 1 << 20).expect("picture");
++
++        assert_eq!(picture.bytes, PNG);
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn an_mp4_covr_atom_is_found_past_a_sibling_box() {
++        let path = write("d.m4a", &mp4_file(JPEG));
++        let picture = extract(&path, 1 << 20).expect("picture");
++
++        assert_eq!(picture.bytes, JPEG);
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn a_flac_without_a_picture_yields_nothing() {
++        let mut bare = Vec::from(*b"fLaC");
++        bare.push(0x80); // a last STREAMINFO block and nothing else
++        bare.extend_from_slice(&[0, 0, 34]);
++        bare.extend_from_slice(&[0u8; 34]);
++        let path = write("e.flac", &bare);
++
++        assert!(extract(&path, 1 << 20).is_none());
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn a_file_of_another_format_yields_nothing() {
++        let path = write("f.ogg", b"OggS\0\0\0\0\0\0\0\0");
++
++        assert!(extract(&path, 1 << 20).is_none());
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn a_picture_larger_than_the_cap_is_refused() {
++        let big = vec![0x89u8; 4096];
++        let path = write("g.flac", &flac_file(&big, b"image/png"));
++
++        assert!(extract(&path, 512).is_none());
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn a_picture_within_the_cap_survives_a_long_description() {
++        let path = write("i.flac", &flac_file(PNG, b"image/png"));
++        let picture = extract(&path, PNG.len()).expect("picture");
++
++        assert_eq!(picture.bytes, PNG);
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn the_extension_follows_the_bytes_not_the_declared_mime() {
++        // A tagger that writes PNG bytes under an image/jpeg MIME type.
++        let path = write("h.flac", &flac_file(PNG, b"image/jpeg"));
++        let picture = extract(&path, 1 << 20).expect("picture");
++
++        assert_eq!(picture.extension(), "png");
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn syncsafe_refuses_a_word_with_a_high_bit() {
++        assert_eq!(syncsafe(&[0x00, 0x00, 0x02, 0x01]), Some(257));
++        assert_eq!(syncsafe(&[0x00, 0x00, 0x80, 0x01]), None);
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/mod.rs
+new file mode 100644
+index 0000000..e61a161
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/mod.rs
+@@ -0,0 +1,139 @@
++//! Cover art for players that publish a local file but no picture.
++//!
++//! `wayle-media` resolves `mpris:artUrl`, downloading and caching an HTTP one,
++//! and gives up when a player publishes none. Local players often do: a track
++//! carries its cover inside the file, or beside it in the folder, and a player
++//! that never extracts one has nothing to put in `mpris:artUrl`. The panel can
++//! look in both places itself, because `xesam:url` says where the file is.
++
++mod embedded;
++mod sidecar;
++
++use std::{
++    hash::{DefaultHasher, Hash, Hasher},
++    path::{Path, PathBuf},
++};
++
++use tokio::task;
++use tracing::debug;
++use wayle_media::core::player::Player;
++
++pub(super) use self::embedded::Picture;
++
++const CACHE_DIR: &str = "wayle/media-art";
++/// Cover art larger than this is a file that is not really cover art.
++const MAX_PICTURE_BYTES: usize = 24 * 1024 * 1024;
++
++/// Finds a cover for a player whose own art URL led nowhere.
++///
++/// Returns a path a `background-image` can point at, or `None` when the track
++/// is not a local file or has no picture to find.
++pub(super) async fn find(player: &Player) -> Option<String> {
++    let url = super::transport::track_url(player).await?;
++    let path = local_path(&url)?;
++
++    task::spawn_blocking(move || find_blocking(&path))
++        .await
++        .inspect_err(|error| debug!(%error, "cover art lookup panicked"))
++        .ok()
++        .flatten()
++}
++
++fn find_blocking(path: &Path) -> Option<String> {
++    if let Some(beside) = sidecar::beside(path) {
++        return beside.to_str().map(String::from);
++    }
++
++    let picture = embedded::extract(path, MAX_PICTURE_BYTES)?;
++    cache(path, &picture)
++}
++
++/// Turns a `file://` URL into a path, undoing the percent-encoding a player
++/// applies to spaces and to anything non-ASCII in a filename.
++fn local_path(url: &str) -> Option<PathBuf> {
++    let encoded = url.strip_prefix("file://")?;
++    // A `file://host/path` URL is not something a media player publishes, but
++    // an empty authority (`file:///path`) leaves the path starting at the
++    // third slash, which is what the strip above already left behind.
++    let decoded = percent_decode(encoded)?;
++    let path = PathBuf::from(decoded);
++    path.is_absolute().then_some(path)
++}
++
++fn percent_decode(value: &str) -> Option<String> {
++    let bytes = value.as_bytes();
++    let mut out = Vec::with_capacity(bytes.len());
++    let mut index = 0;
++    while index < bytes.len() {
++        if bytes[index] == b'%' {
++            let hex = value.get(index + 1..index + 3)?;
++            out.push(u8::from_str_radix(hex, 16).ok()?);
++            index += 3;
++        } else {
++            out.push(bytes[index]);
++            index += 1;
++        }
++    }
++    String::from_utf8(out).ok()
++}
++
++/// Writes an extracted picture next to the covers `wayle-media` downloads, so
++/// the two kinds of art age out of the same place.
++fn cache(track: &Path, picture: &Picture) -> Option<String> {
++    let mut hasher = DefaultHasher::new();
++    track.hash(&mut hasher);
++    picture.bytes.len().hash(&mut hasher);
++    let name = format!("embedded-{:016x}.{}", hasher.finish(), picture.extension());
++
++    let destination = cache_dir()?.join(name);
++    if !destination.exists() {
++        std::fs::create_dir_all(destination.parent()?).ok()?;
++        std::fs::write(&destination, &picture.bytes)
++            .inspect_err(|error| debug!(%error, "could not cache extracted cover art"))
++            .ok()?;
++    }
++    destination.to_str().map(String::from)
++}
++
++fn cache_dir() -> Option<PathBuf> {
++    let base = std::env::var_os("XDG_CACHE_HOME")
++        .map(PathBuf::from)
++        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
++    Some(base.join(CACHE_DIR))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn local_path_decodes_percent_escapes() {
++        let path = local_path("file:///music/Bj%C3%B6rk/J%C3%B3ga%20-%20live.flac");
++
++        assert_eq!(path, Some(PathBuf::from("/music/Björk/Jóga - live.flac")));
++    }
++
++    #[test]
++    fn local_path_keeps_a_plain_path() {
++        assert_eq!(
++            local_path("file:///music/track.mp3"),
++            Some(PathBuf::from("/music/track.mp3"))
++        );
++    }
++
++    #[test]
++    fn local_path_rejects_other_schemes() {
++        assert_eq!(local_path("https://example.com/track.mp3"), None);
++        assert_eq!(local_path("spotify:track:abc"), None);
++    }
++
++    #[test]
++    fn local_path_rejects_a_truncated_escape() {
++        assert_eq!(local_path("file:///music/track%2.mp3"), None);
++    }
++
++    #[test]
++    fn percent_decode_leaves_ordinary_text_alone() {
++        assert_eq!(percent_decode("plain/path.flac"), Some(String::from("plain/path.flac")));
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/sidecar.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/sidecar.rs
+new file mode 100644
+index 0000000..69dbb8a
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/artwork/sidecar.rs
+@@ -0,0 +1,161 @@
++//! Cover art stored as its own file next to the track.
++
++use std::path::{Path, PathBuf};
++
++/// Names a ripper or a tagger gives the folder's cover, best first.
++const COVER_STEMS: &[&str] = &["cover", "folder", "front", "album", "albumart", "thumb"];
++const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "avif", "bmp", "gif"];
++
++/// Looks for a cover in the track's own folder.
++///
++/// A file named after the track wins over the folder's cover, because a folder
++/// holding one album still gets a per-track picture when the tracks differ.
++pub(super) fn beside(track: &Path) -> Option<PathBuf> {
++    let folder = track.parent()?;
++    let entries = read_names(folder)?;
++
++    if let Some(stem) = track.file_stem().and_then(|stem| stem.to_str())
++        && let Some(found) = matching(&entries, folder, &[stem])
++    {
++        return Some(found);
++    }
++
++    matching(&entries, folder, COVER_STEMS)
++}
++
++/// The folder read once, so a folder of a thousand tracks is not walked once
++/// per candidate name.
++fn read_names(folder: &Path) -> Option<Vec<String>> {
++    let mut names: Vec<String> = std::fs::read_dir(folder)
++        .ok()?
++        .flatten()
++        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
++        .filter_map(|entry| entry.file_name().to_str().map(String::from))
++        .collect();
++    names.sort();
++    Some(names)
++}
++
++fn matching(entries: &[String], folder: &Path, stems: &[&str]) -> Option<PathBuf> {
++    // Ordered by the caller's preference, not by what the folder happens to
++    // list first, so `cover.jpg` beats `thumb.png` wherever they sit.
++    for stem in stems {
++        for extension in IMAGE_EXTENSIONS {
++            let wanted = format!("{stem}.{extension}");
++            if let Some(found) = entries
++                .iter()
++                .find(|entry| entry.eq_ignore_ascii_case(&wanted))
++            {
++                return Some(folder.join(found));
++            }
++        }
++    }
++    None
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn folder() -> tempdir::TempDir {
++        tempdir::TempDir::new()
++    }
++
++    #[test]
++    fn a_cover_in_the_folder_is_found() {
++        let dir = folder();
++        std::fs::write(dir.path().join("01 - song.flac"), b"x").unwrap();
++        std::fs::write(dir.path().join("cover.jpg"), b"x").unwrap();
++
++        assert_eq!(
++            beside(&dir.path().join("01 - song.flac")),
++            Some(dir.path().join("cover.jpg"))
++        );
++    }
++
++    #[test]
++    fn the_tracks_own_picture_wins_over_the_folder_cover() {
++        let dir = folder();
++        std::fs::write(dir.path().join("song.mp3"), b"x").unwrap();
++        std::fs::write(dir.path().join("song.png"), b"x").unwrap();
++        std::fs::write(dir.path().join("cover.jpg"), b"x").unwrap();
++
++        assert_eq!(
++            beside(&dir.path().join("song.mp3")),
++            Some(dir.path().join("song.png"))
++        );
++    }
++
++    #[test]
++    fn the_name_is_matched_whatever_its_case() {
++        let dir = folder();
++        std::fs::write(dir.path().join("song.flac"), b"x").unwrap();
++        std::fs::write(dir.path().join("Folder.JPG"), b"x").unwrap();
++
++        assert_eq!(
++            beside(&dir.path().join("song.flac")),
++            Some(dir.path().join("Folder.JPG"))
++        );
++    }
++
++    #[test]
++    fn cover_is_preferred_to_the_other_folder_names() {
++        let dir = folder();
++        std::fs::write(dir.path().join("song.flac"), b"x").unwrap();
++        std::fs::write(dir.path().join("thumb.png"), b"x").unwrap();
++        std::fs::write(dir.path().join("cover.png"), b"x").unwrap();
++
++        assert_eq!(
++            beside(&dir.path().join("song.flac")),
++            Some(dir.path().join("cover.png"))
++        );
++    }
++
++    #[test]
++    fn a_folder_without_a_picture_yields_nothing() {
++        let dir = folder();
++        std::fs::write(dir.path().join("song.flac"), b"x").unwrap();
++        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
++
++        assert_eq!(beside(&dir.path().join("song.flac")), None);
++    }
++
++    #[test]
++    fn a_directory_named_like_a_cover_is_not_one() {
++        let dir = folder();
++        std::fs::write(dir.path().join("song.flac"), b"x").unwrap();
++        std::fs::create_dir(dir.path().join("cover.jpg")).unwrap();
++
++        assert_eq!(beside(&dir.path().join("song.flac")), None);
++    }
++
++    /// A directory that removes itself, so the tests leave nothing behind.
++    mod tempdir {
++        use std::path::{Path, PathBuf};
++
++        pub struct TempDir(PathBuf);
++
++        impl TempDir {
++            pub fn new() -> Self {
++                let base = std::env::temp_dir().join(format!(
++                    "wayle-sidecar-{}-{:?}",
++                    std::process::id(),
++                    std::thread::current().id()
++                ));
++                let _ = std::fs::remove_dir_all(&base);
++                std::fs::create_dir_all(&base).expect("temp dir");
++                Self(base)
++            }
++
++            pub fn path(&self) -> &Path {
++                &self.0
++            }
++        }
++
++        impl Drop for TempDir {
++            fn drop(&mut self) {
++                let _ = std::fs::remove_dir_all(&self.0);
++            }
++        }
++    }
++}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs
 index e62b8e2..aa7705e 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/messages.rs
@@ -162,10 +945,12 @@ index e62b8e2..aa7705e 100644
 +    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-index f2e3b13..01ffe16 100644
+index f2e3b13..5c9becd 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-@@ -2,45 +2,44 @@ mod factory;
+@@ -1,46 +1,46 @@
++mod artwork;
+ mod factory;
  mod helpers;
  mod messages;
  pub(crate) mod player_view;
@@ -210,7 +995,7 @@ index f2e3b13..01ffe16 100644
 -        }
 -    }
 -}
-+const BASE_WIDTH: f32 = 470.0;
++const BASE_WIDTH: f32 = 540.0;
 +/// Cards past this many are reached by scrolling. Up to it, the panel is only
 +/// as tall as the cards it holds.
 +const VISIBLE_CARDS: i32 = 4;
@@ -237,7 +1022,7 @@ index f2e3b13..01ffe16 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -57,24 +56,71 @@ impl Component for MediaDropdown {
+@@ -57,24 +57,71 @@ impl Component for MediaDropdown {
              set_has_arrow: false,
              #[watch]
              set_width_request: model.scaled_width,
@@ -288,7 +1073,9 @@ index f2e3b13..01ffe16 100644
 +                        set_max_content_height: model.list_height,
 +                        #[watch]
 +                        set_visible: !model.groups.is_empty(),
-+
+ 
+-                    #[watch]
+-                    set_visible_child_name: model.active_page.name(),
 +                        #[local_ref]
 +                        player_list_widget -> gtk::Box {
 +                            add_css_class: "media-player-list",
@@ -297,9 +1084,7 @@ index f2e3b13..01ffe16 100644
 +                            set_spacing: model.card_gap,
 +                        },
 +                    },
- 
--                    #[watch]
--                    set_visible_child_name: model.active_page.name(),
++
 +                    #[template]
 +                    EmptyState {
 +                        add_css_class: "media-empty",
@@ -321,7 +1106,7 @@ index f2e3b13..01ffe16 100644
                  },
              },
          }
-@@ -85,57 +131,49 @@ impl Component for MediaDropdown {
+@@ -85,57 +132,49 @@ impl Component for MediaDropdown {
          root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -405,7 +1190,7 @@ index f2e3b13..01ffe16 100644
              }
          }
      }
-@@ -143,14 +181,322 @@ impl Component for MediaDropdown {
+@@ -143,14 +182,332 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -546,19 +1331,17 @@ index f2e3b13..01ffe16 100644
 +                || !same_player_snapshot(&players[left_index], &players[right_index])
 +            {
 +                continue;
-+            }
-+            let left_playing = players[left_index].playback_state.get() == PlaybackState::Playing;
-+            let right_playing = players[right_index].playback_state.get() == PlaybackState::Playing;
-+            if left_playing && !right_playing {
+             }
++            if candidate_rank(&players[left_index]) >= candidate_rank(&players[right_index]) {
 +                keep[right_index] = false;
 +                merged_into[right_index] = Some(left_index);
 +            } else {
 +                keep[left_index] = false;
 +                merged_into[left_index] = Some(right_index);
 +                break;
-             }
-         }
-     }
++            }
++        }
++    }
 +
 +    for bridge_index in 0..players.len() {
 +        if !keep[bridge_index] || !is_mprisence(&players[bridge_index]) {
@@ -572,14 +1355,8 @@ index f2e3b13..01ffe16 100644
 +        }) else {
 +            continue;
 +        };
-+        let bridge = &players[bridge_index];
-+        let proxy = &players[proxy_index];
-+        let bridge_playing = bridge.playback_state.get() == PlaybackState::Playing;
-+        let proxy_playing = proxy.playback_state.get() == PlaybackState::Playing;
-+        let (dropped, kept) = if proxy_playing && !bridge_playing {
-+            (bridge_index, proxy_index)
-+        } else if (bridge_playing && !proxy_playing)
-+            || metadata_richness(bridge) >= metadata_richness(proxy)
++        let (dropped, kept) = if candidate_rank(&players[bridge_index])
++            >= candidate_rank(&players[proxy_index])
 +        {
 +            (proxy_index, bridge_index)
 +        } else {
@@ -598,8 +1375,8 @@ index f2e3b13..01ffe16 100644
 +        }
 +        if let Some(card) = surviving_card(index, &merged_into, &keep) {
 +            duplicates[card].push(Arc::clone(&players[index]));
-+        }
-+    }
+         }
+     }
 +
 +    players
 +        .into_iter()
@@ -612,6 +1389,24 @@ index f2e3b13..01ffe16 100644
 +            })
 +        })
 +        .collect()
++}
++
++/// How good a candidate a player is for the card that stands for a piece of
++/// playback; the highest wins. Larger is better in every position.
++///
++/// Control comes first because the panel is a control surface: a publisher
++/// that answers `CanControl=false` is telling every client its buttons will do
++/// nothing, and `playerctl` will not even send to it. Such a publisher is also
++/// usually the one that has lost sight of what it is publishing — the browser
++/// bridge that cannot reach its tab reports no duration and a frozen position
++/// while the tab plays on — so preferring the controllable one also picks the
++/// one whose state is worth believing.
++fn candidate_rank(player: &Player) -> (bool, bool, usize) {
++    (
++        player.can_control.get(),
++        player.playback_state.get() == PlaybackState::Playing,
++        metadata_richness(player),
++    )
 +}
 +
 +/// Follows the chain of merges from a dropped player to the card that ended up
@@ -731,7 +1526,7 @@ index f2e3b13..01ffe16 100644
 +    .count()
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
-index a4a0c29..c28236b 100644
+index a4a0c29..37de151 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 @@ -1,19 +1,19 @@
@@ -757,7 +1552,7 @@ index a4a0c29..c28236b 100644
      PlayPauseClicked,
      NextClicked,
      PreviousClicked,
-@@ -22,14 +22,8 @@ pub(crate) enum PlayerViewInput {
+@@ -22,15 +22,11 @@ pub(crate) enum PlayerViewInput {
      SeekCommitted(f64),
  }
  
@@ -770,19 +1565,32 @@ index a4a0c29..c28236b 100644
  pub(crate) enum PlayerViewCmd {
 -    PlayerChanged(Option<Arc<Player>>),
      MetadataChanged,
++    /// A cover found for a local track the player published none for.
++    LocalArtFound(String),
      PlaybackStateChanged(PlaybackState),
      PositionTick(Duration),
+     CapabilitiesChanged,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
-index d52db43..1ef76a0 100644
+index d52db43..de54470 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
-@@ -1,4 +1,4 @@
+@@ -1,10 +1,13 @@
 -use std::{borrow::Cow, future::Future, sync::Arc, time::Duration};
 +use std::{borrow::Cow, future::Future, sync::Arc};
  
  use relm4::ComponentSender;
  use wayle_media::{core::player::Player, types::*};
-@@ -16,7 +16,14 @@ impl PlayerView {
+ 
+ use super::{PlayerView, PlayerViewCmd};
+-use crate::{i18n::t, shell::bar::dropdowns::media::helpers};
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::media::{artwork, helpers},
++};
+ 
+ impl PlayerView {
+     pub(super) fn set_active(&mut self, active: bool, sender: &ComponentSender<PlayerView>) {
+@@ -16,7 +19,14 @@ impl PlayerView {
          let _ = self.player_watcher.reset();
  
          if active {
@@ -798,7 +1606,7 @@ index d52db43..1ef76a0 100644
          }
      }
  
-@@ -29,9 +36,7 @@ impl PlayerView {
+@@ -29,9 +39,7 @@ impl PlayerView {
          F: FnOnce(Arc<Player>) -> Fut + Send + 'static,
          Fut: Future<Output = Result<(), wayle_media::Error>> + Send,
      {
@@ -809,7 +1617,7 @@ index d52db43..1ef76a0 100644
          sender.oneshot_command(async move {
              if let Err(err) = action(player).await {
                  tracing::warn!(error = %err, "{label}");
-@@ -40,34 +45,8 @@ impl PlayerView {
+@@ -40,52 +48,61 @@ impl PlayerView {
          });
      }
  
@@ -845,19 +1653,60 @@ index d52db43..1ef76a0 100644
          self.title = metadata.title.get();
          self.artist = metadata.artist.get();
          self.album = metadata.album.get();
-@@ -77,15 +56,11 @@ impl PlayerView {
+         self.length = metadata.length.get();
+-        self.cover_art = metadata.cover_art.get();
++        // A player that publishes no cover publishes none every tick, so a
++        // cover found on disk has to survive them.
++        self.cover_art = metadata.cover_art.get().or_else(|| {
++            (self.art_lookup.as_deref() == Some(self.art_key().as_str()))
++                .then(|| self.local_art.clone())
++                .flatten()
++        });
+         self.update_artwork_css();
      }
  
-     pub(super) fn refresh_capabilities(&mut self) {
+-    pub(super) fn refresh_capabilities(&mut self) {
 -        let Some(player) = self.player.as_ref() else {
--            return;
++    /// Identifies the track a cover was looked up for. Title and album are
++    /// what a cover belongs to; the position and the playback state tick
++    /// constantly and must not restart the search.
++    fn art_key(&self) -> String {
++        format!("{}\u{1}{}", self.title, self.album)
++    }
++
++    /// Asks for a cover from the track's own file when the player published
++    /// none. Local players routinely do: the picture is in the file or beside
++    /// it, and a player that never extracts one has nothing to put in
++    /// `mpris:artUrl`.
++    pub(super) fn find_local_art(&mut self, sender: &ComponentSender<PlayerView>) {
++        let track = self.art_key();
++        if self.art_lookup.as_deref() == Some(track.as_str()) {
+             return;
 -        };
--
++        }
+ 
 -        self.can_go_previous = player.can_go_previous.get();
 -        self.can_go_next = player.can_go_next.get();
 -        self.can_seek = player.can_seek.get();
 -        self.can_loop = player.can_loop.get();
 -        self.can_shuffle = player.can_shuffle.get();
++        self.art_lookup = Some(track);
++        self.local_art = None;
++        if self.cover_art.is_some() {
++            return;
++        }
++
++        let player = Arc::clone(&self.player);
++        sender.oneshot_command(async move {
++            match artwork::find(&player).await {
++                Some(path) => PlayerViewCmd::LocalArtFound(path),
++                None => PlayerViewCmd::Noop,
++            }
++        });
++    }
++
++    pub(super) fn refresh_capabilities(&mut self) {
++        self.can_control = self.player.can_control.get();
 +        self.can_go_previous = self.player.can_go_previous.get();
 +        self.can_go_next = self.player.can_go_next.get();
 +        self.can_seek = self.player.can_seek.get();
@@ -866,7 +1715,7 @@ index d52db43..1ef76a0 100644
      }
  
      pub(super) fn display_title(&self) -> Cow<'_, str> {
-@@ -139,6 +114,14 @@ impl PlayerView {
+@@ -139,6 +156,14 @@ impl PlayerView {
          }
      }
  
@@ -881,7 +1730,7 @@ index d52db43..1ef76a0 100644
      pub(super) fn loop_icon(&self) -> &'static str {
          match self.loop_mode {
              LoopMode::Track => "ld-repeat-1-symbolic",
-@@ -146,7 +129,7 @@ impl PlayerView {
+@@ -146,12 +171,13 @@ impl PlayerView {
          }
      }
  
@@ -890,7 +1739,13 @@ index d52db43..1ef76a0 100644
          self.player_identity = player.identity.get();
          self.playback_state = player.playback_state.get();
          self.loop_mode = player.loop_mode.get();
-@@ -165,9 +148,7 @@ impl PlayerView {
+         self.shuffle_mode = player.shuffle_mode.get();
+ 
++        self.can_control = player.can_control.get();
+         self.can_go_previous = player.can_go_previous.get();
+         self.can_go_next = player.can_go_next.get();
+         self.can_seek = player.can_seek.get();
+@@ -165,9 +191,7 @@ impl PlayerView {
      }
  
      fn refresh_position_now(&self, sender: &ComponentSender<PlayerView>) {
@@ -901,7 +1756,7 @@ index d52db43..1ef76a0 100644
  
          sender.oneshot_command(async move {
              match player.position().await {
-@@ -179,26 +160,4 @@ impl PlayerView {
+@@ -179,26 +203,4 @@ impl PlayerView {
              }
          });
      }
@@ -929,23 +1784,22 @@ index d52db43..1ef76a0 100644
 -    }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-index 111f79f..9115760 100644
+index 111f79f..0f8ce0c 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-@@ -18,9 +18,9 @@ use wayle_media::{core::player::Player, types::*};
- use wayle_widgets::{WatcherToken, prelude::*};
- 
+@@ -20,7 +20,10 @@ use wayle_widgets::{WatcherToken, prelude::*};
  pub(crate) use self::messages::*;
--use crate::{
--    i18n::t,
+ use crate::{
+     i18n::t,
 -    shell::{bar::dropdowns::media::helpers, helpers::COMPONENT_CSS_PRIORITY},
-+use crate::shell::{
-+    bar::dropdowns::media::{helpers, transport},
-+    helpers::COMPONENT_CSS_PRIORITY,
++    shell::{
++        bar::dropdowns::media::{helpers, transport},
++        helpers::COMPONENT_CSS_PRIORITY,
++    },
  };
  
  static NEXT_ART_CSS_ID: AtomicU64 = AtomicU64::new(1);
-@@ -31,14 +31,14 @@ fn next_art_css_class() -> String {
+@@ -31,18 +34,24 @@ fn next_art_css_class() -> String {
  }
  
  pub(crate) struct PlayerView {
@@ -962,7 +1816,25 @@ index 111f79f..9115760 100644
      title: String,
      artist: String,
      album: String,
-@@ -65,259 +65,242 @@ pub(crate) struct PlayerView {
+     cover_art: Option<String>,
++    /// The track a local cover was last looked for, so a metadata tick that
++    /// changes nothing does not send the panel back to the disk.
++    art_lookup: Option<String>,
++    /// The cover found for that track. The player keeps publishing none, so
++    /// every metadata tick would otherwise clear what was found.
++    local_art: Option<String>,
+ 
+     playback_state: PlaybackState,
+     position: Duration,
+@@ -51,6 +60,7 @@ pub(crate) struct PlayerView {
+     loop_mode: LoopMode,
+     shuffle_mode: ShuffleMode,
+ 
++    can_control: bool,
+     can_go_previous: bool,
+     can_go_next: bool,
+     can_seek: bool,
+@@ -65,259 +75,255 @@ pub(crate) struct PlayerView {
  impl Component for PlayerView {
      type Init = PlayerViewInit;
      type Input = PlayerViewInput;
@@ -1042,6 +1914,17 @@ index 111f79f..9115760 100644
 +                    set_ellipsize: gtk::pango::EllipsizeMode::End,
 +                    #[watch]
 +                    set_label: &model.player_identity,
++                },
++
++                // A player that publishes CanControl=false is telling every
++                // client that its buttons will do nothing. Saying so beats a
++                // transport row that looks alive and silently refuses.
++                gtk::Image {
++                    add_css_class: "media-readonly-icon",
++                    set_icon_name: Some("ld-lock-symbolic"),
++                    set_tooltip_text: Some(&t!("dropdown-media-no-control")),
++                    #[watch]
++                    set_visible: !model.can_control,
 +                },
 +
 +                gtk::Label {
@@ -1400,16 +2283,18 @@ index 111f79f..9115760 100644
 +                set_end_widget = &gtk::Label {
 +                    add_css_class: "media-time",
 +                    set_valign: gtk::Align::Center,
++                    // A publisher that omits mpris:length has not said the
++                    // track is zero seconds long, so do not claim it did.
 +                    #[watch]
 +                    set_label: &model.length.map_or_else(
-+                        || String::from("0:00"),
++                        || String::from("--:--"),
 +                        helpers::format_duration,
 +                    ),
 +                },
              },
          }
      }
-@@ -327,8 +310,6 @@ impl Component for PlayerView {
+@@ -327,8 +333,6 @@ impl Component for PlayerView {
          _root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1418,7 +2303,7 @@ index 111f79f..9115760 100644
          let art_css_provider = CssProvider::new();
          #[allow(clippy::expect_used)]
          let display = Display::default().expect("display required for media dropdown");
-@@ -348,15 +329,15 @@ impl Component for PlayerView {
+@@ -348,18 +352,20 @@ impl Component for PlayerView {
              }),
          );
  
@@ -1437,7 +2322,20 @@ index 111f79f..9115760 100644
              title: String::new(),
              artist: String::new(),
              album: String::new(),
-@@ -379,6 +360,9 @@ impl Component for PlayerView {
++            art_lookup: None,
++            local_art: None,
+             cover_art: None,
+ 
+             playback_state: PlaybackState::Stopped,
+@@ -369,6 +375,7 @@ impl Component for PlayerView {
+             loop_mode: LoopMode::None,
+             shuffle_mode: ShuffleMode::Off,
+ 
++            can_control: true,
+             can_go_previous: false,
+             can_go_next: false,
+             can_seek: false,
+@@ -379,6 +386,9 @@ impl Component for PlayerView {
              source_icon: String::from("ld-music-symbolic"),
          };
  
@@ -1447,7 +2345,7 @@ index 111f79f..9115760 100644
          let seek_slider = &model.seek_slider;
          let widgets = view_output!();
          ComponentParts { model, widgets }
-@@ -386,20 +370,24 @@ impl Component for PlayerView {
+@@ -386,20 +396,24 @@ impl Component for PlayerView {
  
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
@@ -1484,12 +2382,7 @@ index 111f79f..9115760 100644
              }
  
              PlayerViewInput::NextClicked => {
-@@ -451,39 +439,19 @@ impl Component for PlayerView {
-     fn update_cmd(
-         &mut self,
-         msg: PlayerViewCmd,
--        sender: ComponentSender<Self>,
-+        _sender: ComponentSender<Self>,
+@@ -455,35 +469,23 @@ impl Component for PlayerView {
          _root: &Self::Root,
      ) {
          match msg {
@@ -1497,19 +2390,23 @@ index 111f79f..9115760 100644
 -                self.update_player(player, &sender);
 -            }
 -
--            PlayerViewCmd::MetadataChanged => {
--                self.refresh_metadata();
--            }
+             PlayerViewCmd::MetadataChanged => {
+                 self.refresh_metadata();
++                self.find_local_art(&sender);
+             }
 -
 -            PlayerViewCmd::CapabilitiesChanged => {
 -                self.refresh_capabilities();
--            }
++            PlayerViewCmd::LocalArtFound(path) => {
++                self.local_art = Some(path.clone());
++                self.cover_art = Some(path);
++                self.update_artwork_css();
+             }
 -
 -            PlayerViewCmd::PlaybackStateChanged(state) => {
 -                self.playback_state = state;
 -            }
 -
-+            PlayerViewCmd::MetadataChanged => self.refresh_metadata(),
 +            PlayerViewCmd::CapabilitiesChanged => self.refresh_capabilities(),
 +            PlayerViewCmd::PlaybackStateChanged(state) => self.playback_state = state,
              PlayerViewCmd::PositionTick(position) => {
@@ -1531,7 +2428,7 @@ index 111f79f..9115760 100644
          }
      }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
-index 8f60a8d..160ae73 100644
+index 8f60a8d..4f5caf6 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/watchers.rs
 @@ -3,18 +3,11 @@ use std::sync::Arc;
@@ -1555,12 +2452,28 @@ index 8f60a8d..160ae73 100644
  pub(super) fn spawn_player(
      sender: &ComponentSender<PlayerView>,
      player: &Arc<Player>,
+@@ -44,6 +37,7 @@ pub(super) fn spawn_player(
+         let _ = out.send(PlayerViewCmd::ShuffleModeChanged(shuffle_mode.get()));
+     });
+ 
++    let can_control = player.can_control.clone();
+     let can_go_next = player.can_go_next.clone();
+     let can_go_previous = player.can_go_previous.clone();
+     let can_seek = player.can_seek.clone();
+@@ -54,6 +48,7 @@ pub(super) fn spawn_player(
+         sender,
+         caps_token,
+         [
++            can_control.watch(),
+             can_go_next.watch(),
+             can_go_previous.watch(),
+             can_seek.watch(),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
 new file mode 100644
-index 0000000..6113aa3
+index 0000000..1ac5a4b
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,130 @@
 +//! Play and pause commands that name what they want.
 +//!
 +//! `PlayPause` leaves the decision to the player. A bridge that republishes a
@@ -1570,12 +2483,12 @@ index 0000000..6113aa3
 +//! it also makes the command idempotent, which is what lets a card send it to
 +//! every player it stands for.
 +
-+use std::{sync::Arc, time::Duration};
++use std::{collections::HashMap, sync::Arc, time::Duration};
 +
 +use tokio::{sync::OnceCell, time::sleep};
 +use tracing::warn;
 +use wayle_media::{core::player::Player, types::PlaybackState};
-+use zbus::Connection;
++use zbus::{Connection, zvariant::OwnedValue};
 +
 +const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 +const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -1656,26 +2569,40 @@ index 0000000..6113aa3
 +    }
 +}
 +
++/// The file or address a player says it is playing.
++///
++/// `wayle-media` does not carry `xesam:url`, and it is the only thing that
++/// says where a local track lives, which is where its cover art is when the
++/// player publishes none.
++pub(super) async fn track_url(player: &Player) -> Option<String> {
++    let proxy = proxy(player).await.ok()?;
++    let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.ok()?;
++    String::try_from(metadata.get("xesam:url")?.try_clone().ok()?).ok()
++}
++
 +async fn send(player: &Player, method: &str) -> Result<(), String> {
++    proxy(player)
++        .await?
++        .call_method(method, &())
++        .await
++        .map(|_| ())
++        .map_err(|error| error.to_string())
++}
++
++async fn proxy(player: &Player) -> Result<zbus::Proxy<'static>, String> {
 +    let connection = SESSION
 +        .get_or_try_init(Connection::session)
 +        .await
 +        .map_err(|error| format!("session bus unavailable: {error}"))?;
 +
-+    let proxy = zbus::Proxy::new(
++    zbus::Proxy::new(
 +        connection,
 +        player.id.bus_name().to_owned(),
 +        MPRIS_PATH,
 +        PLAYER_INTERFACE,
 +    )
 +    .await
-+    .map_err(|error| error.to_string())?;
-+
-+    proxy
-+        .call_method(method, &())
-+        .await
-+        .map(|_| ())
-+        .map_err(|error| error.to_string())
++    .map_err(|error| error.to_string())
 +}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/watchers.rs
 index aebaf29..307dffa 100644
@@ -1819,10 +2746,10 @@ index 73b7bde..4759abd 100644
 +    }
 +}
 diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-index c623146..e061e70 100644
+index c623146..8f57d31 100644
 --- a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
 +++ b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-@@ -1,66 +1,81 @@
+@@ -1,68 +1,89 @@
 -.media-header {
 -    padding: calc(var(--space-sm) * 1.1) var(--space-md);
 -    border-bottom: 1px solid var(--border-default);
@@ -1875,11 +2802,16 @@ index c623146..e061e70 100644
 -        margin-left: var(--space-sm);
          font-size: var(--text-sm);
          font-weight: var(--weight-bold);
-+        color: var(--fg-default);
++        color: var(--red);
      }
  
 -    image.media-source-chevron {
--        -gtk-icon-size: var(--icon-sm);
++    image.media-readonly-icon {
+         -gtk-icon-size: var(--icon-sm);
++        margin-left: var(--space-xs);
++        color: var(--red);
+     }
++
 +    .media-player-state {
 +        margin-left: var(--space-sm);
 +        padding: calc(var(--space-xs) / 2) var(--space-sm);
@@ -1893,14 +2825,14 @@ index c623146..e061e70 100644
 +            color: var(--accent);
 +            background: var(--accent-subtle);
 +        }
-     }
++    }
++}
++
++.media-player-summary {
++    border-spacing: var(--space-md);
  }
  
 -.media-artwork {
-+.media-player-summary {
-+    border-spacing: var(--space-md);
-+}
-+
 +// Square, and large enough to read as a picture rather than a marker. `cover`
 +// fills it from the middle of the art, so covers that are not square are
 +// cropped instead of stretched.
@@ -1939,9 +2871,12 @@ index c623146..e061e70 100644
 -        font-size: var(--text-lg);
 +        font-size: var(--text-md);
          font-weight: var(--weight-bold);
-         color: var(--fg-default);
+-        color: var(--fg-default);
++        color: var(--blue);
  
-@@ -70,42 +85,56 @@ button.media-source-button {
+         &.placeholder {
+             color: var(--fg-subtle);
+@@ -70,42 +91,57 @@ button.media-source-button {
          }
      }
  
@@ -1979,7 +2914,7 @@ index c623146..e061e70 100644
 +        .media-artist {
 +            font-size: var(--text-sm);
 +            font-weight: var(--weight-semibold);
-+            color: var(--fg-muted);
++            color: var(--fg-default);
 +
 +            &.placeholder {
 +                color: var(--fg-subtle);
@@ -1989,9 +2924,10 @@ index c623146..e061e70 100644
 +
 +        .media-album {
 +            font-size: var(--text-sm);
-+            color: var(--fg-subtle);
++            color: var(--fg-default);
 +
 +            &.placeholder {
++                color: var(--fg-subtle);
 +                font-style: italic;
 +            }
          }
@@ -2016,7 +2952,7 @@ index c623146..e061e70 100644
              background: var(--accent);
              border-radius: var(--rounding-element);
          }
-@@ -128,18 +157,19 @@ scale.media-seek-slider {
+@@ -128,18 +164,19 @@ scale.media-seek-slider {
      }
  }
  
@@ -2045,7 +2981,7 @@ index c623146..e061e70 100644
      border-spacing: var(--space-xs);
  }
  
-@@ -150,7 +180,6 @@ button.media-control {
+@@ -150,7 +187,6 @@ button.media-control {
      transition:
          background var(--duration-fast),
          color var(--duration-fast);
@@ -2053,7 +2989,7 @@ index c623146..e061e70 100644
  
      &:hover {
          background: var(--bg-overlay);
-@@ -159,31 +188,28 @@ button.media-control {
+@@ -159,31 +195,28 @@ button.media-control {
  
      image {
          -gtk-icon-size: var(--icon-md);

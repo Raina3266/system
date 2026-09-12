@@ -508,7 +508,21 @@ ends of the control row rather than on a row of their own. The cover is a
 3.5rem square that crops rather than stretches whatever the player publishes,
 and a player that publishes nothing gets the same square with a disc in it, so
 cards stay the same size either way. Like every other card in Wayle, they are
-painted on the palette's elevated layer.
+painted on the palette's elevated layer. The source is drawn in the palette's
+red, the title in its blue, and the artist and album in the plain foreground.
+
+`wayle-media` resolves `mpris:artUrl`, downloading and caching an HTTP one, and
+gives up when a player publishes none. Local players often do: the cover is
+inside the file or beside it in the folder, and a player that never extracts
+one has nothing to publish. When a card has no cover, the panel reads
+`xesam:url` off the bus itself and looks in both places — a picture named after
+the track, then `cover`/`folder`/`front`/`album`/`albumart`/`thumb` in any
+common image format, then the picture carried inside the file: FLAC's PICTURE
+block, an ID3v2 APIC frame, or MP4's `covr` atom. Extracted pictures are
+written beside the covers `wayle-media` downloads. The parsers are a walk over
+the lengths each format stores in front of the picture rather than a decode,
+which is what lets them live in the patch: nixpkgs pins Wayle's `cargoHash`, so
+the patch stack cannot add a tag-reading crate.
 
 The panel is only as tall as the cards it holds, up to four of them; a fifth
 source is reached by scrolling. Its height comes from measuring a card once the
@@ -522,8 +536,32 @@ its own MPRIS player, decides from its own copy of the tab's state; when the two
 disagree the toggle resolves to the state the tab is already in and the press
 does nothing. Naming the command also makes it idempotent, so a card that stands
 for both a bridge and the player it mirrors sends to both and lets whichever one
-is listening act. Right-clicking the Waybar media button pauses everything at
-once, through `playerctl --all-players pause`.
+is listening act.
+
+Right-clicking the Waybar media button pauses everything at once. It runs
+`control-centre media-pause-all`, not `playerctl --all-players pause`:
+`playerctl` reads each player's `CanPause` first and skips the ones that answer
+no, so a browser bridge that cannot reach its tab is never even asked and the
+music it publishes keeps playing. MPRIS asks a player that cannot honour a
+command to ignore it rather than fail, and publishers get the property wrong
+often enough, so asking every player and letting those that mean it decline
+stops more music than trusting what they advertise. Players still playing
+afterwards are named on stdout. `control-centre media-players` prints what
+every player on the bus advertises — identity, status, whether it says it can
+be controlled, and whether it publishes a position and a duration at all —
+which is how a source that will not respond is told apart from one the panel
+picked wrongly.
+
+A player that answers `CanControl=false` is saying its buttons will do nothing,
+so the card marks it with a padlock instead of leaving a transport row that
+looks alive and silently refuses, and deduplication prefers a controllable
+player over an uncontrollable one showing the same track. That ordering —
+control first, then playing, then whichever knows most about the track — lives
+in one function, because the publisher that cannot be controlled is usually
+also the one that has lost sight of what it is publishing: it reports no
+duration and a frozen position while the tab plays on. A card whose player
+publishes no `mpris:length` shows `--:--` for the total rather than claiming
+the track is zero seconds long.
 
 Three things decide the direction of that command, because a card that gets any
 of them wrong is a card whose play/pause button appears to do nothing:
@@ -628,7 +666,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
@@ -640,7 +678,8 @@ The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
-`cargo test -p control-centre` covers the remaining Waybar media-title streamer.
+`cargo test -p control-centre` covers the remaining Waybar media-title streamer
+and the MPRIS name filtering behind `media-pause-all`.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
 device/port rules and profile bridge have focused parsing, naming and row-shape
 tests. The Wayle patch stack is checked against v0.7.0 before updates are

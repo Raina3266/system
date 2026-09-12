@@ -107,10 +107,11 @@ let
     "exec-on-event" = false;
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss media ${lib.escapeShellArg monitor}";
-    # Right-click stops everything: `Pause` on every player, rather than a
-    # toggle aimed at whichever one Wayle considers active. Pausing a player
-    # that is already paused does nothing, so the others are left alone.
-    on-click-right = "${pkgs.playerctl}/bin/playerctl --all-players pause";
+    # Right-click stops everything. Not `playerctl --all-players pause`: that
+    # reads each player's `CanPause` first and skips the ones that answer no,
+    # so a browser bridge that cannot reach its tab is never even asked, and
+    # the music it is publishing keeps playing.
+    on-click-right = "${packages.controlCentre}/bin/control-centre media-pause-all";
   };
 in
 {
