@@ -678,6 +678,13 @@ The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
+`scripts/mpris-report.sh` dumps every MPRIS player on the session bus — owner
+process, identity, capabilities, metadata, and Wayle's own view of which card
+maps to which bus name — for working out why one source ignores the panel.
+`--test-control` additionally sends `Pause` and then `PlayPause` to each and
+reports which of them moved, which separates a player that refuses commands
+from one the panel aimed at wrongly. It pauses your music.
+
 `cargo test -p control-centre` covers the remaining Waybar media-title streamer
 and the MPRIS name filtering behind `media-pause-all`.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
