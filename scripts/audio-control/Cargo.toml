@@ -3,7 +3,24 @@ name = "audio-control"
 version.workspace = true
 edition.workspace = true
 
+# Two binaries over one library: the command line stays free of GTK on the
+# path Waybar runs every few seconds, and the panel shares the audio and
+# Bluetooth logic rather than a second copy of it.
+[lib]
+name = "audio_control"
+path = "src/lib.rs"
+
+[[bin]]
+name = "audio-control"
+path = "src/bin/audio-control.rs"
+
+[[bin]]
+name = "audio-panel"
+path = "src/bin/audio-panel.rs"
+
 [dependencies]
+gtk = { package = "gtk4", version = "=0.11.4", features = ["v4_8"] }
+gtk4-layer-shell = "=0.8.0"
 # BlueZ over D-Bus: device listing, scan, pair (with an authorization agent for
 # PIN/passkey prompts), connect, disconnect, and adapter power.
 bluer = { version = "=0.17.4", default-features = false, features = [

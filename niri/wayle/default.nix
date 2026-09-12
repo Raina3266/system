@@ -1,10 +1,11 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # Wayle's native dashboard also owns notification history and the seven-day
-# agenda. Its own bar is visually hidden. The dashboard, Wi-Fi manager, media
-# panel, and Bluetooth/audio panel opened from Waybar use separate layer-shell
-# windows, avoiding GTK popup-grab restrictions.
-{ repoPackages, ... }:
+# agenda. Its own bar is visually hidden. The dashboard and Wi-Fi manager
+# opened from Waybar use separate layer-shell windows, avoiding GTK popup-grab
+# restrictions; the media and audio panels are this repository's own programs
+# and no longer involve Wayle at all.
+{ ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
   # unrelated tracked file changes. Copy each patch to its own content-based
@@ -39,8 +40,6 @@ in
             ./dashboard-power-profile.patch
             ./dashboard-wifi-tile.patch
             ./dashboard-notifications.patch
-            ./wayle-audio-panel.patch
-            ./wayle-audio-profile-bridge.patch
             ./dashboard-slim.patch
             ./dashboard-polish.patch
           ];
@@ -81,8 +80,7 @@ in
 
             bar = {
               # `show = false` keeps Wayle's own bar visually hidden. External
-              # dashboard, Wi-Fi, media and audio requests use monitor-local
-              # layer surfaces.
+              # dashboard and Wi-Fi requests use monitor-local layer surfaces.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;
@@ -138,11 +136,10 @@ in
           };
           Service = {
             RestartSec = 3;
-            # The network panel gets its QR encoder, and the audio panel gets
-            # the profile-aware selector shared with the former Rofi UI.
+            # The network panel gets its QR encoder. Audio no longer needs a
+            # helper here: its panel left Wayle for `audio-panel`.
             Environment = [
               "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}"
-              "WAYLE_AUDIO_HELPER=${lib.getExe repoPackages.audioControl}"
             ];
           };
         };

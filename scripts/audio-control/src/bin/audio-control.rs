@@ -1,16 +1,10 @@
+//! The command line: the Rofi menu, the Waybar status line, and the small
+//! machine interface Wayle's device picker calls.
+
 use std::env;
-use std::error::Error;
 use std::io;
 
-mod audio;
-mod bluetooth;
-mod model;
-mod rofi;
-mod waybar;
-mod wayle;
-
-pub type AppError = Box<dyn Error + Send + Sync>;
-pub type AppResult<T> = Result<T, AppError>;
+use audio_control::{AppResult, rofi, waybar, wayle};
 
 #[tokio::main]
 async fn main() {

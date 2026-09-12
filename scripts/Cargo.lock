@@ -157,6 +157,8 @@ version = "0.1.0"
 dependencies = [
  "bluer",
  "futures-util",
+ "gtk4",
+ "gtk4-layer-shell",
  "libpulse-binding",
  "pulsectl-rs",
  "tokio",

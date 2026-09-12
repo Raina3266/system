@@ -586,51 +586,43 @@ replaced by an error.
 
 ### Bluetooth and audio panel
 
-The right-side audio button opens Wayle's Bluetooth and audio panel in its own
-monitor-local layer-shell window. It has the same four tabs as
-[`audio-control`](#audio-control), built from Wayle's own components wherever Wayle
-provides one:
+The right-side audio button opens `audio-panel`, a second binary in the
+[`audio-control`](#audio-control) crate rather than a patch on Wayle. It has the
+same four tabs the Rofi menu has, over the same code:
 
-| Tab | Contents | Native |
-| --- | --- | --- |
-| Pair | Wayle's Bluetooth dropdown: paired and discovered devices, connect, disconnect, forget, the adapter switch, the scan button, and the pairing card for PINs and passkeys | yes |
-| Output | The default output's volume and mute, then every output device and its available ports | ports added |
-| Input | The default input's volume and mute, then every microphone and its available ports | ports added |
-| Play | Wayle's per-application volume list, with a route button at the end of each stream's row | route added |
+| Tab | Contents |
+| --- | --- |
+| Pair | Paired and discovered devices, connect, disconnect, forget, the adapter switch, the scan button, and the pairing card for PINs and passkeys |
+| Output | The default output's volume and mute, then every output device and its available ports |
+| Input | The default input's volume and mute, then every microphone and its available ports |
+| Play | Per-application volume, with a route button at the end of each stream's row |
 
-The audio-specific additions reuse `audio-control`'s profile-aware selection
-backend, so **Speaker** and **Headphones** remain separate destinations even
-when the laptop exposes them through mutually exclusive ALSA profiles. Selecting
-one revalidates the card and port, chooses a compatible profile that preserves
-the current microphone inputs, waits for the new sink, and then makes it the
-default. USB, Bluetooth and virtual devices use the same list. Rows show only
-the distinguishing port or model name; the full PulseAudio description remains
-in the tooltip. Ports reported as unplugged are hidden and unknown availability
-stays selectable. The panel is two thirds of its former width. The route button
-opens the native device list for one playback stream and calls Wayle's
-`move_to_device` instead of changing the system default, so the rest of the
-system keeps playing where it was; the picker stays open with the stream's
-current destination checked, and `Back` returns to Play. A stream that ends while
-its picker is open is not routed.
+One library, two binaries. `audio-control` keeps the command line — the Rofi
+menu, the Waybar status line — and never links GTK, which matters because
+Waybar runs it every five seconds; `audio-panel` is the GTK front end over the
+same `audio` and `bluetooth` modules. Both therefore make the same decisions,
+which is the point: **Speaker** and **Headphones** stay separate destinations
+even when the laptop exposes them through mutually exclusive ALSA profiles,
+because both go through the same `selections` and `set_default`. Selecting one
+revalidates the card and port, chooses a compatible profile that preserves the
+current microphone inputs, waits for the new sink, and then makes it the
+default. Rows show only the distinguishing port or model name; the full
+PulseAudio description stays in the tooltip.
 
-The panel is opened over D-Bus, like the dashboard and the media and Wi-Fi
-panels:
+The route button moves one playback stream rather than changing the system
+default, so the rest of the desktop keeps playing where it was; the picker
+shows the stream's current destination ticked, and `Back` returns to Play.
 
-```sh
-busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 \
-  DropdownToggle ss audio eDP-1
-```
+PulseAudio and BlueZ are read on a worker thread, so a device that has gone
+away mid-scan stalls that thread rather than the panel. Nothing is read at all
+while the panel is hidden. Running the binary again toggles the panel that is
+already up, so the button closes what it opened; a Bluetooth failure is shown
+on the Pair tab only, since a machine with no adapter should not put an error
+over its volume sliders.
 
-Switching to Pair, and opening the panel while Pair is the current tab, starts a
-timed Bluetooth discovery. As in `audio-control`, that leaves a powered-off adapter
-off: use the tab's switch, or right-click the Waybar button.
-
-`wayle-audio` itself has no card/profile API, so a small machine interface calls
-the already-tested `audio-control` logic rather than duplicating that hardware
-policy inside the Wayle patch. It also reconciles Wayle's reactive default after
-a profile change: PulseAudio can announce the new default before Wayle has added
-the replacement sink, which otherwise leaves the removed Speaker object shown
-in the header after Headphones became live.
+Right-clicking the button still toggles the adapter through
+`audio-control bluetooth-power toggle`, which leaves a powered-off adapter off
+unless you ask for it.
 
 ### What is still patched
 
@@ -645,8 +637,6 @@ The local patches are:
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
 | `dashboard-wifi-tile.patch` | Removes the duplicate dashboard Wi-Fi tile and hosts a dropdown in a monitor-local layer-shell window centred on the bar button that asked for it. This is what is left of the media patch after the panel became `media-panel`. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
-| `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
-| `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
 | `dashboard-slim.patch` | Removes the dashboard cards the audio, Wi-Fi and dashboard buttons already cover, and gives the space to the agenda and notification lists. |
 | `dashboard-polish.patch` | Drops the header's settings button, moves Do Not Disturb beside the notification card's title, expands a notification's title along with its body, puts an event's time above the event, and colours every card title red. |
 | `mprisence-position.patch` | Unrelated to Wayle: it stops mprisence clamping a browser's position backwards after a replay or a backward seek. That is a fix to what it publishes, so no reader can correct it. |
@@ -664,7 +654,9 @@ maps to which bus name — for working out why one source ignores the panel.
 reports which of them moved, which separates a player that refuses commands
 from one the panel aimed at wrongly. It pauses your music.
 
-`cargo test -p control-centre` covers the remaining Waybar media-title streamer.
+`cargo test -p control-centre` covers the remaining Waybar media-title
+streamer, and `cargo test -p audio-control` the device, port and profile rules
+the audio panel and the Rofi menu share.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
 device/port rules and profile bridge have focused parsing, naming and row-shape
 tests. The Wayle patch stack is checked against v0.7.0 before updates are

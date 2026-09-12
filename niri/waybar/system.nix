@@ -92,8 +92,10 @@ let
     return-type = "json";
     tooltip = true;
     escape = false;
-    on-click =
-      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio ${lib.escapeShellArg monitor}";
+    # `audio-panel` is a second binary in the audio-control crate, so the panel
+    # and the Rofi menu make the same decisions about mutually exclusive ALSA
+    # card profiles. Running it again toggles the one already up.
+    on-click = "${packages.audioControl}/bin/audio-panel ${lib.escapeShellArg monitor}";
     on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
 

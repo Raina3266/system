@@ -1,0 +1,263 @@
+/* The audio panel's own styling. The palette is the one in
+   niri/wayle/default.nix, so the panel reads as part of the same desktop as
+   Wayle's dropdowns beside it.
+
+   Keep every rule non-empty. GTK stops parsing at the first error and an empty
+   declaration block is one, which costs every rule after it — including the
+   transparent window background, leaving an opaque surface over the output. */
+
+window.audio-window {
+    background: transparent;
+}
+
+.audio-panel {
+    background: #210e15;
+    border: 1px solid rgba(214, 86, 199, 0.30);
+    border-radius: 13px;
+    font-family: "Noto Sans", sans-serif;
+    color: #f8f8f2;
+}
+
+.audio-glyph,
+button.audio-glyph label {
+    font-family: "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
+}
+
+/* The four tabs, across the top. */
+.audio-tabs {
+    padding: 7px 7px 0 7px;
+    border-bottom: 1px solid rgba(214, 86, 199, 0.20);
+}
+
+button.audio-tab {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 7px 4px;
+    margin: 0 2px;
+    border-radius: 8px 8px 0 0;
+    font-size: 13px;
+    font-weight: bold;
+    color: #6b6670;
+    font-family: "Symbols Nerd Font Mono", "Noto Sans", sans-serif;
+}
+
+button.audio-tab:hover {
+    color: #f8f8f2;
+    background: rgba(248, 248, 242, 0.06);
+}
+
+button.audio-tab.active {
+    color: #d656c7;
+    background: rgba(214, 86, 199, 0.14);
+}
+
+.audio-content {
+    padding: 11px;
+}
+
+.audio-scroll {
+    min-height: 0;
+}
+
+.audio-section {
+    font-size: 11px;
+    font-weight: bold;
+    color: #d52c35;
+    margin: 11px 2px 5px 2px;
+}
+
+.audio-card {
+    background: #0e0616;
+    border: 1px solid rgba(214, 86, 199, 0.22);
+    border-radius: 9px;
+    padding: 9px 11px;
+    margin-bottom: 7px;
+}
+
+.audio-card-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #5df4fe;
+}
+
+.audio-volume-row {
+    margin-top: 7px;
+}
+
+.audio-volume-reading {
+    font-size: 11px;
+    font-weight: bold;
+    color: #6b6670;
+    min-width: 34px;
+}
+
+/* One selectable device, application destination, or Bluetooth device. */
+button.audio-row,
+.audio-row {
+    background: none;
+    border: 1px solid transparent;
+    box-shadow: none;
+    border-radius: 8px;
+    padding: 7px 9px;
+    margin-bottom: 3px;
+    color: #f8f8f2;
+}
+
+button.audio-row:hover {
+    background: rgba(248, 248, 242, 0.07);
+}
+
+button.audio-row.active,
+.audio-row.active {
+    border-color: rgba(214, 86, 199, 0.45);
+    background: rgba(214, 86, 199, 0.12);
+}
+
+.audio-row-title {
+    font-size: 13px;
+    color: #f8f8f2;
+}
+
+.audio-row-detail {
+    font-size: 11px;
+    color: #6b6670;
+}
+
+.audio-tick {
+    color: #d656c7;
+    font-size: 14px;
+}
+
+button.audio-icon-button {
+    background: none;
+    border: none;
+    box-shadow: none;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border-radius: 9999px;
+    color: #f8f8f2;
+    font-size: 15px;
+}
+
+button.audio-icon-button:hover {
+    background: rgba(248, 248, 242, 0.08);
+}
+
+button.audio-icon-button.muted {
+    color: #d52c35;
+}
+
+button.audio-action,
+button.audio-route,
+button.audio-scan {
+    background: rgba(248, 248, 242, 0.07);
+    border: 1px solid rgba(214, 86, 199, 0.25);
+    box-shadow: none;
+    border-radius: 7px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #f8f8f2;
+}
+
+button.audio-action:hover,
+button.audio-route:hover,
+button.audio-scan:hover {
+    background: rgba(214, 86, 199, 0.20);
+}
+
+button.audio-action:disabled,
+button.audio-scan:disabled {
+    color: #6b6670;
+}
+
+button.audio-action.primary {
+    background: #d656c7;
+    color: #180a10;
+    border-color: #d656c7;
+}
+
+button.audio-action.primary:hover {
+    background: #e173d6;
+}
+
+/* The route button carries a device name, which can be long. */
+button.audio-route label {
+    color: #5df4fe;
+}
+
+.audio-pairing {
+    border-color: rgba(213, 44, 53, 0.55);
+}
+
+entry.audio-entry {
+    background: rgba(248, 248, 242, 0.06);
+    border: 1px solid rgba(214, 86, 199, 0.30);
+    border-radius: 7px;
+    padding: 3px 7px;
+    color: #f8f8f2;
+    font-size: 12px;
+}
+
+.audio-notice {
+    background: rgba(213, 44, 53, 0.16);
+    border: 1px solid rgba(213, 44, 53, 0.45);
+    border-radius: 8px;
+    padding: 7px 9px;
+    margin-bottom: 7px;
+    font-size: 11px;
+    color: #f8f8f2;
+}
+
+.audio-placeholder {
+    padding: 26px 13px;
+    font-size: 12px;
+    color: #6b6670;
+}
+
+scale.audio-slider {
+    padding: 0;
+    min-height: 14px;
+}
+
+scale.audio-slider trough {
+    min-height: 4px;
+    background: rgba(248, 248, 242, 0.10);
+    border-radius: 4px;
+}
+
+scale.audio-slider highlight {
+    min-height: 4px;
+    background: #d656c7;
+    border-radius: 4px;
+}
+
+scale.audio-slider slider {
+    min-width: 12px;
+    min-height: 12px;
+    margin: -5px;
+    border-radius: 9999px;
+    background: #f8f8f2;
+}
+
+scale.audio-slider:disabled highlight {
+    background: #6b6670;
+}
+
+switch.audio-switch {
+    background: rgba(248, 248, 242, 0.12);
+    border-radius: 9999px;
+}
+
+switch.audio-switch:checked {
+    background: #d656c7;
+}
+
+switch.audio-switch > slider {
+    background: #f8f8f2;
+    border-radius: 9999px;
+    min-width: 16px;
+    min-height: 16px;
+}
