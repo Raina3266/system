@@ -945,10 +945,10 @@ index e62b8e2..aa7705e 100644
 +    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-index f2e3b13..5c9becd 100644
+index f2e3b13..44cffdc 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-@@ -1,46 +1,46 @@
+@@ -1,46 +1,50 @@
 +mod artwork;
  mod factory;
  mod helpers;
@@ -958,7 +958,7 @@ index f2e3b13..5c9becd 100644
 +pub(crate) mod transport;
  mod watchers;
  
-+use std::{collections::HashSet, sync::Arc};
++use std::{collections::HashSet, sync::Arc, time::Duration};
 +
  use gtk::prelude::*;
  use relm4::{gtk, prelude::*};
@@ -979,14 +979,14 @@ index f2e3b13..5c9becd 100644
 -
 -const BASE_WIDTH: f32 = 380.0;
 -const BASE_HEIGHT: f32 = 410.0;
--
++use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+ 
 -#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 -enum MediaPage {
 -    Main,
 -    Sources,
 -}
-+use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
- 
+-
 -impl MediaPage {
 -    fn name(self) -> &'static str {
 -        match self {
@@ -1003,6 +1003,10 @@ index f2e3b13..5c9becd 100644
 +/// Only used until a real card can be measured, which needs the list to be in
 +/// a window so GTK has the styling that decides a card's height.
 +const BASE_CARD_HEIGHT: f32 = 127.0;
++/// Two players further apart than this are playing separately, not mirroring
++/// one another. Wide enough that polling them at different moments does not
++/// look like disagreement.
++const POSITION_TOLERANCE: std::time::Duration = std::time::Duration::from_secs(5);
  
  pub(crate) struct MediaDropdown {
 +    media: Arc<MediaService>,
@@ -1022,7 +1026,7 @@ index f2e3b13..5c9becd 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -57,24 +57,71 @@ impl Component for MediaDropdown {
+@@ -57,24 +61,71 @@ impl Component for MediaDropdown {
              set_has_arrow: false,
              #[watch]
              set_width_request: model.scaled_width,
@@ -1073,9 +1077,7 @@ index f2e3b13..5c9becd 100644
 +                        set_max_content_height: model.list_height,
 +                        #[watch]
 +                        set_visible: !model.groups.is_empty(),
- 
--                    #[watch]
--                    set_visible_child_name: model.active_page.name(),
++
 +                        #[local_ref]
 +                        player_list_widget -> gtk::Box {
 +                            add_css_class: "media-player-list",
@@ -1084,7 +1086,9 @@ index f2e3b13..5c9becd 100644
 +                            set_spacing: model.card_gap,
 +                        },
 +                    },
-+
+ 
+-                    #[watch]
+-                    set_visible_child_name: model.active_page.name(),
 +                    #[template]
 +                    EmptyState {
 +                        add_css_class: "media-empty",
@@ -1106,7 +1110,7 @@ index f2e3b13..5c9becd 100644
                  },
              },
          }
-@@ -85,57 +132,49 @@ impl Component for MediaDropdown {
+@@ -85,57 +136,49 @@ impl Component for MediaDropdown {
          root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1190,7 +1194,7 @@ index f2e3b13..5c9becd 100644
              }
          }
      }
-@@ -143,14 +182,332 @@ impl Component for MediaDropdown {
+@@ -143,14 +186,463 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -1211,10 +1215,10 @@ index f2e3b13..5c9becd 100644
 +            }
 +            MediaDropdownCmd::PlayersChanged => {
 +                self.sync_player_views(self.media.player_list.get());
-+            }
-+        }
-+    }
-+}
+             }
+         }
+     }
+ }
 +
 +impl MediaDropdown {
 +    fn update_player_list(&mut self, players: Vec<Arc<Player>>, sender: &ComponentSender<Self>) {
@@ -1317,9 +1321,8 @@ index f2e3b13..5c9becd 100644
 +        .collect();
 +
 +    // Which card each dropped player was folded into, recorded as it is
-+    // dropped. Re-deriving it afterwards from a resemblance test loses the
-+    // pairs the bridge rule matched, which are exactly the ones that disagree
-+    // about their own state and so most need both ends to hear a command.
++    // dropped, so a command reaches every player the card stands for.
++    let tracks: Vec<TrackSnapshot> = players.iter().map(|p| TrackSnapshot::of(p)).collect();
 +    let mut merged_into: Vec<Option<usize>> = vec![None; players.len()];
 +    let mut keep = vec![true; players.len()];
 +    for left_index in 0..players.len() {
@@ -1328,11 +1331,13 @@ index f2e3b13..5c9becd 100644
 +        }
 +        for right_index in (left_index + 1)..players.len() {
 +            if !keep[right_index]
-+                || !same_player_snapshot(&players[left_index], &players[right_index])
++                || !same_playback(&tracks[left_index], &tracks[right_index])
 +            {
 +                continue;
-             }
-+            if candidate_rank(&players[left_index]) >= candidate_rank(&players[right_index]) {
++            }
++            if candidate_rank(&players[left_index], &tracks[left_index])
++                >= candidate_rank(&players[right_index], &tracks[right_index])
++            {
 +                keep[right_index] = false;
 +                merged_into[right_index] = Some(left_index);
 +            } else {
@@ -1341,29 +1346,6 @@ index f2e3b13..5c9becd 100644
 +                break;
 +            }
 +        }
-+    }
-+
-+    for bridge_index in 0..players.len() {
-+        if !keep[bridge_index] || !is_mprisence(&players[bridge_index]) {
-+            continue;
-+        }
-+        let Some(proxy_index) = (0..players.len()).find(|&index| {
-+            keep[index]
-+                && index != bridge_index
-+                && is_browser_or_proxy(&players[index])
-+                && matching_metadata(&players[bridge_index], &players[index])
-+        }) else {
-+            continue;
-+        };
-+        let (dropped, kept) = if candidate_rank(&players[bridge_index])
-+            >= candidate_rank(&players[proxy_index])
-+        {
-+            (proxy_index, bridge_index)
-+        } else {
-+            (bridge_index, proxy_index)
-+        };
-+        keep[dropped] = false;
-+        merged_into[dropped] = Some(kept);
 +    }
 +
 +    // Everything a card replaced is still a way to reach the same playback,
@@ -1375,8 +1357,8 @@ index f2e3b13..5c9becd 100644
 +        }
 +        if let Some(card) = surviving_card(index, &merged_into, &keep) {
 +            duplicates[card].push(Arc::clone(&players[index]));
-         }
-     }
++        }
++    }
 +
 +    players
 +        .into_iter()
@@ -1401,12 +1383,24 @@ index f2e3b13..5c9becd 100644
 +/// bridge that cannot reach its tab reports no duration and a frozen position
 +/// while the tab plays on — so preferring the controllable one also picks the
 +/// one whose state is worth believing.
-+fn candidate_rank(player: &Player) -> (bool, bool, usize) {
++fn candidate_rank(player: &Player, track: &TrackSnapshot) -> (bool, bool, bool, usize) {
 +    (
 +        player.can_control.get(),
 +        player.playback_state.get() == PlaybackState::Playing,
-+        metadata_richness(player),
++        !is_mirror(player),
++        track.richness(),
 +    )
++}
++
++/// A player that republishes someone else's playback rather than owning it.
++///
++/// Only ever a tie-break: a browser tab's bridge is the only publisher there
++/// is, and still wins by being the only candidate. It matters when a mirror
++/// stands beside the player it mirrors, where showing the mirror puts an extra
++/// hop between the button and the audio.
++fn is_mirror(player: &Player) -> bool {
++    let bus_name = player.id.bus_name().to_ascii_lowercase();
++    bus_name.contains("mprisence") || bus_name.contains("playerctld")
 +}
 +
 +/// Follows the chain of merges from a dropped player to the card that ended up
@@ -1422,38 +1416,97 @@ index f2e3b13..5c9becd 100644
 +    None
 +}
 +
-+fn same_player_snapshot(left: &Player, right: &Player) -> bool {
-+    same_non_empty(&left.identity.get(), &right.identity.get())
-+        && matching_metadata(left, right)
++/// The fields deduplication compares, read off a player once.
++///
++/// Lifting them out keeps the rules below free of the bus, which is what lets
++/// them be tested, and reads each property once instead of once per pairing.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++struct TrackSnapshot {
++    title: String,
++    artist: String,
++    album: String,
++    art_url: Option<String>,
++    length: Option<Duration>,
++    position: Duration,
 +}
 +
-+fn is_mprisence(player: &Player) -> bool {
-+    player.id.bus_name().to_ascii_lowercase().contains("mprisence")
-+}
-+
-+fn is_browser_or_proxy(player: &Player) -> bool {
-+    let id = player.id.bus_name().to_ascii_lowercase();
-+    [
-+        "playerctld", "plasma-browser-integration", "chromium", "chrome",
-+        "firefox", "brave", "vivaldi", "microsoft-edge", "opera", "zen",
-+    ]
-+    .iter()
-+    .any(|candidate| id.contains(candidate))
-+}
-+
-+fn matching_metadata(left: &Player, right: &Player) -> bool {
-+    let left_title = normalized(&left.metadata.title.get());
-+    if left_title.is_empty() || left_title != normalized(&right.metadata.title.get()) {
-+        return false;
++impl TrackSnapshot {
++    fn of(player: &Player) -> Self {
++        let metadata = &player.metadata;
++        Self {
++            title: metadata.title.get(),
++            artist: metadata.artist.get(),
++            album: metadata.album.get(),
++            art_url: metadata.art_url.get(),
++            length: metadata.length.get(),
++            position: player.position.get(),
++        }
 +    }
-+    same_non_empty(&left.metadata.artist.get(), &right.metadata.artist.get())
-+        || same_non_empty(&left.metadata.album.get(), &right.metadata.album.get())
-+        || same_optional(&left.metadata.art_url.get(), &right.metadata.art_url.get())
-+        || near_duration(left.metadata.length.get(), right.metadata.length.get())
++
++    /// How much this player knows about what it is playing.
++    fn richness(&self) -> usize {
++        [
++            !self.title.trim().is_empty(),
++            !self.artist.trim().is_empty(),
++            !self.album.trim().is_empty(),
++            self.art_url.is_some(),
++            self.length.is_some(),
++        ]
++        .into_iter()
++        .filter(|present| *present)
++        .count()
++    }
++}
++
++/// Whether two players are publishing the same playback.
++///
++/// Identity is deliberately not part of this. Two publishers of one piece of
++/// playback routinely disagree about who they are — a bridge names the app or
++/// site it mirrors while the player names itself — and requiring them to agree
++/// is what left a local player and its mirror side by side as two cards
++/// showing the same track at the same second.
++///
++/// Dropping it means the rest of the metadata has to carry more weight. A
++/// title alone is something a mirror and an unrelated player can share, so two
++/// further fields have to line up, and a position the two disagree about
++/// settles it the other way. Position is only evidence when both report one:
++/// `wayle-media` stops polling it for a player nothing is watching, so a zero
++/// there means unknown rather than the start of the track.
++fn same_playback(left: &TrackSnapshot, right: &TrackSnapshot) -> bool {
++    same_title(left, right)
++        && corroborating_fields(left, right) >= 2
++        && !positions_disagree(left, right)
++}
++
++fn same_title(left: &TrackSnapshot, right: &TrackSnapshot) -> bool {
++    let title = normalized(&left.title);
++    !title.is_empty() && title == normalized(&right.title)
++}
++
++fn corroborating_fields(left: &TrackSnapshot, right: &TrackSnapshot) -> usize {
++    [
++        same_non_empty(&left.artist, &right.artist),
++        same_non_empty(&left.album, &right.album),
++        same_optional(&left.art_url, &right.art_url),
++        near_duration(left.length, right.length),
++    ]
++    .into_iter()
++    .filter(|agrees| *agrees)
++    .count()
++}
++
++fn positions_disagree(left: &TrackSnapshot, right: &TrackSnapshot) -> bool {
++    !left.position.is_zero()
++        && !right.position.is_zero()
++        && left.position.abs_diff(right.position) > POSITION_TOLERANCE
 +}
 +
 +fn normalized(value: &str) -> String {
-+    value.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
++    value
++        .split_whitespace()
++        .collect::<Vec<_>>()
++        .join(" ")
++        .to_lowercase()
 +}
 +
 +fn same_non_empty(left: &str, right: &str) -> bool {
@@ -1467,17 +1520,111 @@ index f2e3b13..5c9becd 100644
 +        .is_some_and(|(left, right)| same_non_empty(left, right))
 +}
 +
-+fn near_duration(
-+    left: Option<std::time::Duration>,
-+    right: Option<std::time::Duration>,
-+) -> bool {
++fn near_duration(left: Option<Duration>, right: Option<Duration>) -> bool {
 +    left.zip(right)
-+        .is_some_and(|(left, right)| left.abs_diff(right) <= std::time::Duration::from_secs(2))
++        .is_some_and(|(left, right)| left.abs_diff(right) <= Duration::from_secs(2))
 +}
 +
 +#[cfg(test)]
 +mod tests {
-+    use super::surviving_card;
++    use super::{Duration, TrackSnapshot, same_playback, surviving_card};
++
++    fn track(title: &str, artist: &str, album: &str) -> TrackSnapshot {
++        TrackSnapshot {
++            title: String::from(title),
++            artist: String::from(artist),
++            album: String::from(album),
++            length: Some(Duration::from_secs(160)),
++            ..TrackSnapshot::default()
++        }
++    }
++
++    #[test]
++    fn a_player_and_its_mirror_are_one_playback() {
++        // What the panel showed as an "Elisa" card and a "YouTube Music" card:
++        // the same track at the same second, published twice. Identity is the
++        // only thing they disagreed about, and it is no longer consulted.
++        let elisa = track("Summer Feelings", "Lennon Stella/Charlie Puth", "Summer Feelings");
++        let mirror = elisa.clone();
++
++        assert!(same_playback(&elisa, &mirror));
++    }
++
++    #[test]
++    fn different_tracks_are_not_merged() {
++        let left = track("Summer Feelings", "Lennon Stella", "Summer Feelings");
++        let right = track("1999", "Charli xcx", "1999");
++
++        assert!(!same_playback(&left, &right));
++    }
++
++    #[test]
++    fn a_shared_title_alone_is_not_enough() {
++        // A cover, or two unrelated tracks that happen to share a name.
++        let left = track("Everlong", "Foo Fighters", "The Colour and the Shape");
++        let right = TrackSnapshot {
++            title: String::from("Everlong"),
++            length: Some(Duration::from_secs(600)),
++            ..TrackSnapshot::default()
++        };
++
++        assert!(!same_playback(&left, &right));
++    }
++
++    #[test]
++    fn two_players_at_different_points_are_separate() {
++        let left = TrackSnapshot {
++            position: Duration::from_secs(6),
++            ..track("Summer Feelings", "Lennon Stella", "Summer Feelings")
++        };
++        let right = TrackSnapshot {
++            position: Duration::from_secs(120),
++            ..track("Summer Feelings", "Lennon Stella", "Summer Feelings")
++        };
++
++        assert!(!same_playback(&left, &right));
++    }
++
++    #[test]
++    fn a_position_of_zero_is_unknown_rather_than_the_start() {
++        // wayle-media stops polling position for a player nothing watches, so
++        // zero must not be read as disagreement with a player midway through.
++        let watched = TrackSnapshot {
++            position: Duration::from_secs(120),
++            ..track("Summer Feelings", "Lennon Stella", "Summer Feelings")
++        };
++        let unwatched = track("Summer Feelings", "Lennon Stella", "Summer Feelings");
++
++        assert!(same_playback(&watched, &unwatched));
++    }
++
++    #[test]
++    fn positions_a_few_seconds_apart_still_match() {
++        // The two are polled at different moments, which is not disagreement.
++        let left = TrackSnapshot {
++            position: Duration::from_secs(60),
++            ..track("Summer Feelings", "Lennon Stella", "Summer Feelings")
++        };
++        let right = TrackSnapshot {
++            position: Duration::from_secs(62),
++            ..track("Summer Feelings", "Lennon Stella", "Summer Feelings")
++        };
++
++        assert!(same_playback(&left, &right));
++    }
++
++    #[test]
++    fn an_untitled_track_never_matches() {
++        let blank = TrackSnapshot::default();
++
++        assert!(!same_playback(&blank, &blank));
++    }
++
++    #[test]
++    fn richness_counts_what_a_player_knows() {
++        assert_eq!(track("t", "a", "b").richness(), 4);
++        assert_eq!(TrackSnapshot::default().richness(), 0);
++    }
 +
 +    #[test]
 +    fn surviving_card_follows_a_chain_of_merges() {
@@ -1513,18 +1660,6 @@ index f2e3b13..5c9becd 100644
 +    }
 +}
 +
-+fn metadata_richness(player: &Player) -> usize {
-+    [
-+        !player.metadata.title.get().trim().is_empty(),
-+        !player.metadata.artist.get().trim().is_empty(),
-+        !player.metadata.album.get().trim().is_empty(),
-+        player.metadata.art_url.get().is_some(),
-+        player.metadata.length.get().is_some(),
-+    ]
-+    .into_iter()
-+    .filter(|present| *present)
-+    .count()
- }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 index a4a0c29..37de151 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
@@ -1571,7 +1706,7 @@ index a4a0c29..37de151 100644
      PositionTick(Duration),
      CapabilitiesChanged,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
-index d52db43..de54470 100644
+index d52db43..8ce5788 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/methods.rs
 @@ -1,10 +1,13 @@
@@ -1590,7 +1725,7 @@ index d52db43..de54470 100644
  
  impl PlayerView {
      pub(super) fn set_active(&mut self, active: bool, sender: &ComponentSender<PlayerView>) {
-@@ -16,7 +19,14 @@ impl PlayerView {
+@@ -16,10 +19,30 @@ impl PlayerView {
          let _ = self.player_watcher.reset();
  
          if active {
@@ -1606,7 +1741,23 @@ index d52db43..de54470 100644
          }
      }
  
-@@ -29,9 +39,7 @@ impl PlayerView {
++    /// Every player the card stands for.
++    ///
++    /// Only commands that name an absolute outcome go to all of them —
++    /// play, pause, and seeking to a position. `Next` would skip two tracks
++    /// if two members turned out to be the same playback, so relative
++    /// commands go to the one the card shows.
++    pub(super) fn command_targets(&self) -> Vec<Arc<Player>> {
++        let mut targets = Vec::with_capacity(1 + self.duplicates.len());
++        targets.push(Arc::clone(&self.player));
++        targets.extend(self.duplicates.iter().map(Arc::clone));
++        targets
++    }
++
+     pub(super) fn fire_player_command<F, Fut>(
+         &self,
+         sender: &ComponentSender<PlayerView>,
+@@ -29,9 +52,7 @@ impl PlayerView {
          F: FnOnce(Arc<Player>) -> Fut + Send + 'static,
          Fut: Future<Output = Result<(), wayle_media::Error>> + Send,
      {
@@ -1617,7 +1768,7 @@ index d52db43..de54470 100644
          sender.oneshot_command(async move {
              if let Err(err) = action(player).await {
                  tracing::warn!(error = %err, "{label}");
-@@ -40,52 +48,61 @@ impl PlayerView {
+@@ -40,52 +61,61 @@ impl PlayerView {
          });
      }
  
@@ -1715,7 +1866,7 @@ index d52db43..de54470 100644
      }
  
      pub(super) fn display_title(&self) -> Cow<'_, str> {
-@@ -139,6 +156,14 @@ impl PlayerView {
+@@ -139,6 +169,14 @@ impl PlayerView {
          }
      }
  
@@ -1730,7 +1881,7 @@ index d52db43..de54470 100644
      pub(super) fn loop_icon(&self) -> &'static str {
          match self.loop_mode {
              LoopMode::Track => "ld-repeat-1-symbolic",
-@@ -146,12 +171,13 @@ impl PlayerView {
+@@ -146,12 +184,13 @@ impl PlayerView {
          }
      }
  
@@ -1745,7 +1896,7 @@ index d52db43..de54470 100644
          self.can_go_previous = player.can_go_previous.get();
          self.can_go_next = player.can_go_next.get();
          self.can_seek = player.can_seek.get();
-@@ -165,9 +191,7 @@ impl PlayerView {
+@@ -165,9 +204,7 @@ impl PlayerView {
      }
  
      fn refresh_position_now(&self, sender: &ComponentSender<PlayerView>) {
@@ -1756,7 +1907,7 @@ index d52db43..de54470 100644
  
          sender.oneshot_command(async move {
              match player.position().await {
-@@ -179,26 +203,4 @@ impl PlayerView {
+@@ -179,26 +216,4 @@ impl PlayerView {
              }
          });
      }
@@ -1784,7 +1935,7 @@ index d52db43..de54470 100644
 -    }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-index 111f79f..0f8ce0c 100644
+index 111f79f..d6b442c 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 @@ -20,7 +20,10 @@ use wayle_widgets::{WatcherToken, prelude::*};
@@ -2345,7 +2496,7 @@ index 111f79f..0f8ce0c 100644
          let seek_slider = &model.seek_slider;
          let widgets = view_output!();
          ComponentParts { model, widgets }
-@@ -386,20 +396,24 @@ impl Component for PlayerView {
+@@ -386,20 +396,21 @@ impl Component for PlayerView {
  
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
@@ -2370,10 +2521,7 @@ index 111f79f..0f8ce0c 100644
 +                // send whichever command the player is already obeying.
 +                self.playback_state = self.player.playback_state.get();
 +                let play = self.playback_state != PlaybackState::Playing;
-+
-+                let mut targets = Vec::with_capacity(1 + self.duplicates.len());
-+                targets.push(Arc::clone(&self.player));
-+                targets.extend(self.duplicates.iter().map(Arc::clone));
++                let targets = self.command_targets();
 +
 +                sender.oneshot_command(async move {
 +                    transport::set_playing(targets, play).await;
@@ -2382,7 +2530,28 @@ index 111f79f..0f8ce0c 100644
              }
  
              PlayerViewInput::NextClicked => {
-@@ -455,35 +469,23 @@ impl Component for PlayerView {
+@@ -439,11 +450,15 @@ impl Component for PlayerView {
+                     return;
+                 };
+                 let target = Duration::from_secs_f64(length.as_secs_f64() * percentage / 100.0);
+-                self.fire_player_command(
+-                    &sender,
+-                    move |player| async move { player.set_position(target).await },
+-                    "seek failed",
+-                );
++                // An absolute position is safe to send to every player the
++                // card stands for: each ends up where it was asked to be,
++                // however many of them turn out to be the same playback.
++                let targets = self.command_targets();
++
++                sender.oneshot_command(async move {
++                    transport::seek_to(targets, target).await;
++                    PlayerViewCmd::Noop
++                });
+             }
+         }
+     }
+@@ -455,35 +470,23 @@ impl Component for PlayerView {
          _root: &Self::Root,
      ) {
          match msg {
@@ -2397,15 +2566,15 @@ index 111f79f..0f8ce0c 100644
 -
 -            PlayerViewCmd::CapabilitiesChanged => {
 -                self.refresh_capabilities();
+-            }
+-
+-            PlayerViewCmd::PlaybackStateChanged(state) => {
+-                self.playback_state = state;
 +            PlayerViewCmd::LocalArtFound(path) => {
 +                self.local_art = Some(path.clone());
 +                self.cover_art = Some(path);
 +                self.update_artwork_css();
              }
--
--            PlayerViewCmd::PlaybackStateChanged(state) => {
--                self.playback_state = state;
--            }
 -
 +            PlayerViewCmd::CapabilitiesChanged => self.refresh_capabilities(),
 +            PlayerViewCmd::PlaybackStateChanged(state) => self.playback_state = state,
@@ -2470,10 +2639,10 @@ index 8f60a8d..4f5caf6 100644
              can_seek.watch(),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
 new file mode 100644
-index 0000000..1ac5a4b
+index 0000000..f007cd9
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,240 @@
 +//! Play and pause commands that name what they want.
 +//!
 +//! `PlayPause` leaves the decision to the player. A bridge that republishes a
@@ -2488,7 +2657,10 @@ index 0000000..1ac5a4b
 +use tokio::{sync::OnceCell, time::sleep};
 +use tracing::warn;
 +use wayle_media::{core::player::Player, types::PlaybackState};
-+use zbus::{Connection, zvariant::OwnedValue};
++use zbus::{
++    Connection,
++    zvariant::{ObjectPath, OwnedValue},
++};
 +
 +const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 +const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -2498,6 +2670,11 @@ index 0000000..1ac5a4b
 +/// the command.
 +const SETTLE_TIMEOUT: Duration = Duration::from_millis(1200);
 +const SETTLE_POLL: Duration = Duration::from_millis(50);
++
++/// How long an absolute seek is given before the relative one is tried.
++const SEEK_SETTLE: Duration = Duration::from_millis(350);
++/// A player that landed this close to where it was sent has obeyed.
++const SEEK_TOLERANCE: Duration = Duration::from_secs(2);
 +
 +static SESSION: OnceCell<Connection> = OnceCell::const_new();
 +
@@ -2567,6 +2744,108 @@ index 0000000..1ac5a4b
 +        sleep(SETTLE_POLL).await;
 +        waited += SETTLE_POLL;
 +    }
++}
++
++/// Moves every player a card stands for to the same absolute position.
++///
++/// `SetPosition` carries the track it applies to, and MPRIS tells a player to
++/// ignore the call when that identifier is not the one it is playing.
++/// `wayle-media` reads `mpris:trackid` as a string, but the spec types it as
++/// an object path, so it parses none from a compliant player and sends `/`
++/// instead — which every such player is required to ignore. Reading the
++/// identifier off the bus fixes that, and a relative `Seek` covers a player
++/// that publishes no usable identifier at all.
++///
++/// Sending an absolute position to every player in the group is safe in a way
++/// that `Next` is not: each one ends up where it was asked to be, however many
++/// of them are really the same playback.
++pub(super) async fn seek_to(players: Vec<Arc<Player>>, target: Duration) {
++    for player in players {
++        seek_one(&player, target).await;
++    }
++}
++
++async fn seek_one(player: &Player, target: Duration) {
++    let Ok(proxy) = proxy(player).await else {
++        return;
++    };
++
++    if set_position(&proxy, player, target).await {
++        return;
++    }
++    seek_by_offset(&proxy, player, target).await;
++}
++
++/// Sends the absolute position, and says whether the player went there.
++async fn set_position(proxy: &zbus::Proxy<'static>, player: &Player, target: Duration) -> bool {
++    let Some(track) = track_id(proxy).await else {
++        return false;
++    };
++
++    if let Err(error) = proxy
++        .call_method("SetPosition", &(&track, micros(target)))
++        .await
++    {
++        warn!(player = %player.id, %error, "SetPosition failed");
++        return false;
++    }
++
++    sleep(SEEK_SETTLE).await;
++    if reached(player, target).await {
++        return true;
++    }
++    warn!(player = %player.id, "SetPosition was ignored, seeking by offset");
++    false
++}
++
++/// Relative seek names no track, so it is what is left for a player that
++/// publishes no identifier or ignored the absolute call. The offset is
++/// measured from this player's own position, which keeps the destination
++/// absolute however far along it happens to be.
++async fn seek_by_offset(proxy: &zbus::Proxy<'static>, player: &Player, target: Duration) {
++    let Ok(current) = player.position().await else {
++        return;
++    };
++    if let Err(error) = proxy
++        .call_method("Seek", &(micros(target) - micros(current),))
++        .await
++    {
++        warn!(player = %player.id, %error, "seek failed");
++    }
++}
++
++/// The current track's identifier, as the object path MPRIS says it is.
++///
++/// A few players publish it as a plain string instead; both are accepted,
++/// because either one still names the track the player is on.
++async fn track_id(proxy: &zbus::Proxy<'static>) -> Option<ObjectPath<'static>> {
++    let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.ok()?;
++    let value = metadata.get("mpris:trackid")?.try_clone().ok()?;
++
++    let path = ObjectPath::try_from(value.clone())
++        .map(ObjectPath::into_owned)
++        .ok()
++        .or_else(|| {
++            String::try_from(value)
++                .ok()
++                .and_then(|text| ObjectPath::try_from(text).ok())
++        })?;
++
++    // The spec's "no track" sentinel, and the bare root wayle-media falls back
++    // to, both name no track and are ignored by every player that follows it.
++    let text = path.as_str();
++    (text != "/" && !text.ends_with("/NoTrack")).then_some(path)
++}
++
++async fn reached(player: &Player, target: Duration) -> bool {
++    player
++        .position()
++        .await
++        .is_ok_and(|position| position.abs_diff(target) <= SEEK_TOLERANCE)
++}
++
++fn micros(value: Duration) -> i64 {
++    i64::try_from(value.as_micros()).unwrap_or(i64::MAX)
 +}
 +
 +/// The file or address a player says it is playing.

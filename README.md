@@ -530,6 +530,14 @@ panel is on screen rather than from a fixed number, so it follows the
 configured scale and stays right if the card's contents change. Two players
 therefore get a short panel instead of a tall one with space under it.
 
+Dragging the progress bar sends `SetPosition` with the track identifier read
+off the bus. `wayle-media` reads `mpris:trackid` as a string, but MPRIS types
+it as an object path, so it parses none from a compliant player and sends `/`
+instead — an identifier naming no track, which the spec requires every player
+to ignore. That is why seeking did nothing in a local player. A player that
+publishes no usable identifier, or ignores the absolute call anyway, gets a
+relative `Seek` measured from its own position, which lands in the same place.
+
 The play/pause button sends `Play` or `Pause`, not `PlayPause`. A toggle leaves
 the decision to the player, and `mprisence`, which republishes a browser tab as
 its own MPRIS player, decides from its own copy of the tab's state; when the two
@@ -554,14 +562,29 @@ picked wrongly.
 
 A player that answers `CanControl=false` is saying its buttons will do nothing,
 so the card marks it with a padlock instead of leaving a transport row that
-looks alive and silently refuses, and deduplication prefers a controllable
-player over an uncontrollable one showing the same track. That ordering —
-control first, then playing, then whichever knows most about the track — lives
-in one function, because the publisher that cannot be controlled is usually
-also the one that has lost sight of what it is publishing: it reports no
-duration and a frozen position while the tab plays on. A card whose player
-publishes no `mpris:length` shows `--:--` for the total rather than claiming
-the track is zero seconds long.
+looks alive and silently refuses. A card whose player publishes no
+`mpris:length` shows `--:--` for the total rather than claiming the track is
+zero seconds long.
+
+Two publishers of one piece of playback are shown as one card. Identity is not
+part of deciding that: a bridge names the app or site it mirrors while the
+player names itself, and requiring the two to agree is what left a local player
+and its mirror side by side as two cards showing the same track at the same
+second. In its place the metadata carries more weight — a shared title is
+something a mirror and an unrelated track can both have, so two further fields
+must line up — and a position the two disagree about settles it the other way.
+Position is only evidence when both report one: `wayle-media` stops polling it
+for a player nothing is watching, so a zero there means unknown rather than the
+start of the track. This replaced a special case that paired a bridge with a
+browser by matching its bus name against a hardcoded list of browsers, which is
+why a mirror of a local player was never recognised.
+
+Which of the two the card keeps is ranked: one that takes commands, then one
+that is playing, then the player itself over a mirror of it, then whichever
+knows most about the track. Getting that order wrong costs only the label,
+because a command that names an absolute outcome — play, pause, seek to a
+position — goes to every player the card stands for. Relative commands do not:
+`Next` sent to two publishers of one playback would skip two tracks.
 
 Three things decide the direction of that command, because a card that gets any
 of them wrong is a card whose play/pause button appears to do nothing:
@@ -666,7 +689,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, one card per piece of playback however differently its publishers name themselves, a progress bar that seeks with the track identifier the bus actually carries, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
