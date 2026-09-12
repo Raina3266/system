@@ -500,14 +500,15 @@ Rofi Wi-Fi/Ethernet manager.
 The centre media button opens a separate native Wayle media panel. It lists
 every MPRIS source that is playing or paused, with artwork, source, track,
 artist, album, an adjustable progress bar, and independent transport,
-shuffle, and repeat controls. Each card's first line carries the source and the
-artist together, an icon in front of each saying which is which, so neither
-needs a line of its own; the cover, the title and the album sit below it, and
-the elapsed and total times sit at the ends of the control row rather than on a
-row of their own. The cover is a 3.5rem square that crops rather than stretches
-whatever the player publishes, and a player that publishes nothing gets the same
-square with a disc in it, so cards stay the same size either way. Like every
-other card in Wayle, they are painted on the palette's elevated layer.
+shuffle, and repeat controls. A card's first line is the source alone, with how
+it is playing at the end of it. Below that the cover sits beside the title, and
+under the title the artist and the album share a line, a microphone and a disc
+in front of them saying which is which. The elapsed and total times sit at the
+ends of the control row rather than on a row of their own. The cover is a
+3.5rem square that crops rather than stretches whatever the player publishes,
+and a player that publishes nothing gets the same square with a disc in it, so
+cards stay the same size either way. Like every other card in Wayle, they are
+painted on the palette's elevated layer.
 
 The panel is only as tall as the cards it holds, up to four of them; a fifth
 source is reached by scrolling. Its height comes from measuring a card once the
@@ -627,7 +628,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that pair the source with the artist on one line, a panel that is as tall as the cards it holds up to four of them, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |

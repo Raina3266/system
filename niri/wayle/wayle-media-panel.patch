@@ -929,7 +929,7 @@ index d52db43..1ef76a0 100644
 -    }
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
-index 111f79f..57dc1b0 100644
+index 111f79f..9115760 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/mod.rs
 @@ -18,9 +18,9 @@ use wayle_media::{core::player::Player, types::*};
@@ -962,7 +962,7 @@ index 111f79f..57dc1b0 100644
      title: String,
      artist: String,
      album: String,
-@@ -65,259 +65,230 @@ pub(crate) struct PlayerView {
+@@ -65,259 +65,242 @@ pub(crate) struct PlayerView {
  impl Component for PlayerView {
      type Init = PlayerViewInit;
      type Input = PlayerViewInput;
@@ -1023,8 +1023,9 @@ index 111f79f..57dc1b0 100644
 -                        },
 +            set_hexpand: true,
 +
-+            // Source and artist share the top line: an icon in front of each
-+            // says which is which, so neither needs a line of its own.
++            // The source owns the top line, with how it is playing at the end
++            // of it. Who and what is playing belong to the track, so they sit
++            // with the title instead.
 +            gtk::Box {
 +                add_css_class: "media-player-source",
 +
@@ -1036,26 +1037,11 @@ index 111f79f..57dc1b0 100644
 +
 +                gtk::Label {
 +                    add_css_class: "media-source-name",
-+                    set_halign: gtk::Align::Start,
-+                    set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                    #[watch]
-+                    set_label: &model.player_identity,
-+                },
-+
-+                gtk::Image {
-+                    add_css_class: "media-artist-icon",
-+                    set_icon_name: Some("ld-mic-symbolic"),
-+                },
-+
-+                gtk::Label {
-+                    add_css_class: "media-artist",
 +                    set_hexpand: true,
 +                    set_halign: gtk::Align::Start,
 +                    set_ellipsize: gtk::pango::EllipsizeMode::End,
 +                    #[watch]
-+                    set_label: &model.display_artist(),
-+                    #[watch]
-+                    set_class_active: ("placeholder", model.artist.is_empty()),
++                    set_label: &model.player_identity,
 +                },
 +
 +                gtk::Label {
@@ -1132,14 +1118,15 @@ index 111f79f..57dc1b0 100644
                      },
  
 -                    #[name = "info"]
--                    gtk::Box {
++                    // Artist and album share a line, an icon in front of each
++                    // saying which is which. The album gives way first when
++                    // there is not room for both.
+                     gtk::Box {
 -                        add_css_class: "media-info",
 -                        set_orientation: gtk::Orientation::Vertical,
-+                    gtk::Label {
-+                        add_css_class: "media-album",
-+                        set_hexpand: true,
-                         set_halign: gtk::Align::Fill,
--
+-                        set_halign: gtk::Align::Fill,
++                        add_css_class: "media-player-credits",
+ 
 -                        #[name = "title_label"]
 -                        gtk::Label {
 -                            add_css_class: "media-title",
@@ -1150,37 +1137,44 @@ index 111f79f..57dc1b0 100644
 -                            set_ellipsize: gtk::pango::EllipsizeMode::End,
 -                            set_max_width_chars: 1,
 -                            set_xalign: 0.5,
--                        },
--
++                        gtk::Image {
++                            add_css_class: "media-artist-icon",
++                            set_icon_name: Some("ld-mic-symbolic"),
+                         },
+ 
 -                        #[name = "artist_label"]
--                        gtk::Label {
--                            add_css_class: "media-artist",
--                            #[watch]
--                            set_label: &model.display_artist(),
--                            #[watch]
--                            set_class_active: ("placeholder", model.artist.is_empty()),
+                         gtk::Label {
+                             add_css_class: "media-artist",
++                            set_halign: gtk::Align::Start,
++                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+                             #[watch]
+                             set_label: &model.display_artist(),
+                             #[watch]
+                             set_class_active: ("placeholder", model.artist.is_empty()),
 -                            set_ellipsize: gtk::pango::EllipsizeMode::End,
 -                            set_max_width_chars: 1,
 -                            set_xalign: 0.5,
--                        },
--
+                         },
+ 
 -                        #[name = "album_label"]
--                        gtk::Label {
--                            add_css_class: "media-album",
--                            #[watch]
--                            set_label: &model.display_album(),
--                            #[watch]
--                            set_class_active: ("placeholder", model.album.is_empty()),
++                        gtk::Image {
++                            add_css_class: "media-album-icon",
++                            set_icon_name: Some("ld-disc-3-symbolic"),
++                        },
++
+                         gtk::Label {
+                             add_css_class: "media-album",
++                            set_hexpand: true,
++                            set_halign: gtk::Align::Start,
++                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+                             #[watch]
+                             set_label: &model.display_album(),
+                             #[watch]
+                             set_class_active: ("placeholder", model.album.is_empty()),
 -                            set_ellipsize: gtk::pango::EllipsizeMode::End,
 -                            set_max_width_chars: 1,
 -                            set_xalign: 0.5,
--                        },
-+                        set_xalign: 0.0,
-+                        set_ellipsize: gtk::pango::EllipsizeMode::End,
-+                        #[watch]
-+                        set_label: &model.display_album(),
-+                        #[watch]
-+                        set_class_active: ("placeholder", model.album.is_empty()),
+                         },
                      },
  
 -                    #[name = "progress"]
@@ -1415,7 +1409,7 @@ index 111f79f..57dc1b0 100644
              },
          }
      }
-@@ -327,8 +298,6 @@ impl Component for PlayerView {
+@@ -327,8 +310,6 @@ impl Component for PlayerView {
          _root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1424,7 +1418,7 @@ index 111f79f..57dc1b0 100644
          let art_css_provider = CssProvider::new();
          #[allow(clippy::expect_used)]
          let display = Display::default().expect("display required for media dropdown");
-@@ -348,15 +317,15 @@ impl Component for PlayerView {
+@@ -348,15 +329,15 @@ impl Component for PlayerView {
              }),
          );
  
@@ -1443,7 +1437,7 @@ index 111f79f..57dc1b0 100644
              title: String::new(),
              artist: String::new(),
              album: String::new(),
-@@ -379,6 +348,9 @@ impl Component for PlayerView {
+@@ -379,6 +360,9 @@ impl Component for PlayerView {
              source_icon: String::from("ld-music-symbolic"),
          };
  
@@ -1453,7 +1447,7 @@ index 111f79f..57dc1b0 100644
          let seek_slider = &model.seek_slider;
          let widgets = view_output!();
          ComponentParts { model, widgets }
-@@ -386,20 +358,24 @@ impl Component for PlayerView {
+@@ -386,20 +370,24 @@ impl Component for PlayerView {
  
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
@@ -1490,7 +1484,7 @@ index 111f79f..57dc1b0 100644
              }
  
              PlayerViewInput::NextClicked => {
-@@ -451,39 +427,19 @@ impl Component for PlayerView {
+@@ -451,39 +439,19 @@ impl Component for PlayerView {
      fn update_cmd(
          &mut self,
          msg: PlayerViewCmd,
@@ -1825,10 +1819,10 @@ index 73b7bde..4759abd 100644
 +    }
 +}
 diff --git a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-index c623146..c325159 100644
+index c623146..e061e70 100644
 --- a/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
 +++ b/crates/wayle-styling/scss/modules/media_dropdown/_player_view.scss
-@@ -1,80 +1,100 @@
+@@ -1,66 +1,81 @@
 -.media-header {
 -    padding: calc(var(--space-sm) * 1.1) var(--space-md);
 -    border-bottom: 1px solid var(--border-default);
@@ -1844,16 +1838,16 @@ index c623146..c325159 100644
 -    }
 +.media-player-scroll {
 +    min-height: 0;
-+}
-+
+ }
+ 
+-button.media-source-button {
 +// The gap between cards is set on the box itself, so that the height of four
 +// cards and three gaps is a number the panel can be sized from.
 +.media-player-list {
 +    padding: 0;
 +    border-spacing: 0;
- }
- 
--button.media-source-button {
++}
++
 +.media-player-card {
 +    padding: var(--space-sm) var(--space-md);
      border-radius: var(--rounding-element);
@@ -1866,9 +1860,11 @@ index c623146..c325159 100644
 -    &:hover {
 -        color: var(--fg-default);
 -    }
++// The source line is its own band across the top of the card; the gap under
++// it is what keeps it from reading as a caption on the cover below.
 +.media-player-source {
 +    border-spacing: var(--space-xs);
-+    margin-bottom: var(--space-xs);
++    margin-bottom: var(--space-md);
  
      image.media-source-icon {
          -gtk-icon-size: var(--icon-md);
@@ -1883,25 +1879,7 @@ index c623146..c325159 100644
      }
  
 -    image.media-source-chevron {
-+    // Separates the artist from the source it is playing through, so the two
-+    // do not read as one run of text when both are short.
-+    image.media-artist-icon {
-         -gtk-icon-size: var(--icon-sm);
-+        margin-left: var(--space-sm);
-+        color: var(--fg-subtle);
-+    }
-+
-+    .media-artist {
-+        font-size: var(--text-sm);
-+        font-weight: var(--weight-semibold);
-+        color: var(--fg-muted);
-+
-+        &.placeholder {
-+            color: var(--fg-subtle);
-+            font-style: italic;
-+        }
-+    }
-+
+-        -gtk-icon-size: var(--icon-sm);
 +    .media-player-state {
 +        margin-left: var(--space-sm);
 +        padding: calc(var(--space-xs) / 2) var(--space-sm);
@@ -1959,43 +1937,70 @@ index c623146..c325159 100644
  
      .media-title {
 -        font-size: var(--text-lg);
--        font-weight: var(--weight-bold);
--        color: var(--fg-default);
--
--        &.placeholder {
--            color: var(--fg-subtle);
--            font-style: italic;
--        }
--    }
--
--    .media-artist {
-         font-size: var(--text-md);
--        font-weight: var(--weight-semibold);
-+        font-weight: var(--weight-bold);
++        font-size: var(--text-md);
+         font-weight: var(--weight-bold);
          color: var(--fg-default);
--        margin-top: var(--space-sm);
  
-         &.placeholder {
-             color: var(--fg-subtle);
-@@ -83,10 +103,9 @@ button.media-source-button {
+@@ -70,42 +85,56 @@ button.media-source-button {
+         }
      }
  
-     .media-album {
+-    .media-artist {
+-        font-size: var(--text-md);
+-        font-weight: var(--weight-semibold);
+-        color: var(--fg-default);
+-        margin-top: var(--space-sm);
++    .media-player-credits {
++        margin-top: calc(var(--space-xs) / 2);
++        border-spacing: var(--space-xs);
+ 
+-        &.placeholder {
++        image.media-artist-icon,
++        image.media-album-icon {
++            -gtk-icon-size: var(--icon-sm);
+             color: var(--fg-subtle);
+-            font-style: italic;
+         }
+-    }
+ 
+-    .media-album {
 -        font-size: var(--text-base);
 -        font-weight: var(--weight-semibold);
-+        margin-top: calc(var(--space-xs) / 2);
-+        font-size: var(--text-xs);
-         color: var(--fg-subtle);
+-        color: var(--fg-subtle);
 -        margin: var(--space-sm) 0;
++        // Separates the album from the artist, so the two do not read as one
++        // run of text when both are short.
++        image.media-album-icon {
++            margin-left: var(--space-sm);
++        }
  
-         &.placeholder {
-             font-style: italic;
-@@ -95,17 +114,17 @@ button.media-source-button {
+-        &.placeholder {
+-            font-style: italic;
++        .media-artist {
++            font-size: var(--text-sm);
++            font-weight: var(--weight-semibold);
++            color: var(--fg-muted);
++
++            &.placeholder {
++                color: var(--fg-subtle);
++                font-style: italic;
++            }
++        }
++
++        .media-album {
++            font-size: var(--text-sm);
++            color: var(--fg-subtle);
++
++            &.placeholder {
++                font-style: italic;
++            }
+         }
+     }
  }
  
  .media-progress {
 -    padding: 0 calc(var(--space-md) + var(--space-xs));
-+    margin-top: var(--space-xs);
++    margin-top: var(--space-sm);
  }
  
  scale.media-seek-slider {
@@ -2011,7 +2016,7 @@ index c623146..c325159 100644
              background: var(--accent);
              border-radius: var(--rounding-element);
          }
-@@ -128,18 +147,19 @@ scale.media-seek-slider {
+@@ -128,18 +157,19 @@ scale.media-seek-slider {
      }
  }
  
@@ -2040,7 +2045,7 @@ index c623146..c325159 100644
      border-spacing: var(--space-xs);
  }
  
-@@ -150,7 +170,6 @@ button.media-control {
+@@ -150,7 +180,6 @@ button.media-control {
      transition:
          background var(--duration-fast),
          color var(--duration-fast);
@@ -2048,7 +2053,7 @@ index c623146..c325159 100644
  
      &:hover {
          background: var(--bg-overlay);
-@@ -159,31 +178,28 @@ button.media-control {
+@@ -159,31 +188,28 @@ button.media-control {
  
      image {
          -gtk-icon-size: var(--icon-md);
