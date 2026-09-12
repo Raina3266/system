@@ -37,7 +37,7 @@ in
             ./dashboard-layer-window.patch
             ./wayle-wifi.patch
             ./dashboard-power-profile.patch
-            ./wayle-media-panel.patch
+            ./dashboard-wifi-tile.patch
             ./dashboard-notifications.patch
             ./wayle-audio-panel.patch
             ./wayle-audio-profile-bridge.patch

@@ -2,6 +2,7 @@
 members = [
   "audio-control",
   "control-centre",
+  "media-panel",
   "ocr-screenshot",
   "preview-panel",
   "rofi-clipboard",

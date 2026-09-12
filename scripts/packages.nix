@@ -138,6 +138,18 @@ rec {
   # The former panel now only streams Wayle's media title to Waybar.
   controlCentre = mkWorkspacePackage "control-centre" { };
 
+  # The media panel Waybar's centre button opens. It reads MPRIS off the
+  # session bus itself rather than going through Wayle, which is what took it
+  # out of the patch stack.
+  mediaPanel = mkWorkspacePackage "media-panel" {
+    # curl fetches a remote cover once and caches it. preFixup rather than
+    # postInstall so the argument joins wrapGAppsHook4's own wrapper instead of
+    # being overwritten by it.
+    preFixup = ''
+      gappsWrapperArgs+=(--set MEDIA_PANEL_CURL "${lib.getExe pkgs.curl}")
+    '';
+  };
+
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
     dontWrapGApps = true;
     postInstall = ''

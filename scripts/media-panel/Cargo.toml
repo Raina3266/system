@@ -1,0 +1,17 @@
+[package]
+name = "media-panel"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "media-panel"
+path = "src/main.rs"
+
+[dependencies]
+gtk = { package = "gtk4", version = "=0.11.4", features = ["v4_8"] }
+gtk4-layer-shell = "=0.8.0"
+zbus = "=5.18.0"
+# Cover art for local files. The Wayle patch could not take this — nixpkgs
+# pins Wayle's cargoHash — so it carried hand-written ID3, FLAC and MP4
+# parsers instead. This workspace owns its lockfile, so it can just read tags.
+lofty = "0.22"

@@ -97,6 +97,9 @@ let
     on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
 
+  # The panel this opens is `media-panel`, not one of Wayle's dropdowns: it
+  # reads MPRIS off the session bus itself. Running it again toggles the one
+  # already up, so the button closes what it opened.
   wayleMediaModule = monitor: {
     format = "{}";
     return-type = "json";
@@ -105,13 +108,12 @@ let
     escape = true;
     "restart-interval" = 2;
     "exec-on-event" = false;
-    on-click =
-      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss media ${lib.escapeShellArg monitor}";
+    on-click = "${packages.mediaPanel}/bin/media-panel ${lib.escapeShellArg monitor}";
     # Right-click stops everything. Not `playerctl --all-players pause`: that
     # reads each player's `CanPause` first and skips the ones that answer no,
     # so a browser bridge that cannot reach its tab is never even asked, and
     # the music it is publishing keeps playing.
-    on-click-right = "${packages.controlCentre}/bin/control-centre media-pause-all";
+    on-click-right = "${packages.mediaPanel}/bin/media-panel pause-all";
   };
 in
 {

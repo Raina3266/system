@@ -497,141 +497,74 @@ name, so the panel appears on the display that was clicked. Wi-Fi is no longer
 duplicated in the dashboard. The existing right-side network button remains the
 Rofi Wi-Fi/Ethernet manager.
 
-The centre media button opens a separate native Wayle media panel. It lists
-every MPRIS source that is playing or paused, with artwork, source, track,
-artist, album, an adjustable progress bar, and independent transport,
-shuffle, and repeat controls. A card's first line is the source alone, with how
-it is playing at the end of it. Below that the cover sits beside the title, and
-under the title the artist and the album share a line, a microphone and a disc
-in front of them saying which is which. The elapsed and total times sit at the
-ends of the control row rather than on a row of their own. The cover is a
-3.5rem square that crops rather than stretches whatever the player publishes,
-and a player that publishes nothing gets the same square with a disc in it, so
-cards stay the same size either way. Like every other card in Wayle, they are
-painted on the palette's elevated layer. The source is drawn in the palette's
-red, the title in its blue, and the artist and album in the plain foreground.
+The centre media button opens `media-panel`, which is this repository's own
+program rather than a patch on Wayle. It lists every MPRIS source that is
+playing or paused, with artwork, source, track, artist, album, an adjustable
+progress bar and transport controls. A card's first line is the source alone,
+with how it is playing at the end of it; below that the cover sits beside the
+title, and under the title the artist and album share a line behind an icon
+apiece. The elapsed and total times sit at the ends of the control row. The
+source is drawn in the palette's red, the title in its blue, and the artist and
+album in the plain foreground. The panel is only as tall as the cards it holds,
+up to four of them; a fifth is reached by scrolling.
 
-`wayle-media` resolves `mpris:artUrl`, downloading and caching an HTTP one, and
-gives up when a player publishes none. Local players often do: the cover is
-inside the file or beside it in the folder, and a player that never extracts
-one has nothing to publish. When a card has no cover, the panel reads
-`xesam:url` off the bus itself and looks in both places — a picture named after
-the track, then `cover`/`folder`/`front`/`album`/`albumart`/`thumb` in any
-common image format, then the picture carried inside the file: FLAC's PICTURE
-block, an ID3v2 APIC frame, or MP4's `covr` atom. Extracted pictures are
-written beside the covers `wayle-media` downloads. The parsers are a walk over
-the lengths each format stores in front of the picture rather than a decode,
-which is what lets them live in the patch: nixpkgs pins Wayle's `cargoHash`, so
-the patch stack cannot add a tag-reading crate.
+Running the binary again toggles the panel that is already up, so the button
+closes what it opened; the first run claims a socket in `$XDG_RUNTIME_DIR` and
+becomes the panel, and every run after that hands its request over and exits.
+Nothing is read off the bus while the panel is hidden.
 
-The panel is only as tall as the cards it holds, up to four of them; a fifth
-source is reached by scrolling. Its height comes from measuring a card once the
-panel is on screen rather than from a fixed number, so it follows the
-configured scale and stays right if the card's contents change. Two players
-therefore get a short panel instead of a tall one with space under it.
+It moved out of the patch stack because that patch was the only one that kept
+changing — twelve commits against three for the next-busiest — and because most
+of it was not Wayle code at all. Reading MPRIS directly is also what lets the
+two things the spec is fussy about be got right:
 
-Dragging the progress bar sends `SetPosition` with the track identifier read
-off the bus. `wayle-media` reads `mpris:trackid` as a string, but MPRIS types
-it as an object path, so it parses none from a compliant player and sends `/`
-instead — an identifier naming no track, which the spec requires every player
-to ignore. That is why seeking did nothing in a local player. A player that
-publishes no usable identifier, or ignores the absolute call anyway, gets a
-relative `Seek` measured from its own position, which lands in the same place.
+- `mpris:trackid` is typed as an object path, and MPRIS requires a player to
+  ignore a `SetPosition` naming anything else. Reading it as a string parses
+  none from a compliant player and seeks nowhere, which is why dragging the
+  progress bar did nothing in a local player. A player that publishes no usable
+  identifier, or ignores the absolute call anyway, gets a relative `Seek`
+  measured from its own position, which lands in the same place.
+- `playerctld` proxies whichever player was last active and copies its identity
+  and metadata wholesale, so it appears as a second card under the real
+  player's own name. It is excluded, along with `kdeconnect`.
 
-Only one player is seeked. A card can stand for several publishers of one
-playback, and seeking each of them in turn seeks the same audio repeatedly —
-the destination is the same but the stutter is real — so the rest are tried
-only if the first did not move. For the same reason, not having reached the
-target yet does not count as having ignored the command: a player that streams
-buffers first and reports its old position for a moment, and seeking it again
-in that moment is what makes it stall and repeat. Only a player still sitting
-exactly where it started is seeked a second time.
+Two publishers of one piece of playback are still shown as one card. Identity
+does not decide it — a bridge names the app or site it mirrors while the player
+names itself — so the metadata carries it: a shared title plus two further
+fields agreeing, with a position the two disagree about settling it the other
+way. Publishers that agree on their identity are asked for one field, since one
+app publishing itself twice is not a coincidence to guard against. Play, pause
+and seek-to-a-position name an absolute outcome and go to every player a card
+stands for; `Next` does not, because sent to two publishers of one playback it
+would skip two tracks. Only one player is seeked, and a player that has not yet
+reached the target is not assumed to have ignored the command — a streaming one
+buffers first, and seeking it again in that moment is what makes it stutter.
 
-The play/pause button sends `Play` or `Pause`, not `PlayPause`. A toggle leaves
-the decision to the player, and `mprisence`, which republishes a browser tab as
-its own MPRIS player, decides from its own copy of the tab's state; when the two
-disagree the toggle resolves to the state the tab is already in and the press
-does nothing. Naming the command also makes it idempotent, so a card that stands
-for both a bridge and the player it mirrors sends to both and lets whichever one
-is listening act.
+A player that answers `CanControl=false` gets a padlock rather than a transport
+row that looks alive and silently refuses, and a card whose player publishes no
+`mpris:length` shows `--:--` rather than claiming the track is zero seconds
+long.
 
-Right-clicking the Waybar media button pauses everything at once. It runs
-`control-centre media-pause-all`, not `playerctl --all-players pause`:
-`playerctl` reads each player's `CanPause` first and skips the ones that answer
-no, so a browser bridge that cannot reach its tab is never even asked and the
-music it publishes keeps playing. MPRIS asks a player that cannot honour a
-command to ignore it rather than fail, and publishers get the property wrong
-often enough, so asking every player and letting those that mean it decline
-stops more music than trusting what they advertise. Players still playing
-afterwards are named on stdout. `control-centre media-players` prints what
-every player on the bus advertises — identity, status, whether it says it can
-be controlled, and whether it publishes a position and a duration at all —
-which is how a source that will not respond is told apart from one the panel
-picked wrongly.
+Cover art comes from `mpris:artUrl`, an HTTP one fetched once and cached. Local
+players routinely publish none, because the cover is inside the file or beside
+it in the folder, so `xesam:url` is followed to the file and both places are
+looked in: a picture named after the track, then
+`cover`/`folder`/`front`/`album`/`albumart`/`thumb`, then the tag's own picture
+by way of `lofty`.
 
-A player that answers `CanControl=false` is saying its buttons will do nothing,
-so the card marks it with a padlock instead of leaving a transport row that
-looks alive and silently refuses. A card whose player publishes no
-`mpris:length` shows `--:--` for the total rather than claiming the track is
-zero seconds long.
+Right-clicking the button runs `media-panel pause-all`, not `playerctl
+--all-players pause`: `playerctl` reads each player's `CanPause` first and skips
+the ones that answer no, so a browser bridge that cannot reach its tab is never
+even asked and the music it publishes keeps playing. MPRIS tells a player that
+cannot honour a command to ignore it rather than fail, and publishers get the
+property wrong often enough, so asking every player and letting those that mean
+it decline stops more music than trusting what they advertise. Players still
+going afterwards are named on stdout. `media-panel players` prints what the
+panel reads off the bus, which is how a source that will not respond is told
+apart from one the panel picked wrongly.
 
-`playerctld` is left out of the list entirely. It proxies whichever player was
-last active and copies its identity and metadata wholesale, so it shows up as a
-second card under the real player's own name — an **Elisa** card beside Elisa,
-a second **YouTube Music** beside the tab. Nothing it publishes is absent from
-the bus, and anything it can do is one hop further from the audio than asking
-the player itself.
-
-The rest of the time, two publishers of one piece of playback are shown as one
-card. Identity is not
-part of deciding that: a bridge names the app or site it mirrors while the
-player names itself, and requiring the two to agree is what left a local player
-and its mirror side by side as two cards showing the same track at the same
-second. In its place the metadata carries more weight — a shared title is
-something a mirror and an unrelated track can both have, so two further fields
-must line up — and a position the two disagree about settles it the other way.
-Two publishers that do agree on who they are are asked for only one: one app
-publishing itself twice is not a coincidence to guard against, and holding out
-for more leaves the two side by side for as long as the second one's metadata
-takes to arrive.
-Position is only evidence when both report one: `wayle-media` stops polling it
-for a player nothing is watching, so a zero there means unknown rather than the
-start of the track. This replaced a special case that paired a bridge with a
-browser by matching its bus name against a hardcoded list of browsers, which is
-why a mirror of a local player was never recognised.
-
-Which of the two the card keeps is ranked: one that takes commands, then one
-that is playing, then the player itself over a mirror of it, then whichever
-knows most about the track. Getting that order wrong costs only the label,
-because a command that names an absolute outcome — play, pause, seek to a
-position — goes to every player the card stands for. Relative commands do not:
-`Next` sent to two publishers of one playback would skip two tracks.
-
-Three things decide the direction of that command, because a card that gets any
-of them wrong is a card whose play/pause button appears to do nothing:
-
-- The direction is read from the player at the moment of the press, not from
-  the copy the card holds. The card is only told about changes while the panel
-  is open, so a press moments after it opens would otherwise send whichever
-  command the player is already obeying.
-- A card is rebuilt when the player behind it is replaced, not only when the
-  list of bus names changes. `mprisence` claims the same name each time it
-  recreates a player for a tab, and a card left holding the replaced one is
-  frozen: its state never changes again, so every press sends the command that
-  player is already in.
-- The players a card stands for are recorded as they are folded into it, rather
-  than worked out afterwards from a resemblance test. The bridge rule pairs a
-  bridge with the browser it mirrors even though the two disagree about their
-  identity, and those are exactly the pairs that most need both ends to hear the
-  command.
-
-If the player is still where it started after all that, the card falls back to
-`PlayPause`. MPRIS asks a player that cannot honour a command to ignore it
-rather than report an error, and some publishers answer `Play` and `Pause` that
-way while still acting on the toggle. The fallback waits long enough that a
-player which was merely slow is not sent back where it came from, and it goes
-only to the card's own player, never to the duplicates that already took the
-idempotent command.
+Waybar's media *title* still comes from Wayle, through
+`control-centre media-waybar`, which reads Wayle's own media service.
 
 Hover the active Wi-Fi connection in Wayle and press `Info` for the SSID,
 signal, saved profile and UUID, security, interface, password, IP addresses,
@@ -710,7 +643,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, `playerctld`'s copy of another player left out, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, one card per piece of playback however differently its publishers name themselves, a progress bar that seeks with the track identifier the bus actually carries, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
+| `dashboard-wifi-tile.patch` | Removes the duplicate dashboard Wi-Fi tile and hosts a dropdown in a monitor-local layer-shell window centred on the bar button that asked for it. This is what is left of the media patch after the panel became `media-panel`. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
@@ -722,6 +655,8 @@ The Wayle patches apply to v0.7.0.
 
 ### Verifying a change
 
+`cargo test -p media-panel` covers the panel's bus layer — deduplication,
+capability handling and cover-art lookup — without needing a bus.
 `scripts/mpris-report.sh` dumps every MPRIS player on the session bus — owner
 process, identity, capabilities, metadata, and Wayle's own view of which card
 maps to which bus name — for working out why one source ignores the panel.
@@ -729,8 +664,7 @@ maps to which bus name — for working out why one source ignores the panel.
 reports which of them moved, which separates a player that refuses commands
 from one the panel aimed at wrongly. It pauses your music.
 
-`cargo test -p control-centre` covers the remaining Waybar media-title streamer
-and the MPRIS name filtering behind `media-pause-all`.
+`cargo test -p control-centre` covers the remaining Waybar media-title streamer.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
 device/port rules and profile bridge have focused parsing, naming and row-shape
 tests. The Wayle patch stack is checked against v0.7.0 before updates are

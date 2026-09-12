@@ -1,0 +1,243 @@
+/* The media panel's own styling. The palette is the one in
+   niri/wayle/default.nix, so the panel reads as part of the same desktop as
+   Wayle's dropdowns beside it.
+
+   Keep every rule non-empty. GTK stops parsing at the first error and an empty
+   declaration block is one, which costs every rule after it — including the
+   transparent window background, leaving an opaque surface over the output. */
+
+window.media-window {
+    background: transparent;
+}
+
+.media-panel {
+    background: #210e15;
+    border: 1px solid rgba(214, 86, 199, 0.30);
+    border-radius: 13px;
+    font-family: "Noto Sans", sans-serif;
+    color: #f8f8f2;
+}
+
+.media-header {
+    padding: 10px 13px;
+    border-bottom: 1px solid rgba(214, 86, 199, 0.20);
+}
+
+.media-header-icon {
+    color: #d656c7;
+    margin-right: 7px;
+    font-family: "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
+}
+
+.media-header-title {
+    font-weight: bold;
+    font-size: 15px;
+    color: #f8f8f2;
+}
+
+.media-content {
+    padding: 11px;
+}
+
+.media-scroll {
+    min-height: 0;
+}
+
+/* One card per piece of playback. */
+.media-card {
+    background: #0e0616;
+    border: 1px solid rgba(214, 86, 199, 0.22);
+    border-radius: 9px;
+    padding: 7px 13px;
+}
+
+/* The source line is its own band across the top of the card; the gap under it
+   is what keeps it from reading as a caption on the cover below. */
+.media-source-row {
+    margin-bottom: 13px;
+}
+
+.media-source {
+    font-size: 12px;
+    font-weight: bold;
+    color: #d52c35;
+}
+
+.media-lock {
+    color: #d52c35;
+    margin-left: 4px;
+    -gtk-icon-size: 14px;
+}
+
+.media-state {
+    margin-left: 7px;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #6b6670;
+    background: rgba(248, 248, 242, 0.06);
+}
+
+.media-state.playing {
+    color: #d656c7;
+    background: rgba(214, 86, 199, 0.16);
+}
+
+.media-summary {
+    /* GTK4 boxes take their gap from the widget, not the stylesheet, so the
+       space beside the cover is set here as a margin instead. */
+    margin-bottom: 0;
+}
+
+/* Square, and large enough to read as a picture rather than a marker. */
+.media-artwork {
+    border-radius: 7px;
+    background: rgba(248, 248, 242, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(214, 86, 199, 0.22);
+    margin-right: 13px;
+}
+
+.media-artwork-fallback {
+    color: #6b6670;
+    -gtk-icon-size: 26px;
+}
+
+.media-info {
+    /* Lets the ellipsizing labels shrink instead of widening the panel. */
+    min-width: 0;
+}
+
+.media-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #5df4fe;
+}
+
+.media-credits {
+    margin-top: 2px;
+}
+
+.media-credit-icon {
+    color: #6b6670;
+    font-size: 11px;
+    margin-right: 4px;
+    font-family: "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
+}
+
+.media-credit-icon.album {
+    margin-left: 9px;
+}
+
+.media-artist {
+    font-size: 12px;
+    font-weight: bold;
+    color: #f8f8f2;
+}
+
+.media-album {
+    font-size: 12px;
+    color: #f8f8f2;
+}
+
+scale.media-seek {
+    margin-top: 7px;
+    padding: 0;
+    min-height: 12px;
+}
+
+scale.media-seek trough {
+    min-height: 3px;
+    background: rgba(248, 248, 242, 0.10);
+    border-radius: 4px;
+}
+
+scale.media-seek highlight {
+    min-height: 3px;
+    background: #d656c7;
+    border-radius: 4px;
+}
+
+scale.media-seek slider {
+    min-width: 11px;
+    min-height: 11px;
+    margin: -5px;
+    border-radius: 9999px;
+    background: #f8f8f2;
+    opacity: 0;
+}
+
+scale.media-seek:hover slider {
+    opacity: 1;
+}
+
+scale.media-seek:disabled highlight {
+    background: #6b6670;
+}
+
+.media-controls {
+    padding-top: 7px;
+}
+
+.media-time {
+    font-size: 11px;
+    font-weight: bold;
+    color: #6b6670;
+}
+
+button.media-button {
+    background: none;
+    border: none;
+    box-shadow: none;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    margin: 0 3px;
+    border-radius: 9999px;
+    color: #6b6670;
+}
+
+button.media-button:hover {
+    background: rgba(248, 248, 242, 0.08);
+    color: #f8f8f2;
+}
+
+button.media-button:disabled {
+    color: rgba(107, 102, 112, 0.45);
+}
+
+button.media-button.main {
+    min-width: 31px;
+    min-height: 31px;
+    background: #d656c7;
+    color: #180a10;
+}
+
+button.media-button.main:hover {
+    background: #e173d6;
+}
+
+.media-glyph {
+    font-family: "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 15px;
+}
+
+button.media-button.main .media-glyph {
+    font-size: 17px;
+}
+
+.media-empty {
+    padding: 26px 13px;
+}
+
+.media-empty-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #f8f8f2;
+}
+
+.media-empty-body {
+    font-size: 12px;
+    color: #6b6670;
+    margin-top: 4px;
+}

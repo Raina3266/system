@@ -39,8 +39,8 @@ echo "wayle       : ${wayle_bin:-not on PATH}"
 if [ -n "${wayle_bin:-}" ]; then
   echo "wayle store : $(readlink -f "$wayle_bin")"
 fi
-echo "-- does control-centre have the new subcommands? --"
-control-centre help 2>&1 | head -12
+echo "-- what the media panel reads off the bus --"
+media-panel players 2>&1 | head -40
 echo "-- repo HEAD --"
 git -C "$HOME/system" log --oneline -1 2>&1
 
@@ -95,7 +95,7 @@ for p in "${PLAYERS[@]}"; do
   echo "   length : $(printf '%s' "$meta" | grep -o '"mpris:length" x [0-9-]*' | tail -1)"
 done
 
-say "WAYLE'S OWN VIEW (which card maps to which bus name)"
+say "WAYLE'S OWN VIEW (what the Waybar title badge still reads)"
 busctl --user call com.wayle.Media1 /com/wayle/Media com.wayle.Media1 ListPlayers 2>&1
 echo "-- active player --"
 busctl --user call com.wayle.Media1 /com/wayle/Media com.wayle.Media1 GetActivePlayer 2>&1
@@ -124,8 +124,8 @@ if [ "$TEST_CONTROL" -eq 1 ]; then
   done
 fi
 
-say "WAYLE LOG (last 150 lines)"
-journalctl --user -u wayle -n 150 --no-pager 2>&1 | tail -150
+say "WAYLE LOG (last 80 lines)"
+journalctl --user -u wayle -n 80 --no-pager 2>&1 | tail -80
 
 say "MPRISENCE TODAY"
 journalctl --user --since today --no-pager 2>/dev/null | grep -i mprisence | tail -60
