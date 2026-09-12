@@ -945,10 +945,10 @@ index e62b8e2..aa7705e 100644
 +    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-index f2e3b13..753950e 100644
+index f2e3b13..afec6b2 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-@@ -1,46 +1,50 @@
+@@ -1,46 +1,51 @@
 +mod artwork;
  mod factory;
  mod helpers;
@@ -1007,6 +1007,7 @@ index f2e3b13..753950e 100644
 +/// one another. Wide enough that polling them at different moments does not
 +/// look like disagreement.
 +const POSITION_TOLERANCE: std::time::Duration = std::time::Duration::from_secs(5);
++const PLAYERCTLD_BUS_NAME: &str = "org.mpris.MediaPlayer2.playerctld";
  
  pub(crate) struct MediaDropdown {
 +    media: Arc<MediaService>,
@@ -1026,7 +1027,7 @@ index f2e3b13..753950e 100644
  }
  
  #[relm4::component(pub(crate))]
-@@ -57,24 +61,71 @@ impl Component for MediaDropdown {
+@@ -57,24 +62,71 @@ impl Component for MediaDropdown {
              set_has_arrow: false,
              #[watch]
              set_width_request: model.scaled_width,
@@ -1077,7 +1078,9 @@ index f2e3b13..753950e 100644
 +                        set_max_content_height: model.list_height,
 +                        #[watch]
 +                        set_visible: !model.groups.is_empty(),
-+
+ 
+-                    #[watch]
+-                    set_visible_child_name: model.active_page.name(),
 +                        #[local_ref]
 +                        player_list_widget -> gtk::Box {
 +                            add_css_class: "media-player-list",
@@ -1086,9 +1089,7 @@ index f2e3b13..753950e 100644
 +                            set_spacing: model.card_gap,
 +                        },
 +                    },
- 
--                    #[watch]
--                    set_visible_child_name: model.active_page.name(),
++
 +                    #[template]
 +                    EmptyState {
 +                        add_css_class: "media-empty",
@@ -1110,7 +1111,7 @@ index f2e3b13..753950e 100644
                  },
              },
          }
-@@ -85,57 +136,49 @@ impl Component for MediaDropdown {
+@@ -85,57 +137,49 @@ impl Component for MediaDropdown {
          root: Self::Root,
          sender: ComponentSender<Self>,
      ) -> ComponentParts<Self> {
@@ -1194,7 +1195,7 @@ index f2e3b13..753950e 100644
              }
          }
      }
-@@ -143,14 +186,519 @@ impl Component for MediaDropdown {
+@@ -143,14 +187,563 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -1215,10 +1216,10 @@ index f2e3b13..753950e 100644
 +            }
 +            MediaDropdownCmd::PlayersChanged => {
 +                self.sync_player_views(self.media.player_list.get());
-+            }
-+        }
-+    }
-+}
+             }
+         }
+     }
+ }
 +
 +impl MediaDropdown {
 +    fn update_player_list(&mut self, players: Vec<Arc<Player>>, sender: &ComponentSender<Self>) {
@@ -1232,6 +1233,7 @@ index f2e3b13..753950e 100644
 +            players
 +                .into_iter()
 +                .filter(|player| player.playback_state.get() != PlaybackState::Stopped)
++                .filter(|player| !is_proxy_only(player))
 +                .collect(),
 +        );
 +        groups.sort_by_key(|group| playback_rank(group.player.playback_state.get()));
@@ -1334,7 +1336,7 @@ index f2e3b13..753950e 100644
 +                || !same_playback(&tracks[left_index], &tracks[right_index])
 +            {
 +                continue;
-             }
++            }
 +            if candidate_rank(&players[left_index], &tracks[left_index])
 +                >= candidate_rank(&players[right_index], &tracks[right_index])
 +            {
@@ -1392,6 +1394,19 @@ index f2e3b13..753950e 100644
 +    )
 +}
 +
++/// A player that only ever mirrors another one already on the bus.
++///
++/// `playerctld` proxies whichever player was last active and copies its
++/// identity and metadata wholesale, so it appears as a second card under the
++/// real player's own name — an "Elisa" card beside Elisa, or a second "YouTube
++/// Music" beside the tab. Nothing it shows is absent from the bus, and
++/// anything it can do is one hop further from the audio than asking the player
++/// itself, so the panel leaves it out rather than relying on the metadata
++/// still matching closely enough to merge the two.
++fn is_proxy_only(player: &Player) -> bool {
++    player.id.bus_name() == PLAYERCTLD_BUS_NAME
++}
++
 +/// A player that republishes someone else's playback rather than owning it.
 +///
 +/// Only ever a tie-break: a browser tab's bridge is the only publisher there
@@ -1399,8 +1414,7 @@ index f2e3b13..753950e 100644
 +/// stands beside the player it mirrors, where showing the mirror puts an extra
 +/// hop between the button and the audio.
 +fn is_mirror(player: &Player) -> bool {
-+    let bus_name = player.id.bus_name().to_ascii_lowercase();
-+    bus_name.contains("mprisence") || bus_name.contains("playerctld")
++    player.id.bus_name().to_ascii_lowercase().contains("mprisence")
 +}
 +
 +/// Follows the chain of merges from a dropped player to the card that ended up
@@ -1442,8 +1456,8 @@ index f2e3b13..753950e 100644
 +            art_url: metadata.art_url.get(),
 +            length: metadata.length.get(),
 +            position: player.position.get(),
-         }
-     }
++        }
++    }
 +
 +    /// How much this player knows about what it is playing.
 +    fn richness(&self) -> usize {
@@ -1546,7 +1560,9 @@ index f2e3b13..753950e 100644
 +
 +#[cfg(test)]
 +mod tests {
-+    use super::{Duration, TrackSnapshot, same_playback, surviving_card};
++    use super::{
++        Duration, PLAYERCTLD_BUS_NAME, TrackSnapshot, same_playback, surviving_card,
++    };
 +
 +    fn track(title: &str, artist: &str, album: &str) -> TrackSnapshot {
 +        TrackSnapshot {
@@ -1678,6 +1694,35 @@ index f2e3b13..753950e 100644
 +    }
 +
 +    #[test]
++    fn the_proxy_is_named_exactly() {
++        // Matched whole, not by substring: a real player is free to have
++        // "playerctld" somewhere in its own name.
++        assert_eq!(PLAYERCTLD_BUS_NAME, "org.mpris.MediaPlayer2.playerctld");
++    }
++
++    #[test]
++    fn the_proxys_copy_would_have_merged_anyway() {
++        // What the bus actually showed: playerctld mirroring Elisa down to the
++        // metadata, a second apart. Excluding it is belt and braces over a
++        // merge that would also have caught it.
++        let elisa = TrackSnapshot {
++            identity: String::from("Elisa"),
++            title: String::from("Tomboy"),
++            artist: String::from("Destiny Rogers"),
++            album: String::from("Tomboy"),
++            length: Some(Duration::from_micros(203_496_000)),
++            position: Duration::from_micros(91_974_000),
++            ..TrackSnapshot::default()
++        };
++        let proxy = TrackSnapshot {
++            position: Duration::from_micros(92_550_000),
++            ..elisa.clone()
++        };
++
++        assert!(same_playback(&elisa, &proxy));
++    }
++
++    #[test]
 +    fn richness_counts_what_a_player_knows() {
 +        assert_eq!(track("t", "a", "b").richness(), 4);
 +        assert_eq!(TrackSnapshot::default().richness(), 0);
@@ -1715,7 +1760,7 @@ index f2e3b13..753950e 100644
 +
 +        assert_eq!(surviving_card(0, &merged_into, &keep), None);
 +    }
- }
++}
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 index a4a0c29..37de151 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
@@ -2695,10 +2740,10 @@ index 8f60a8d..4f5caf6 100644
              can_seek.watch(),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
 new file mode 100644
-index 0000000..df91566
+index 0000000..9069b1d
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,255 @@
 +//! Play and pause commands that name what they want.
 +//!
 +//! `PlayPause` leaves the decision to the player. A bridge that republishes a
@@ -2729,8 +2774,9 @@ index 0000000..df91566
 +
 +/// How long a player is given to act on a seek before it is judged to have
 +/// ignored it. Generous, because the cost of judging too early is seeking a
-+/// second time, which is audible.
-+const SEEK_TIMEOUT: Duration = Duration::from_millis(1500);
++/// second time, which is audible: a browser tab reached through a bridge and a
++/// native-messaging hop can take over a second to report where it landed.
++const SEEK_TIMEOUT: Duration = Duration::from_millis(2500);
 +const SEEK_POLL: Duration = Duration::from_millis(120);
 +/// A player that landed this close to where it was sent has obeyed.
 +const SEEK_TOLERANCE: Duration = Duration::from_secs(2);

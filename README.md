@@ -575,7 +575,15 @@ looks alive and silently refuses. A card whose player publishes no
 `mpris:length` shows `--:--` for the total rather than claiming the track is
 zero seconds long.
 
-Two publishers of one piece of playback are shown as one card. Identity is not
+`playerctld` is left out of the list entirely. It proxies whichever player was
+last active and copies its identity and metadata wholesale, so it shows up as a
+second card under the real player's own name — an **Elisa** card beside Elisa,
+a second **YouTube Music** beside the tab. Nothing it publishes is absent from
+the bus, and anything it can do is one hop further from the audio than asking
+the player itself.
+
+The rest of the time, two publishers of one piece of playback are shown as one
+card. Identity is not
 part of deciding that: a bridge names the app or site it mirrors while the
 player names itself, and requiring the two to agree is what left a local player
 and its mirror side by side as two cards showing the same track at the same
@@ -702,7 +710,7 @@ The local patches are:
 | `dashboard-layer-window.patch` | Hosts the native dashboard in a real monitor-local layer-shell window. A Waybar click belongs to a different Wayland client, so Niri cannot reliably grant Wayle's old GTK popover the required popup grab. |
 | `wayle-wifi.patch` | Gives Wayle's network manager its own monitor-local Waybar window, adds complete active-connection information from the live access-point list rather than the device's stale cached path, and generates a large inline QR code from the active NetworkManager profile without putting its password in argv or a temporary file. |
 | `dashboard-power-profile.patch` | Makes the dashboard power-profile action cycle through every profile supported by the machine. |
-| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, one card per piece of playback however differently its publishers name themselves, a progress bar that seeks with the track identifier the bus actually carries, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
+| `wayle-media-panel.patch` | Removes the duplicate dashboard Wi-Fi tile and turns Wayle's native single-player media dropdown into a centred, monitor-local list of every playing or paused source, with equally sized cards that give the source its own line and pair the artist with the album, `playerctld`'s copy of another player left out, a panel that is as tall as the cards it holds up to four of them, cover art recovered from the track's own file when the player publishes none, a padlock on any source that says it cannot be controlled, one card per piece of playback however differently its publishers name themselves, a progress bar that seeks with the track identifier the bus actually carries, and a play/pause button that names the command, aims it at the live player, and falls back to a toggle only if nothing moved. |
 | `dashboard-notifications.patch` | Replaces the dashboard's Now Playing card with Wayle's native notification groups plus a seven-day calendar adapter, and adds expandable notification bodies. |
 | `wayle-audio-panel.patch` | Turns Wayle's audio dropdown into the tabbed [Bluetooth and audio panel](#bluetooth-and-audio-panel) and gives it a monitor-local Waybar window. |
 | `wayle-audio-profile-bridge.patch` | Uses `audio-control`'s stable card/port choices in Wayle, repairs profile switching and stale defaults, shortens device labels, and narrows the panel. |
