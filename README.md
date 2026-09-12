@@ -538,6 +538,15 @@ to ignore. That is why seeking did nothing in a local player. A player that
 publishes no usable identifier, or ignores the absolute call anyway, gets a
 relative `Seek` measured from its own position, which lands in the same place.
 
+Only one player is seeked. A card can stand for several publishers of one
+playback, and seeking each of them in turn seeks the same audio repeatedly —
+the destination is the same but the stutter is real — so the rest are tried
+only if the first did not move. For the same reason, not having reached the
+target yet does not count as having ignored the command: a player that streams
+buffers first and reports its old position for a moment, and seeking it again
+in that moment is what makes it stall and repeat. Only a player still sitting
+exactly where it started is seeked a second time.
+
 The play/pause button sends `Play` or `Pause`, not `PlayPause`. A toggle leaves
 the decision to the player, and `mprisence`, which republishes a browser tab as
 its own MPRIS player, decides from its own copy of the tab's state; when the two
@@ -573,6 +582,10 @@ and its mirror side by side as two cards showing the same track at the same
 second. In its place the metadata carries more weight — a shared title is
 something a mirror and an unrelated track can both have, so two further fields
 must line up — and a position the two disagree about settles it the other way.
+Two publishers that do agree on who they are are asked for only one: one app
+publishing itself twice is not a coincidence to guard against, and holding out
+for more leaves the two side by side for as long as the second one's metadata
+takes to arrive.
 Position is only evidence when both report one: `wayle-media` stops polling it
 for a player nothing is watching, so a zero there means unknown rather than the
 start of the track. This replaced a special case that paired a bridge with a

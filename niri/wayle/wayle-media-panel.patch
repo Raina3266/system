@@ -945,7 +945,7 @@ index e62b8e2..aa7705e 100644
 +    PlayersChanged,
  }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
-index f2e3b13..44cffdc 100644
+index f2e3b13..753950e 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
 @@ -1,46 +1,50 @@
@@ -1194,7 +1194,7 @@ index f2e3b13..44cffdc 100644
              }
          }
      }
-@@ -143,14 +186,463 @@ impl Component for MediaDropdown {
+@@ -143,14 +186,519 @@ impl Component for MediaDropdown {
      fn update_cmd(
          &mut self,
          msg: MediaDropdownCmd,
@@ -1215,10 +1215,10 @@ index f2e3b13..44cffdc 100644
 +            }
 +            MediaDropdownCmd::PlayersChanged => {
 +                self.sync_player_views(self.media.player_list.get());
-             }
-         }
-     }
- }
++            }
++        }
++    }
++}
 +
 +impl MediaDropdown {
 +    fn update_player_list(&mut self, players: Vec<Arc<Player>>, sender: &ComponentSender<Self>) {
@@ -1334,7 +1334,7 @@ index f2e3b13..44cffdc 100644
 +                || !same_playback(&tracks[left_index], &tracks[right_index])
 +            {
 +                continue;
-+            }
+             }
 +            if candidate_rank(&players[left_index], &tracks[left_index])
 +                >= candidate_rank(&players[right_index], &tracks[right_index])
 +            {
@@ -1422,6 +1422,7 @@ index f2e3b13..44cffdc 100644
 +/// them be tested, and reads each property once instead of once per pairing.
 +#[derive(Clone, Debug, Default, PartialEq, Eq)]
 +struct TrackSnapshot {
++    identity: String,
 +    title: String,
 +    artist: String,
 +    album: String,
@@ -1434,14 +1435,15 @@ index f2e3b13..44cffdc 100644
 +    fn of(player: &Player) -> Self {
 +        let metadata = &player.metadata;
 +        Self {
++            identity: player.identity.get(),
 +            title: metadata.title.get(),
 +            artist: metadata.artist.get(),
 +            album: metadata.album.get(),
 +            art_url: metadata.art_url.get(),
 +            length: metadata.length.get(),
 +            position: player.position.get(),
-+        }
-+    }
+         }
+     }
 +
 +    /// How much this player knows about what it is playing.
 +    fn richness(&self) -> usize {
@@ -1474,8 +1476,25 @@ index f2e3b13..44cffdc 100644
 +/// there means unknown rather than the start of the track.
 +fn same_playback(left: &TrackSnapshot, right: &TrackSnapshot) -> bool {
 +    same_title(left, right)
-+        && corroborating_fields(left, right) >= 2
++        && corroborating_fields(left, right) >= required_corroboration(left, right)
 +        && !positions_disagree(left, right)
++}
++
++/// How much of the metadata has to agree before two players are treated as one
++/// playback.
++///
++/// Two publishers that agree on who they are need less: one app publishing
++/// itself twice is not a coincidence to be guarded against, and holding out
++/// for more leaves the pair unmerged whenever the second one's metadata has
++/// not fully arrived. The pair that has to be told apart from a genuine
++/// coincidence is the one where a bridge and the player it mirrors name
++/// themselves differently, and that pair is asked for more.
++fn required_corroboration(left: &TrackSnapshot, right: &TrackSnapshot) -> usize {
++    if same_non_empty(&left.identity, &right.identity) {
++        1
++    } else {
++        2
++    }
 +}
 +
 +fn same_title(left: &TrackSnapshot, right: &TrackSnapshot) -> bool {
@@ -1531,6 +1550,7 @@ index f2e3b13..44cffdc 100644
 +
 +    fn track(title: &str, artist: &str, album: &str) -> TrackSnapshot {
 +        TrackSnapshot {
++            identity: String::from("Elisa"),
 +            title: String::from(title),
 +            artist: String::from(artist),
 +            album: String::from(album),
@@ -1548,6 +1568,43 @@ index f2e3b13..44cffdc 100644
 +        let mirror = elisa.clone();
 +
 +        assert!(same_playback(&elisa, &mirror));
++    }
++
++    #[test]
++    fn one_app_publishing_itself_twice_is_one_playback() {
++        // Two "YouTube Music" cards for one song. They agree on who they are,
++        // so a single further field is enough — waiting for more leaves them
++        // side by side while the second one's metadata is still arriving.
++        let full = track("Back To Sleep", "Chris Brown", "Royalty (Deluxe Version)");
++        let arriving = TrackSnapshot {
++            identity: full.identity.clone(),
++            title: full.title.clone(),
++            artist: full.artist.clone(),
++            ..TrackSnapshot::default()
++        };
++
++        assert!(same_playback(&full, &arriving));
++    }
++
++    #[test]
++    fn a_mirror_naming_itself_differently_is_asked_for_more() {
++        // One agreeing field is not enough across a disagreement about
++        // identity, which is where a coincidence could otherwise slip in.
++        let elisa = track("Summer Feelings", "Lennon Stella", "Summer Feelings");
++        let thin_mirror = TrackSnapshot {
++            identity: String::from("YouTube Music"),
++            title: elisa.title.clone(),
++            artist: elisa.artist.clone(),
++            ..TrackSnapshot::default()
++        };
++        assert!(!same_playback(&elisa, &thin_mirror));
++
++        // With the album agreeing too, it is the same playback.
++        let full_mirror = TrackSnapshot {
++            identity: String::from("YouTube Music"),
++            ..elisa.clone()
++        };
++        assert!(same_playback(&elisa, &full_mirror));
 +    }
 +
 +    #[test]
@@ -1658,8 +1715,7 @@ index f2e3b13..44cffdc 100644
 +
 +        assert_eq!(surviving_card(0, &merged_into, &keep), None);
 +    }
-+}
-+
+ }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
 index a4a0c29..37de151 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/media/player_view/messages.rs
@@ -2639,10 +2695,10 @@ index 8f60a8d..4f5caf6 100644
              can_seek.watch(),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
 new file mode 100644
-index 0000000..f007cd9
+index 0000000..df91566
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/transport.rs
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,254 @@
 +//! Play and pause commands that name what they want.
 +//!
 +//! `PlayPause` leaves the decision to the player. A bridge that republishes a
@@ -2671,8 +2727,11 @@ index 0000000..f007cd9
 +const SETTLE_TIMEOUT: Duration = Duration::from_millis(1200);
 +const SETTLE_POLL: Duration = Duration::from_millis(50);
 +
-+/// How long an absolute seek is given before the relative one is tried.
-+const SEEK_SETTLE: Duration = Duration::from_millis(350);
++/// How long a player is given to act on a seek before it is judged to have
++/// ignored it. Generous, because the cost of judging too early is seeking a
++/// second time, which is audible.
++const SEEK_TIMEOUT: Duration = Duration::from_millis(1500);
++const SEEK_POLL: Duration = Duration::from_millis(120);
 +/// A player that landed this close to where it was sent has obeyed.
 +const SEEK_TOLERANCE: Duration = Duration::from_secs(2);
 +
@@ -2746,7 +2805,7 @@ index 0000000..f007cd9
 +    }
 +}
 +
-+/// Moves every player a card stands for to the same absolute position.
++/// Moves a card's playback to an absolute position.
 +///
 +/// `SetPosition` carries the track it applies to, and MPRIS tells a player to
 +/// ignore the call when that identifier is not the one it is playing.
@@ -2756,61 +2815,79 @@ index 0000000..f007cd9
 +/// identifier off the bus fixes that, and a relative `Seek` covers a player
 +/// that publishes no usable identifier at all.
 +///
-+/// Sending an absolute position to every player in the group is safe in a way
-+/// that `Next` is not: each one ends up where it was asked to be, however many
-+/// of them are really the same playback.
++/// Only one player is moved. A card can stand for several publishers of one
++/// playback, and seeking each of them in turn seeks the same audio repeatedly:
++/// the destination is the same but the stutter is real. The rest are tried
++/// only if the first did not move at all.
 +pub(super) async fn seek_to(players: Vec<Arc<Player>>, target: Duration) {
-+    for player in players {
-+        seek_one(&player, target).await;
++    for player in &players {
++        if seek_one(player, target).await {
++            return;
++        }
 +    }
 +}
 +
-+async fn seek_one(player: &Player, target: Duration) {
++/// Seeks one player, and says whether it acted on it.
++async fn seek_one(player: &Player, target: Duration) -> bool {
 +    let Ok(proxy) = proxy(player).await else {
-+        return;
-+    };
-+
-+    if set_position(&proxy, player, target).await {
-+        return;
-+    }
-+    seek_by_offset(&proxy, player, target).await;
-+}
-+
-+/// Sends the absolute position, and says whether the player went there.
-+async fn set_position(proxy: &zbus::Proxy<'static>, player: &Player, target: Duration) -> bool {
-+    let Some(track) = track_id(proxy).await else {
 +        return false;
 +    };
++    let before = player.position().await.ok();
 +
-+    if let Err(error) = proxy
-+        .call_method("SetPosition", &(&track, micros(target)))
-+        .await
++    if let Some(track) = track_id(&proxy).await
++        && let Err(error) = proxy
++            .call_method("SetPosition", &(&track, micros(target)))
++            .await
 +    {
 +        warn!(player = %player.id, %error, "SetPosition failed");
-+        return false;
-+    }
-+
-+    sleep(SEEK_SETTLE).await;
-+    if reached(player, target).await {
++    } else if acted(player, target, before).await {
 +        return true;
 +    }
-+    warn!(player = %player.id, "SetPosition was ignored, seeking by offset");
-+    false
++
++    seek_by_offset(&proxy, player, target).await && acted(player, target, before).await
 +}
 +
 +/// Relative seek names no track, so it is what is left for a player that
 +/// publishes no identifier or ignored the absolute call. The offset is
 +/// measured from this player's own position, which keeps the destination
 +/// absolute however far along it happens to be.
-+async fn seek_by_offset(proxy: &zbus::Proxy<'static>, player: &Player, target: Duration) {
++async fn seek_by_offset(proxy: &zbus::Proxy<'static>, player: &Player, target: Duration) -> bool {
 +    let Ok(current) = player.position().await else {
-+        return;
++        return false;
 +    };
-+    if let Err(error) = proxy
++    match proxy
 +        .call_method("Seek", &(micros(target) - micros(current),))
 +        .await
 +    {
-+        warn!(player = %player.id, %error, "seek failed");
++        Ok(_) => true,
++        Err(error) => {
++            warn!(player = %player.id, %error, "seek failed");
++            false
++        }
++    }
++}
++
++/// Whether the player did something with the seek.
++///
++/// Not yet at the target is not the same as having ignored it. A player that
++/// streams buffers first and reports the old position for a moment, and
++/// seeking it again in that moment is what makes it stutter. Only a player
++/// still sitting exactly where it started has done nothing.
++async fn acted(player: &Player, target: Duration, before: Option<Duration>) -> bool {
++    let mut waited = Duration::ZERO;
++    loop {
++        let Ok(now) = player.position().await else {
++            // Nothing to judge it by, so do not seek it a second time.
++            return true;
++        };
++        if now.abs_diff(target) <= SEEK_TOLERANCE {
++            return true;
++        }
++        if waited >= SEEK_TIMEOUT {
++            return before.is_none_or(|before| now.abs_diff(before) > SEEK_TOLERANCE);
++        }
++        sleep(SEEK_POLL).await;
++        waited += SEEK_POLL;
 +    }
 +}
 +
@@ -2835,13 +2912,6 @@ index 0000000..f007cd9
 +    // to, both name no track and are ignored by every player that follows it.
 +    let text = path.as_str();
 +    (text != "/" && !text.ends_with("/NoTrack")).then_some(path)
-+}
-+
-+async fn reached(player: &Player, target: Duration) -> bool {
-+    player
-+        .position()
-+        .await
-+        .is_ok_and(|position| position.abs_diff(target) <= SEEK_TOLERANCE)
 +}
 +
 +fn micros(value: Duration) -> i64 {
