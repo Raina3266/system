@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Duration;
@@ -15,6 +16,10 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::artwork;
 use crate::mpris::{Player, Players, clock};
+
+/// The transport glyph: what the button will do, not what the player is doing.
+const GLYPH_PLAY: &str = "\u{f040a}";
+const GLYPH_PAUSE: &str = "\u{f03e4}";
 
 /// How often the cards are re-read while the panel is open. Nothing is read
 /// while it is closed: a hidden panel should cost nothing.
@@ -191,20 +196,50 @@ fn spawn_worker(commands: Receiver<Command>, snapshots: Sender<Vec<Player>>) {
             return;
         };
         while let Ok(command) = commands.recv() {
-            match command {
-                Command::Refresh => {}
-                Command::PlayPause(player) => {
-                    players.set_playing(&player, !player.status.is_playing());
+            // One command can hold this thread for seconds — `set_playing`
+            // waits on the player to agree — while the panel keeps asking for
+            // a refresh twice a second. Taking everything queued in one pass
+            // stops a click from landing behind that backlog, and collapses
+            // the refreshes into the single snapshot below instead of paying
+            // for one apiece.
+            let batch = std::iter::once(command).chain(commands.try_iter());
+            let started = std::time::Instant::now();
+            let mut handled = 0usize;
+            for command in batch {
+                match command {
+                    Command::Refresh => {}
+                    Command::PlayPause(player) => {
+                        players.set_playing(&player, !player.status.is_playing());
+                    }
+                    Command::Next(player) => players.next(&player),
+                    Command::Previous(player) => players.previous(&player),
+                    Command::Seek(player, fraction) => players.seek_to(&player, fraction),
                 }
-                Command::Next(player) => players.next(&player),
-                Command::Previous(player) => players.previous(&player),
-                Command::Seek(player, fraction) => players.seek_to(&player, fraction),
+                handled += 1;
             }
-            if snapshots.send(players.snapshot()).is_err() {
+            let acted = started.elapsed();
+            let reading = std::time::Instant::now();
+            let snapshot = players.snapshot();
+            trace(handled, acted, reading.elapsed(), snapshot.len());
+            if snapshots.send(snapshot).is_err() {
                 return;
             }
         }
     });
+}
+
+/// Timings for the loop above, on stderr, when `MEDIA_PANEL_TRACE` is set.
+/// The panel's responsiveness is entirely this thread's throughput, so this is
+/// the one measurement worth having from a machine that feels slow.
+fn trace(commands: usize, acted: Duration, read: Duration, players: usize) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("MEDIA_PANEL_TRACE").is_some()) {
+        eprintln!(
+            "media-panel: {commands} command(s) in {}ms, {players} player(s) read in {}ms",
+            acted.as_millis(),
+            read.as_millis()
+        );
+    }
 }
 
 fn wayland() -> bool {
@@ -444,14 +479,30 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
     controls.set_end_widget(Some(&length));
     root.append(&controls);
 
-    for (button, make) in [(&play_button, 0u8), (&previous, 1), (&next, 2)] {
+    {
+        let (commands, state, glyph) = (commands.clone(), state.clone(), play.clone());
+        play_button.connect_clicked(move |_| {
+            let player = state.borrow().clone();
+            // Show the outcome at once. A player can take a second or more to
+            // report a status change, and a button that only moves once the
+            // next reading comes back round reads as a button that is stuck.
+            // The next refresh corrects this if the player refused.
+            glyph.set_label(if player.status.is_playing() {
+                GLYPH_PLAY
+            } else {
+                GLYPH_PAUSE
+            });
+            let _ = commands.send(Command::PlayPause(player));
+        });
+    }
+    for (button, forwards) in [(&previous, false), (&next, true)] {
         let (commands, state) = (commands.clone(), state.clone());
         button.connect_clicked(move |_| {
             let player = state.borrow().clone();
-            let _ = commands.send(match make {
-                0 => Command::PlayPause(player),
-                1 => Command::Previous(player),
-                _ => Command::Next(player),
+            let _ = commands.send(if forwards {
+                Command::Next(player)
+            } else {
+                Command::Previous(player)
             });
         });
     }
@@ -540,7 +591,7 @@ fn update(card: &Card, player: Player) {
     card.credits
         .set_visible(!artist.is_empty() || !album.is_empty());
 
-    let cover = artwork::find(player.art_url.as_deref(), player.track_url.as_deref());
+    let cover = artwork::find_when_known(player.art_url.as_deref(), player.track_url.as_deref());
     if card.art_path.borrow().as_deref() != cover.as_deref() {
         let texture = cover.as_deref().and_then(square_texture);
         card.artwork.set_paintable(texture.as_ref());
@@ -551,9 +602,9 @@ fn update(card: &Card, player: Player) {
     card.artwork_fallback.set_visible(!has_art);
 
     card.play.set_label(if player.status.is_playing() {
-        "\u{f03e4}"
+        GLYPH_PAUSE
     } else {
-        "\u{f040a}"
+        GLYPH_PLAY
     });
     card.previous.set_sensitive(player.can_go_previous);
     card.next.set_sensitive(player.can_go_next);

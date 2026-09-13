@@ -551,6 +551,21 @@ going afterwards are named on stdout. `media-panel players` prints what the
 panel reads off the bus, which is how a source that will not respond is told
 apart from one the panel picked wrongly.
 
+Every button goes through one worker thread, so how quickly the panel answers
+a press is that thread's throughput and nothing else. Running the panel with
+`MEDIA_PANEL_TRACE=1` puts a line on stderr per pass — commands handled, how
+long they took, and how long reading the players back took — which says
+whether a slow press is a player taking its time or a backlog:
+
+```text
+media-panel: 1 command(s) in 0ms, 3 player(s) read in 26ms
+media-panel: 7 command(s) in 2586ms, 3 player(s) read in 24ms
+```
+
+The second line is a player that accepted `Pause` and ignored it: the worker
+waited out its 2.5s settle, and the six refreshes that arrived meanwhile were
+taken in the same pass rather than one at a time behind it.
+
 Waybar's media *title* still comes from Wayle, through
 `control-centre media-waybar`, which reads Wayle's own media service.
 

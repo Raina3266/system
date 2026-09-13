@@ -6,10 +6,11 @@
 //! extracted one — so `xesam:url` is followed to the file and both places are
 //! looked in.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
@@ -28,20 +29,48 @@ fn memo() -> &'static Mutex<HashMap<String, Option<PathBuf>>> {
     MEMO.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// A file the panel can draw as this track's cover.
-pub fn find(art_url: Option<&str>, track_url: Option<&str>) -> Option<PathBuf> {
-    let key = format!("{}\u{1}{}", art_url.unwrap_or(""), track_url.unwrap_or(""));
+/// Lookups already running, so a panel refreshing twice a second starts one
+/// thread per track rather than one per tick.
+fn pending() -> &'static Mutex<HashSet<String>> {
+    static PENDING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn key(art_url: Option<&str>, track_url: Option<&str>) -> String {
+    format!("{}\u{1}{}", art_url.unwrap_or(""), track_url.unwrap_or(""))
+}
+
+/// The cover if it is already known, and never a download.
+///
+/// `find` reads tags and fetches over HTTP, either of which can take seconds —
+/// `curl` alone is allowed ten. Doing that on the thread drawing the panel
+/// freezes every card until it returns, which is what a track change used to
+/// cost. A miss starts the lookup out of the way and returns `None`; the
+/// refresh after it finishes picks the answer up.
+pub fn find_when_known(art_url: Option<&str>, track_url: Option<&str>) -> Option<PathBuf> {
+    let key = key(art_url, track_url);
     if let Ok(memo) = memo().lock()
         && let Some(found) = memo.get(&key)
     {
         return found.clone();
     }
 
-    let found = resolve(art_url, track_url);
-    if let Ok(mut memo) = memo().lock() {
-        memo.insert(key, found.clone());
+    let fresh = pending()
+        .lock()
+        .is_ok_and(|mut pending| pending.insert(key.clone()));
+    if fresh {
+        let (art, track) = (art_url.map(str::to_owned), track_url.map(str::to_owned));
+        thread::spawn(move || {
+            let found = resolve(art.as_deref(), track.as_deref());
+            if let Ok(mut memo) = memo().lock() {
+                memo.insert(key.clone(), found);
+            }
+            if let Ok(mut pending) = pending().lock() {
+                pending.remove(&key);
+            }
+        });
     }
-    found
+    None
 }
 
 fn resolve(art_url: Option<&str>, track_url: Option<&str>) -> Option<PathBuf> {
