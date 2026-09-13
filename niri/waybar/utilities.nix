@@ -8,19 +8,9 @@
   homeConfig.home.packages = [
     packages.previewPanel
     packages.rofiClipboard
-    packages.rofiNetwork
   ];
 
   modules = {
-    "custom/network" = {
-      exec = "${packages.rofiNetwork}/bin/rofi-network status";
-      interval = 5;
-      return-type = "json";
-      tooltip = true;
-      escape = false;
-      on-click = "${packages.rofiNetwork}/bin/rofi-network";
-    };
-
     "custom/timer" = {
       exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.waybarTimer}/bin/waybar-timer";
       format = "{}";

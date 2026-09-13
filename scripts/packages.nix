@@ -85,26 +85,37 @@ let
       : > ${m}/src/main.rs
     '') (lib.remove pname workspaceMembers);
 
+  # `pname` is normally also Cargo's package id and the installed main binary.
+  # network-manager is the one exception: its repository directory and binary
+  # were renamed, while its Cargo package id stays `rofi-network` so the shared
+  # Cargo.lock does not churn for an otherwise dependency-free rename.
   mkWorkspacePackage =
     pname: extra:
+    let
+      cargoPackage = extra.cargoPackage or pname;
+      mainProgram = extra.mainProgram or pname;
+      packageExtra = builtins.removeAttrs extra [
+        "cargoPackage"
+        "mainProgram"
+      ];
+    in
     craneLib.buildPackage (
       commonArgs
-      // extra
+      // packageExtra
       // {
         inherit pname cargoArtifacts;
         version = "0.1.0";
         src = memberSrc pname;
         # Feeds both the build and the test phase, so tests stay scoped to the
         # one member as well.
-        cargoExtraArgs = "--locked --package ${pname}";
+        cargoExtraArgs = "--locked --package ${cargoPackage}";
         # The shared environment has to win over anything a crate passes, or
         # that crate stops hitting the artifact cache.
         inherit (commonArgs) strictDeps nativeBuildInputs buildInputs;
-        postPatch = stubSiblings pname + (extra.postPatch or "");
-        # Every member names its [[bin]] after the crate. Say so, rather than
-        # leaving lib.getExe to guess it: the guess still resolves, but warns
-        # on every evaluation that it is deprecated.
-        meta = (extra.meta or { }) // { mainProgram = pname; };
+        postPatch = stubSiblings pname + (packageExtra.postPatch or "");
+        # Say which executable lib.getExe should resolve rather than making it
+        # guess from the derivation name.
+        meta = (packageExtra.meta or { }) // { inherit mainProgram; };
       }
     );
 
@@ -194,14 +205,17 @@ rec {
     '';
   };
 
-  rofiNetwork = mkWorkspacePackage "rofi-network" {
+  networkManager = mkWorkspacePackage "network-manager" {
+    cargoPackage = "rofi-network";
     dontWrapGApps = true;
     postInstall = ''
-      wrapProgram "$out/bin/rofi-network" \
+      wrapProgram "$out/bin/network-manager" \
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
         --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
-        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
+        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
+        --set NETWORK_MANAGER_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
+        --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
     '';
   };
 
@@ -226,7 +240,7 @@ rec {
         --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg-full}/bin/ffmpeg" \
         --set WEBCAM_CROP_FUSER "${pkgs.psmisc}/bin/fuser" \
         --set WEBCAM_CROP_INOTIFYWAIT "${pkgs.inotify-tools}/bin/inotifywait" \
-        --set WEBCAM_CROP_V4L2_CTL "${pkgs.v4l-utils}/bin/v4l2-ctl" \
+        --set WEBCAM_CROP_V4L2_CTL "${pkgs.lib.getExe' pkgs.v4l-utils "v4l2-ctl"}" \
         --set WEBCAM_CROP_V4L2LOOPBACK_CTL "${kernelPackages.v4l2loopback.bin}/bin/v4l2loopback-ctl"
     '';
   };

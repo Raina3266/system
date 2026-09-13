@@ -8,6 +8,7 @@ mod model;
 mod network;
 mod preview;
 mod rofi;
+mod wayle;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
@@ -15,7 +16,7 @@ pub type AppResult<T> = Result<T, AppError>;
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("rofi-network: {error}");
+        eprintln!("network-manager: {error}");
         std::process::exit(2);
     }
 }
@@ -48,8 +49,7 @@ async fn run() -> AppResult<()> {
         }
         Some("connect-bg") => {
             // Detached background connect; spawned by `submit_password` so the
-            // rofi script can render "Connecting…" immediately. Writes the
-            // outcome to $XDG_RUNTIME_DIR/rofi-network-connect-result.
+            // Rofi script can render "Connecting…" immediately.
             let hex_key = arguments
                 .next()
                 .ok_or_else(|| io::Error::other("connect-bg key is missing"))?;
@@ -70,10 +70,25 @@ async fn run() -> AppResult<()> {
             }
             Ok(())
         }
+        Some("wayle-info") => {
+            let ssid = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("wayle-info SSID is missing"))?;
+            let manager = NetworkManager::new().await?;
+            wayle::print_wifi_info(&manager, &ssid).await
+        }
+        Some("wayle-qr") => {
+            let ssid = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("wayle-qr SSID is missing"))?;
+            let manager = NetworkManager::new().await?;
+            wayle::write_wifi_qr(&manager, &ssid).await
+        }
         Some("help" | "--help" | "-h") => {
             print!(
-                "rofi-network\n\n\
-                 Usage:\n  rofi-network\n  rofi-network status\n"
+                "network-manager\n\n\
+                 Usage:\n  network-manager\n  network-manager status\n\
+                 \nWayle bridge:\n  network-manager wayle-info <SSID>\n  network-manager wayle-qr <SSID>\n"
             );
             Ok(())
         }

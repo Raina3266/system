@@ -1,8 +1,10 @@
-# Dashboard, Wayle Wi-Fi/media/audio, and Calendar/Tasks modules.
+# Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
 # The dashboard button carries the current battery reading and opens Wayle's
-# native dashboard, which now also contains notifications and the seven-day
-# calendar. Dedicated buttons open Wayle's Wi-Fi, media and audio panels.
+# native dashboard, which also contains notifications and the seven-day
+# calendar. The network button takes its status from `network-manager` and opens
+# Wayle's native Wi-Fi/Ethernet dropdown. Media and audio use their standalone
+# panels.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -74,17 +76,19 @@ let
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ${lib.escapeShellArg monitor}";
   };
 
-  wayleWifiModule = monitor: {
-    format = "󰤨";
+  networkModule = monitor: {
+    exec = "${packages.networkManager}/bin/network-manager status";
+    interval = 5;
+    return-type = "json";
     tooltip = true;
-    tooltip-format = "Wayle Wi-Fi";
+    escape = false;
     on-click =
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
 
-  # Left-click opens Wayle's Bluetooth and audio panel; the status glyph and
-  # tooltip still come from `audio-control status`, which already reports the
-  # adapter, the default output and input, and connected devices. Right-click
+  # Left-click opens the standalone Bluetooth and audio panel; the status glyph
+  # and tooltip still come from `audio-control status`, which already reports
+  # the adapter, the default output and input, and connected devices. Right-click
   # remains the adapter's on/off switch.
   audioModule = monitor: {
     exec = "${packages.audioControl}/bin/audio-control status";
@@ -93,8 +97,8 @@ let
     tooltip = true;
     escape = false;
     # `audio-panel` is a second binary in the audio-control crate, so the panel
-    # and the Rofi menu make the same decisions about mutually exclusive ALSA
-    # card profiles. Running it again toggles the one already up.
+    # and the old menu logic make the same decisions about mutually exclusive
+    # ALSA card profiles. Running it again toggles the one already up.
     on-click = "${packages.audioControl}/bin/audio-panel ${lib.escapeShellArg monitor}";
     on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
@@ -119,13 +123,14 @@ let
   };
 in
 {
-  inherit audioModule dashboardModule wayleMediaModule wayleWifiModule;
+  inherit audioModule dashboardModule networkModule wayleMediaModule;
 
   homeConfig = {
     home.packages = [
       pkgs.mprisence
       packages.ycal.package
       packages.audioControl
+      packages.networkManager
     ];
     programs.google-chrome = {
       commandLineArgs = [
@@ -155,11 +160,9 @@ in
     # each panel on the monitor whose button was clicked.
     "custom/audio" = audioModule "";
     "custom/dashboard" = dashboardModule "";
-    "custom/wayle-wifi" = wayleWifiModule "";
+    "custom/network" = networkModule "";
     "custom/wayle-media" = wayleMediaModule "";
 
-    # The media button above reads Wayle's own D-Bus service, so it and the
-    # popup select and deduplicate the same native player list.
     "custom/lyrics" = {
       hide-empty-text = true;
       return-type = "json";

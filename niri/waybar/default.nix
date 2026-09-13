@@ -34,13 +34,10 @@ let
     // {
       position = "top";
       expand-center = true;
-      # Wayle's native dashboard and Wi-Fi manager are separate buttons at the
-      # far left. The dashboard button also carries the battery reading; the
-      # centre keeps media controls and the current track, and the audio button
-      # on the right opens Wayle's Bluetooth and audio panel.
+      # Network and Dashboard live together at the far right: Network is the
+      # second-most-right button and opens Wayle's native Wi-Fi/Ethernet panel;
+      # Dashboard is the right-most button and still carries battery status.
       modules-left = [
-        "custom/dashboard"
-        "custom/wayle-wifi"
         "tray"
         "custom/ycal"
       ];
@@ -53,6 +50,7 @@ let
         "custom/clipboard"
         "custom/audio"
         "custom/network"
+        "custom/dashboard"
       ];
     }
     // modules;
@@ -70,7 +68,7 @@ let
         inherit output;
         "custom/audio" = system.audioModule output;
         "custom/dashboard" = system.dashboardModule output;
-        "custom/wayle-wifi" = system.wayleWifiModule output;
+        "custom/network" = system.networkModule output;
         "custom/wayle-media" = system.wayleMediaModule output;
       };
     }) wayleOutputs

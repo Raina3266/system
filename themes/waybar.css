@@ -38,7 +38,6 @@ window#waybar.bottom {
 #custom-timer,
 #custom-files,
 #custom-dashboard,
-#custom-wayle-wifi,
 #custom-wayle-media,
 #tray {
     color: #7afcff;
@@ -140,7 +139,6 @@ window#waybar.bottom {
 #custom-files:hover,
 #custom-timer:hover,
 #custom-dashboard:hover,
-#custom-wayle-wifi:hover,
 #custom-wayle-media:hover,
 #custom-obsidian:hover,
 #custom-tauon:hover,

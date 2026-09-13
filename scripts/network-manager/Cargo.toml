@@ -1,7 +1,14 @@
 [package]
+# Keep the Cargo package id stable so Cargo.lock does not churn solely because
+# the front-end grew into a shared network backend. The installed executable
+# and repository directory are both `network-manager`.
 name = "rofi-network"
 version.workspace = true
 edition.workspace = true
+
+[[bin]]
+name = "network-manager"
+path = "src/main.rs"
 
 [dependencies]
 nmrs = "=3.4.2"

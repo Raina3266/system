@@ -3,11 +3,11 @@ members = [
   "audio-control",
   "control-centre",
   "media-panel",
+  "network-manager",
   "ocr-screenshot",
   "preview-panel",
   "rofi-clipboard",
   "rofi-filesearch",
-  "rofi-network",
   "waybar-timer",
   "webcam-crop",
 ]
