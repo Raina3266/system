@@ -1,9 +1,10 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # Wayle's native dashboard also owns notification history and the seven-day
-# agenda. Its own bar is visually hidden. The dashboard and network manager
-# opened from Waybar use separate layer-shell windows, avoiding GTK popup-grab
-# restrictions; media and audio are this repository's own programs.
+# agenda. Its own bar is visually hidden. Every Wayle dropdown opened from
+# Waybar uses a monitor-local layer-shell window, avoiding GTK popup-grab
+# restrictions and providing a shared click-away backdrop; media and audio in
+# the visible Waybar remain this repository's own programs.
 { repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -46,6 +47,9 @@ in
             ./dashboard-notifications.patch
             ./dashboard-slim.patch
             ./dashboard-polish.patch
+            # Apply last: dashboard-wifi-tile adds Media to the external host;
+            # this generalises that finished host to every registered dropdown.
+            ./external-dropdown-all.patch
           ];
       });
     })
@@ -84,14 +88,14 @@ in
 
             bar = {
               # `show = false` keeps Wayle's own bar visually hidden. External
-              # dashboard and network requests use monitor-local layer surfaces.
+              # dropdown requests use monitor-local layer surfaces with their
+              # own click-away backdrop.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;
-              # The click originates in Waybar, not Wayle. An autohide GTK
-              # popover would request an xdg_popup grab using an input serial
-              # Wayle never received, so external panels use layer surfaces.
-              "dropdown-autohide" = false;
+              # D-Bus panels no longer use GTK popovers, so ordinary Wayle
+              # popovers can safely use their native outside-click dismissal.
+              "dropdown-autohide" = true;
               layout = [
                 {
                   monitor = "*";
