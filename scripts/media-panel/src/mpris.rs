@@ -157,6 +157,7 @@ impl Players {
             .as_ref()
             .and_then(|root| root.get_property::<String>("Identity").ok())
             .filter(|identity| !identity.trim().is_empty())
+            .filter(|identity| !echoes_the_bus_name(identity))
             .unwrap_or_else(|| friendly_source(bus));
 
         Some(Player {
@@ -336,15 +337,54 @@ fn is_player(name: &OwnedBusName) -> bool {
             .any(|excluded| name.to_ascii_lowercase().contains(excluded))
 }
 
-/// The player's own name, for a bus that publishes no `Identity`.
+/// Most players publish their own name as `Identity` — `Elisa`, `YouTube
+/// Music` — and the card shows it untouched. A few echo their bus name back
+/// instead, which is dotted and carries no spaces; that gets the same cleanup
+/// as a bus publishing no identity at all.
+fn echoes_the_bus_name(identity: &str) -> bool {
+    identity.contains('.') && !identity.contains(' ')
+}
+
+/// Chromium numbers its instances (`instance1234`) and mprisence gives every
+/// tab a `p` and a hex id (`pa8082085c72e81fe`). Neither names an app.
+fn is_instance(part: &str) -> bool {
+    let digits = |rest: &str| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    part.strip_prefix("instance").is_some_and(digits)
+        || part
+            .strip_prefix('p')
+            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_hexdigit()))
+        || digits(part)
+}
+
+/// The player's own name, for a bus that publishes no usable `Identity`.
+///
+/// mprisence opens one bus per browser tab and names it for the publisher, the
+/// site and the tab: `mprisence_web.youtube_music.pa8082085c72e81fe`. Neither
+/// the leading segment nor the whole tail is a name worth putting on a card,
+/// so drop the publisher and the per-tab id and keep what names the app.
 pub fn friendly_source(bus: &str) -> String {
     let tail = bus.strip_prefix(MPRIS_PREFIX).unwrap_or(bus);
-    // Chromium-style buses carry an instance suffix: `chromium.instance1234`.
-    let name = tail.split('.').next().unwrap_or(tail);
-    let mut characters = name.chars();
-    characters.next().map_or_else(String::new, |first| {
-        first.to_uppercase().collect::<String>() + characters.as_str()
-    })
+    let mut parts: Vec<&str> = tail.split('.').filter(|part| !part.is_empty()).collect();
+
+    if parts.len() > 1 && parts[0].split('_').next() == Some("mprisence") {
+        parts.remove(0);
+    }
+    if parts.len() > 1 && is_instance(parts[parts.len() - 1]) {
+        parts.pop();
+    }
+
+    parts
+        .join(" ")
+        .split(['_', '-', ' '])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut characters = word.chars();
+            characters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + characters.as_str()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn micros(value: Duration) -> i64 {

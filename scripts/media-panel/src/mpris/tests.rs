@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use super::{Player, Status, clock, friendly_source, merge_duplicates, same_playback};
+use super::{
+    Player, Status, clock, echoes_the_bus_name, friendly_source, merge_duplicates, same_playback,
+};
 
 fn player(bus: &str, source: &str, title: &str, artist: &str, album: &str) -> Player {
     Player {
@@ -195,6 +197,32 @@ fn friendly_source_drops_a_chromium_instance_suffix() {
         "Chromium"
     );
     assert_eq!(friendly_source("org.mpris.MediaPlayer2.elisa"), "Elisa");
+}
+
+#[test]
+fn friendly_source_names_the_app_behind_an_mprisence_tab() {
+    // One bus per browser tab: publisher, site, then the tab's own id.
+    assert_eq!(
+        friendly_source("org.mpris.MediaPlayer2.mprisence_web.spotify.p2911"),
+        "Spotify"
+    );
+    assert_eq!(
+        friendly_source("org.mpris.MediaPlayer2.mprisence_web.youtube_music.pa8082085c72e81fe"),
+        "Youtube Music"
+    );
+    // An app segment that merely starts with `p` is not a tab id.
+    assert_eq!(
+        friendly_source("org.mpris.MediaPlayer2.mprisence.pandora"),
+        "Pandora"
+    );
+}
+
+#[test]
+fn a_published_identity_wins_unless_it_is_the_bus_name() {
+    assert!(!echoes_the_bus_name("YouTube Music"));
+    assert!(!echoes_the_bus_name("Elisa"));
+    assert!(!echoes_the_bus_name("VLC media player"));
+    assert!(echoes_the_bus_name("mprisence_web.spotify.p2911"));
 }
 
 #[test]
