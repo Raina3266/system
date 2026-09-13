@@ -3,8 +3,8 @@ use std::str::FromStr;
 
 use crate::{AppError, AppResult};
 
-/// Each tab is a separate script mode, so Rofi keeps a
-/// private `ROFI_DATA` per tab and the mode switcher renders them as buttons.
+/// The four tabs. `name` is the stable identifier used on the command line;
+/// `prompt` is what the tab itself is labelled with.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Bluetooth,
@@ -23,11 +23,7 @@ impl Mode {
         }
     }
 
-    /// The mode switcher's tab label. Rofi ties the input bar's prompt widget
-    /// to the same string (`script.c` assigns the `prompt` header to
-    /// `sw->display_name`, and `rofi_view_update_prompt` reads it back), so
-    /// the input bar drops the `prompt` widget entirely and shows a static
-    /// filter glyph instead — see the `inputbar` block in audio-control.rasi.
+    /// The tab's label, glyph included.
     pub fn prompt(self) -> &'static str {
         match self {
             Self::Bluetooth => "󰂯 Pair",
@@ -281,23 +277,6 @@ impl StreamEntry {
     }
 }
 
-/// A routing sub-menu stays in the current tab; the target is a stream key,
-/// never its display label or row number.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Picker {
-    Route(String),
-}
-
-impl Picker {
-    pub fn target(&self) -> &str {
-        match self {
-            Self::Route(key) => key,
-        }
-    }
-}
-
-pub const BACK_KEY: &str = "back";
-
 #[derive(Clone, Debug)]
 pub struct ChoiceEntry {
     pub key: String,
@@ -316,83 +295,6 @@ impl ChoiceEntry {
             label: device.label,
             description: device.description,
             enabled: true,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ChoiceList {
-    pub title: String,
-    pub entries: Vec<ChoiceEntry>,
-}
-
-/// One script invocation only ever renders one tab, so only that tab's devices
-/// are collected. Bluetooth reads BlueZ, the audio tabs read PulseAudio, and
-/// neither backend has to be reachable for the other tab to work.
-pub enum Devices {
-    Bluetooth(Vec<BluetoothEntry>),
-    Audio(Vec<AudioEntry>),
-    Streams(Vec<StreamEntry>),
-    Choices(ChoiceList),
-}
-
-impl Devices {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Bluetooth(entries) => entries.is_empty(),
-            Self::Audio(entries) => entries.is_empty(),
-            Self::Streams(entries) => entries.is_empty(),
-            // Every picker has a Back row, even when all targets disappear.
-            Self::Choices(_) => false,
-        }
-    }
-
-    pub fn position(&self, key: &str) -> Option<usize> {
-        match self {
-            Self::Bluetooth(entries) => entries.iter().position(|entry| entry.key == key),
-            Self::Audio(entries) => entries.iter().position(|entry| entry.key == key),
-            Self::Streams(entries) => entries.iter().position(|entry| entry.key == key),
-            Self::Choices(choices) => {
-                if key == BACK_KEY {
-                    Some(0)
-                } else {
-                    choices
-                        .entries
-                        .iter()
-                        .position(|entry| entry.key == key)
-                        .map(|i| i + 1)
-                }
-            }
-        }
-    }
-
-    pub fn message_label(&self, index: usize) -> Option<String> {
-        match self {
-            Self::Bluetooth(entries) => entries.get(index).map(BluetoothEntry::message_label),
-            Self::Audio(entries) => entries.get(index).map(AudioEntry::message_label),
-            Self::Streams(_) => None,
-            Self::Choices(choices) => Some(choices.title.clone()),
-        }
-    }
-
-    pub fn bluetooth(&self, key: &str) -> Option<&BluetoothEntry> {
-        match self {
-            Self::Bluetooth(entries) => entries.iter().find(|entry| entry.key == key),
-            _ => None,
-        }
-    }
-
-    pub fn audio(&self, key: &str) -> Option<&AudioEntry> {
-        match self {
-            Self::Audio(entries) => entries.iter().find(|entry| entry.key == key),
-            _ => None,
-        }
-    }
-
-    pub fn stream(&self, key: &str) -> Option<&StreamEntry> {
-        match self {
-            Self::Streams(entries) => entries.iter().find(|entry| entry.key == key),
-            _ => None,
         }
     }
 }

@@ -1,7 +1,7 @@
 //! The panel: four tabs on a monitor-local layer surface.
 //!
-//! The tabs and what they hold are the ones the Rofi menu has always had, so
-//! `Mode` decides both. Everything drawn here comes from one `Snapshot`, and
+//! `Mode` decides both the tabs and what each one holds. Everything drawn
+//! here comes from one `Snapshot`, and
 //! every press goes back as one `Command`; the UI itself knows nothing about
 //! PulseAudio or BlueZ.
 
@@ -228,7 +228,11 @@ fn clear(container: &gtk::Box) {
 /// Redrawing rebuilds the rows, which loses whatever the pointer was on, so it
 /// only happens when something actually changed.
 fn signature(snapshot: &Snapshot, view: &View) -> String {
-    let mut out = format!("{:?}|{:?}|", view.tab(), view.routing.as_ref().map(|s| &s.key));
+    let mut out = format!(
+        "{:?}|{:?}|",
+        view.tab(),
+        view.routing.as_ref().map(|s| &s.key)
+    );
     out.push_str(&format!("{}{}", snapshot.powered, snapshot.scanning));
     if let Some(notice) = &snapshot.notice {
         out.push_str(notice);
@@ -317,8 +321,8 @@ fn section(title: &str) -> gtk::Label {
 
 /// The default device's volume and mute, then every device to switch to.
 ///
-/// The rows are `selections`, the same list the Rofi menu and Wayle's picker
-/// use, so a laptop's Speaker and Headphones stay separate destinations even
+/// The rows are `selections`, the same list Wayle's device picker is given,
+/// so a laptop's Speaker and Headphones stay separate destinations even
 /// though their ALSA profiles are mutually exclusive.
 fn device_tab(content: &gtk::Box, snapshot: &Snapshot, mode: Mode, commands: &Sender<Command>) {
     let entries = worker::entries(snapshot, mode);
@@ -352,7 +356,11 @@ fn volume_card(entry: &AudioEntry, commands: &Sender<Command>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     row.add_css_class("audio-volume-row");
 
-    let mute = gtk::Button::with_label(if entry.muted { "\u{f075f}" } else { "\u{f057e}" });
+    let mute = gtk::Button::with_label(if entry.muted {
+        "\u{f075f}"
+    } else {
+        "\u{f057e}"
+    });
     mute.set_css_classes(if entry.muted {
         &["audio-icon-button", "audio-glyph", "muted"]
     } else {
@@ -490,7 +498,11 @@ fn stream_card(
     card.append(&header);
 
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let mute = gtk::Button::with_label(if stream.muted { "\u{f075f}" } else { "\u{f057e}" });
+    let mute = gtk::Button::with_label(if stream.muted {
+        "\u{f075f}"
+    } else {
+        "\u{f057e}"
+    });
     mute.set_css_classes(if stream.muted {
         &["audio-icon-button", "audio-glyph", "muted"]
     } else {
@@ -632,7 +644,11 @@ fn adapter_row(snapshot: &Snapshot, commands: &Sender<Command>) -> gtk::Box {
     label.set_xalign(0.0);
     row.append(&label);
 
-    let scan = gtk::Button::with_label(if snapshot.scanning { "Scanning…" } else { "Scan" });
+    let scan = gtk::Button::with_label(if snapshot.scanning {
+        "Scanning…"
+    } else {
+        "Scan"
+    });
     scan.set_css_classes(&["audio-scan"]);
     scan.set_sensitive(!snapshot.scanning);
     let sender = commands.clone();

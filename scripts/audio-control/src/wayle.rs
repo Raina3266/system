@@ -1,9 +1,9 @@
 //! Small machine interface used by Wayle's device picker.
 //!
-//! The regular UI and this bridge deliberately use the same `selections` and
+//! The panel and this bridge deliberately use the same `selections` and
 //! `set_default` functions. That keeps mutually exclusive ALSA card profiles
 //! (notably the laptop Speaker and Headphones profiles) behaving identically
-//! in Rofi and Wayle.
+//! in the panel and in Wayle.
 
 use std::io::{self, Write};
 

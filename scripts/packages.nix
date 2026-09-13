@@ -205,13 +205,11 @@ rec {
     '';
   };
 
-  audioControl = mkWorkspacePackage "audio-control" {
-    dontWrapGApps = true;
-    postInstall = ''
-      wrapProgram "$out/bin/audio-control" \
-        --set AUDIO_CONTROL_ROFI "${pkgs.lib.getExe pkgs.rofi}"
-    '';
-  };
+  # No `dontWrapGApps` here, unlike the other command-line members: this crate
+  # also ships `audio-panel`, so wrapGAppsHook4 has to reach it the same way it
+  # reaches media-panel. The wrapper it puts on `audio-control` only sets
+  # environment variables — Waybar's status call still loads no GTK.
+  audioControl = mkWorkspacePackage "audio-control" { };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     dontWrapGApps = true;

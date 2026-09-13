@@ -16,7 +16,7 @@ opened from the audio button.
 ## audio-control
 
 `scripts/audio-control` replaces the former `custom/audio` shell script and
-`custom/bt` Waybar module with one program and one Waybar entry. Bluetooth is
+`custom/bt` Waybar module with one crate and one Waybar entry. Bluetooth is
 driven by [`bluer`](https://crates.io/crates/bluer), the official BlueZ crate,
 and the audio tabs by [`pulsectl-rs`](https://crates.io/crates/pulsectl-rs) over
 PulseAudio, which `pipewire-pulse` serves. Neither backend is reimplemented by
@@ -25,20 +25,18 @@ hand.
 The package in `scripts/packages.nix` and the existing Waybar launcher provide
 all four tabs.
 
-The Waybar button now opens Wayle's
-[Bluetooth and audio panel](#bluetooth-and-audio-panel), which has the same four
-tabs. `audio-control` keeps the Rofi menu described below — run it from a terminal
-or a binding of your own — and stays the Waybar entry's status backend and its
-right-click Bluetooth switch.
+The Waybar button opens the [Bluetooth and audio panel](#bluetooth-and-audio-panel),
+`audio-panel`. `audio-control` is the command line beside it: the Waybar entry's
+status backend and its right-click Bluetooth switch.
 
-### Modes
+### Tabs
 
-Rofi opens on **Pair** (Bluetooth); `Shift+Left`/`Shift+Right` move between tabs.
-The internal mode name remains `bluetooth`.
+The panel opens on **Output**; the four tabs across the top switch between them.
+The internal mode name for Pair remains `bluetooth`.
 
-| Tab | Rows | Enter / double-click |
+| Tab | Rows | Activating a row |
 | --- | --- | --- |
-| Pair | Discovered and paired Bluetooth devices | Pair/connect or disconnect, as before |
+| Pair | Discovered and paired Bluetooth devices | Pair/connect or disconnect |
 | Output | Output devices and their available ports | Activate the row's port, then set its device as default |
 | Input | Microphones and other non-monitor inputs, including their available ports | Activate the row's port, then set its device as default |
 | Play | Live playback streams, with app, volume and meaningful stream title | Choose that stream's output |
@@ -46,9 +44,7 @@ The internal mode name remains `bluetooth`.
 Applications may expose several streams. They remain separate; no MPRIS support
 is required. Start playback in an application for its stream to
 appear. Muted or paused streams are dimmed, and lists refresh every two seconds.
-The popup width is configured in `themes/audio-control.rasi`.
-Tabs size themselves to their labels instead of splitting the width equally,
-so a longer label such as Output gets more space than Pair.
+The panel's width and colours are in `scripts/audio-control/src/panel/style.css`.
 There is no Recording tab or per-application input routing. The Input tab still
 controls microphone devices: default selection, volume, mute and physical ports.
 
@@ -177,16 +173,14 @@ service, which auto-confirms them.
 ### Commands
 
 ```text
-audio-control [launch]
 audio-control status
 audio-control bluetooth-power [on|off|toggle]
-audio-control script <bluetooth|output|input|playback>
-audio-control connect-bg <row-key>
-audio-control scan-bg
+audio-control wayle-list <output|input>
+audio-control wayle-set-default <output|input> <key>
 ```
 
-`script`, `connect-bg`, and `scan-bg` are internal: Rofi invokes the first,
-and the Pair tab spawns the other two.
+Run it with no arguments for that list. The panel is the other binary in the
+crate: `audio-panel [monitor]`.
 
 ### Waybar module
 
@@ -197,16 +191,15 @@ and the Pair tab spawns the other two.
     "interval": 5,
     "return-type": "json",
     "escape": false,
-    "on-click": "busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio eDP-1",
+    "on-click": "/path/to/audio-panel eDP-1",
     "on-click-right": "/path/to/audio-control bluetooth-power toggle"
   }
 }
 ```
 
-The configured `on-click` opens Wayle's
+The configured `on-click` opens the
 [Bluetooth and audio panel](#bluetooth-and-audio-panel) on the monitor whose
-button was clicked; each Waybar instance passes its own output name. Use
-`/path/to/audio-control` instead to keep the Rofi menu on the button.
+button was clicked; each Waybar instance passes its own output name.
 
 The text is a single glyph:
 
@@ -230,12 +223,7 @@ switch; `bluetooth-power on` and `off` are available for bindings of your own.
 
 | Variable | Purpose |
 | --- | --- |
-| `AUDIO_CONTROL_ROFI` | Override the `rofi` executable |
-| `AUDIO_CONTROL_THEME` | Override the Rofi theme path (default: `$XDG_CONFIG_HOME/rofi/audio-control.rasi`) |
 | `AUDIO_CONTROL_SCAN_SECONDS` | Length of the Bluetooth discovery window (default: `10`) |
-
-Styling lives in `themes/audio-control.rasi`, symlinked to
-`~/.config/rofi/audio-control.rasi` so edits apply without a rebuild.
 
 ### Development checks
 
@@ -587,8 +575,7 @@ replaced by an error.
 ### Bluetooth and audio panel
 
 The right-side audio button opens `audio-panel`, a second binary in the
-[`audio-control`](#audio-control) crate rather than a patch on Wayle. It has the
-same four tabs the Rofi menu has, over the same code:
+[`audio-control`](#audio-control) crate rather than a patch on Wayle:
 
 | Tab | Contents |
 | --- | --- |
@@ -597,8 +584,8 @@ same four tabs the Rofi menu has, over the same code:
 | Input | The default input's volume and mute, then every microphone and its available ports |
 | Play | Per-application volume, with a route button at the end of each stream's row |
 
-One library, two binaries. `audio-control` keeps the command line — the Rofi
-menu, the Waybar status line — and never links GTK, which matters because
+One library, two binaries. `audio-control` is the command line — the Waybar
+status line, Wayle's device picker — and never links GTK, which matters because
 Waybar runs it every five seconds; `audio-panel` is the GTK front end over the
 same `audio` and `bluetooth` modules. Both therefore make the same decisions,
 which is the point: **Speaker** and **Headphones** stay separate destinations
@@ -656,7 +643,7 @@ from one the panel aimed at wrongly. It pauses your music.
 
 `cargo test -p control-centre` covers the remaining Waybar media-title
 streamer, and `cargo test -p audio-control` the device, port and profile rules
-the audio panel and the Rofi menu share.
+behind the audio panel.
 The seven-day agenda has a unit test in `dashboard-notifications.patch`; the
 device/port rules and profile bridge have focused parsing, naming and row-shape
 tests. The Wayle patch stack is checked against v0.7.0 before updates are

@@ -32,7 +32,9 @@ pub fn spawn(commands: Receiver<Command>, snapshots: Sender<Snapshot>) {
 async fn apply(command: Command) -> Option<String> {
     match command {
         Command::Refresh => None,
-        Command::SetDefault(entry) => failure("Could not switch device", audio::set_default(&entry)),
+        Command::SetDefault(entry) => {
+            failure("Could not switch device", audio::set_default(&entry))
+        }
         Command::SetVolume(entry, target) => {
             // The domain layer nudges rather than sets, so that the step is
             // applied to the level read back from the server rather than to
@@ -59,10 +61,9 @@ async fn apply(command: Command) -> Option<String> {
             "Could not move the stream",
             audio::move_stream(&entry, &destination),
         ),
-        Command::SetPowered(on) => backend_action(|backend| async move {
-            backend.set_powered(on).await
-        })
-        .await,
+        Command::SetPowered(on) => {
+            backend_action(|backend| async move { backend.set_powered(on).await }).await
+        }
         Command::Scan => {
             backend_action(|backend| async move {
                 backend.power_on().await?;
@@ -123,7 +124,11 @@ async fn read(notice: Option<String>) -> Snapshot {
                 Err(error) => (powered, Vec::new(), Some(format!("Bluetooth: {error}"))),
             }
         }
-        Err(error) => (false, Vec::new(), Some(format!("Bluetooth unavailable: {error}"))),
+        Err(error) => (
+            false,
+            Vec::new(),
+            Some(format!("Bluetooth unavailable: {error}")),
+        ),
     };
 
     Snapshot {

@@ -261,11 +261,10 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 // ---------------------------------------------------------------------------
 // Pairing agent
 //
-// The Rofi script is a fresh short-lived process per keystroke, so it cannot
-// host the agent that BlueZ calls back into during pairing. The detached
-// `connect-bg` process owns the agent instead, and the two halves talk through
-// a pair of files in $XDG_RUNTIME_DIR: the agent writes a request, the script
-// renders it as a prompt, and the script writes back the typed answer.
+// BlueZ calls back into an agent while a device pairs, and whoever owns that
+// agent has to outlive the call. The agent and whatever is showing the prompt
+// talk through a pair of files in $XDG_RUNTIME_DIR: the agent writes a request,
+// the front end renders it, and the front end writes back the typed answer.
 // ---------------------------------------------------------------------------
 
 /// A prompt raised by the agent while pairing.
@@ -329,7 +328,7 @@ fn pairing_agent() -> Agent {
     }
 }
 
-/// Publishes a prompt and waits for the Rofi script to answer it.
+/// Publishes a prompt and waits for the front end to answer it.
 async fn ask(kind: CodeKind, address: String) -> ReqResult<String> {
     let _ = fs::remove_file(response_path().ok_or(ReqError::Canceled)?);
     write_request(&PairRequest {
@@ -426,8 +425,8 @@ pub fn clear_request() {
     }
 }
 
-/// Reads and consumes a pending prompt. Prompts are single-use: the script
-/// keeps the resulting state in `ROFI_DATA` from there on.
+/// Reads and consumes a pending prompt. Prompts are single-use: the front end
+/// holds the resulting state from there on.
 pub fn take_request() -> Option<PairRequest> {
     let path = request_path()?;
     let contents = fs::read_to_string(&path).ok()?;
