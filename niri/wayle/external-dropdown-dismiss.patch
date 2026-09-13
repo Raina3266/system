@@ -92,7 +92,42 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
          }
          window.present();
          self.external_window.replace(Some(window));
-@@ -83,3 +118,49 @@
+@@ -204,38 +239,84 @@
+     fn position_external_window(window: &gtk::Window, location: Location, name: &str) {
+         const WAYBAR_SIZE: i32 = 40;
+         const GAP: i32 = 6;
+         const OFFSET: i32 = WAYBAR_SIZE + GAP;
+         const WAYBAR_BUTTON_STEP: i32 = 50;
+         let along_bar = if name == "network" {
+             GAP + WAYBAR_BUTTON_STEP
+         } else {
+             GAP
+         };
+ 
+         match location {
+             Location::Top => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Left, true);
+                 window.set_margin(Edge::Top, OFFSET);
+                 window.set_margin(Edge::Left, along_bar);
+             }
+             Location::Bottom => {
+                 window.set_anchor(Edge::Bottom, true);
+                 window.set_anchor(Edge::Left, true);
+                 window.set_margin(Edge::Bottom, OFFSET);
+                 window.set_margin(Edge::Left, along_bar);
+             }
+             Location::Left => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Left, true);
+                 window.set_margin(Edge::Top, along_bar);
+                 window.set_margin(Edge::Left, OFFSET);
+             }
+             Location::Right => {
+                 window.set_anchor(Edge::Top, true);
+                 window.set_anchor(Edge::Right, true);
+                 window.set_margin(Edge::Top, along_bar);
+                 window.set_margin(Edge::Right, OFFSET);
              }
          }
      }
