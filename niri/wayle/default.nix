@@ -1,11 +1,10 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications,
 # draws the popups, and keeps the history. Waybar remains the visible bar and
 # Wayle's native dashboard also owns notification history and the seven-day
-# agenda. Its own bar is visually hidden. The dashboard and Wi-Fi manager
+# agenda. Its own bar is visually hidden. The dashboard and network manager
 # opened from Waybar use separate layer-shell windows, avoiding GTK popup-grab
-# restrictions; the media and audio panels are this repository's own programs
-# and no longer involve Wayle at all.
-{ ... }:
+# restrictions; media and audio are this repository's own programs.
+{ repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
   # unrelated tracked file changes. Copy each patch to its own content-based
@@ -36,7 +35,12 @@ in
             ./notification-history.patch
             ./dashboard-waybar-host.patch
             ./dashboard-layer-window.patch
-            ./wayle-wifi.patch
+            # Keep each network concern small. The native UI stays in Wayle,
+            # while network-manager owns the duplicated info/QR backend logic.
+            ./network-details-ui.patch
+            ./network-manager-bridge.patch
+            ./network-external-window.patch
+            ./external-dropdown-dismiss.patch
             ./dashboard-power-profile.patch
             ./dashboard-wifi-tile.patch
             ./dashboard-notifications.patch
@@ -80,14 +84,13 @@ in
 
             bar = {
               # `show = false` keeps Wayle's own bar visually hidden. External
-              # dashboard and Wi-Fi requests use monitor-local layer surfaces.
+              # dashboard and network requests use monitor-local layer surfaces.
               location = "top";
               layer = "overlay";
               "dropdown-opacity" = 100;
               # The click originates in Waybar, not Wayle. An autohide GTK
               # popover would request an xdg_popup grab using an input serial
-              # Wayle never received, so the compositor dismisses it immediately.
-              # The same Waybar button closes its panel on the next click.
+              # Wayle never received, so external panels use layer surfaces.
               "dropdown-autohide" = false;
               layout = [
                 {
@@ -136,10 +139,10 @@ in
           };
           Service = {
             RestartSec = 3;
-            # The network panel gets its QR encoder. Audio no longer needs a
-            # helper here: its panel left Wayle for `audio-panel`.
+            # Wayle renders the panel; network-manager supplies only the
+            # duplicated connection-info and QR data behind its Info/QR pages.
             Environment = [
-              "WAYLE_QRENCODE=${lib.getExe' pkgs.qrencode "qrencode"}"
+              "WAYLE_NETWORK_MANAGER=${repoPackages.networkManager}/bin/network-manager"
             ];
           };
         };

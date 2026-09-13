@@ -1,0 +1,470 @@
+Keep Wayle's native Wi-Fi/Ethernet UI and add the existing Info/QR detail views.
+The data behind those views comes from the repository's network-manager bridge,
+so this patch contains only presentation/state wiring.
+
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+@@ -15,6 +15,16 @@ dropdown-network-cancel = Cancel
+ dropdown-network-password-placeholder = Enter password
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = WiFi
++dropdown-network-show-info = Info
++dropdown-network-show-info-tooltip = Show WiFi connection information
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Show WiFi QR code
++dropdown-network-close-details = Close details
++dropdown-network-info-title = Network information
++dropdown-network-info-loading = Reading WiFi information…
++dropdown-network-qr-title = Share { $ssid }
++dropdown-network-qr-description = Scan this code to connect to the WiFi network
++dropdown-network-qr-loading = Creating QR code…
+ dropdown-network-no-networks-title = No Networks Found
+ dropdown-network-no-networks-description = Make sure WiFi is enabled and try scanning again
+ dropdown-network-no-adapter-title = No WiFi Adapter
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+--- a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+@@ -15,6 +15,16 @@ dropdown-network-cancel = Annuler
+ dropdown-network-password-placeholder = Entrez le mot de passe
+ dropdown-network-ethernet = Ethernet
+ dropdown-network-wifi = Wi-Fi
++dropdown-network-show-info = Infos
++dropdown-network-show-info-tooltip = Afficher les informations de connexion Wi-Fi
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Afficher le code QR Wi-Fi
++dropdown-network-close-details = Fermer les détails
++dropdown-network-info-title = Informations réseau
++dropdown-network-info-loading = Lecture des informations Wi-Fi…
++dropdown-network-qr-title = Partager { $ssid }
++dropdown-network-qr-description = Scannez ce code pour vous connecter au réseau Wi-Fi
++dropdown-network-qr-loading = Création du code QR…
+ dropdown-network-no-networks-title = Aucun réseau trouvé
+ dropdown-network-no-networks-description = Assurez-vous que le Wi-Fi est activé et relancez la recherche
+ dropdown-network-no-adapter-title = Aucun adaptateur Wi-Fi
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+@@ -76,8 +76,19 @@ pub(super) struct ConnectionProgress {
+     pub error: Option<String>,
+ }
+ 
++#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
++pub(super) enum DetailPage {
++    #[default]
++    Hidden,
++    Info,
++    Qr,
++}
++
+ #[derive(Debug)]
+ pub(crate) enum ActiveConnectionsInput {
++    ShowWifiInfo,
++    ShowWifiQr,
++    HideDetails,
+     DisconnectWifi,
+     ForgetWifi,
+     DismissError,
+@@ -92,6 +103,14 @@ pub(crate) enum ActiveConnectionsInput {
+ #[derive(Debug)]
+ #[allow(clippy::enum_variant_names)]
+ pub(crate) enum ActiveConnectionsCmd {
++    InfoLoaded {
++        ssid: String,
++        result: Result<String, String>,
++    },
++    QrRendered {
++        ssid: String,
++        result: Result<Vec<u8>, String>,
++    },
+     WifiStateChanged {
+         connectivity: NetworkStatus,
+         ssid: Option<String>,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+@@ -2,10 +2,85 @@ use relm4::ComponentSender;
+ use tracing::warn;
+ use wayle_network::core::access_point::Ssid;
+ 
+-use super::ActiveConnections;
++use super::{
++    ActiveConnections,
++    messages::{ActiveConnectionsCmd, DetailPage},
++};
+ use crate::{i18n::t, shell::bar::dropdowns::network::helpers};
+ 
+ impl ActiveConnections {
++    pub(super) fn show_wifi_info(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Info, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::info::load(network, ssid.clone()).await;
++            ActiveConnectionsCmd::InfoLoaded { ssid, result }
++        });
++    }
++
++    pub(super) fn show_wifi_qr(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Qr, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::qr::render(network, ssid.clone()).await;
++            ActiveConnectionsCmd::QrRendered { ssid, result }
++        });
++    }
++
++    fn begin_details(&mut self, page: DetailPage, ssid: &str) {
++        self.detail_page = page;
++        self.detail_loading = true;
++        self.detail_ssid = ssid.to_owned();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) fn hide_details(&mut self) {
++        self.detail_page = DetailPage::Hidden;
++        self.detail_loading = false;
++        self.detail_ssid.clear();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) const fn details_visible(&self) -> bool {
++        !matches!(self.detail_page, DetailPage::Hidden)
++    }
++
++    pub(super) const fn details_page_name(&self) -> &'static str {
++        match self.detail_page {
++            DetailPage::Hidden => "loading",
++            DetailPage::Info => "info",
++            DetailPage::Qr => "qr",
++        }
++    }
++
++    pub(super) fn details_title(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-title", ssid = self.detail_ssid.clone()),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-title"),
++        }
++    }
++
++    pub(super) fn details_loading_label(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-loading"),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-loading"),
++        }
++    }
++
+     pub(super) fn has_wifi_error(&self) -> bool {
+         self.connection.error.is_some() && !self.wifi.connected
+     }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+@@ -1,15 +1,17 @@
++mod info;
+ mod messages;
+ mod methods;
++mod qr;
+ mod watchers;
+ 
+ use std::sync::Arc;
+ 
+ use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
++use relm4::{gtk, gtk::gdk, prelude::*};
+ use wayle_network::{NetworkService, types::states::NetworkStatus};
+ use wayle_widgets::{WatcherToken, prelude::*};
+ 
+-use self::messages::{ActiveConnectionsCmd, ConnectionProgress, WifiState, WiredState};
++use self::messages::{ActiveConnectionsCmd, ConnectionProgress, DetailPage, WifiState, WiredState};
+ pub(crate) use self::messages::{ActiveConnectionsInit, ActiveConnectionsInput};
+ use crate::{i18n::t, shell::bar::dropdowns::network::helpers};
+ 
+@@ -19,6 +21,12 @@ pub(crate) struct ActiveConnections {
+     wired: WiredState,
+     connection: ConnectionProgress,
+     has_connections: bool,
++    detail_page: DetailPage,
++    detail_loading: bool,
++    detail_ssid: String,
++    detail_error: Option<String>,
++    info_text: String,
++    qr_paintable: Option<gdk::Paintable>,
+     wifi_watcher: WatcherToken,
+     wired_watcher: WatcherToken,
+ }
+@@ -215,6 +223,34 @@ impl Component for ActiveConnections {
+                                 "network-connection-actions",
+                             set_valign: gtk::Align::Center,
+ 
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-info",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-info-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-info"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiInfo,
++                            },
++
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-qr",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-qr-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-qr"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiQr,
++                            },
++
+                             #[template]
+                             GhostButton {
+                                 add_css_class:
+@@ -281,6 +317,129 @@ impl Component for ActiveConnections {
+                     },
+                 },
+             },
++
++            gtk::Revealer {
++                set_transition_type: gtk::RevealerTransitionType::SlideDown,
++                set_transition_duration: 200,
++                #[watch]
++                set_reveal_child: model.details_visible(),
++
++                #[template]
++                Card {
++                    add_css_class: "network-details-card",
++                    set_orientation: gtk::Orientation::Vertical,
++
++                    gtk::Box {
++                        add_css_class: "network-details-header",
++
++                        gtk::Box {
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_hexpand: true,
++
++                            gtk::Label {
++                                add_css_class: "network-details-title",
++                                set_halign: gtk::Align::Start,
++                                #[watch]
++                                set_label: &model.details_title(),
++                            },
++
++                            gtk::Label {
++                                add_css_class: "network-details-description",
++                                set_halign: gtk::Align::Start,
++                                set_label: &t!("dropdown-network-qr-description"),
++                                #[watch]
++                                set_visible: model.detail_page == DetailPage::Qr,
++                            },
++                        },
++
++                        #[template]
++                        GhostIconButton {
++                            set_icon_name: "ld-x-symbolic",
++                            set_tooltip_text: Some(&t!("dropdown-network-close-details")),
++                            connect_clicked => ActiveConnectionsInput::HideDetails,
++                        },
++                    },
++
++                    gtk::Stack {
++                        add_css_class: "network-details-stack",
++                        set_transition_type: gtk::StackTransitionType::Crossfade,
++                        set_transition_duration: 150,
++                        #[watch]
++                        set_visible_child_name: if model.detail_loading {
++                            "loading"
++                        } else if model.detail_error.is_some() {
++                            "error"
++                        } else {
++                            model.details_page_name()
++                        },
++
++                        add_named[Some("loading")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_halign: gtk::Align::Center,
++
++                            gtk::Spinner {
++                                set_spinning: true,
++                            },
++
++                            gtk::Label {
++                                #[watch]
++                                set_label: &model.details_loading_label(),
++                            },
++                        },
++
++                        add_named[Some("qr")] = &gtk::Box {
++                            add_css_class: "network-qr-code",
++                            set_halign: gtk::Align::Center,
++                            set_valign: gtk::Align::Center,
++
++                            gtk::Picture {
++                                set_can_shrink: true,
++                                set_content_fit: gtk::ContentFit::Contain,
++                                set_size_request: (400, 400),
++                                #[watch]
++                                set_paintable: model.qr_paintable.as_ref(),
++                            },
++                        },
++
++                        add_named[Some("info")] = &gtk::ScrolledWindow {
++                            add_css_class: "network-info-scroll",
++                            set_has_frame: false,
++                            set_hscrollbar_policy: gtk::PolicyType::Never,
++                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                            set_min_content_height: 360,
++
++                            gtk::Label {
++                                add_css_class: "network-info-text",
++                                set_xalign: 0.0,
++                                set_yalign: 0.0,
++                                set_selectable: true,
++                                set_wrap: true,
++                                set_wrap_mode: gtk::pango::WrapMode::WordChar,
++                                #[watch]
++                                set_label: &model.info_text,
++                            },
++                        },
++
++                        add_named[Some("error")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            add_css_class: "error",
++                            set_orientation: gtk::Orientation::Vertical,
++
++                            gtk::Image {
++                                set_icon_name: Some("ld-triangle-alert-symbolic"),
++                            },
++
++                            gtk::Label {
++                                set_wrap: true,
++                                set_justify: gtk::Justification::Center,
++                                #[watch]
++                                set_label: model.detail_error.as_deref().unwrap_or_default(),
++                            },
++                        },
++                    },
++                },
++            },
+         }
+     }
+ 
+@@ -309,6 +468,12 @@ impl Component for ActiveConnections {
+             wired,
+             connection: ConnectionProgress::default(),
+             has_connections,
++            detail_page: DetailPage::Hidden,
++            detail_loading: false,
++            detail_ssid: String::new(),
++            detail_error: None,
++            info_text: String::new(),
++            qr_paintable: None,
+             wifi_watcher: WatcherToken::new(),
+             wired_watcher: WatcherToken::new(),
+         };
+@@ -339,6 +504,15 @@ impl Component for ActiveConnections {
+ 
+     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+         match msg {
++            ActiveConnectionsInput::ShowWifiInfo => {
++                self.show_wifi_info(&sender);
++            }
++            ActiveConnectionsInput::ShowWifiQr => {
++                self.show_wifi_qr(&sender);
++            }
++            ActiveConnectionsInput::HideDetails => {
++                self.hide_details();
++            }
+             ActiveConnectionsInput::DisconnectWifi => self.disconnect_wifi(&sender),
+             ActiveConnectionsInput::ForgetWifi => self.forget_wifi(&sender),
+             ActiveConnectionsInput::DismissError => {
+@@ -377,6 +551,58 @@ impl Component for ActiveConnections {
+         _root: &Self::Root,
+     ) {
+         match msg {
++            ActiveConnectionsCmd::InfoLoaded { ssid, result } => {
++                if self.detail_page != DetailPage::Info
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(info) => {
++                        self.info_text = info;
++                        self.detail_error = None;
++                    }
++                    Err(error) => {
++                        self.info_text.clear();
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
++            ActiveConnectionsCmd::QrRendered { ssid, result } => {
++                if self.detail_page != DetailPage::Qr
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(png) => {
++                        let bytes = gtk::glib::Bytes::from_owned(png);
++                        match gdk::Texture::from_bytes(&bytes) {
++                            Ok(texture) => {
++                                self.qr_paintable = Some(texture.upcast());
++                                self.detail_error = None;
++                            }
++                            Err(error) => {
++                                self.qr_paintable = None;
++                                self.detail_error =
++                                    Some(format!("Could not decode the QR image: {error}"));
++                            }
++                        }
++                    }
++                    Err(error) => {
++                        self.qr_paintable = None;
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
+             ActiveConnectionsCmd::WifiStateChanged {
+                 connectivity,
+                 ssid,
+@@ -395,6 +621,8 @@ impl Component for ActiveConnections {
+ 
+                 if self.wifi.connected {
+                     self.connection = ConnectionProgress::default();
++                } else {
++                    self.hide_details();
+                 }
+                 self.update_has_connections();
+             }

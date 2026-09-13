@@ -1,0 +1,74 @@
+Delegate Wayle's network detail data to the repository's network-manager helper.
+The native Wayle widgets stay unchanged; this is deliberately only a process
+bridge so networking logic has a single owner.
+
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+@@ -0,0 +1,36 @@
++use std::{env, ffi::OsString, sync::Arc};
++
++use wayle_network::NetworkService;
++
++pub(super) async fn load(
++    _network: Arc<NetworkService>,
++    ssid: String,
++) -> Result<String, String> {
++    let output = tokio::process::Command::new(network_manager_binary())
++        .arg("wayle-info")
++        .arg(&ssid)
++        .output()
++        .await
++        .map_err(|error| format!("Could not start network-manager: {error}"))?;
++
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(if detail.trim().is_empty() {
++            format!("network-manager exited with {}", output.status)
++        } else {
++            detail.trim().to_owned()
++        });
++    }
++
++    String::from_utf8(output.stdout)
++        .map_err(|error| format!("network-manager returned invalid UTF-8: {error}"))
++}
++
++pub(super) fn network_manager_binary() -> OsString {
++    env::var_os("WAYLE_NETWORK_MANAGER").unwrap_or_else(|| OsString::from("network-manager"))
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+@@ -0,0 +1,29 @@
++use std::sync::Arc;
++
++use wayle_network::NetworkService;
++
++pub(super) async fn render(
++    _network: Arc<NetworkService>,
++    ssid: String,
++) -> Result<Vec<u8>, String> {
++    let output = tokio::process::Command::new(super::info::network_manager_binary())
++        .arg("wayle-qr")
++        .arg(&ssid)
++        .output()
++        .await
++        .map_err(|error| format!("Could not start network-manager: {error}"))?;
++
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(if detail.trim().is_empty() {
++            format!("network-manager exited with {}", output.status)
++        } else {
++            detail.trim().to_owned()
++        });
++    }
++    if output.stdout.is_empty() {
++        return Err(String::from("network-manager returned an empty QR image."));
++    }
++
++    Ok(output.stdout)
++}
