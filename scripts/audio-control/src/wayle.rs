@@ -1,9 +1,10 @@
 //! Small machine interface used by Wayle's device picker.
 //!
-//! The panel and this bridge deliberately use the same `selections` and
-//! `set_default` functions. That keeps mutually exclusive ALSA card profiles
-//! (notably the laptop Speaker and Headphones profiles) behaving identically
-//! in the panel and in Wayle.
+//! Wayle keeps its native device-picker UI. This bridge is only for the
+//! profile-aware selection behaviour its audio service does not expose: the
+//! same `selections` and `set_default` functions used by the Waybar backend
+//! keep mutually exclusive ALSA card profiles (notably laptop Speaker and
+//! Headphones profiles) as separate, stable destinations.
 
 use std::io::{self, Write};
 

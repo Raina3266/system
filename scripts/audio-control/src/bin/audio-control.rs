@@ -1,5 +1,5 @@
-//! The command line: the Waybar status line and the small machine interface
-//! Wayle's device picker calls. The panel is the other binary in this crate.
+//! Headless audio helper: Waybar status/Bluetooth power and the small machine
+//! interface used by Wayle's profile-aware device picker.
 
 use std::env;
 use std::io;

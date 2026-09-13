@@ -7,14 +7,15 @@ the same way Dashboard and Network do.
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -124,17 +124,6 @@ impl DropdownInstance {
+@@ -125,18 +125,6 @@ impl DropdownInstance {
              return true;
          }
  
+-        let is_audio = self.controller.is::<Controller<AudioDropdown>>();
 -        let is_dashboard = self.controller.is::<Controller<DashboardDropdown>>();
 -        let is_media = self.controller.is::<Controller<MediaDropdown>>();
 -        let is_network = self.controller.is::<Controller<NetworkDropdown>>();
--        if !is_dashboard && !is_media && !is_network {
+-        if !is_audio && !is_dashboard && !is_media && !is_network {
 -            warn!(
 -                dropdown = name,
 -                "external layer window is not supported by this dropdown"
@@ -25,7 +26,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
          let Some(content) = self.popover.child() else {
              warn!(
                  dropdown = name,
-@@ -149,6 +138,7 @@ impl DropdownInstance {
+@@ -151,6 +139,7 @@ impl DropdownInstance {
          window.set_resizable(false);
          window.add_css_class(&format!("{name}-dropdown"));
          window.add_css_class(&format!("{name}-layer-window"));
@@ -36,15 +37,16 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
-@@ -269,11 +269,8 @@ impl Component for Bar {
+@@ -269,12 +269,8 @@ impl Component for Bar {
                  apply_layer(root, configured, &self.services.config);
              }
              BarCmd::ToggleDropdown(name) => {
--                let toggled = if matches!(name.as_str(), "dashboard" | "media" | "network") {
--                    self.dropdowns.toggle_external_window(&name, &self.monitor)
--                } else {
--                    self.dropdowns.toggle_external(&name, &self.external_anchor)
--                };
+-                let toggled =
+-                    if matches!(name.as_str(), "audio" | "dashboard" | "media" | "network") {
+-                        self.dropdowns.toggle_external_window(&name, &self.monitor)
+-                    } else {
+-                        self.dropdowns.toggle_external(&name, &self.external_anchor)
+-                    };
 +                let toggled =
 +                    self.dropdowns.toggle_external_window(&name, &self.monitor);
  

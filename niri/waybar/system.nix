@@ -2,9 +2,8 @@
 #
 # The dashboard button carries the current battery reading and opens Wayle's
 # native dashboard, which also contains notifications and the seven-day
-# calendar. The network button takes its status from `network-manager` and opens
-# Wayle's native Wi-Fi/Ethernet dropdown. Media and audio use their standalone
-# panels.
+# calendar. The network and audio buttons open Wayle-native dropdowns; media
+# remains the standalone MPRIS panel.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -86,20 +85,19 @@ let
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
 
-  # Left-click opens the standalone Bluetooth and audio panel; the status glyph
-  # and tooltip still come from `audio-control status`, which already reports
-  # the adapter, the default output and input, and connected devices. Right-click
-  # remains the adapter's on/off switch.
+  # Left-click opens Wayle's native Bluetooth/audio panel. The visible rows,
+  # sliders, Bluetooth controls and per-application volume controls are Wayle's
+  # own components; audio-control is only the profile-aware backend for the
+  # Speaker/Headphones cases Wayle does not natively expose. Right-click remains
+  # the adapter's on/off switch.
   audioModule = monitor: {
     exec = "${packages.audioControl}/bin/audio-control status";
     interval = 5;
     return-type = "json";
     tooltip = true;
     escape = false;
-    # `audio-panel` is a second binary in the audio-control crate, so the panel
-    # and the old menu logic make the same decisions about mutually exclusive
-    # ALSA card profiles. Running it again toggles the one already up.
-    on-click = "${packages.audioControl}/bin/audio-panel ${lib.escapeShellArg monitor}";
+    on-click =
+      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio ${lib.escapeShellArg monitor}";
     on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
 

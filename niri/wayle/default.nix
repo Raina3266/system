@@ -3,8 +3,9 @@
 # Wayle's native dashboard also owns notification history and the seven-day
 # agenda. Its own bar is visually hidden. Every Wayle dropdown opened from
 # Waybar uses a monitor-local layer-shell window, avoiding GTK popup-grab
-# restrictions and providing a shared click-away backdrop; media and audio in
-# the visible Waybar remain this repository's own programs.
+# restrictions and providing a shared click-away backdrop. Audio is rendered
+# by Wayle's native components; audio-control only supplies the profile-aware
+# behaviour that Wayle's own audio service does not expose.
 { repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -45,6 +46,14 @@ in
             ./dashboard-power-profile.patch
             ./dashboard-wifi-tile.patch
             ./dashboard-notifications.patch
+            # Keep the audio presentation inside Wayle. The first patch only
+            # composes Wayle's native Bluetooth, device, volume and application
+            # widgets into the four-tab panel and wires existing Wayle APIs for
+            # port selection and per-stream routing. The second delegates the
+            # one missing behaviour — inactive ALSA profile switching — to the
+            # profile-aware audio-control helper.
+            ./wayle-audio-panel.patch
+            ./wayle-audio-profile-bridge.patch
             ./dashboard-slim.patch
             ./dashboard-polish.patch
             # Apply last: dashboard-wifi-tile adds Media to the external host;
@@ -143,10 +152,11 @@ in
           };
           Service = {
             RestartSec = 3;
-            # Wayle renders the panel; network-manager supplies only the
-            # duplicated connection-info and QR data behind its Info/QR pages.
+            # Wayle renders both panels. External Rust helpers supply only the
+            # behaviour that is not already implemented by Wayle itself.
             Environment = [
               "WAYLE_NETWORK_MANAGER=${repoPackages.networkManager}/bin/network-manager"
+              "WAYLE_AUDIO_HELPER=${repoPackages.audioControl}/bin/audio-control"
             ];
           };
         };

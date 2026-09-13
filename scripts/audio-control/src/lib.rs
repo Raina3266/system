@@ -1,17 +1,17 @@
 //! Audio and Bluetooth control for this desktop.
 //!
-//! The logic lives here so the three front ends over it — the GTK panel, the
-//! Waybar status line, and Wayle's device picker — all make the same
-//! decisions. That matters most for mutually exclusive ALSA card profiles:
-//! Speaker and Headphones stay separate destinations in every one of them
-//! because they all go through the same `selections` and `set_default`.
+//! Wayle owns the visible audio UI and uses its native widgets and reactive
+//! audio service wherever possible. This library is the small backend beside
+//! it: Waybar status/Bluetooth power plus the profile-aware device selector
+//! Wayle calls for behaviour its own audio service does not expose. In
+//! particular, Speaker and Headphones can remain separate destinations even
+//! when the ALSA card exposes them through mutually exclusive profiles.
 
 use std::error::Error;
 
 pub mod audio;
 pub mod bluetooth;
 pub mod model;
-pub mod panel;
 pub mod waybar;
 pub mod wayle;
 
