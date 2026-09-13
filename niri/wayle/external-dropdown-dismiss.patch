@@ -42,7 +42,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -5,13 +5,48 @@
+@@ -1,81 +1,162 @@
          window.set_exclusive_zone(0);
          window.set_monitor(Some(monitor));
          Self::position_external_window(&window, style.location, name);
@@ -92,7 +92,36 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
          }
          window.present();
          self.external_window.replace(Some(window));
-@@ -204,38 +239,84 @@
+         self.external_visibility_changed(true);
+         true
+     }
+ 
+     fn external_visibility_changed(&self, visible: bool) {
+         let Some(controller) = self
+             .controller
+             .downcast_ref::<Controller<NetworkDropdown>>()
+         else {
+             return;
+         };
+ 
+         if visible {
+             controller.emit(NetworkDropdownMsg::ScanRequested);
+         } else {
+             controller.emit(NetworkDropdownMsg::Reset);
+         }
+     }
+ 
+     fn hide_external_window(&self) {
+         let external_window = self.external_window.borrow();
+         let Some(window) = external_window.as_ref() else {
+             return;
+         };
+         if window.is_visible() {
+             window.set_visible(false);
+             self.external_visibility_changed(false);
+         }
+     }
+ 
      fn position_external_window(window: &gtk::Window, location: Location, name: &str) {
          const WAYBAR_SIZE: i32 = 40;
          const GAP: i32 = 6;
