@@ -6,7 +6,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connectio
 new file mode 100644
 --- /dev/null
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,31 @@
 +use std::{env, ffi::OsString, sync::Arc};
 +
 +use wayle_network::NetworkService;
