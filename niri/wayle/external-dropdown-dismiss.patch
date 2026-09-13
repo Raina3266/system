@@ -24,7 +24,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/cr
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
-@@ -182,6 +182,14 @@ impl Component for NetworkDropdown {
+@@ -182,6 +182,18 @@ impl Component for NetworkDropdown {
      fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
          match msg {
              NetworkDropdownMsg::Reset => {
@@ -32,6 +32,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/
                      .emit(ActiveConnectionsInput::HideDetails);
              }
 +            NetworkDropdownMsg::SetExternalHost(window) => {
++                let is_visible = window.is_visible();
 +                let input_sender = sender.input_sender().clone();
 +                window.connect_visible_notify(move |window| {
 +                    input_sender.emit(if window.is_visible() {
@@ -40,6 +41,9 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/
 +                        NetworkDropdownMsg::Reset
 +                    });
 +                });
++                if is_visible {
++                    sender.input_sender().emit(NetworkDropdownMsg::ScanRequested);
++                }
 +            }
              NetworkDropdownMsg::WifiToggled(active) => {
                  self.toggle_wifi(active, &sender);
