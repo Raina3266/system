@@ -131,7 +131,10 @@ fn embedded(track: &Path) -> Option<PathBuf> {
     let mut hasher = DefaultHasher::new();
     track.hash(&mut hasher);
     picture.data().len().hash(&mut hasher);
-    write_cache(&format!("{:016x}.{extension}", hasher.finish()), picture.data())
+    write_cache(
+        &format!("{:016x}.{extension}", hasher.finish()),
+        picture.data(),
+    )
 }
 
 fn download(url: &str) -> Option<PathBuf> {
@@ -154,7 +157,15 @@ fn download(url: &str) -> Option<PathBuf> {
 /// client crate for one request is not worth the closure size.
 fn ureq_get(url: &str) -> Option<Vec<u8>> {
     let output = std::process::Command::new(curl())
-        .args(["--silent", "--show-error", "--fail", "--location", "--max-time", "10", url])
+        .args([
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--location",
+            "--max-time",
+            "10",
+            url,
+        ])
         .output()
         .ok()?;
     output.status.success().then_some(output.stdout)

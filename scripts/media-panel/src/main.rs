@@ -52,7 +52,9 @@ fn main() -> ExitCode {
                         player.album,
                         player.status,
                         mpris::clock(player.position),
-                        player.length.map_or_else(|| String::from("--:--"), mpris::clock),
+                        player
+                            .length
+                            .map_or_else(|| String::from("--:--"), mpris::clock),
                         player.can_control,
                         player.can_seek,
                         player.can_go_previous,
@@ -90,7 +92,10 @@ fn main() -> ExitCode {
     let (toggles, guard) = match ipc::listen() {
         Ok(listening) => listening,
         Err(error) => {
-            eprintln!("media-panel: could not claim {:?}: {error}", ipc::socket_path());
+            eprintln!(
+                "media-panel: could not claim {:?}: {error}",
+                ipc::socket_path()
+            );
             return ExitCode::FAILURE;
         }
     };

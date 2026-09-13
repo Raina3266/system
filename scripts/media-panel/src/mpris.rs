@@ -449,7 +449,10 @@ fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
     let mut kept: Vec<Player> = Vec::with_capacity(players.len());
 
     for player in players {
-        match kept.iter_mut().find(|keeper| same_playback(keeper, &player)) {
+        match kept
+            .iter_mut()
+            .find(|keeper| same_playback(keeper, &player))
+        {
             // The list arrives playing-first, so the keeper is the better card
             // already; the other is still a way to reach the same playback.
             Some(keeper) => keeper.also.push(player.bus),
@@ -479,7 +482,11 @@ fn agreeing_fields(left: &Player, right: &Player) -> usize {
 }
 
 fn required_agreement(left: &Player, right: &Player) -> usize {
-    if same_text(&left.source, &right.source) { 1 } else { 2 }
+    if same_text(&left.source, &right.source) {
+        1
+    } else {
+        2
+    }
 }
 
 fn positions_disagree(left: &Player, right: &Player) -> bool {

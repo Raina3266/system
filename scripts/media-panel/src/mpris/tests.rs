@@ -51,7 +51,9 @@ fn one_app_publishing_itself_twice_becomes_one_card() {
     assert_eq!(merged.len(), 1);
     assert_eq!(
         merged[0].also,
-        vec![String::from("org.mpris.MediaPlayer2.mprisence_web.youtube_music.p2911")]
+        vec![String::from(
+            "org.mpris.MediaPlayer2.mprisence_web.youtube_music.p2911"
+        )]
     );
 }
 
@@ -158,7 +160,10 @@ fn the_card_commands_every_player_it_stands_for() {
 
     assert_eq!(
         targets,
-        vec!["org.mpris.MediaPlayer2.elisa", "org.mpris.MediaPlayer2.other"]
+        vec![
+            "org.mpris.MediaPlayer2.elisa",
+            "org.mpris.MediaPlayer2.other"
+        ]
     );
 }
 

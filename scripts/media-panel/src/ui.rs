@@ -1,12 +1,14 @@
 //! The panel: a monitor-local layer surface holding one card per player.
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Duration;
 
 use gtk::gdk;
+use gtk::gdk_pixbuf;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -48,8 +50,14 @@ struct Card {
     lock: gtk::Label,
     artwork: gtk::Picture,
     artwork_fallback: gtk::Label,
+    /// What `artwork` is currently showing, so a cover is decoded once per
+    /// track rather than on every tick.
+    art_path: RefCell<Option<PathBuf>>,
     title: gtk::Label,
+    credits: gtk::Box,
+    artist_icon: gtk::Label,
     artist: gtk::Label,
+    album_icon: gtk::Label,
     album: gtk::Label,
     seek: gtk::Scale,
     seek_handler: glib::SignalHandlerId,
@@ -200,9 +208,7 @@ fn spawn_worker(commands: Receiver<Command>, snapshots: Sender<Vec<Player>>) {
 }
 
 fn wayland() -> bool {
-    gdk::Display::default().is_some_and(|display| {
-        display.backend().is_wayland()
-    })
+    gdk::Display::default().is_some_and(|display| display.backend().is_wayland())
 }
 
 fn monitor_named(name: &str) -> Option<gdk::Monitor> {
@@ -264,7 +270,9 @@ fn sync(
     let mut cards = cards.borrow_mut();
 
     cards.retain(|card| {
-        let wanted = players.iter().any(|player| player.bus == card.player.borrow().bus);
+        let wanted = players
+            .iter()
+            .any(|player| player.bus == card.player.borrow().bus);
         if !wanted {
             list.remove(&card.root);
         }
@@ -272,7 +280,10 @@ fn sync(
     });
 
     for (index, player) in players.into_iter().enumerate() {
-        match cards.iter().position(|card| card.player.borrow().bus == player.bus) {
+        match cards
+            .iter()
+            .position(|card| card.player.borrow().bus == player.bus)
+        {
             Some(existing) => {
                 update(&cards[existing], player);
                 let last = cards.len().saturating_sub(1);
@@ -294,7 +305,10 @@ fn sync(
         #[allow(clippy::cast_possible_wrap)]
         list.reorder_child_after(
             &card.root,
-            position.checked_sub(1).and_then(|before| cards.get(before)).map(|card| &card.root),
+            position
+                .checked_sub(1)
+                .and_then(|before| cards.get(before))
+                .map(|card| &card.root),
         );
     }
 }
@@ -430,11 +444,7 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
     controls.set_end_widget(Some(&length));
     root.append(&controls);
 
-    for (button, make) in [
-        (&play_button, 0u8),
-        (&previous, 1),
-        (&next, 2),
-    ] {
+    for (button, make) in [(&play_button, 0u8), (&previous, 1), (&next, 2)] {
         let (commands, state) = (commands.clone(), state.clone());
         button.connect_clicked(move |_| {
             let player = state.borrow().clone();
@@ -453,8 +463,12 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
         lock,
         artwork,
         artwork_fallback,
+        art_path: RefCell::new(None),
         title,
+        credits,
+        artist_icon,
         artist,
+        album_icon,
         album,
         seek,
         seek_handler,
@@ -465,6 +479,29 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
         next,
         player: state,
     }
+}
+
+/// A centred square of the cover, at exactly the size the card draws it.
+///
+/// `Picture::set_filename` hands GTK the file at its own resolution, and a
+/// widget's size request is a minimum rather than a maximum — so a 1280x720
+/// video thumbnail took as much of the row as the title was willing to give up
+/// and the card grew to match, while a small square cover looked correct. The
+/// natural size is the drawn size now, so neither the row nor the card height
+/// depends on what the artwork happens to be.
+fn square_texture(path: &Path) -> Option<gdk::Texture> {
+    let full = gdk_pixbuf::Pixbuf::from_file(path).ok()?;
+    let (x, y, side) = centre_square(full.width(), full.height())?;
+    let square = full.new_subpixbuf(x, y, side, side);
+    let scaled =
+        square.scale_simple(ARTWORK_SIZE, ARTWORK_SIZE, gdk_pixbuf::InterpType::Bilinear)?;
+    Some(gdk::Texture::for_pixbuf(&scaled))
+}
+
+/// The largest centred square inside `width` x `height`, as `(x, y, side)`.
+pub fn centre_square(width: i32, height: i32) -> Option<(i32, i32, i32)> {
+    let side = width.min(height);
+    (side > 0).then(|| ((width - side) / 2, (height - side) / 2, side))
 }
 
 fn transport_button(glyph: &str, class: &str) -> gtk::Button {
@@ -488,21 +525,30 @@ fn update(card: &Card, player: Player) {
     });
     card.lock.set_visible(!player.can_control);
 
-    card.title.set_label(placeholder(&player.title, "Unknown Title"));
-    card.artist.set_label(placeholder(&player.artist, "Unknown Artist"));
-    card.album.set_label(placeholder(&player.album, "Unknown Album"));
+    card.title
+        .set_label(placeholder(&player.title, "Unknown Title"));
+    // A chip with no value behind it is noise, so the icon goes with the text.
+    // Web players routinely publish a title and nothing else.
+    let artist = player.artist.trim();
+    let album = player.album.trim();
+    card.artist.set_label(artist);
+    card.album.set_label(album);
+    card.artist_icon.set_visible(!artist.is_empty());
+    card.artist.set_visible(!artist.is_empty());
+    card.album_icon.set_visible(!album.is_empty());
+    card.album.set_visible(!album.is_empty());
+    card.credits
+        .set_visible(!artist.is_empty() || !album.is_empty());
 
-    match artwork::find(player.art_url.as_deref(), player.track_url.as_deref()) {
-        Some(path) => {
-            card.artwork.set_filename(Some(&path));
-            card.artwork.set_visible(true);
-            card.artwork_fallback.set_visible(false);
-        }
-        None => {
-            card.artwork.set_visible(false);
-            card.artwork_fallback.set_visible(true);
-        }
+    let cover = artwork::find(player.art_url.as_deref(), player.track_url.as_deref());
+    if card.art_path.borrow().as_deref() != cover.as_deref() {
+        let texture = cover.as_deref().and_then(square_texture);
+        card.artwork.set_paintable(texture.as_ref());
+        card.art_path.replace(cover);
     }
+    let has_art = card.artwork.paintable().is_some();
+    card.artwork.set_visible(has_art);
+    card.artwork_fallback.set_visible(!has_art);
 
     card.play.set_label(if player.status.is_playing() {
         "\u{f03e4}"
@@ -515,13 +561,11 @@ fn update(card: &Card, player: Player) {
     card.position.set_label(&clock(player.position));
     // A publisher that omits mpris:length has not said the track is zero
     // seconds long, so do not claim it did.
-    card.length.set_label(
-        &player
-            .length
-            .map_or_else(|| String::from("--:--"), clock),
-    );
+    card.length
+        .set_label(&player.length.map_or_else(|| String::from("--:--"), clock));
 
-    card.seek.set_sensitive(player.can_seek && player.length.is_some());
+    card.seek
+        .set_sensitive(player.can_seek && player.length.is_some());
     // Blocked, or writing the tick back would read as the user dragging.
     card.seek.block_signal(&card.seek_handler);
     card.seek.set_value(player.progress() * 1000.0);
@@ -531,5 +575,12 @@ fn update(card: &Card, player: Player) {
 }
 
 fn placeholder<'a>(value: &'a str, fallback: &'a str) -> &'a str {
-    if value.trim().is_empty() { fallback } else { value }
+    if value.trim().is_empty() {
+        fallback
+    } else {
+        value
+    }
 }
+
+#[cfg(test)]
+mod tests;
