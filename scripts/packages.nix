@@ -57,11 +57,11 @@ let
   );
 
   # The source one member is built from: every manifest in the workspace, and
-  # that member's own tree.
+  # that member's Cargo sources.
   #
   # Passing the whole of scripts/ as src meant every derivation's input hash
-  # covered all nine crates *and* this file, so touching any one of them - or
-  # editing a wrapper below - rebuilt all nine. Sibling manifests are still an
+  # covered all ten crates *and* this file, so touching any one of them - or
+  # editing a wrapper below - rebuilt all ten. Sibling manifests are still an
   # input, but they only change when a crate gains or drops a dependency.
   memberSrc =
     pname:
@@ -69,9 +69,9 @@ let
       root = ./.;
       fileset = lib.fileset.unions [
         (craneLib.fileset.cargoTomlAndLock ./.)
-        # The member's whole directory, not crane's commonCargoSources, so any
-        # non-Rust runtime assets remain part of that package's source.
-        (./. + "/${pname}")
+        # Exclude UI/runtime assets (CSS, docs, screenshots) from the compiled
+        # package input. They are live-linked separately by Home Manager.
+        (craneLib.fileset.commonCargoSources (./. + "/${pname}"))
       ];
     };
 
@@ -277,7 +277,6 @@ rec {
 
   ycal =
     let
-      inherit (pkgs) lib;
       src = pkgs.fetchzip {
         url = "https://github.com/yagybaba/waybar-ycal/archive/refs/tags/v1.1.0.tar.gz";
         sha256 = "0483nv1dspa7a90s8hxkb3kmva9r6c8qb61hilaks483n92lwf7a";
@@ -359,8 +358,10 @@ rec {
           chmod +x $out/bin/waybar-ycal-popup
         '';
       };
-      barExec = "${pythonWithDeps}/bin/python ${package}/share/waybar-ycal/bar.py";
-      toggle = pkgs.writeShellScript "waybar-ycal-toggle" ''
+      bar = pkgs.writeShellScriptBin "waybar-ycal-bar" ''
+        exec ${pythonWithDeps}/bin/python ${package}/share/waybar-ycal/bar.py "$@"
+      '';
+      toggle = pkgs.writeShellScriptBin "waybar-ycal-toggle" ''
         set -euo pipefail
         PID_FILE="$HOME/.cache/waybar-ycal/popup.pid"
 
@@ -387,6 +388,6 @@ rec {
       '';
     in
     {
-      inherit package barExec toggle;
+      inherit package bar toggle;
     };
 }

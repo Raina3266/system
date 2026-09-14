@@ -1,0 +1,55 @@
+{
+  "position": "bottom",
+  "modules-left": [
+    "niri/workspaces",
+    "custom/obsidian",
+    "custom/gcal",
+    "custom/gkeep",
+    "custom/gphotos",
+    "custom/whatsapp",
+    "custom/tauon",
+    "cffi/niri_window_buttons"
+  ],
+  "niri/workspaces": {
+    "format": "{index}",
+    "tooltip-format": "Middle-click: move up  |  Right-click: move down",
+    "on-click-middle": "niri msg action focus-workspace {index} && niri msg action move-workspace-up",
+    "on-click-right": "niri msg action focus-workspace {index} && niri msg action move-workspace-down"
+  },
+  "custom/obsidian": {
+    "format": "💎",
+    "tooltip": true,
+    "tooltip-format": "Obsidian",
+    "on-click": "obsidian &"
+  },
+  "custom/tauon": {
+    "format": "🎵",
+    "tooltip": true,
+    "tooltip-format": "Tauon",
+    "on-click": "tauon &"
+  },
+  "custom/whatsapp": {
+    "format": "💬",
+    "tooltip": true,
+    "tooltip-format": "WhatsApp",
+    "on-click": "whatsie &"
+  },
+  "custom/gkeep": {
+    "format": "📝",
+    "tooltip": true,
+    "tooltip-format": "Google Keep",
+    "on-click": "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &"
+  },
+  "custom/gcal": {
+    "format": "📅",
+    "tooltip": true,
+    "tooltip-format": "Google Calendar",
+    "on-click": "google-chrome-stable --profile-directory=Default --app-id=kjbdgfilnfhdoflbpgamdcdgpehopbep &"
+  },
+  "custom/gphotos": {
+    "format": "🖼️",
+    "tooltip": true,
+    "tooltip-format": "Google Photos",
+    "on-click": "google-chrome-stable --profile-directory=Default --app-id=ncmjhecbjeaamljdfahankockkkdmedg &"
+  }
+}

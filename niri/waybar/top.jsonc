@@ -1,0 +1,13 @@
+{
+  "position": "top",
+  "expand-center": true,
+  "modules-left": ["tray", "custom/ycal"],
+  "modules-center": ["custom/wayle-media", "custom/lyrics"],
+  "modules-right": [
+    "custom/timer",
+    "custom/clipboard",
+    "custom/audio",
+    "custom/network",
+    "custom/dashboard"
+  ]
+}

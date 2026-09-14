@@ -131,13 +131,6 @@
         }
       ];
 
-      # audio_indicator = {
-      #   enabled = true;
-      #   playing_icon = "󰕾 ";
-      #   muted_icon = "󰖁 ";
-      #   clickable = true;
-      # };
-
       # Urgency hints when app requests attention
       notifications = {
         enabled = true;

@@ -172,8 +172,8 @@ in
     "custom/ycal" = {
       return-type = "json";
       interval = 60;
-      exec = packages.ycal.barExec;
-      on-click = packages.ycal.toggle;
+      exec = "${packages.ycal.bar}/bin/waybar-ycal-bar";
+      on-click = "${packages.ycal.toggle}/bin/waybar-ycal-toggle";
     };
   };
 }

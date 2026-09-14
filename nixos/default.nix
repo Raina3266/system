@@ -12,6 +12,8 @@
 }:
 let
   kernelPackages = pkgs.linuxPackages_latest;
+  # One canonical checkout path for every live-linked desktop configuration.
+  repoRoot = "/home/raina/System";
   repoPackages = import ../scripts/packages.nix {
     inherit pkgs kernelPackages;
     craneLib = inputs.crane.mkLib pkgs;
@@ -67,7 +69,7 @@ in
       useGlobalPkgs = true;
       users.raina = import ../home;
       extraSpecialArgs = {
-        inherit inputs repoPackages;
+        inherit inputs repoPackages repoRoot;
       };
     };
 

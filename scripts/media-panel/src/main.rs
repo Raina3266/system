@@ -13,6 +13,7 @@ mod artwork;
 mod ipc;
 mod mpris;
 mod pause;
+mod style;
 mod ui;
 
 use std::process::ExitCode;
@@ -21,8 +22,6 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 
 const APP_ID: &str = "dev.raina.MediaPanel";
-const STYLE: &str = include_str!("style.css");
-
 fn main() -> ExitCode {
     let argument = std::env::args().nth(1).unwrap_or_default();
 
@@ -110,7 +109,7 @@ fn main() -> ExitCode {
         .build();
 
     let toggles = std::cell::RefCell::new(Some(toggles));
-    app.connect_startup(|_| load_style());
+    app.connect_startup(|_| style::install());
     app.connect_activate(move |app| {
         if let Some(toggles) = toggles.borrow_mut().take() {
             ui::run(app, monitor.clone(), toggles);
@@ -124,17 +123,4 @@ fn main() -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
-}
-
-fn load_style() {
-    let Some(display) = gtk::gdk::Display::default() else {
-        return;
-    };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_data(STYLE);
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
 }

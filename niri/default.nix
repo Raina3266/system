@@ -2,6 +2,7 @@
   pkgs,
   config,
   lib,
+  repoRoot,
   repoPackages,
   ...
 }:
@@ -48,7 +49,10 @@ in
   # Rofi's shared package override and Home Manager settings are registered
   # together by ../nixos/default.nix through ./rofi.
 
-  xdg.configFile."niri/config.kdl".text = ''
+  xdg.configFile."niri/config.kdl".source =
+    config.lib.file.mkOutOfStoreSymlink "${repoRoot}/niri/config.kdl";
+
+  xdg.configFile."niri/environment.kdl".text = ''
     environment {
     ${lib.concatStringsSep "\n" (
       lib.mapAttrsToList (name: value: "  ${name} \"${value}\"") qtEnvironment
@@ -59,7 +63,6 @@ in
     // that session is selected, so this remains scoped to Niri.
     spawn-at-startup "${pkgs.kdePackages.polkit-kde-agent-1}/libexec/polkit-kde-authentication-agent-1"
 
-    ${builtins.readFile ./config.kdl}
   '';
 
   programs'.waybar.enable = true;

@@ -16,6 +16,25 @@ This repository contains ten Rust packages used by the desktop configuration:
 The Niri configuration also patches Wayle v0.7.0 to supply the native
 [dashboard, network, and audio panels](#wayle-dashboard).
 
+## Live desktop editing
+
+After one Home Manager/NixOS switch, presentation files are linked directly
+from `/home/raina/System`. They no longer need another system rebuild:
+
+| What to edit | When it takes effect |
+| --- | --- |
+| `niri/config.kdl` | Niri reloads it on save |
+| `niri/rofi/config.rasi`, `themes/rofi-*.rasi` | Next Rofi launch |
+| `niri/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
+| `themes/waybar.css` | Waybar reloads CSS automatically |
+| `themes/preview-panel.css` | Preview panel hot-reloads |
+| `scripts/media-panel/src/style.css` | Open media panel hot-reloads |
+| `themes/wayle/index.scss` | Wayle recompiles the override on save |
+
+Rust, Nix module, package, service, and kernel changes still require a rebuild.
+Each Rust package now hashes only Cargo sources, so changing one UI stylesheet
+or sibling utility no longer invalidates every desktop helper.
+
 ## audio-control
 
 `scripts/audio-control` has no visible UI. Wayle owns the Bluetooth and audio
@@ -237,8 +256,8 @@ A minimal custom module configuration looks like this:
     "escape": false,
     "restart-interval": 1,
     "exec-on-event": false,
-    "on-click": "/path/to/waybar-timer toggle",
-    "on-click-middle": "/path/to/waybar-timer add",
+    "on-click": "/path/to/waybar-timer add",
+    "on-click-middle": "/path/to/waybar-timer toggle",
     "on-click-right": "/path/to/waybar-timer clear"
   }
 }
@@ -249,7 +268,8 @@ A minimal custom module configuration looks like this:
 ## Wayle dashboard
 
 `Mod+N` and the right-most Waybar battery button open Wayle's dashboard in a
-monitor-local layer-shell window. The button shows capacity and charging state,
+monitor-local layer-shell window directly below Waybar and flush with the
+screen's right edge. The button shows capacity and charging state,
 with low, warning, and critical classes for Waybar styling.
 
 The dashboard intentionally contains only:

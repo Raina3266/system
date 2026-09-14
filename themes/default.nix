@@ -7,22 +7,24 @@
 {
   config,
   pkgs,
+  repoRoot,
   ...
 }:
 let
   # --- Repository stylesheets, linked out of the store -----------------------
-
-  repoRoot = "${config.home.homeDirectory}/System";
 
   link = path: { source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/${path}"; };
 
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
     "preview-panel/preview-panel.css" = "themes/preview-panel.css";
+    "media-panel/style.css" = "scripts/media-panel/src/style.css";
     "rofi/rofi-clipboard.rasi" = "themes/rofi-clipboard.rasi";
     "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
     "rofi/rofi-network.rasi" = "themes/rofi-network.rasi";
     "waybar/style.css" = "themes/waybar.css";
+    # Wayle watches this directory and recompiles SCSS after a valid save.
+    "wayle/styles" = "themes/wayle";
   };
 
   # <path under $XDG_DATA_HOME> = <path in this repository>

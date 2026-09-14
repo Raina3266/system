@@ -4,6 +4,7 @@
   lib,
   osConfig,
   pkgs,
+  repoRoot,
   repoPackages,
   ...
 }:
@@ -25,6 +26,7 @@ let
     layer = "top";
     height = 40;
     smooth-scrolling-threshold = 5;
+    reload_style_on_change = true;
   };
 
   # ------------ TopBar -------------
@@ -32,26 +34,7 @@ let
   topBar =
     common
     // {
-      position = "top";
-      expand-center = true;
-      # Network and Dashboard live together at the far right: Network is the
-      # second-most-right button and opens Wayle's native Wi-Fi/Ethernet panel;
-      # Dashboard is the right-most button and still carries battery status.
-      modules-left = [
-        "tray"
-        "custom/ycal"
-      ];
-      modules-center = [
-        "custom/wayle-media"
-        "custom/lyrics"
-      ];
-      modules-right = [
-        "custom/timer"
-        "custom/clipboard"
-        "custom/audio"
-        "custom/network"
-        "custom/dashboard"
-      ];
+      include = [ "${repoRoot}/niri/waybar/top.jsonc" ];
     }
     // modules;
 
@@ -76,46 +59,10 @@ let
 
   # ------------ BottomBar -------------
 
-  starredApp = name: icon: cmd: {
-    format = icon;
-    tooltip = true;
-    tooltip-format = name;
-    on-click = "${cmd} &";
-  };
-
-  chromeApp =
-    name: icon: appId:
-    starredApp name icon "google-chrome-stable --profile-directory=Default --app-id=${appId}";
-
   bottomBar =
     common
     // {
-      position = "bottom";
-      modules-left = [
-        "niri/workspaces"
-        "custom/obsidian"
-        "custom/gcal"
-        "custom/gkeep"
-        "custom/gphotos"
-        "custom/whatsapp"
-        "custom/tauon"
-        "cffi/niri_window_buttons"
-      ];
-
-      # Workspace switcher: click to focus, middle-click to move up, right-click to move down
-      "niri/workspaces" = {
-        format = "{index}";
-        tooltip-format = "Middle-click: move up  |  Right-click: move down";
-        on-click-middle = "niri msg action focus-workspace {index} && niri msg action move-workspace-up";
-        on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";
-      };
-
-      "custom/obsidian" = starredApp "Obsidian" "💎" "obsidian";
-      "custom/tauon" = starredApp "Tauon" "🎵" "tauon";
-      "custom/whatsapp" = starredApp "WhatsApp" "💬" "whatsie";
-      "custom/gkeep" = chromeApp "Google Keep" "📝" "eilembjdkfgodjkcjnpgpaenohkicgjd";
-      "custom/gcal" = chromeApp "Google Calendar" "📅" "kjbdgfilnfhdoflbpgamdcdgpehopbep";
-      "custom/gphotos" = chromeApp "Google Photos" "🖼️" "ncmjhecbjeaamljdfahankockkkdmedg";
+      include = [ "${repoRoot}/niri/waybar/bottom.jsonc" ];
     }
     // taskbar;
 in
@@ -147,6 +94,29 @@ in
           Service = {
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
+          };
+        };
+
+        # Waybar does not watch its JSON configuration. Restart it whenever a
+        # live layout fragment is saved; CSS reloads natively via the setting
+        # above and does not need a system rebuild either.
+        systemd.user.paths.waybar-live-layout = {
+          Unit.Description = "Watch live Waybar layout files";
+          Path = {
+            PathChanged = [
+              "${repoRoot}/niri/waybar/top.jsonc"
+              "${repoRoot}/niri/waybar/bottom.jsonc"
+            ];
+            Unit = "waybar-live-layout.service";
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        systemd.user.services.waybar-live-layout = {
+          Unit.Description = "Apply live Waybar layout changes";
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${pkgs.systemd}/bin/systemctl --user try-restart waybar.service";
           };
         };
       })

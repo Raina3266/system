@@ -23,7 +23,7 @@
 
   home-manager.sharedModules = [
     (
-      { pkgs, repoPackages, ... }:
+      { config, pkgs, repoPackages, repoRoot, ... }:
       {
         home.packages = with pkgs; [
           rofi
@@ -38,27 +38,8 @@
           gdk-pixbuf
         ];
 
-        xdg.configFile."rofi/config.rasi".text = ''
-          /* ROFI: base configuration */
-
-          configuration {
-              /* ── Top-right corner ── */
-              location: 3;
-              x-offset: 5px;
-              y-offset: 44px;
-
-              scroll-method: 0;
-              cycle: false;
-              click-to-exit: true;
-
-              sidebar-mode: true;
-
-              show-icons: true;
-              icon-theme: "WhiteSur-dark";
-          }
-
-          @theme "~/.config/rofi/rofi-finder.rasi"
-        '';
+        xdg.configFile."rofi/config.rasi".source =
+          config.lib.file.mkOutOfStoreSymlink "${repoRoot}/niri/rofi/config.rasi";
 
         # Reuse the Rust package's PDF renderer for small list-row thumbnails.
         xdg.dataFile."thumbnailers/pdftoppm.thumbnailer".text = ''
