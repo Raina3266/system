@@ -63,6 +63,9 @@ in
             # Correct the final host geometry and visibility lifecycle, then
             # keep the dashboard to quick actions, agenda and notifications.
             ./wayle-behavior-fixes.patch
+            # The click-away host fills the selected monitor; every native
+            # panel sits directly below Waybar, flush with the right edge.
+            ./external-dropdown-position.patch
           ];
       });
     })
