@@ -175,6 +175,48 @@ scale.media-seek:disabled highlight {
     background: #6b6670;
 }
 
+.media-volume-row {
+    margin-top: 7px;
+}
+
+.media-volume-icon {
+    min-width: 18px;
+    color: #6b6670;
+    font-size: 13px;
+}
+
+scale.media-volume {
+    min-width: 120px;
+    min-height: 12px;
+    padding: 0;
+}
+
+scale.media-volume trough {
+    min-height: 3px;
+    background: rgba(248, 248, 242, 0.10);
+    border-radius: 4px;
+}
+
+scale.media-volume highlight {
+    min-height: 3px;
+    background: #5df4fe;
+    border-radius: 4px;
+}
+
+scale.media-volume slider {
+    min-width: 11px;
+    min-height: 11px;
+    margin: -5px;
+    border-radius: 9999px;
+    background: #f8f8f2;
+}
+
+.media-volume-value {
+    font-size: 12px;
+    font-weight: bold;
+    color: #6b6670;
+}
+
 .media-controls {
     padding-top: 7px;
 }

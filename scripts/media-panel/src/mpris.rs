@@ -89,6 +89,9 @@ pub struct Player {
     pub status: Status,
     pub position: Duration,
     pub length: Option<Duration>,
+    /// MPRIS volume normalized to a 0–100 percentage. `None` means the player
+    /// does not expose the optional property.
+    pub volume: Option<u32>,
     pub can_control: bool,
     pub can_seek: bool,
     pub can_go_next: bool,
@@ -174,6 +177,10 @@ impl Players {
             length: metadata_u64(&metadata, "mpris:length")
                 .map(Duration::from_micros)
                 .filter(|length| !length.is_zero()),
+            volume: proxy
+                .get_property::<f64>("Volume")
+                .ok()
+                .and_then(volume_percent),
             can_control: proxy.get_property("CanControl").unwrap_or(true),
             can_seek: proxy.get_property("CanSeek").unwrap_or(false),
             can_go_next: proxy.get_property("CanGoNext").unwrap_or(false),
@@ -212,6 +219,16 @@ impl Players {
 
     pub fn previous(&self, player: &Player) {
         self.call(&player.bus, "Previous");
+    }
+
+    /// Sets the volume on every publisher represented by this card.
+    pub fn set_volume(&self, player: &Player, percent: u32) {
+        let volume = f64::from(percent.min(100)) / 100.0;
+        for bus in player.targets() {
+            if let Ok(proxy) = self.player(bus) {
+                let _ = proxy.set_property("Volume", volume);
+            }
+        }
     }
 
     /// Jumps to `fraction` through the track.
@@ -391,6 +408,12 @@ fn micros(value: Duration) -> i64 {
     i64::try_from(value.as_micros()).unwrap_or(i64::MAX)
 }
 
+fn volume_percent(volume: f64) -> Option<u32> {
+    volume
+        .is_finite()
+        .then(|| (volume.clamp(0.0, 1.0) * 100.0).round() as u32)
+}
+
 fn metadata_string(metadata: &Metadata, key: &str) -> Option<String> {
     match &**metadata.get(key)? {
         Value::Str(text) => Some(text.to_string()),
@@ -455,7 +478,12 @@ fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
         {
             // The list arrives playing-first, so the keeper is the better card
             // already; the other is still a way to reach the same playback.
-            Some(keeper) => keeper.also.push(player.bus),
+            Some(keeper) => {
+                if keeper.volume.is_none() {
+                    keeper.volume = player.volume;
+                }
+                keeper.also.push(player.bus);
+            }
             None => kept.push(player),
         }
     }

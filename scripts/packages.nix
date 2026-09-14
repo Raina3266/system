@@ -219,11 +219,9 @@ rec {
     '';
   };
 
-  # No `dontWrapGApps` here, unlike the other command-line members: this crate
-  # also ships `audio-panel`, so wrapGAppsHook4 has to reach it the same way it
-  # reaches media-panel. The wrapper it puts on `audio-control` only sets
-  # environment variables — Waybar's status call still loads no GTK.
-  audioControl = mkWorkspacePackage "audio-control" { };
+  # A headless status/profile helper. Wayle owns the visible audio UI, so this
+  # executable needs no GTK environment wrapper.
+  audioControl = mkWorkspacePackage "audio-control" { dontWrapGApps = true; };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     dontWrapGApps = true;

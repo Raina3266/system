@@ -4,6 +4,7 @@ the visible dashboard/network content stays aligned beneath the right-side
 Waybar buttons.
 
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+index 95b13b8..bf4ce3f 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
 @@ -1,5 +1,6 @@
@@ -13,7 +14,7 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/cr
  use wayle_config::ConfigService;
  use wayle_network::NetworkService;
  
-@@ -13,6 +14,7 @@
+@@ -13,6 +14,7 @@ pub(crate) struct NetworkDropdownInit {
  #[derive(Debug)]
  pub(crate) enum NetworkDropdownMsg {
      Reset,
@@ -22,9 +23,10 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/cr
      ScanRequested,
      AvailableNetworks(AvailableNetworksOutput),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+index 9ddd1f0..50e73f6 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
-@@ -4,6 +4,14 @@
+@@ -186,6 +186,14 @@ impl Component for NetworkDropdown {
                  self.active_connections
                      .emit(ActiveConnectionsInput::HideDetails);
              }
@@ -40,9 +42,10 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/
                  self.toggle_wifi(active, &sender);
              }
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 9b15f23..9d5c5c2 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-@@ -1,81 +1,162 @@
+@@ -160,13 +160,48 @@ impl DropdownInstance {
          window.set_exclusive_zone(0);
          window.set_monitor(Some(monitor));
          Self::position_external_window(&window, style.location, name);
@@ -92,75 +95,10 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
          }
          window.present();
          self.external_window.replace(Some(window));
-         self.external_visibility_changed(true);
-         true
-     }
- 
-     fn external_visibility_changed(&self, visible: bool) {
-         let Some(controller) = self
-             .controller
-             .downcast_ref::<Controller<NetworkDropdown>>()
-         else {
-             return;
-         };
- 
-         if visible {
-             controller.emit(NetworkDropdownMsg::ScanRequested);
-         } else {
-             controller.emit(NetworkDropdownMsg::Reset);
+@@ -239,6 +274,52 @@ impl DropdownInstance {
          }
      }
  
-     fn hide_external_window(&self) {
-         let external_window = self.external_window.borrow();
-         let Some(window) = external_window.as_ref() else {
-             return;
-         };
-         if window.is_visible() {
-             window.set_visible(false);
-             self.external_visibility_changed(false);
-         }
-     }
- 
-     fn position_external_window(window: &gtk::Window, location: Location, name: &str) {
-         const WAYBAR_SIZE: i32 = 40;
-         const GAP: i32 = 6;
-         const OFFSET: i32 = WAYBAR_SIZE + GAP;
-         const WAYBAR_BUTTON_STEP: i32 = 50;
-         let along_bar = if name == "network" {
-             GAP + WAYBAR_BUTTON_STEP
-         } else {
-             GAP
-         };
- 
-         match location {
-             Location::Top => {
-                 window.set_anchor(Edge::Top, true);
-                 window.set_anchor(Edge::Left, true);
-                 window.set_margin(Edge::Top, OFFSET);
-                 window.set_margin(Edge::Left, along_bar);
-             }
-             Location::Bottom => {
-                 window.set_anchor(Edge::Bottom, true);
-                 window.set_anchor(Edge::Left, true);
-                 window.set_margin(Edge::Bottom, OFFSET);
-                 window.set_margin(Edge::Left, along_bar);
-             }
-             Location::Left => {
-                 window.set_anchor(Edge::Top, true);
-                 window.set_anchor(Edge::Left, true);
-                 window.set_margin(Edge::Top, along_bar);
-                 window.set_margin(Edge::Left, OFFSET);
-             }
-             Location::Right => {
-                 window.set_anchor(Edge::Top, true);
-                 window.set_anchor(Edge::Right, true);
-                 window.set_margin(Edge::Top, along_bar);
-                 window.set_margin(Edge::Right, OFFSET);
-             }
-         }
-     }
-+
 +    fn position_external_content(content: &gtk::Widget, location: Location, name: &str) {
 +        const WAYBAR_SIZE: i32 = 40;
 +        const GAP: i32 = 6;
@@ -206,10 +144,15 @@ diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/way
 +            }
 +        }
 +    }
++
+     /// Toggles popover visibility for the given bar button.
+     ///
+     /// If the popover is already open for this button, it closes; otherwise it
 diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
+index e5e1d1a..e2c6b09 100644
 --- a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
 +++ b/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scss
-@@ -2,10 +2,10 @@
+@@ -41,11 +41,11 @@ window.dashboard-layer-window {
      background: transparent;
      box-shadow: none;
  
@@ -222,10 +165,12 @@ diff --git a/crates/wayle-styling/scss/modules/dashboard_dropdown/_dashboard.scs
 +    &.shadow .external-dropdown-panel {
          box-shadow:
              0 0 5px rgba(0, 0, 0, 0.3),
+             0 4px 10px rgba(0, 0, 0, 0.3),
 diff --git a/crates/wayle-styling/scss/modules/network_dropdown/_index.scss b/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
+index c4e5bf8..49d67c4 100644
 --- a/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
 +++ b/crates/wayle-styling/scss/modules/network_dropdown/_index.scss
-@@ -2,10 +2,10 @@
+@@ -6,11 +6,11 @@ window.network-layer-window {
      background: transparent;
      box-shadow: none;
  
@@ -238,3 +183,4 @@ diff --git a/crates/wayle-styling/scss/modules/network_dropdown/_index.scss b/cr
 +    &.shadow .external-dropdown-panel {
          box-shadow:
              0 0 5px rgba(0, 0, 0, 0.3),
+             0 4px 10px rgba(0, 0, 0, 0.3),

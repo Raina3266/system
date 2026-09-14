@@ -44,7 +44,7 @@ fn main() -> ExitCode {
             Ok(players) => {
                 for player in players.snapshot() {
                     println!(
-                        "{}\n    source : {}\n    track  : {} — {} — {}\n    state  : {:?} {}/{}\n    caps   : control={} seek={} prev={} next={}\n    art    : {:?}\n    url    : {:?}\n    also   : {:?}",
+                        "{}\n    source : {}\n    track  : {} — {} — {}\n    state  : {:?} {}/{}\n    volume : {}\n    caps   : control={} seek={} prev={} next={}\n    art    : {:?}\n    url    : {:?}\n    also   : {:?}",
                         player.bus,
                         player.source,
                         player.title,
@@ -55,6 +55,9 @@ fn main() -> ExitCode {
                         player
                             .length
                             .map_or_else(|| String::from("--:--"), mpris::clock),
+                        player
+                            .volume
+                            .map_or_else(|| String::from("--"), |volume| format!("{volume}%")),
                         player.can_control,
                         player.can_seek,
                         player.can_go_previous,

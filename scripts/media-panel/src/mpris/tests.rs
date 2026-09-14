@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use super::{
     Player, Status, clock, echoes_the_bus_name, friendly_source, merge_duplicates, same_playback,
+    volume_percent,
 };
 
 fn player(bus: &str, source: &str, title: &str, artist: &str, album: &str) -> Player {
@@ -193,6 +194,35 @@ fn progress_is_clamped_past_the_end() {
     };
 
     assert_eq!(overrun.progress(), 1.0);
+}
+
+#[test]
+fn mpris_volume_is_mapped_to_a_bounded_percentage() {
+    assert_eq!(volume_percent(0.0), Some(0));
+    assert_eq!(volume_percent(0.425), Some(43));
+    assert_eq!(volume_percent(1.0), Some(100));
+    assert_eq!(volume_percent(-0.5), Some(0));
+    assert_eq!(volume_percent(1.5), Some(100));
+    assert_eq!(volume_percent(f64::NAN), None);
+    assert_eq!(volume_percent(f64::INFINITY), None);
+}
+
+#[test]
+fn a_mirror_can_supply_the_cards_missing_volume() {
+    let primary = Player {
+        volume: None,
+        ..elisa()
+    };
+    let mirror = Player {
+        bus: String::from("org.mpris.MediaPlayer2.other"),
+        volume: Some(37),
+        ..primary.clone()
+    };
+
+    let merged = merge_duplicates(vec![primary, mirror]);
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].volume, Some(37));
 }
 
 #[test]

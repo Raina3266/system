@@ -277,16 +277,14 @@ fn print_badge(track: Option<&Track>) -> bool {
 
 fn truncate_title(title: &str) -> String {
     let mut output = String::new();
-    let mut characters = 0;
     let mut ideographs = 0;
 
-    for character in title.chars() {
+    for (characters, character) in title.chars().enumerate() {
         if characters == 50 || (is_cjk_ideograph(character) && ideographs == 35) {
             output.push('…');
             return output;
         }
         output.push(character);
-        characters += 1;
         if is_cjk_ideograph(character) {
             ideographs += 1;
         }

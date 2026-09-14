@@ -44,6 +44,7 @@ pub enum Command {
     Next(Player),
     Previous(Player),
     Seek(Player, f64),
+    SetVolume(Player, u32),
 }
 
 /// One card's widgets, kept so a refresh can update them in place rather than
@@ -68,6 +69,11 @@ struct Card {
     seek_handler: glib::SignalHandlerId,
     position: gtk::Label,
     length: gtk::Label,
+    volume_row: gtk::Box,
+    volume_icon: gtk::Label,
+    volume: gtk::Scale,
+    volume_handler: glib::SignalHandlerId,
+    volume_value: gtk::Label,
     play: gtk::Label,
     previous: gtk::Button,
     next: gtk::Button,
@@ -98,14 +104,34 @@ pub fn run(app: &gtk::Application, monitor: Option<String>, toggles: Receiver<St
     let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     panel.add_css_class("media-panel");
     panel.set_width_request(PANEL_WIDTH);
+    panel.set_halign(gtk::Align::Center);
+    panel.set_valign(gtk::Align::Start);
+    panel.set_margin_top(TOP_MARGIN);
     panel.append(&header());
     panel.append(&content);
+
+    // A content-sized surface cannot receive clicks outside the panel. A
+    // transparent monitor-sized host can, while Overlay keeps the actual panel
+    // above that dismiss target.
+    let host = gtk::Overlay::new();
+    host.set_hexpand(true);
+    host.set_vexpand(true);
+    let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    backdrop.set_hexpand(true);
+    backdrop.set_vexpand(true);
+    host.set_child(Some(&backdrop));
+    host.add_overlay(&panel);
 
     let window = gtk::ApplicationWindow::new(app);
     window.set_decorated(false);
     window.set_resizable(false);
     window.add_css_class("media-window");
-    window.set_child(Some(&panel));
+    window.set_child(Some(&host));
+
+    let click_away = gtk::GestureClick::new();
+    let hiding = window.clone();
+    click_away.connect_released(move |_, _, _, _| hiding.set_visible(false));
+    backdrop.add_controller(click_away);
 
     // Layer shell is a Wayland protocol. Guarding it keeps the panel runnable
     // under a plain X server, which is how it gets screenshotted in review.
@@ -115,8 +141,9 @@ pub fn run(app: &gtk::Application, monitor: Option<String>, toggles: Receiver<St
         window.set_layer(Layer::Overlay);
         window.set_keyboard_mode(KeyboardMode::OnDemand);
         window.set_exclusive_zone(0);
-        window.set_anchor(Edge::Top, true);
-        window.set_margin(Edge::Top, TOP_MARGIN);
+        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+            window.set_anchor(edge, true);
+        }
         if let Some(monitor) = monitor.as_deref().filter(|name| !name.is_empty())
             && let Some(output) = monitor_named(monitor)
         {
@@ -214,6 +241,9 @@ fn spawn_worker(commands: Receiver<Command>, snapshots: Sender<Vec<Player>>) {
                     Command::Next(player) => players.next(&player),
                     Command::Previous(player) => players.previous(&player),
                     Command::Seek(player, fraction) => players.seek_to(&player, fraction),
+                    Command::SetVolume(player, percent) => {
+                        players.set_volume(&player, percent);
+                    }
                 }
                 handled += 1;
             }
@@ -451,6 +481,31 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
     summary.append(&info);
     root.append(&summary);
 
+    let volume_row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+    volume_row.add_css_class("media-volume-row");
+    let volume_icon = gtk::Label::new(Some(volume_glyph(0)));
+    volume_icon.set_css_classes(&["media-volume-icon", "media-glyph"]);
+    volume_row.append(&volume_icon);
+    let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+    volume.add_css_class("media-volume");
+    volume.set_draw_value(false);
+    volume.set_hexpand(true);
+    let volume_handler = {
+        let (commands, state) = (commands.clone(), state.clone());
+        volume.connect_change_value(move |_, _, value| {
+            let percent = value.round().clamp(0.0, 100.0) as u32;
+            let _ = commands.send(Command::SetVolume(state.borrow().clone(), percent));
+            glib::Propagation::Proceed
+        })
+    };
+    volume_row.append(&volume);
+    let volume_value = gtk::Label::new(None);
+    volume_value.add_css_class("media-volume-value");
+    volume_value.set_width_chars(4);
+    volume_value.set_xalign(1.0);
+    volume_row.append(&volume_value);
+    root.append(&volume_row);
+
     let controls = gtk::CenterBox::new();
     controls.add_css_class("media-controls");
     let position = gtk::Label::new(None);
@@ -525,6 +580,11 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
         seek_handler,
         position,
         length,
+        volume_row,
+        volume_icon,
+        volume,
+        volume_handler,
+        volume_value,
         play,
         previous,
         next,
@@ -563,6 +623,14 @@ fn transport_button(glyph: &str, class: &str) -> gtk::Button {
     label.add_css_class("media-glyph");
     button.set_child(Some(&label));
     button
+}
+
+fn volume_glyph(percent: u32) -> &'static str {
+    match percent {
+        0 => "󰕿",
+        1..=50 => "󰖀",
+        _ => "󰕾",
+    }
 }
 
 /// Writes a fresh reading of a player into the card already on screen.
@@ -621,6 +689,15 @@ fn update(card: &Card, player: Player) {
     card.seek.block_signal(&card.seek_handler);
     card.seek.set_value(player.progress() * 1000.0);
     card.seek.unblock_signal(&card.seek_handler);
+
+    card.volume_row.set_visible(player.volume.is_some());
+    if let Some(volume) = player.volume {
+        card.volume_icon.set_label(volume_glyph(volume));
+        card.volume_value.set_label(&format!("{volume}%"));
+        card.volume.block_signal(&card.volume_handler);
+        card.volume.set_value(f64::from(volume));
+        card.volume.unblock_signal(&card.volume_handler);
+    }
 
     card.player.replace(player);
 }

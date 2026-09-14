@@ -56,9 +56,13 @@ in
             ./wayle-audio-profile-bridge.patch
             ./dashboard-slim.patch
             ./dashboard-polish.patch
-            # Apply last: dashboard-wifi-tile adds Media to the external host;
-            # this generalises that finished host to every registered dropdown.
+            # Apply after the feature patches: dashboard-wifi-tile adds Media
+            # to the external host, and this generalises that finished host to
+            # every registered dropdown.
             ./external-dropdown-all.patch
+            # Correct the final host geometry and visibility lifecycle, then
+            # keep the dashboard to quick actions, agenda and notifications.
+            ./wayle-behavior-fixes.patch
           ];
       });
     })
