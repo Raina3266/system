@@ -1,2 +1,281 @@
-// Live Wayle overrides. Wayle watches this file and recompiles it on save.
-// Keep this empty to preserve the upstream/patched appearance by default.
+// Live Wayle presentation overrides. Wayle watches this directory and applies
+// valid SCSS changes immediately; no NixOS rebuild is required.
+
+// External dropdowns use a transparent monitor-sized host so clicking outside
+// the visible card can close it. Keep only the card itself opaque and shadowed.
+window.external-dropdown-window,
+window.dashboard-layer-window,
+window.network-layer-window,
+window.audio-layer-window {
+    background: transparent;
+    box-shadow: none;
+
+    .external-dropdown-panel,
+    > .dropdown {
+        min-width: 0;
+    }
+
+    &.shadow .external-dropdown-panel,
+    &.shadow > .dropdown {
+        box-shadow:
+            0 0 5px rgba(0, 0, 0, 0.3),
+            0 4px 10px rgba(0, 0, 0, 0.3),
+            0 0 0 1px rgba(255, 255, 255, 0.04);
+    }
+}
+
+// Dashboard -----------------------------------------------------------------
+
+.dashboard-dropdown {
+    .dashboard-scroll,
+    .dashboard-calendar-scroll,
+    .dashboard-notification-scroll {
+        min-height: 0;
+        background: transparent;
+
+        undershoot,
+        overshoot {
+            background: transparent;
+        }
+    }
+
+    .card-title {
+        font-size: var(--text-2xs);
+        font-weight: var(--weight-bold);
+        color: var(--status-error);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border-spacing: var(--space-xs);
+        margin-right: var(--space-sm);
+
+        image {
+            -gtk-icon-size: var(--icon-md);
+            margin-right: var(--space-sm);
+            color: var(--status-error);
+        }
+    }
+
+    .dashboard-calendar-range {
+        font-size: var(--text-2xs);
+        font-weight: var(--weight-semibold);
+        color: var(--status-error);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .dashboard-calendar-body {
+        margin-right: var(--space-sm);
+    }
+
+    .dashboard-calendar-day {
+        margin-top: var(--space-md);
+        margin-bottom: var(--space-xs);
+        font-size: var(--text-md);
+        font-weight: var(--weight-semibold);
+        color: var(--accent);
+
+        &:first-child {
+            margin-top: 0;
+        }
+    }
+
+    .dashboard-calendar-time {
+        margin-top: var(--space-sm);
+        font-size: var(--text-xs);
+        font-weight: var(--weight-semibold);
+        color: var(--fg-muted);
+        letter-spacing: 0.04em;
+    }
+
+    .dashboard-calendar-entry {
+        margin-top: var(--space-xs);
+        margin-bottom: var(--space-xs);
+        font-size: var(--text-base);
+        font-weight: var(--weight-medium);
+        color: var(--status-info);
+    }
+
+    .dashboard-notification-section {
+        padding-bottom: var(--space-md);
+    }
+
+    .dashboard-notification-scroll {
+        margin-top: var(--space-sm);
+    }
+
+    .dashboard-section-empty {
+        margin-bottom: var(--space-sm);
+        font-size: var(--text-sm);
+        font-weight: var(--weight-medium);
+        color: var(--fg-subtle);
+    }
+
+    // Do Not Disturb sits beside the title in the card header.
+    .notification-dropdown-dnd-switch {
+        margin-right: var(--space-sm);
+    }
+}
+
+button.notification-dropdown-item-expand,
+button.notification-dropdown-item-dismiss {
+    > image {
+        -gtk-icon-size: var(--icon-xs);
+        margin: var(--space-xs) var(--space-sm);
+    }
+}
+
+button.notification-dropdown-item-expand:hover image {
+    color: var(--accent);
+}
+
+// Network -------------------------------------------------------------------
+
+.network-details-card {
+    margin-top: var(--space-sm);
+    padding: var(--space-md);
+}
+
+.network-details-header {
+    margin-bottom: var(--space-md);
+}
+
+.network-details-title {
+    font-size: var(--text-md);
+    font-weight: var(--weight-bold);
+    color: var(--fg-default);
+}
+
+.network-details-description {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--fg-subtle);
+}
+
+.network-details-stack,
+.network-details-status {
+    min-height: calc(25rem * var(--global-scale));
+}
+
+.network-details-status {
+    border-spacing: var(--space-sm);
+    color: var(--fg-subtle);
+
+    spinner,
+    image {
+        -gtk-icon-size: var(--icon-lg);
+    }
+
+    &.error {
+        color: var(--status-error);
+    }
+}
+
+.network-qr-code {
+    padding: var(--space-sm);
+    border-radius: var(--rounding-element);
+    background: white;
+}
+
+.network-info-scroll {
+    background: transparent;
+}
+
+.network-info-text {
+    padding: var(--space-sm);
+    font-family: monospace;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--fg-default);
+}
+
+// Audio ---------------------------------------------------------------------
+
+.audio-tabs {
+    padding: var(--space-sm) var(--space-md);
+    border-spacing: var(--space-xs);
+    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    border-top-left-radius: var(--rounding-container);
+    border-top-right-radius: var(--rounding-container);
+
+    button.audio-tab {
+        padding: var(--space-xs) var(--space-sm);
+        border-radius: var(--rounding-element);
+        background: transparent;
+        transition:
+            background var(--duration-fast),
+            color var(--duration-fast);
+
+        label {
+            font-size: var(--text-md);
+            font-weight: var(--weight-medium);
+            color: var(--fg-muted);
+        }
+
+        &:hover {
+            background: var(--bg-overlay);
+
+            label {
+                color: var(--fg-default);
+            }
+        }
+
+        &.active {
+            background: var(--accent-subtle);
+
+            label {
+                color: var(--accent);
+                font-weight: var(--weight-semibold);
+            }
+        }
+    }
+}
+
+.audio-page {
+    .audio-device {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    .picker-header {
+        padding-top: var(--space-sm);
+    }
+}
+
+// The Pair tab embeds Wayle's Bluetooth dropdown content without duplicating
+// its outer dropdown frame.
+.bluetooth-section > .dropdown {
+    min-width: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+
+    > .dropdown-content {
+        padding: 0;
+    }
+
+    > .dropdown-header {
+        margin-bottom: var(--space-sm);
+        border-radius: var(--rounding-element);
+    }
+}
+
+button.audio-route-btn {
+    margin-right: var(--space-xs);
+    color: var(--fg-muted);
+    background: var(--bg-overlay);
+    transition:
+        background var(--duration-fast),
+        color var(--duration-fast);
+
+    image.audio-route-icon {
+        margin: calc(var(--space-xs) * 1.5);
+        -gtk-icon-size: var(--icon-md);
+    }
+
+    &:hover {
+        color: var(--fg-default);
+        background: var(--bg-hover);
+    }
+}

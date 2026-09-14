@@ -1,0 +1,4340 @@
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
+index d6a66a6..6bd5de4 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_audio.ftl
+@@ -3,0 +4,2 @@ dropdown-audio-title = Audio
++dropdown-audio-tab-pair = Pair
++dropdown-audio-tab-play = Play
+@@ -5,0 +8,3 @@ dropdown-audio-input = Input
++dropdown-audio-playback = Playback
++dropdown-audio-route = Route
++dropdown-audio-route-tooltip = Choose an output for this stream
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+index 0b6d5d1..12b1dd8 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
+@@ -12 +12 @@ dropdown-dashboard-idle-inhibit = Idle Inhibit
+-dropdown-dashboard-power-saver = Power Saver
++dropdown-dashboard-power-saver = Power Profile
+@@ -22,0 +23,7 @@ dropdown-dashboard-no-media-description = No media playing
++## Calendar and Notifications
++dropdown-dashboard-calendar = Calendar
++dropdown-dashboard-calendar-today = Today
++dropdown-dashboard-calendar-empty = Nothing scheduled in the next 7 days
++dropdown-dashboard-notifications = Notifications
++dropdown-dashboard-notifications-unavailable = Notification service unavailable
++
+diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+index 7d8b079..32b4109 100644
+--- a/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/en-US/dropdowns/_network.ftl
+@@ -17,0 +18,10 @@ dropdown-network-wifi = WiFi
++dropdown-network-show-info = Info
++dropdown-network-show-info-tooltip = Show WiFi connection information
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Show WiFi QR code
++dropdown-network-close-details = Close details
++dropdown-network-info-title = Network information
++dropdown-network-info-loading = Reading WiFi information…
++dropdown-network-qr-title = Share { $ssid }
++dropdown-network-qr-description = Scan this code to connect to the WiFi network
++dropdown-network-qr-loading = Creating QR code…
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl b/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
+index e8c2ac8..2d9800e 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_audio.ftl
+@@ -3,0 +4,2 @@ dropdown-audio-title = Audio
++dropdown-audio-tab-pair = Appairer
++dropdown-audio-tab-play = Lecture
+@@ -5,0 +8,3 @@ dropdown-audio-input = Entrée
++dropdown-audio-playback = Lecture
++dropdown-audio-route = Destination
++dropdown-audio-route-tooltip = Choisir une sortie pour ce flux
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+index aa799bc..7f00df0 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
+@@ -12 +12 @@ dropdown-dashboard-idle-inhibit = Inhiber la veille
+-dropdown-dashboard-power-saver = Économie d'énergie
++dropdown-dashboard-power-saver = Profil d’alimentation
+@@ -22,0 +23,7 @@ dropdown-dashboard-no-media-description = Aucun média en cours de lecture
++## Calendrier et notifications
++dropdown-dashboard-calendar = Calendrier
++dropdown-dashboard-calendar-today = Aujourd'hui
++dropdown-dashboard-calendar-empty = Aucun événement prévu dans les 7 prochains jours
++dropdown-dashboard-notifications = Notifications
++dropdown-dashboard-notifications-unavailable = Service de notifications indisponible
++
+diff --git a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+index fe3920a..3311e06 100644
+--- a/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
++++ b/crates/wayle-shell/locales/fr/dropdowns/_network.ftl
+@@ -17,0 +18,10 @@ dropdown-network-wifi = Wi-Fi
++dropdown-network-show-info = Infos
++dropdown-network-show-info-tooltip = Afficher les informations de connexion Wi-Fi
++dropdown-network-show-qr = QR
++dropdown-network-show-qr-tooltip = Afficher le code QR Wi-Fi
++dropdown-network-close-details = Fermer les détails
++dropdown-network-info-title = Informations réseau
++dropdown-network-info-loading = Lecture des informations Wi-Fi…
++dropdown-network-qr-title = Partager { $ssid }
++dropdown-network-qr-description = Scannez ce code pour vous connecter au réseau Wi-Fi
++dropdown-network-qr-loading = Création du code QR…
+diff --git a/crates/wayle-shell/src/services/shell_ipc/dbus.rs b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
+index 4483872..400a1ab 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/dbus.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/dbus.rs
+@@ -5 +5,4 @@ use zbus::{fdo, interface};
+-use super::{bar::BarVisibility, state::ShellIpcState};
++use super::{
++    bar::BarVisibility,
++    state::{DropdownRequest, ShellIpcState},
++};
+@@ -38,0 +42,31 @@ impl ShellIpcDaemon {
++    /// Toggles a dropdown on a monitor for integration with external bars.
++    pub async fn dropdown_toggle(&self, name: &str, monitor: &str) -> fdo::Result<()> {
++        if !crate::shell::bar::dropdowns::DROPDOWN_NAMES.contains(&name) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown dropdown: {name}"
++            )));
++        }
++
++        let mut connectors = self.state.connectors.get();
++        connectors.sort();
++        let monitor = if monitor.is_empty() {
++            connectors.first().map(String::as_str).unwrap_or_default()
++        } else {
++            monitor
++        };
++
++        if !connectors.iter().any(|item| item == monitor) {
++            return Err(fdo::Error::InvalidArgs(format!(
++                "unknown monitor: {monitor}"
++            )));
++        }
++
++        let serial = self.state.dropdown_request.get().serial.wrapping_add(1);
++        self.state.dropdown_request.set(DropdownRequest {
++            serial,
++            name: name.to_owned(),
++            monitor: monitor.to_owned(),
++        });
++        Ok(())
++    }
++
+diff --git a/crates/wayle-shell/src/services/shell_ipc/state.rs b/crates/wayle-shell/src/services/shell_ipc/state.rs
+index 9fdaf9f..f422b58 100644
+--- a/crates/wayle-shell/src/services/shell_ipc/state.rs
++++ b/crates/wayle-shell/src/services/shell_ipc/state.rs
+@@ -6,0 +7,11 @@ use wayle_core::Property;
++/// A request from an external bar to toggle one of Wayle's dropdowns.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct DropdownRequest {
++    /// Monotonically increasing value so identical requests stay observable.
++    pub serial: u64,
++    /// Registered dropdown name, for example `dashboard`.
++    pub name: String,
++    /// Monitor connector on which the dropdown should open.
++    pub monitor: String,
++}
++
+@@ -17,0 +29,3 @@ pub struct ShellIpcState {
++
++    /// Most recent request to toggle a dropdown from an external bar.
++    pub dropdown_request: Property<DropdownRequest>,
+@@ -24,0 +39 @@ impl ShellIpcState {
++            dropdown_request: Property::new(DropdownRequest::default()),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/device_item.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/device_item.rs
+index 76f241e..7a52707 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/device_item.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/device_item.rs
+@@ -8,0 +9 @@ pub(super) struct DeviceOptionItem {
++    tooltip: Option<String>,
+@@ -26,0 +28 @@ impl FactoryComponent for DeviceOptionItem {
++            set_tooltip_text: self.tooltip.as_deref(),
+@@ -84,0 +87 @@ impl FactoryComponent for DeviceOptionItem {
++            tooltip: init.tooltip,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/helper.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/helper.rs
+new file mode 100644
+index 0000000..cf99d47
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/helper.rs
+@@ -0,0 +1,141 @@
++//! Adapter to the audio profile logic shared with the former Rofi panel.
++
++use std::{env, str};
++
++use tokio::process::Command;
++
++use crate::shell::bar::dropdowns::audio::VolumeSectionKind;
++
++const FIELD_COUNT: usize = 5;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct HelperRow {
++    pub key: String,
++    pub label: String,
++    pub description: String,
++    pub name: String,
++    pub is_default: bool,
++}
++
++pub(super) async fn load(kind: VolumeSectionKind) -> Result<Vec<HelperRow>, String> {
++    let output = command()?
++        .arg("wayle-list")
++        .arg(kind_name(kind))
++        .output()
++        .await
++        .map_err(|error| format!("cannot run audio helper: {error}"))?;
++
++    if !output.status.success() {
++        return Err(command_error(&output.stderr, output.status.to_string()));
++    }
++    parse_output(&output.stdout)
++}
++
++pub(super) async fn set_default(kind: VolumeSectionKind, key: &str) -> Result<(), String> {
++    let output = command()?
++        .arg("wayle-set-default")
++        .arg(kind_name(kind))
++        .arg(key)
++        .output()
++        .await
++        .map_err(|error| format!("cannot run audio helper: {error}"))?;
++
++    if output.status.success() {
++        Ok(())
++    } else {
++        Err(command_error(&output.stderr, output.status.to_string()))
++    }
++}
++
++fn command() -> Result<Command, String> {
++    let executable = env::var_os("WAYLE_AUDIO_HELPER")
++        .ok_or_else(|| "WAYLE_AUDIO_HELPER is not configured".to_owned())?;
++    let mut command = Command::new(executable);
++    command.kill_on_drop(true);
++    Ok(command)
++}
++
++const fn kind_name(kind: VolumeSectionKind) -> &'static str {
++    match kind {
++        VolumeSectionKind::Output => "output",
++        VolumeSectionKind::Input => "input",
++    }
++}
++
++fn command_error(stderr: &[u8], status: String) -> String {
++    let message = String::from_utf8_lossy(stderr);
++    let message = message.trim();
++    if message.is_empty() {
++        format!("audio helper exited with {status}")
++    } else {
++        message.to_owned()
++    }
++}
++
++fn parse_output(output: &[u8]) -> Result<Vec<HelperRow>, String> {
++    let mut fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
++    if fields.last().is_some_and(|field| field.is_empty()) {
++        fields.pop();
++    }
++    if !fields.len().is_multiple_of(FIELD_COUNT) {
++        return Err(format!(
++            "audio helper returned {} fields, expected a multiple of {FIELD_COUNT}",
++            fields.len()
++        ));
++    }
++
++    fields
++        .chunks_exact(FIELD_COUNT)
++        .map(|fields| {
++            let text = |index| {
++                str::from_utf8(fields[index])
++                    .map(str::to_owned)
++                    .map_err(|error| format!("audio helper returned invalid UTF-8: {error}"))
++            };
++            let default = text(4)?;
++            let is_default = match default.as_str() {
++                "0" => false,
++                "1" => true,
++                value => {
++                    return Err(format!(
++                        "audio helper returned invalid default flag {value:?}"
++                    ));
++                }
++            };
++            Ok(HelperRow {
++                key: text(0)?,
++                label: text(1)?,
++                description: text(2)?,
++                name: text(3)?,
++                is_default,
++            })
++        })
++        .collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn parses_nul_delimited_rows() {
++        let rows = parse_output(
++            b"speaker\0Speaker\0Controller Speaker\0speaker-sink\0\x31\0\
++              headphones\0Headphones\0Controller Headphones\0\0\x30\0",
++        )
++        .unwrap();
++
++        assert_eq!(rows.len(), 2);
++        assert_eq!(rows[0].label, "Speaker");
++        assert!(rows[0].is_default);
++        assert_eq!(rows[1].name, "");
++        assert!(!rows[1].is_default);
++    }
++
++    #[test]
++    fn rejects_partial_and_invalid_rows() {
++        assert!(parse_output(b"only-one-field\0").is_err());
++        assert!(parse_output(b"key\0label\0description\0name\0maybe\0").is_err());
++        assert!(parse_output(b"key\0\xff\0description\0name\0\x31\0").is_err());
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
+index cedf2e1..5221e0e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/messages.rs
+@@ -3 +3,7 @@ use std::sync::Arc;
+-use wayle_audio::AudioService;
++use wayle_audio::{
++    AudioService,
++    core::{
++        device::{input::InputDevice, output::OutputDevice},
++        stream::AudioStream,
++    },
++};
+@@ -7 +13,20 @@ use crate::shell::bar::dropdowns::audio::VolumeSectionKind;
+-#[derive(Debug)]
++use super::helper::HelperRow;
++
++/// What activating a row does.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub(crate) enum DevicePickerMode {
++    /// A top-level tab: the row's device becomes the system default.
++    Default,
++    /// The Play tab's route picker: the row's device receives one stream.
++    Route,
++}
++
++/// Live device a row activates.
++#[derive(Clone)]
++pub(crate) enum RowDevice {
++    Output(Arc<OutputDevice>),
++    Input(Arc<InputDevice>),
++}
++
++/// One selectable row: a device, or one of its available ports.
++#[derive(Clone)]
+@@ -10,0 +36 @@ pub(crate) struct DeviceInfo {
++    pub tooltip: Option<String>,
+@@ -12,0 +39,7 @@ pub(crate) struct DeviceInfo {
++    pub device: Option<RowDevice>,
++    /// Port to activate before the row's action, when the device exposes more
++    /// than one available port.
++    pub port: Option<String>,
++    /// Stable key handled by the profile-aware helper. Present on the Output
++    /// and Input tab rows; route-picker rows keep using Wayle's native API.
++    pub helper_key: Option<String>,
+@@ -18,0 +52 @@ pub(crate) struct DevicePickerInit {
++    pub mode: DevicePickerMode,
+@@ -24,0 +59,6 @@ pub(crate) enum DevicePickerInput {
++    /// Route mode only: the stream every selection moves, with the application
++    /// name shown in the header.
++    SetStream {
++        stream: Option<Arc<AudioStream>>,
++        app: String,
++    },
+@@ -29 +69,9 @@ pub(crate) enum DevicePickerCmd {
+-    DevicesChanged(Vec<DeviceInfo>),
++    /// A device appeared or disappeared, or the default device changed.
++    DeviceListChanged,
++    /// A port or the routed stream's destination changed.
++    RowsChanged,
++    HelperRowsLoaded {
++        generation: u64,
++        result: Result<Vec<HelperRow>, String>,
++    },
++    HelperActionFinished(Result<(), String>),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
+index 12b2061..77b424e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/methods.rs
+@@ -1,2 +0,0 @@
+-use std::sync::Arc;
+-
+@@ -5,4 +3 @@ use tracing::warn;
+-use wayle_audio::{
+-    AudioService,
+-    core::device::{input::InputDevice, output::OutputDevice},
+-};
++use wayle_audio::{Error, types::device::DevicePort};
+@@ -11,2 +6,2 @@ use super::{
+-    DevicePicker,
+-    messages::{DeviceInfo, DevicePickerOutput},
++    DevicePicker, helper,
++    messages::{DeviceInfo, DevicePickerMode, RowDevice},
+@@ -15,0 +11,23 @@ use crate::shell::bar::dropdowns::audio::{VolumeSectionKind, helpers};
++impl RowDevice {
++    fn active_port(&self) -> Option<String> {
++        match self {
++            Self::Output(device) => device.active_port.get(),
++            Self::Input(device) => device.active_port.get(),
++        }
++    }
++
++    async fn set_port(&self, port: String) -> Result<(), Error> {
++        match self {
++            Self::Output(device) => device.set_port(port).await,
++            Self::Input(device) => device.set_port(port).await,
++        }
++    }
++
++    async fn set_as_default(&self) -> Result<(), Error> {
++        match self {
++            Self::Output(device) => device.set_as_default().await,
++            Self::Input(device) => device.set_as_default().await,
++        }
++    }
++}
++
+@@ -17 +35,3 @@ impl DevicePicker {
+-    pub(super) fn apply_device_list(&mut self, list: Vec<DeviceInfo>) {
++    pub(super) fn rebuild_rows(&mut self) {
++        self.rows = self.build_rows();
++
+@@ -20,2 +40,2 @@ impl DevicePicker {
+-        for info in list {
+-            guard.push_back(info);
++        for row in &self.rows {
++            guard.push_back(row.clone());
+@@ -25,2 +45,6 @@ impl DevicePicker {
+-    pub(super) fn select_device(&self, index: usize, sender: &ComponentSender<Self>) {
+-        let _ = sender.output(DevicePickerOutput::NavigateBack);
++    fn build_rows(&self) -> Vec<DeviceInfo> {
++        if self.mode == DevicePickerMode::Default
++            && let Some(rows) = &self.helper_rows
++        {
++            return self.build_helper_rows(rows);
++        }
+@@ -30,6 +54,8 @@ impl DevicePicker {
+-                let Some(device) = self.cached_output_devices.get(index).cloned() else {
+-                    return;
+-                };
+-                sender.command(|_out, _shutdown| async move {
+-                    if let Err(err) = device.set_as_default().await {
+-                        warn!(error = %err, "failed to set default output");
++                let target = match self.mode {
++                    DevicePickerMode::Default => self
++                        .audio
++                        .default_output
++                        .get()
++                        .map(|device| device.key.index),
++                    DevicePickerMode::Route => {
++                        self.stream.as_ref().map(|stream| stream.device_index.get())
+@@ -37 +63,20 @@ impl DevicePicker {
+-                });
++                };
++
++                let devices = self.audio.output_devices.get();
++                devices
++                    .iter()
++                    .flat_map(|device| {
++                        device_rows(
++                            RowDevice::Output(device.clone()),
++                            &device.description.get(),
++                            helpers::output_device_icon(
++                                &device.name.get(),
++                                &device.description.get(),
++                                &device.properties.get(),
++                            ),
++                            &device.ports.get(),
++                            &device.active_port.get(),
++                            target == Some(device.key.index),
++                        )
++                    })
++                    .collect()
+@@ -40,2 +85,8 @@ impl DevicePicker {
+-                let mut physical_inputs = self
+-                    .cached_input_devices
++                let target = self
++                    .audio
++                    .default_input
++                    .get()
++                    .map(|device| device.key.index);
++
++                let devices = self.audio.input_devices.get();
++                devices
+@@ -43,9 +94,16 @@ impl DevicePicker {
+-                    .filter(|device| !device.is_monitor.get());
+-                let Some(device) = physical_inputs.nth(index).cloned() else {
+-                    return;
+-                };
+-                sender.command(|_out, _shutdown| async move {
+-                    if let Err(err) = device.set_as_default().await {
+-                        warn!(error = %err, "failed to set default input");
+-                    }
+-                });
++                    .filter(|device| !device.is_monitor.get())
++                    .flat_map(|device| {
++                        device_rows(
++                            RowDevice::Input(device.clone()),
++                            &device.description.get(),
++                            helpers::input_device_icon(
++                                &device.name.get(),
++                                &device.description.get(),
++                                &device.properties.get(),
++                            ),
++                            &device.ports.get(),
++                            &device.active_port.get(),
++                            target == Some(device.key.index),
++                        )
++                    })
++                    .collect()
+@@ -56,5 +114,44 @@ impl DevicePicker {
+-    pub(super) fn build_device_list(
+-        audio: &AudioService,
+-        kind: VolumeSectionKind,
+-    ) -> Vec<DeviceInfo> {
+-        match kind {
++    fn build_helper_rows(&self, rows: &[helper::HelperRow]) -> Vec<DeviceInfo> {
++        self.reconcile_default(rows);
++
++        rows.iter()
++            .map(|row| {
++                let icon = match self.kind {
++                    VolumeSectionKind::Output => helpers::output_device_icon(
++                        &row.name,
++                        &row.description,
++                        &Default::default(),
++                    ),
++                    VolumeSectionKind::Input => {
++                        helpers::input_device_icon(&row.name, &row.description, &Default::default())
++                    }
++                };
++                DeviceInfo {
++                    description: row.label.clone(),
++                    subtitle: None,
++                    tooltip: (row.description != row.label).then(|| row.description.clone()),
++                    icon,
++                    is_active: row.is_default,
++                    device: None,
++                    port: None,
++                    helper_key: Some(row.key.clone()),
++                }
++            })
++            .collect()
++    }
++
++    /// `wayle-audio` can receive the server-default event before it receives
++    /// the sink created by a card-profile switch. In that order it keeps the
++    /// removed Speaker object as the default forever. The helper reads the
++    /// server after its new sink exists, so use that answer to repair Wayle's
++    /// reactive default with the matching live object.
++    fn reconcile_default(&self, rows: &[helper::HelperRow]) {
++        let Some(name) = rows
++            .iter()
++            .find(|row| row.is_default && !row.name.is_empty())
++            .map(|row| row.name.as_str())
++        else {
++            return;
++        };
++
++        match self.kind {
+@@ -62 +159,17 @@ impl DevicePicker {
+-                build_output_device_list(&audio.output_devices.get(), &audio.default_output.get())
++                let Some(device) = self
++                    .audio
++                    .output_devices
++                    .get()
++                    .into_iter()
++                    .find(|device| device.name.get() == name)
++                else {
++                    return;
++                };
++                if self
++                    .audio
++                    .default_output
++                    .get()
++                    .is_none_or(|current| current.key != device.key)
++                {
++                    self.audio.default_output.set(Some(device));
++                }
+@@ -65 +178,18 @@ impl DevicePicker {
+-                build_input_device_list(&audio.input_devices.get(), &audio.default_input.get())
++                let Some(device) = self
++                    .audio
++                    .input_devices
++                    .get()
++                    .into_iter()
++                    .filter(|device| !device.is_monitor.get())
++                    .find(|device| device.name.get() == name)
++                else {
++                    return;
++                };
++                if self
++                    .audio
++                    .default_input
++                    .get()
++                    .is_none_or(|current| current.key != device.key)
++                {
++                    self.audio.default_input.set(Some(device));
++                }
+@@ -68,0 +199,69 @@ impl DevicePicker {
++
++    /// Activates the row's port when it names one, then makes its device the
++    /// default or moves the routed stream onto it.
++    ///
++    /// The picker stays where it is: the checked row follows the audio server's
++    /// answer rather than the click.
++    pub(super) fn select_device(&self, index: usize, sender: &ComponentSender<Self>) {
++        let Some(row) = self.rows.get(index).cloned() else {
++            return;
++        };
++
++        if let Some(key) = row.helper_key.clone() {
++            let kind = self.kind;
++            sender.command(move |out, _shutdown| async move {
++                let result = helper::set_default(kind, &key).await;
++                let _ = out.send(super::messages::DevicePickerCmd::HelperActionFinished(
++                    result,
++                ));
++            });
++            return;
++        }
++
++        let Some(device) = row.device else {
++            return;
++        };
++
++        let mode = self.mode;
++        let audio = self.audio.clone();
++        let stream = self.stream.clone();
++
++        sender.command(move |_out, _shutdown| async move {
++            if let Some(port) = row.port.clone()
++                && device.active_port().as_deref() != Some(port.as_str())
++                && let Err(err) = device.set_port(port).await
++            {
++                warn!(error = %err, "failed to activate device port");
++                return;
++            }
++
++            match mode {
++                DevicePickerMode::Default => {
++                    if let Err(err) = device.set_as_default().await {
++                        warn!(error = %err, "failed to set default device");
++                    }
++                }
++                DevicePickerMode::Route => {
++                    let (Some(stream), RowDevice::Output(device)) = (stream, &device) else {
++                        return;
++                    };
++
++                    // The stream can end while its picker is open; route the
++                    // row the user chose or nothing at all.
++                    if !audio
++                        .playback_streams
++                        .get()
++                        .iter()
++                        .any(|live| live.key == stream.key)
++                    {
++                        warn!("playback stream ended before it could be routed");
++                        return;
++                    }
++
++                    if let Err(err) = stream.move_to_device(device.key).await {
++                        warn!(error = %err, "failed to route playback stream");
++                    }
++                }
++            }
++        });
++    }
+@@ -71,3 +270,8 @@ impl DevicePicker {
+-pub(super) fn build_output_device_list(
+-    devices: &[Arc<OutputDevice>],
+-    default: &Option<Arc<OutputDevice>>,
++/// Expands one device into its selectable rows.
++fn device_rows(
++    device: RowDevice,
++    description: &str,
++    icon: &'static str,
++    ports: &[DevicePort],
++    active_port: &Option<String>,
++    device_is_target: bool,
+@@ -75,16 +279,11 @@ pub(super) fn build_output_device_list(
+-    devices
+-        .iter()
+-        .map(|device| DeviceInfo {
+-            description: device.description.get(),
+-            subtitle: helpers::active_port_description(
+-                &device.active_port.get(),
+-                &device.ports.get(),
+-            ),
+-            icon: helpers::output_device_icon(
+-                &device.name.get(),
+-                &device.description.get(),
+-                &device.properties.get(),
+-            ),
+-            is_active: default
+-                .as_ref()
+-                .is_some_and(|default_device| default_device.key == device.key),
++    port_rows(description, ports, active_port, device_is_target)
++        .into_iter()
++        .map(|row| DeviceInfo {
++            description: row.description,
++            subtitle: row.subtitle,
++            tooltip: Some(description.to_owned()),
++            icon,
++            is_active: row.is_active,
++            device: Some(device.clone()),
++            port: row.port,
++            helper_key: None,
+@@ -95,5 +294,31 @@ pub(super) fn build_output_device_list(
+-pub(super) fn build_input_device_list(
+-    devices: &[Arc<InputDevice>],
+-    default: &Option<Arc<InputDevice>>,
+-) -> Vec<DeviceInfo> {
+-    devices
++/// One row's text, checked state and port, without the device handle.
++#[derive(Debug, PartialEq, Eq)]
++struct RowShape {
++    description: String,
++    subtitle: Option<String>,
++    is_active: bool,
++    port: Option<String>,
++}
++
++/// Splits a device into the rows that stand for its outputs.
++///
++/// Every named, available port becomes one compact row, because the port is the
++/// meaningful difference between the controller's otherwise repeated names.
++/// Ports the card reports as unplugged are left out. A device without named
++/// ports keeps one shortened device row for USB, Bluetooth and virtual audio.
++fn port_rows(
++    description: &str,
++    ports: &[DevicePort],
++    active_port: &Option<String>,
++    device_is_target: bool,
++) -> Vec<RowShape> {
++    if !ports.iter().any(|port| !port.name.is_empty()) {
++        return vec![RowShape {
++            description: helpers::short_device_name(description),
++            subtitle: None,
++            is_active: device_is_target,
++            port: None,
++        }];
++    }
++
++    let mut selectable: Vec<&DevicePort> = ports
+@@ -101,15 +326,16 @@ pub(super) fn build_input_device_list(
+-        .filter(|device| !device.is_monitor.get())
+-        .map(|device| DeviceInfo {
+-            description: device.description.get(),
+-            subtitle: helpers::active_port_description(
+-                &device.active_port.get(),
+-                &device.ports.get(),
+-            ),
+-            icon: helpers::input_device_icon(
+-                &device.name.get(),
+-                &device.description.get(),
+-                &device.properties.get(),
+-            ),
+-            is_active: default
+-                .as_ref()
+-                .is_some_and(|default_device| default_device.key == device.key),
++        .filter(|port| !port.name.is_empty() && port.available)
++        .collect();
++
++    selectable.sort_by(|left, right| right.priority.cmp(&left.priority));
++
++    selectable
++        .into_iter()
++        .map(|port| RowShape {
++            description: if port.description.is_empty() {
++                port.name.clone()
++            } else {
++                port.description.clone()
++            },
++            subtitle: None,
++            is_active: device_is_target && active_port.as_deref() == Some(port.name.as_str()),
++            port: Some(port.name.clone()),
+@@ -118,0 +345,117 @@ pub(super) fn build_input_device_list(
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn port(name: &str, description: &str, priority: u32, available: bool) -> DevicePort {
++        DevicePort {
++            name: name.to_owned(),
++            description: description.to_owned(),
++            priority,
++            available,
++        }
++    }
++
++    fn shapes(ports: &[DevicePort], active: Option<&str>, is_target: bool) -> Vec<RowShape> {
++        port_rows(
++            "Built-in Audio",
++            ports,
++            &active.map(str::to_owned),
++            is_target,
++        )
++    }
++
++    #[test]
++    fn single_port_device_stays_one_row() {
++        let ports = [port("analog-output-speaker", "Speaker", 10_000, true)];
++        let rows = shapes(&ports, Some("analog-output-speaker"), true);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].description, "Speaker");
++        assert_eq!(rows[0].subtitle, None);
++        assert_eq!(rows[0].port.as_deref(), Some("analog-output-speaker"));
++        assert!(rows[0].is_active);
++    }
++
++    #[test]
++    fn device_without_ports_has_no_subtitle() {
++        let rows = shapes(&[], None, false);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].subtitle, None);
++        assert!(!rows[0].is_active);
++    }
++
++    #[test]
++    fn plugged_ports_become_their_own_rows() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), true);
++
++        assert_eq!(rows.len(), 2);
++        assert_eq!(rows[0].description, "Speaker");
++        assert_eq!(rows[0].subtitle, None);
++        assert_eq!(rows[1].description, "Headphones");
++    }
++
++    #[test]
++    fn only_the_active_port_of_the_target_device_is_checked() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), true);
++
++        assert!(!rows[0].is_active);
++        assert!(rows[1].is_active);
++    }
++
++    #[test]
++    fn ports_of_a_device_that_is_not_the_target_are_unchecked() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, true),
++        ];
++        let rows = shapes(&ports, Some("analog-output-headphones"), false);
++
++        assert!(rows.iter().all(|row| !row.is_active));
++    }
++
++    #[test]
++    fn unplugged_ports_are_hidden() {
++        let ports = [
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("analog-output-headphones", "Headphones", 9_000, false),
++        ];
++        let rows = shapes(&ports, Some("analog-output-speaker"), true);
++
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].description, "Speaker");
++        assert_eq!(rows[0].port.as_deref(), Some("analog-output-speaker"));
++    }
++
++    #[test]
++    fn device_with_only_an_unplugged_named_port_is_hidden() {
++        let ports = [port("analog-output-headphones", "Headphones", 9_000, false)];
++
++        assert!(shapes(&ports, None, false).is_empty());
++    }
++
++    #[test]
++    fn rows_follow_port_priority() {
++        let ports = [
++            port("hdmi-output-1", "HDMI / DisplayPort 2", 100, true),
++            port("analog-output-speaker", "Speaker", 10_000, true),
++            port("hdmi-output-0", "HDMI / DisplayPort 1", 500, true),
++        ];
++        let rows = shapes(&ports, None, false);
++
++        let order: Vec<&str> = rows.iter().map(|row| row.description.as_str()).collect();
++        assert_eq!(
++            order,
++            ["Speaker", "HDMI / DisplayPort 1", "HDMI / DisplayPort 2"]
++        );
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
+index dac5a43..2600a04 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/mod.rs
+@@ -1,0 +2 @@ mod device_item;
++mod helper;
+@@ -10 +11,2 @@ use relm4::{factory::FactoryVecDeque, gtk, prelude::*};
+-use wayle_audio::AudioService;
++use wayle_audio::{AudioService, core::stream::AudioStream};
++use wayle_widgets::WatcherToken;
+@@ -12,0 +15 @@ use self::device_item::DeviceOptionItem;
++use self::helper::HelperRow;
+@@ -18,0 +22 @@ pub(crate) struct DevicePicker {
++    mode: DevicePickerMode,
+@@ -19,0 +24,3 @@ pub(crate) struct DevicePicker {
++    rows: Vec<DeviceInfo>,
++    helper_rows: Option<Vec<HelperRow>>,
++    helper_generation: u64,
+@@ -21,2 +28,3 @@ pub(crate) struct DevicePicker {
+-    cached_output_devices: Vec<Arc<wayle_audio::core::device::output::OutputDevice>>,
+-    cached_input_devices: Vec<Arc<wayle_audio::core::device::input::InputDevice>>,
++    stream: Option<Arc<AudioStream>>,
++    device_watcher: WatcherToken,
++    stream_watcher: WatcherToken,
+@@ -43,0 +52,4 @@ impl Component for DevicePicker {
++                    // The device tabs are reached from the tab bar; only the
++                    // route picker is a page you come back from.
++                    #[watch]
++                    set_visible: model.mode == DevicePickerMode::Route,
+@@ -48,0 +61 @@ impl Component for DevicePicker {
++                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+@@ -86,6 +98,0 @@ impl Component for DevicePicker {
+-        let initial_list = Self::build_device_list(&init.audio, init.kind);
+-        let (cached_output, cached_input) = match init.kind {
+-            VolumeSectionKind::Output => (init.audio.output_devices.get(), Vec::new()),
+-            VolumeSectionKind::Input => (Vec::new(), init.audio.input_devices.get()),
+-        };
+-
+@@ -94,0 +102 @@ impl Component for DevicePicker {
++            mode: init.mode,
+@@ -95,0 +104,3 @@ impl Component for DevicePicker {
++            rows: Vec::new(),
++            helper_rows: None,
++            helper_generation: 0,
+@@ -97,2 +108,3 @@ impl Component for DevicePicker {
+-            cached_output_devices: cached_output,
+-            cached_input_devices: cached_input,
++            stream: None,
++            device_watcher: WatcherToken::new(),
++            stream_watcher: WatcherToken::new(),
+@@ -101 +113,3 @@ impl Component for DevicePicker {
+-        model.apply_device_list(initial_list);
++        model.rebuild_rows();
++        model.resume_device_watchers(&sender);
++        model.refresh_helper_rows(&sender);
+@@ -115,0 +130,6 @@ impl Component for DevicePicker {
++            DevicePickerInput::SetStream { stream, app } => {
++                self.title = app;
++                self.stream = stream;
++                self.resume_stream_watcher(&sender);
++                self.rebuild_rows();
++            }
+@@ -122 +142 @@ impl Component for DevicePicker {
+-        _sender: ComponentSender<Self>,
++        sender: ComponentSender<Self>,
+@@ -126,4 +146,17 @@ impl Component for DevicePicker {
+-            DevicePickerCmd::DevicesChanged(list) => {
+-                match self.kind {
+-                    VolumeSectionKind::Output => {
+-                        self.cached_output_devices = self.audio.output_devices.get();
++            DevicePickerCmd::DeviceListChanged => {
++                self.rebuild_rows();
++                self.resume_device_watchers(&sender);
++                self.refresh_helper_rows(&sender);
++            }
++            DevicePickerCmd::RowsChanged => {
++                self.rebuild_rows();
++                self.refresh_helper_rows(&sender);
++            }
++            DevicePickerCmd::HelperRowsLoaded { generation, result } => {
++                if generation != self.helper_generation {
++                    return;
++                }
++                match result {
++                    Ok(rows) => {
++                        self.helper_rows = Some(rows);
++                        self.rebuild_rows();
+@@ -131,2 +164,4 @@ impl Component for DevicePicker {
+-                    VolumeSectionKind::Input => {
+-                        self.cached_input_devices = self.audio.input_devices.get();
++                    Err(error) => {
++                        tracing::warn!(%error, "failed to load profile-aware audio rows");
++                        self.helper_rows = None;
++                        self.rebuild_rows();
+@@ -135 +170,6 @@ impl Component for DevicePicker {
+-                self.apply_device_list(list);
++            }
++            DevicePickerCmd::HelperActionFinished(result) => {
++                if let Err(error) = result {
++                    tracing::warn!(%error, "failed to select audio device");
++                }
++                self.refresh_helper_rows(&sender);
+@@ -139,0 +180,31 @@ impl Component for DevicePicker {
++
++impl DevicePicker {
++    /// Re-arms the per-device port watchers after the device list changed.
++    fn resume_device_watchers(&mut self, sender: &ComponentSender<Self>) {
++        let token = self.device_watcher.reset();
++        watchers::spawn_per_device(sender, &self.audio, self.kind, token);
++    }
++
++    /// Follows the routed stream's destination so the checked row is the one
++    /// the audio server actually chose.
++    fn resume_stream_watcher(&mut self, sender: &ComponentSender<Self>) {
++        let token = self.stream_watcher.reset();
++        if let Some(stream) = &self.stream {
++            watchers::spawn_stream(sender, stream, token);
++        }
++    }
++
++    /// Refreshes the stable card/port rows without blocking GTK's main loop.
++    fn refresh_helper_rows(&mut self, sender: &ComponentSender<Self>) {
++        if self.mode != DevicePickerMode::Default {
++            return;
++        }
++        self.helper_generation = self.helper_generation.wrapping_add(1);
++        let generation = self.helper_generation;
++        let kind = self.kind;
++        sender.command(move |out, _shutdown| async move {
++            let result = helper::load(kind).await;
++            let _ = out.send(DevicePickerCmd::HelperRowsLoaded { generation, result });
++        });
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
+index 4ae004e..eba663f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/device_picker/watchers.rs
+@@ -4,2 +4,3 @@ use relm4::ComponentSender;
+-use wayle_audio::AudioService;
+-use wayle_widgets::watch;
++use tokio_util::sync::CancellationToken;
++use wayle_audio::{AudioService, core::stream::AudioStream};
++use wayle_widgets::{watch, watch_cancellable};
+@@ -7,5 +8 @@ use wayle_widgets::watch;
+-use super::{
+-    DevicePicker,
+-    messages::DevicePickerCmd,
+-    methods::{build_input_device_list, build_output_device_list},
+-};
++use super::{DevicePicker, messages::DevicePickerCmd};
+@@ -27,3 +24 @@ pub(super) fn spawn(
+-                    let list =
+-                        build_output_device_list(&output_devices.get(), &default_output.get());
+-                    let _ = out.send(DevicePickerCmd::DevicesChanged(list));
++                    let _ = out.send(DevicePickerCmd::DeviceListChanged);
+@@ -40,2 +35 @@ pub(super) fn spawn(
+-                    let list = build_input_device_list(&input_devices.get(), &default_input.get());
+-                    let _ = out.send(DevicePickerCmd::DevicesChanged(list));
++                    let _ = out.send(DevicePickerCmd::DeviceListChanged);
+@@ -46,0 +41,51 @@ pub(super) fn spawn(
++
++/// Watches every device's ports, so plugging a jack in or out adds and removes
++/// its row without waiting for the device list itself to change.
++pub(super) fn spawn_per_device(
++    sender: &ComponentSender<DevicePicker>,
++    audio: &Arc<AudioService>,
++    kind: VolumeSectionKind,
++    token: CancellationToken,
++) {
++    match kind {
++        VolumeSectionKind::Output => {
++            for device in audio.output_devices.get() {
++                let ports = device.ports.clone();
++                let active_port = device.active_port.clone();
++                watch_cancellable!(
++                    sender,
++                    token.clone(),
++                    [ports.watch(), active_port.watch()],
++                    |out| {
++                        let _ = out.send(DevicePickerCmd::RowsChanged);
++                    }
++                );
++            }
++        }
++        VolumeSectionKind::Input => {
++            for device in audio.input_devices.get() {
++                let ports = device.ports.clone();
++                let active_port = device.active_port.clone();
++                watch_cancellable!(
++                    sender,
++                    token.clone(),
++                    [ports.watch(), active_port.watch()],
++                    |out| {
++                        let _ = out.send(DevicePickerCmd::RowsChanged);
++                    }
++                );
++            }
++        }
++    }
++}
++
++pub(super) fn spawn_stream(
++    sender: &ComponentSender<DevicePicker>,
++    stream: &Arc<AudioStream>,
++    token: CancellationToken,
++) {
++    let device_index = stream.device_index.clone();
++    watch_cancellable!(sender, token, [device_index.watch()], |out| {
++        let _ = out.send(DevicePickerCmd::RowsChanged);
++    });
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
+index b636f55..9ba4adc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/factory.rs
+@@ -13,0 +14 @@ impl DropdownFactory for Factory {
++        let bluetooth = services.bluetooth.clone();
+@@ -16 +17,5 @@ impl DropdownFactory for Factory {
+-        let init = AudioDropdownInit { audio, config };
++        let init = AudioDropdownInit {
++            audio,
++            bluetooth,
++            config,
++        };
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/helpers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/helpers.rs
+index 96b5e20..94c5aa5 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/helpers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/helpers.rs
+@@ -90,0 +91,81 @@ const DEFAULT_INPUT_ICON: &str = "tb-microphone-symbolic";
++const DESCRIPTION_NOISE: &[&str] = &[
++    "High Definition Audio Controller",
++    "HD Audio Controller",
++    "Audio Controller",
++    "Analog Surround 7.1",
++    "Analog Surround 5.1",
++    "Analog Surround 4.0",
++    "Digital Surround 7.1",
++    "Digital Surround 5.1",
++    "Digital Stereo",
++    "Analog Stereo",
++    "Digital Mono",
++    "Analog Mono",
++    "Stereo Duplex",
++    "Mono Duplex",
++];
++
++/// Removes PulseAudio profile boilerplate while retaining the device model.
++pub(crate) fn short_device_name(description: &str) -> String {
++    let mut short = description.to_owned();
++    for noise in DESCRIPTION_NOISE {
++        while let Some(at) = short.find(noise) {
++            short.replace_range(at..at + noise.len(), " ");
++        }
++    }
++    let tokens: Vec<&str> = short.split_whitespace().collect();
++    let short = tokens
++        .iter()
++        .enumerate()
++        .filter(|(index, token)| {
++            let family_label = **token == "Family"
++                && tokens
++                    .get(index + 1)
++                    .is_some_and(|next| is_pci_family(next));
++            !(is_pci_family(token) || family_label)
++        })
++        .map(|(_, token)| *token)
++        .collect::<Vec<_>>()
++        .join(" ");
++    let short = short.trim_matches(|character: char| {
++        character.is_whitespace() || matches!(character, '-' | ',' | ':')
++    });
++    if short.is_empty() {
++        description.to_owned()
++    } else {
++        short.to_owned()
++    }
++}
++
++/// The built-in controller name is identical across Speaker, Headphones and
++/// HDMI nodes. Show its active port; retain a shortened model name for USB,
++/// Bluetooth and other genuinely different hardware.
++pub(crate) fn active_device_name(
++    description: &str,
++    active_port: &Option<String>,
++    ports: &[wayle_audio::types::device::DevicePort],
++) -> String {
++    let port = active_port_description(active_port, ports);
++    let lower = description.to_lowercase();
++    if (lower.contains("audio controller") || lower.contains("built-in audio"))
++        && let Some(port) = port.filter(|port| !port.is_empty())
++    {
++        return port;
++    }
++    short_device_name(description)
++}
++
++fn is_pci_family(token: &str) -> bool {
++    !token.is_empty()
++        && token.split('/').all(|part| {
++            let Some(digits) = part.strip_suffix('h') else {
++                return false;
++            };
++            (2..=3).contains(&digits.len())
++                && digits.starts_with(|character: char| character.is_ascii_digit())
++                && digits
++                    .chars()
++                    .all(|character| character.is_ascii_hexdigit())
++        })
++}
++
+@@ -234,0 +316,30 @@ mod tests {
++    #[test]
++    fn controller_names_use_the_part_that_differs() {
++        let ports = [wayle_audio::types::device::DevicePort {
++            name: "[Out] Speaker".into(),
++            description: "Speaker".into(),
++            priority: 100,
++            available: true,
++        }];
++        assert_eq!(
++            active_device_name(
++                "Alder Lake PCH-P High Definition Audio Controller Speaker",
++                &Some("[Out] Speaker".into()),
++                &ports,
++            ),
++            "Speaker"
++        );
++    }
++
++    #[test]
++    fn real_device_models_survive_boilerplate_removal() {
++        assert_eq!(
++            short_device_name("Jabra Evolve 65 Analog Stereo"),
++            "Jabra Evolve 65"
++        );
++        assert_eq!(
++            short_device_name("Family 17h/19h/20h HD Audio Controller"),
++            "Family 17h/19h/20h HD Audio Controller"
++        );
++    }
++
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
+index 9ce92dd..e4d15af 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/app_volume_item.rs
+@@ -5 +5 @@ use wayle_widgets::prelude::DebouncedSlider;
+-use crate::shell::bar::dropdowns::audio::helpers;
++use crate::{i18n::t, shell::bar::dropdowns::audio::helpers};
+@@ -27,0 +28 @@ pub(super) enum AppVolumeItemMsg {
++    Route,
+@@ -33,0 +35 @@ pub(super) enum AppVolumeItemOutput {
++    Route(u32),
+@@ -93,0 +96,13 @@ impl FactoryComponent for AppVolumeItem {
++
++                gtk::Button {
++                    add_css_class: "audio-route-btn",
++                    set_valign: gtk::Align::Center,
++                    set_cursor_from_name: Some("pointer"),
++                    set_tooltip_text: Some(&t!("dropdown-audio-route-tooltip")),
++                    connect_clicked => AppVolumeItemMsg::Route,
++
++                    gtk::Image {
++                        add_css_class: "audio-route-icon",
++                        set_icon_name: Some("ld-arrow-right-symbolic"),
++                    },
++                },
+@@ -154,0 +170,3 @@ impl FactoryComponent for AppVolumeItem {
++            AppVolumeItemMsg::Route => {
++                let _ = sender.output(AppVolumeItemOutput::Route(self.stream_index));
++            }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
+index 6291e28..0f14d74 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/messages.rs
+@@ -14,0 +15,10 @@ pub(crate) enum AppVolumesInput {
++    RouteApp(u32),
++}
++
++#[derive(Debug)]
++pub(crate) enum AppVolumesOutput {
++    /// The panel should open its route picker for this stream.
++    RouteRequested {
++        stream: Arc<AudioStream>,
++        app: String,
++    },
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
+index c60b8bf..b0c443a 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/methods.rs
+@@ -16,0 +17 @@ use crate::shell::bar::dropdowns::audio::{
++        messages::AppVolumesOutput,
+@@ -139,0 +141,13 @@ impl AppVolumes {
++    /// Hands the panel the stream its route picker should move.
++    pub(super) fn request_route(&self, stream_index: u32, sender: &ComponentSender<Self>) {
++        let Some(stream) = self.find_stream(stream_index) else {
++            return;
++        };
++        let app = helpers::app_display_name(&stream.application_name.get(), &stream.name.get());
++
++        let _ = sender.output(AppVolumesOutput::RouteRequested {
++            stream: stream.clone(),
++            app,
++        });
++    }
++
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
+index f1928f3..d01615f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/app_volumes/mod.rs
+@@ -14 +14 @@ use wayle_widgets::{WatcherToken, prelude::*};
+-pub(crate) use self::messages::AppVolumesInit;
++pub(crate) use self::messages::{AppVolumesInit, AppVolumesOutput};
+@@ -32 +32 @@ impl Component for AppVolumes {
+-    type Output = ();
++    type Output = AppVolumesOutput;
+@@ -40,0 +41,9 @@ impl Component for AppVolumes {
++            gtk::Box {
++                add_css_class: "picker-header",
++
++                gtk::Label {
++                    add_css_class: "picker-title",
++                    set_label: &t!("dropdown-audio-playback"),
++                },
++            },
++
+@@ -95,0 +105 @@ impl Component for AppVolumes {
++                AppVolumeItemOutput::Route(stream_index) => AppVolumesInput::RouteApp(stream_index),
+@@ -123,0 +134,3 @@ impl Component for AppVolumes {
++            AppVolumesInput::RouteApp(stream_index) => {
++                self.request_route(stream_index, &sender);
++            }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs
+deleted file mode 100644
+index 962d41b..0000000
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/messages.rs
++++ /dev/null
+@@ -1,22 +0,0 @@
+-use std::sync::Arc;
+-
+-use wayle_audio::AudioService;
+-
+-use super::volume_section::VolumeSectionOutput;
+-
+-pub(crate) struct DefaultDevicesInit {
+-    pub audio: Arc<AudioService>,
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum DefaultDevicesInput {
+-    OutputSection(VolumeSectionOutput),
+-    InputSection(VolumeSectionOutput),
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum DefaultDevicesOutput {
+-    ShowOutputDevices,
+-    ShowInputDevices,
+-    HasDeviceChanged(bool),
+-}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
+index 8a1c269..2e2ffef 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/mod.rs
+@@ -1,33 +1 @@
+-pub(crate) mod volume_section;
+-
+-mod messages;
+-
+-use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
+-
+-pub(super) use self::messages::*;
+-use self::volume_section::{
+-    VolumeSection, VolumeSectionInit, VolumeSectionKind, VolumeSectionOutput,
+-};
+-
+-pub(crate) struct DefaultDevices {
+-    has_output: bool,
+-    has_input: bool,
+-    output_section: Controller<VolumeSection>,
+-    input_section: Controller<VolumeSection>,
+-}
+-
+-#[relm4::component(pub(crate))]
+-impl SimpleComponent for DefaultDevices {
+-    type Init = DefaultDevicesInit;
+-    type Input = DefaultDevicesInput;
+-    type Output = DefaultDevicesOutput;
+-
+-    view! {
+-        #[root]
+-        gtk::Box {
+-            add_css_class: "audio-devices",
+-            set_orientation: gtk::Orientation::Vertical,
+-
+-            #[local_ref]
+-            output_section_widget -> gtk::Box {},
++//! The default output and input rows, one per audio tab.
+@@ -35,73 +3 @@ impl SimpleComponent for DefaultDevices {
+-            #[local_ref]
+-            input_section_widget -> gtk::Box {},
+-        }
+-    }
+-
+-    fn init(
+-        init: Self::Init,
+-        _root: Self::Root,
+-        sender: ComponentSender<Self>,
+-    ) -> ComponentParts<Self> {
+-        let output_section = VolumeSection::builder()
+-            .launch(VolumeSectionInit {
+-                audio: init.audio.clone(),
+-                kind: VolumeSectionKind::Output,
+-            })
+-            .forward(sender.input_sender(), DefaultDevicesInput::OutputSection);
+-
+-        let input_section = VolumeSection::builder()
+-            .launch(VolumeSectionInit {
+-                audio: init.audio.clone(),
+-                kind: VolumeSectionKind::Input,
+-            })
+-            .forward(sender.input_sender(), DefaultDevicesInput::InputSection);
+-
+-        let has_output = !init.audio.output_devices.get().is_empty();
+-        let has_input = init
+-            .audio
+-            .input_devices
+-            .get()
+-            .iter()
+-            .any(|device| !device.is_monitor.get());
+-
+-        let model = Self {
+-            has_output,
+-            has_input,
+-            output_section,
+-            input_section,
+-        };
+-
+-        let output_section_widget = model.output_section.widget();
+-        let input_section_widget = model.input_section.widget();
+-        let widgets = view_output!();
+-
+-        ComponentParts { model, widgets }
+-    }
+-
+-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+-        match msg {
+-            DefaultDevicesInput::OutputSection(output) => match output {
+-                VolumeSectionOutput::ShowDevices => {
+-                    let _ = sender.output(DefaultDevicesOutput::ShowOutputDevices);
+-                }
+-                VolumeSectionOutput::HasDeviceChanged(has) => {
+-                    self.has_output = has;
+-                    let _ = sender.output(DefaultDevicesOutput::HasDeviceChanged(
+-                        self.has_output || self.has_input,
+-                    ));
+-                }
+-            },
+-            DefaultDevicesInput::InputSection(output) => match output {
+-                VolumeSectionOutput::ShowDevices => {
+-                    let _ = sender.output(DefaultDevicesOutput::ShowInputDevices);
+-                }
+-                VolumeSectionOutput::HasDeviceChanged(has) => {
+-                    self.has_input = has;
+-                    let _ = sender.output(DefaultDevicesOutput::HasDeviceChanged(
+-                        self.has_output || self.has_input,
+-                    ));
+-                }
+-            },
+-        }
+-    }
+-}
++pub(crate) mod volume_section;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
+index 92ae6a1..7a24cd4 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/messages.rs
+@@ -19,0 +20,3 @@ pub(crate) struct VolumeSectionInit {
++    /// Whether the device name opens a picker. False when the caller already
++    /// shows the device list beneath this row.
++    pub show_picker_link: bool,
+@@ -31,0 +35 @@ pub(crate) enum VolumeSectionCmd {
++    DeviceDetailsChanged,
+@@ -38 +41,0 @@ pub(crate) enum VolumeSectionOutput {
+-    HasDeviceChanged(bool),
+@@ -62 +65 @@ impl ActiveDevice {
+-    pub fn description(&self) -> String {
++    pub fn display_name(&self) -> String {
+@@ -64,2 +67,10 @@ impl ActiveDevice {
+-            Self::Output(device) => device.description.get(),
+-            Self::Input(device) => device.description.get(),
++            Self::Output(device) => helpers::active_device_name(
++                &device.description.get(),
++                &device.active_port.get(),
++                &device.ports.get(),
++            ),
++            Self::Input(device) => helpers::active_device_name(
++                &device.description.get(),
++                &device.active_port.get(),
++                &device.ports.get(),
++            ),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/methods.rs
+index 87fbd2b..bcfbd57 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/methods.rs
+@@ -32 +32 @@ impl VolumeSection {
+-        self.device_name = device.description();
++        self.device_name = device.display_name();
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
+index 46b7d77..94e3e9b 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/mod.rs
+@@ -17,0 +18 @@ pub(crate) struct VolumeSection {
++    show_picker_link: bool,
+@@ -73,0 +75,2 @@ impl Component for VolumeSection {
++                        #[watch]
++                        set_visible: model.show_picker_link,
+@@ -91,0 +95,12 @@ impl Component for VolumeSection {
++
++                    // The audio panel puts the list of devices directly under
++                    // this row, so there is nowhere for the chevron to go.
++                    gtk::Label {
++                        add_css_class: "audio-device-name-text",
++                        set_halign: gtk::Align::Start,
++                        set_ellipsize: gtk::pango::EllipsizeMode::End,
++                        #[watch]
++                        set_visible: !model.show_picker_link,
++                        #[watch]
++                        set_label: &model.device_name,
++                    },
+@@ -158 +173 @@ impl Component for VolumeSection {
+-                    device.description(),
++                    device.display_name(),
+@@ -197,0 +213 @@ impl Component for VolumeSection {
++            show_picker_link: init.show_picker_link,
+@@ -209,2 +224,0 @@ impl Component for VolumeSection {
+-        let _ = sender.output(VolumeSectionOutput::HasDeviceChanged(has_device));
+-
+@@ -241 +254,0 @@ impl Component for VolumeSection {
+-                let had_device = self.has_device;
+@@ -250,4 +262,0 @@ impl Component for VolumeSection {
+-
+-                if self.has_device != had_device {
+-                    let _ = sender.output(VolumeSectionOutput::HasDeviceChanged(self.has_device));
+-                }
+@@ -260,0 +270,5 @@ impl Component for VolumeSection {
++            VolumeSectionCmd::DeviceDetailsChanged => {
++                if let Some(device) = self.device.clone() {
++                    self.sync_from_device(&device);
++                }
++            }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/watchers.rs
+index d2f97f1..39314bf 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/default_devices/volume_section/watchers.rs
+@@ -6 +6 @@ use wayle_audio::AudioService;
+-use wayle_widgets::{watch, watch_cancellable_throttled};
++use wayle_widgets::{watch, watch_cancellable, watch_cancellable_throttled};
+@@ -64 +64 @@ pub(super) fn spawn_device(
+-                token,
++                token.clone(),
+@@ -70,0 +71,11 @@ pub(super) fn spawn_device(
++            let description = d.description.clone();
++            let active_port = d.active_port.clone();
++            let ports = d.ports.clone();
++            watch_cancellable!(
++                sender,
++                token,
++                [description.watch(), active_port.watch(), ports.watch()],
++                |out| {
++                    let _ = out.send(VolumeSectionCmd::DeviceDetailsChanged);
++                }
++            );
+@@ -77 +88 @@ pub(super) fn spawn_device(
+-                token,
++                token.clone(),
+@@ -83,0 +95,11 @@ pub(super) fn spawn_device(
++            let description = d.description.clone();
++            let active_port = d.active_port.clone();
++            let ports = d.ports.clone();
++            watch_cancellable!(
++                sender,
++                token,
++                [description.watch(), active_port.watch(), ports.watch()],
++                |out| {
++                    let _ = out.send(VolumeSectionCmd::DeviceDetailsChanged);
++                }
++            );
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs
+deleted file mode 100644
+index dd63abb..0000000
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/messages.rs
++++ /dev/null
+@@ -1,22 +0,0 @@
+-use std::sync::Arc;
+-
+-use wayle_audio::AudioService;
+-use wayle_config::ConfigService;
+-
+-use super::default_devices::DefaultDevicesOutput;
+-
+-pub(crate) struct MainSectionInit {
+-    pub audio: Arc<AudioService>,
+-    pub config: Arc<ConfigService>,
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum MainSectionInput {
+-    DefaultDevices(DefaultDevicesOutput),
+-}
+-
+-#[derive(Debug)]
+-pub(crate) enum MainSectionOutput {
+-    ShowOutputDevices,
+-    ShowInputDevices,
+-}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
+index db54f9c..ffd7e18 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/main_section/mod.rs
+@@ -1,56 +1,4 @@
+-mod app_volumes;
+-pub(crate) mod default_devices;
+-mod messages;
+-
+-use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
+-use wayle_widgets::prelude::*;
+-
+-pub(super) use self::messages::*;
+-use self::{
+-    app_volumes::AppVolumes,
+-    default_devices::{DefaultDevices, DefaultDevicesInit, DefaultDevicesOutput},
+-};
+-use crate::i18n::t;
+-
+-pub(crate) struct MainSection {
+-    has_any_device: bool,
+-    default_devices: Controller<DefaultDevices>,
+-    app_volumes: Controller<AppVolumes>,
+-}
+-
+-#[relm4::component(pub(crate))]
+-impl SimpleComponent for MainSection {
+-    type Init = MainSectionInit;
+-    type Input = MainSectionInput;
+-    type Output = MainSectionOutput;
+-
+-    view! {
+-        #[root]
+-        gtk::Box {
+-            set_orientation: gtk::Orientation::Vertical,
+-
+-            gtk::Box {
+-                add_css_class: "audio-fixed",
+-                set_orientation: gtk::Orientation::Vertical,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-
+-                #[local_ref]
+-                default_devices_widget -> gtk::Box {},
+-            },
+-
+-            gtk::Label {
+-                add_css_class: "section-label",
+-                set_label: &t!("dropdown-audio-app-volume"),
+-                set_halign: gtk::Align::Start,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-            },
+-
+-            #[local_ref]
+-            app_volumes_widget -> gtk::Box {
+-                set_vexpand: true,
+-                #[watch]
+-                set_visible: model.has_any_device,
+-            },
++//! Pieces the audio panel's tabs are built from.
++//!
++//! The panel replaced the single scrolling page these once shared, so this
++//! module is only the path to them.
+@@ -58,80 +6,2 @@ impl SimpleComponent for MainSection {
+-            gtk::Box {
+-                #[watch]
+-                set_visible: !model.has_any_device,
+-                set_vexpand: true,
+-                set_valign: gtk::Align::Center,
+-
+-                #[template]
+-                EmptyState {
+-                    #[template_child]
+-                    icon {
+-                        set_icon_name: Some("ld-volume-x-symbolic"),
+-                    },
+-                    #[template_child]
+-                    title {
+-                        set_label: &t!("dropdown-audio-no-devices-title"),
+-                    },
+-                    #[template_child]
+-                    description {
+-                        set_label: &t!("dropdown-audio-no-devices-description"),
+-                    },
+-                },
+-            },
+-        }
+-    }
+-
+-    fn init(
+-        init: Self::Init,
+-        _root: Self::Root,
+-        sender: ComponentSender<Self>,
+-    ) -> ComponentParts<Self> {
+-        let has_output = !init.audio.output_devices.get().is_empty();
+-        let has_input = init
+-            .audio
+-            .input_devices
+-            .get()
+-            .iter()
+-            .any(|device| !device.is_monitor.get());
+-
+-        let default_devices = DefaultDevices::builder()
+-            .launch(DefaultDevicesInit {
+-                audio: init.audio.clone(),
+-            })
+-            .forward(sender.input_sender(), MainSectionInput::DefaultDevices);
+-
+-        let app_volumes = AppVolumes::builder()
+-            .launch(app_volumes::AppVolumesInit {
+-                audio: init.audio,
+-                config: init.config,
+-            })
+-            .detach();
+-
+-        let model = Self {
+-            has_any_device: has_output || has_input,
+-            default_devices,
+-            app_volumes,
+-        };
+-
+-        let default_devices_widget = model.default_devices.widget();
+-        let app_volumes_widget = model.app_volumes.widget();
+-        let widgets = view_output!();
+-
+-        ComponentParts { model, widgets }
+-    }
+-
+-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+-        match msg {
+-            MainSectionInput::DefaultDevices(output) => match output {
+-                DefaultDevicesOutput::ShowOutputDevices => {
+-                    let _ = sender.output(MainSectionOutput::ShowOutputDevices);
+-                }
+-                DefaultDevicesOutput::ShowInputDevices => {
+-                    let _ = sender.output(MainSectionOutput::ShowInputDevices);
+-                }
+-                DefaultDevicesOutput::HasDeviceChanged(has) => {
+-                    self.has_any_device = has;
+-                }
+-            },
+-        }
+-    }
+-}
++pub(crate) mod app_volumes;
++pub(crate) mod default_devices;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
+index 04b09d5..585d8c9 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/messages.rs
+@@ -3,0 +4 @@ use wayle_audio::AudioService;
++use wayle_bluetooth::BluetoothService;
+@@ -4,0 +6 @@ use wayle_config::ConfigService;
++use wayle_core::DeferredService;
+@@ -6 +8,7 @@ use wayle_config::ConfigService;
+-use super::{device_picker::DevicePickerOutput, main_section::MainSectionOutput};
++use super::{
++    AudioPage,
++    device_picker::DevicePickerOutput,
++    main_section::{
++        app_volumes::AppVolumesOutput, default_devices::volume_section::VolumeSectionOutput,
++    },
++};
+@@ -9,0 +18 @@ pub(crate) struct AudioDropdownInit {
++    pub bluetooth: DeferredService<BluetoothService>,
+@@ -15 +24,6 @@ pub(crate) enum AudioDropdownMsg {
+-    MainSection(MainSectionOutput),
++    /// Wayle's own dropdown machinery, or the external Waybar window, showed or
++    /// hid the panel.
++    VisibilityChanged(bool),
++    TabSelected(AudioPage),
++    OutputVolume(VolumeSectionOutput),
++    InputVolume(VolumeSectionOutput),
+@@ -17,0 +32,2 @@ pub(crate) enum AudioDropdownMsg {
++    RoutePicker(DevicePickerOutput),
++    Playback(AppVolumesOutput),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
+index 4617c10..22d7365 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/audio/mod.rs
+@@ -13,0 +14 @@ pub(crate) use self::main_section::default_devices::volume_section::VolumeSectio
++pub(super) use self::messages::AudioDropdownMsg;
+@@ -15,3 +16,18 @@ use self::{
+-    device_picker::{DevicePicker, DevicePickerInit, DevicePickerOutput},
+-    main_section::{MainSection, MainSectionInit, MainSectionOutput},
+-    messages::{AudioDropdownCmd, AudioDropdownInit, AudioDropdownMsg},
++    device_picker::{
++        DevicePicker, DevicePickerInit, DevicePickerInput, DevicePickerMode, DevicePickerOutput,
++    },
++    main_section::{
++        app_volumes::{AppVolumes, AppVolumesInit, AppVolumesOutput},
++        default_devices::volume_section::{VolumeSection, VolumeSectionInit, VolumeSectionOutput},
++    },
++    messages::{AudioDropdownCmd, AudioDropdownInit},
++};
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::{
++        bluetooth::{
++            BluetoothDropdown,
++            messages::{BluetoothDropdownInit, BluetoothDropdownMsg},
++        },
++        scaled_dimension,
++    },
+@@ -19 +34,0 @@ use self::{
+-use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+@@ -21,2 +36,4 @@ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+-const BASE_WIDTH: f32 = 382.0;
+-const BASE_HEIGHT: f32 = 512.0;
++// Two thirds of the original 382 px panel. Device rows now show only their
++// distinguishing port/model label, so the extra horizontal space is unused.
++const BASE_WIDTH: f32 = 255.0;
++const BASE_HEIGHT: f32 = 560.0;
+@@ -23,0 +41,4 @@ const BASE_HEIGHT: f32 = 512.0;
++/// The panel's pages.
++///
++/// The first four are the tabs; `Route` is the Play tab's destination picker
++/// and is reached from a stream's route button.
+@@ -25,4 +46,6 @@ const BASE_HEIGHT: f32 = 512.0;
+-pub(super) enum AudioPage {
+-    Main,
+-    OutputDevices,
+-    InputDevices,
++pub(crate) enum AudioPage {
++    Pair,
++    Output,
++    Input,
++    Play,
++    Route,
+@@ -34,3 +57,14 @@ impl AudioPage {
+-            Self::Main => "main",
+-            Self::OutputDevices => "output",
+-            Self::InputDevices => "input",
++            Self::Pair => "pair",
++            Self::Output => "output",
++            Self::Input => "input",
++            Self::Play => "play",
++            Self::Route => "route",
++        }
++    }
++
++    /// The tab that stays lit while the page is shown. The route picker
++    /// belongs to Play.
++    fn tab(self) -> Self {
++        match self {
++            Self::Route => Self::Play,
++            page => page,
+@@ -40,0 +75,2 @@ impl AudioPage {
++/// Bluetooth and audio in one panel: pair and connect devices, choose the
++/// output and input, and set each application's volume and destination.
+@@ -45 +81,4 @@ pub(crate) struct AudioDropdown {
+-    main_section: Controller<MainSection>,
++
++    bluetooth: Controller<BluetoothDropdown>,
++    output_volume: Controller<VolumeSection>,
++    input_volume: Controller<VolumeSection>,
+@@ -47,0 +87,2 @@ pub(crate) struct AudioDropdown {
++    playback: Controller<AppVolumes>,
++    route_picker: Controller<DevicePicker>,
+@@ -70,6 +111,26 @@ impl Component for AudioDropdown {
+-                #[template]
+-                DropdownHeader {
+-                    #[template_child]
+-                    icon {
+-                        set_visible: true,
+-                        set_icon_name: Some("ld-volume-2-symbolic"),
++                gtk::Box {
++                    add_css_class: "audio-tabs",
++                    set_homogeneous: true,
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Pair),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Pair),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-tab-pair"),
++                        },
++                    },
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Output),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Output),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-output"),
++                        },
+@@ -77,3 +138,23 @@ impl Component for AudioDropdown {
+-                    #[template_child]
+-                    label {
+-                        set_label: &t!("dropdown-audio-title"),
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Input),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Input),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-input"),
++                        },
++                    },
++
++                    gtk::Button {
++                        add_css_class: "audio-tab",
++                        set_cursor_from_name: Some("pointer"),
++                        #[watch]
++                        set_class_active: ("active", model.active_page.tab() == AudioPage::Play),
++                        connect_clicked => AudioDropdownMsg::TabSelected(AudioPage::Play),
++
++                        gtk::Label {
++                            set_label: &t!("dropdown-audio-tab-play"),
++                        },
+@@ -88,0 +170,4 @@ impl Component for AudioDropdown {
++
++                    #[local_ref]
++                    add_named[Some("pair")] = bluetooth_widget -> gtk::Box {},
++
+@@ -90 +175 @@ impl Component for AudioDropdown {
+-                    add_named[Some("main")] = main_section_widget -> gtk::Box {},
++                    add_named[Some("output")] = output_page_widget -> gtk::Box {},
+@@ -93 +178 @@ impl Component for AudioDropdown {
+-                    add_named[Some("output")] = output_picker_widget -> gtk::Box {},
++                    add_named[Some("input")] = input_page_widget -> gtk::Box {},
+@@ -96 +181,4 @@ impl Component for AudioDropdown {
+-                    add_named[Some("input")] = input_picker_widget -> gtk::Box {},
++                    add_named[Some("play")] = playback_widget -> gtk::Box {},
++
++                    #[local_ref]
++                    add_named[Some("route")] = route_picker_widget -> gtk::Box {},
+@@ -110,3 +198,3 @@ impl Component for AudioDropdown {
+-        let main_section = MainSection::builder()
+-            .launch(MainSectionInit {
+-                audio: init.audio.clone(),
++        let bluetooth = BluetoothDropdown::builder()
++            .launch(BluetoothDropdownInit {
++                bluetooth: init.bluetooth,
+@@ -115 +203,17 @@ impl Component for AudioDropdown {
+-            .forward(sender.input_sender(), AudioDropdownMsg::MainSection);
++            .detach();
++
++        let output_volume = VolumeSection::builder()
++            .launch(VolumeSectionInit {
++                audio: init.audio.clone(),
++                kind: VolumeSectionKind::Output,
++                show_picker_link: false,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::OutputVolume);
++
++        let input_volume = VolumeSection::builder()
++            .launch(VolumeSectionInit {
++                audio: init.audio.clone(),
++                kind: VolumeSectionKind::Input,
++                show_picker_link: false,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::InputVolume);
+@@ -121,0 +226 @@ impl Component for AudioDropdown {
++                mode: DevicePickerMode::Default,
+@@ -129,0 +235 @@ impl Component for AudioDropdown {
++                mode: DevicePickerMode::Default,
+@@ -132,0 +239,16 @@ impl Component for AudioDropdown {
++        let playback = AppVolumes::builder()
++            .launch(AppVolumesInit {
++                audio: init.audio.clone(),
++                config: init.config.clone(),
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::Playback);
++
++        let route_picker = DevicePicker::builder()
++            .launch(DevicePickerInit {
++                audio: init.audio,
++                kind: VolumeSectionKind::Output,
++                title: t!("dropdown-audio-route"),
++                mode: DevicePickerMode::Route,
++            })
++            .forward(sender.input_sender(), AudioDropdownMsg::RoutePicker);
++
+@@ -139,2 +261,4 @@ impl Component for AudioDropdown {
+-            active_page: AudioPage::Main,
+-            main_section,
++            active_page: AudioPage::Pair,
++            bluetooth,
++            output_volume,
++            input_volume,
+@@ -142,0 +267,2 @@ impl Component for AudioDropdown {
++            playback,
++            route_picker,
+@@ -145,4 +271,8 @@ impl Component for AudioDropdown {
+-        let main_section_widget = model.main_section.widget();
+-        let output_picker_widget = model.output_picker.widget();
+-        let input_picker_widget = model.input_picker.widget();
+-        let widgets = view_output!();
++        let bluetooth_widget = model.bluetooth.widget();
++        let playback_widget = model.playback.widget();
++        let route_picker_widget = model.route_picker.widget();
++
++        let output_page = page_box(model.output_volume.widget(), model.output_picker.widget());
++        let input_page = page_box(model.input_volume.widget(), model.input_picker.widget());
++        let output_page_widget = &output_page;
++        let input_page_widget = &input_page;
+@@ -149,0 +280 @@ impl Component for AudioDropdown {
++        let widgets = view_output!();
+@@ -155,3 +286,3 @@ impl Component for AudioDropdown {
+-            AudioDropdownMsg::MainSection(output) => match output {
+-                MainSectionOutput::ShowOutputDevices => {
+-                    self.active_page = AudioPage::OutputDevices;
++            AudioDropdownMsg::VisibilityChanged(visible) => {
++                if visible && self.active_page == AudioPage::Pair {
++                    self.bluetooth.emit(BluetoothDropdownMsg::ScanRequested);
+@@ -159,2 +290,4 @@ impl Component for AudioDropdown {
+-                MainSectionOutput::ShowInputDevices => {
+-                    self.active_page = AudioPage::InputDevices;
++            }
++            AudioDropdownMsg::TabSelected(page) => {
++                if page == AudioPage::Pair && self.active_page != AudioPage::Pair {
++                    self.bluetooth.emit(BluetoothDropdownMsg::ScanRequested);
+@@ -162 +295,8 @@ impl Component for AudioDropdown {
+-            },
++                self.active_page = page;
++            }
++            AudioDropdownMsg::OutputVolume(VolumeSectionOutput::ShowDevices) => {
++                self.active_page = AudioPage::Output;
++            }
++            AudioDropdownMsg::InputVolume(VolumeSectionOutput::ShowDevices) => {
++                self.active_page = AudioPage::Input;
++            }
+@@ -164,2 +304,14 @@ impl Component for AudioDropdown {
+-            | AudioDropdownMsg::InputPicker(DevicePickerOutput::NavigateBack) => {
+-                self.active_page = AudioPage::Main;
++            | AudioDropdownMsg::InputPicker(DevicePickerOutput::NavigateBack) => {}
++            AudioDropdownMsg::RoutePicker(DevicePickerOutput::NavigateBack) => {
++                self.route_picker.emit(DevicePickerInput::SetStream {
++                    stream: None,
++                    app: t!("dropdown-audio-route"),
++                });
++                self.active_page = AudioPage::Play;
++            }
++            AudioDropdownMsg::Playback(AppVolumesOutput::RouteRequested { stream, app }) => {
++                self.route_picker.emit(DevicePickerInput::SetStream {
++                    stream: Some(stream),
++                    app,
++                });
++                self.active_page = AudioPage::Route;
+@@ -183,0 +336,9 @@ impl Component for AudioDropdown {
++
++/// A device tab: the current default device above the list it is chosen from.
++fn page_box(volume: &gtk::Box, picker: &gtk::Box) -> gtk::Box {
++    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
++    page.add_css_class("audio-page");
++    page.append(volume);
++    page.append(picker);
++    page
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
+index db0423e..f55dc9e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/factory.rs
+@@ -1 +1,2 @@
+-use relm4::prelude::*;
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
+@@ -19 +20,7 @@ impl DropdownFactory for Factory {
+-        let popover = controller.widget().clone();
++        // The component's root is a plain box so the audio panel can host it,
++        // so the standalone dropdown supplies the popover here.
++        let popover = gtk::Popover::new();
++        popover.set_css_classes(&["dropdown", "bluetooth-dropdown"]);
++        popover.set_has_arrow(false);
++        popover.set_child(Some(controller.widget()));
++
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+index a3bebc7..11e7a23 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+@@ -51,0 +52,3 @@ impl Component for BluetoothDropdown {
++        // A box, not a popover: the audio panel embeds this component as its
++        // Pair page, and `bluetooth::Factory` puts the standalone dropdown's
++        // popover around it.
+@@ -53,6 +56,3 @@ impl Component for BluetoothDropdown {
+-        gtk::Popover {
+-            set_css_classes: &[
+-                "dropdown",
+-                "bluetooth-dropdown",
+-            ],
+-            set_has_arrow: false,
++        gtk::Box {
++            add_css_class: "bluetooth-section",
++            set_orientation: gtk::Orientation::Vertical,
+@@ -66,0 +67 @@ impl Component for BluetoothDropdown {
++                set_vexpand: true,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+new file mode 100644
+index 0000000..15019e7
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
+@@ -0,0 +1,317 @@
++use std::{env, fs, path::PathBuf};
++
++use chrono::{Duration, Local, NaiveDate};
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use serde_json::Value;
++
++use crate::i18n::t;
++
++const DAYS: i64 = 7;
++const WRAP_CHARS: i32 = 34;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct AgendaEntry {
++    order: u8,
++    icon: &'static str,
++    title: String,
++    /// `HH:MM-HH:MM`, split off the title so it can be shown above the entry.
++    /// `None` for all-day events and tasks.
++    time: Option<String>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct AgendaDay {
++    heading: String,
++    entries: Vec<AgendaEntry>,
++}
++
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++struct Agenda {
++    range: String,
++    days: Vec<AgendaDay>,
++}
++
++#[derive(Debug)]
++pub(crate) enum CalendarSectionInput {
++    Refresh,
++}
++
++pub(crate) struct CalendarSection {
++    agenda: Agenda,
++    body: gtk::Box,
++}
++
++#[relm4::component(pub(crate))]
++impl Component for CalendarSection {
++    type Init = ();
++    type Input = CalendarSectionInput;
++    type Output = ();
++    type CommandOutput = ();
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "dashboard-calendar-section"],
++            set_orientation: gtk::Orientation::Vertical,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++                    set_hexpand: true,
++
++                    gtk::Image {
++                        set_icon_name: Some("tb-calendar-time-symbolic"),
++                    },
++
++                    gtk::Label {
++                        set_label: &t!("dropdown-dashboard-calendar"),
++                    },
++                },
++
++                gtk::Label {
++                    add_css_class: "dashboard-calendar-range",
++                    set_halign: gtk::Align::End,
++                    #[watch]
++                    set_label: &model.agenda.range,
++                },
++            },
++
++            gtk::Label {
++                add_css_class: "dashboard-section-empty",
++                set_halign: gtk::Align::Start,
++                set_label: &t!("dropdown-dashboard-calendar-empty"),
++                #[watch]
++                set_visible: model.agenda.days.is_empty(),
++            },
++
++            gtk::ScrolledWindow {
++                add_css_class: "dashboard-calendar-scroll",
++                set_hscrollbar_policy: gtk::PolicyType::Never,
++                set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                set_max_content_height: 320,
++                set_propagate_natural_height: true,
++                #[watch]
++                set_visible: !model.agenda.days.is_empty(),
++
++                #[local_ref]
++                body_widget -> gtk::Box {
++                    add_css_class: "dashboard-calendar-body",
++                    set_orientation: gtk::Orientation::Vertical,
++                },
++            },
++        }
++    }
++
++    fn init(
++        _init: Self::Init,
++        _root: Self::Root,
++        _sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        let model = Self {
++            agenda: read_agenda(),
++            body,
++        };
++        model.rebuild_body();
++
++        let body_widget = &model.body;
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            CalendarSectionInput::Refresh => {
++                self.agenda = read_agenda();
++                self.rebuild_body();
++            }
++        }
++    }
++}
++
++impl CalendarSection {
++    fn rebuild_body(&self) {
++        while let Some(child) = self.body.first_child() {
++            self.body.remove(&child);
++        }
++
++        for day in &self.agenda.days {
++            let heading = gtk::Label::new(Some(&day.heading));
++            heading.add_css_class("dashboard-calendar-day");
++            heading.set_xalign(0.0);
++            self.body.append(&heading);
++
++            for entry in &day.entries {
++                if let Some(time) = &entry.time {
++                    let time_label = gtk::Label::new(Some(time));
++                    time_label.add_css_class("dashboard-calendar-time");
++                    time_label.set_xalign(0.0);
++                    self.body.append(&time_label);
++                }
++
++                let label = gtk::Label::new(Some(&format!("{}  {}", entry.icon, entry.title)));
++                label.add_css_class("dashboard-calendar-entry");
++                label.set_xalign(0.0);
++                label.set_wrap(true);
++                label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
++                label.set_max_width_chars(WRAP_CHARS);
++                self.body.append(&label);
++            }
++        }
++    }
++}
++
++fn cache_path() -> PathBuf {
++    env::var_os("HOME")
++        .map_or_else(PathBuf::new, PathBuf::from)
++        .join(".cache/waybar-ycal/events.json")
++}
++
++fn read_agenda() -> Agenda {
++    let cache = fs::read_to_string(cache_path()).unwrap_or_default();
++    build_agenda(&cache, Local::now().date_naive())
++}
++
++fn build_agenda(cache: &str, start: NaiveDate) -> Agenda {
++    let end = start + Duration::days(DAYS - 1);
++    let range = format!("{} – {}", start.format("%-d %b"), end.format("%-d %b"));
++    let parsed = serde_json::from_str::<Value>(cache).unwrap_or(Value::Null);
++
++    let mut days = Vec::new();
++    for offset in 0..DAYS {
++        let date = start + Duration::days(offset);
++        let entries = entries_for(&parsed, &date.format("%Y-%m-%d").to_string());
++        if entries.is_empty() {
++            continue;
++        }
++        days.push(AgendaDay {
++            heading: if offset == 0 {
++                t!("dropdown-dashboard-calendar-today")
++            } else {
++                date.format("%A %-d %b").to_string()
++            },
++            entries,
++        });
++    }
++
++    Agenda { range, days }
++}
++
++fn entries_for(parsed: &Value, date: &str) -> Vec<AgendaEntry> {
++    let Some(Value::Array(items)) = parsed.get(date) else {
++        return Vec::new();
++    };
++
++    let mut entries = items
++        .iter()
++        .filter_map(|item| match item {
++            Value::String(label) => {
++                let (title, time) = split_time(label);
++                Some(AgendaEntry {
++                    order: 1,
++                    icon: "󰃭",
++                    title,
++                    time,
++                })
++            }
++            Value::Object(task) => {
++                let done = task.get("done").and_then(Value::as_bool).unwrap_or(false);
++                Some(AgendaEntry {
++                    order: if done { 2 } else { 0 },
++                    icon: if done { "󰄲" } else { "󰄱" },
++                    title: task.get("title").and_then(Value::as_str)?.to_owned(),
++                    time: None,
++                })
++            }
++            _ => None,
++        })
++        .collect::<Vec<_>>();
++    entries.sort_by_key(|entry| entry.order);
++    entries
++}
++
++/// Splits `waybar-ycal`'s `"<title> HH:MM-HH:MM"` label into its two halves.
++///
++/// The cache appends the time range to a timed event's summary and leaves an
++/// all-day event as the summary alone, so anything that does not end in a time
++/// range is returned unchanged.
++fn split_time(label: &str) -> (String, Option<String>) {
++    let Some((title, tail)) = label.rsplit_once(' ') else {
++        return (label.to_owned(), None);
++    };
++
++    let Some((start, end)) = tail.split_once('-') else {
++        return (label.to_owned(), None);
++    };
++
++    if is_clock_time(start) && is_clock_time(end) {
++        (title.trim_end().to_owned(), Some(tail.to_owned()))
++    } else {
++        (label.to_owned(), None)
++    }
++}
++
++fn is_clock_time(value: &str) -> bool {
++    let Some((hours, minutes)) = value.split_once(':') else {
++        return false;
++    };
++
++    hours.len() == 2
++        && minutes.len() == 2
++        && hours.chars().all(|digit| digit.is_ascii_digit())
++        && minutes.chars().all(|digit| digit.is_ascii_digit())
++}
++
++#[cfg(test)]
++mod tests {
++    use chrono::NaiveDate;
++
++    use super::{build_agenda, split_time};
++
++    #[test]
++    fn timed_events_keep_their_time_apart_from_the_title() {
++        let (title, time) = split_time("Video appointment with Johns, Brian (Mr) 19:00-19:30");
++        assert_eq!(title, "Video appointment with Johns, Brian (Mr)");
++        assert_eq!(time.as_deref(), Some("19:00-19:30"));
++    }
++
++    #[test]
++    fn all_day_events_have_no_time() {
++        let (title, time) = split_time("Teachers' Day");
++        assert_eq!(title, "Teachers' Day");
++        assert_eq!(time, None);
++    }
++
++    #[test]
++    fn a_title_ending_in_a_range_that_is_not_a_time_is_left_alone() {
++        let (title, time) = split_time("Sprint 12-14");
++        assert_eq!(title, "Sprint 12-14");
++        assert_eq!(time, None);
++    }
++
++    #[test]
++    fn a_title_that_is_only_a_time_range_keeps_the_time() {
++        let (title, time) = split_time("Standup 09:00-09:15");
++        assert_eq!(title, "Standup");
++        assert_eq!(time.as_deref(), Some("09:00-09:15"));
++    }
++
++    #[test]
++    fn agenda_includes_today_and_the_following_six_days_only() {
++        let cache = r#"{
++            "2026-09-09": ["Today"],
++            "2026-09-15": ["Day seven"],
++            "2026-09-16": ["Too late"]
++        }"#;
++        let Some(start) = NaiveDate::from_ymd_opt(2026, 9, 9) else {
++            panic!("test date must be valid");
++        };
++        let agenda = build_agenda(cache, start);
++        assert_eq!(agenda.days.len(), 2);
++        assert_eq!(agenda.days[0].entries[0].title, "Today");
++        assert_eq!(agenda.days[1].entries[0].title, "Day seven");
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
+index 056cffb..c5d2e07 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
+@@ -14,2 +13,0 @@ impl DropdownFactory for Factory {
+-            audio: services.audio.clone(),
+-            battery: services.battery.clone(),
+@@ -18 +15,0 @@ impl DropdownFactory for Factory {
+-            media: services.media.clone(),
+@@ -22 +18,0 @@ impl DropdownFactory for Factory {
+-            sysinfo: services.sysinfo.clone(),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+index f31dbd5..40a024f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
+@@ -3,2 +3 @@ use std::sync::Arc;
+-use wayle_audio::AudioService;
+-use wayle_battery::BatteryService;
++use relm4::gtk;
+@@ -8 +6,0 @@ use wayle_core::DeferredService;
+-use wayle_media::MediaService;
+@@ -12 +9,0 @@ use wayle_power_profiles::PowerProfilesService;
+-use wayle_sysinfo::SysinfoService;
+@@ -17,2 +13,0 @@ pub(crate) struct DashboardDropdownInit {
+-    pub audio: Option<Arc<AudioService>>,
+-    pub battery: Option<Arc<BatteryService>>,
+@@ -21 +15,0 @@ pub(crate) struct DashboardDropdownInit {
+-    pub media: Option<Arc<MediaService>>,
+@@ -25 +18,0 @@ pub(crate) struct DashboardDropdownInit {
+-    pub sysinfo: Arc<SysinfoService>,
+@@ -32 +25 @@ pub(crate) enum DashboardDropdownMsg {
+-    OpenSettings,
++    SetExternalHost(gtk::Window),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+index 7e38a69..d2cbab8 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
+@@ -1,2 +1 @@
+-mod battery_section;
+-mod controls;
++mod calendar_section;
+@@ -4 +2,0 @@ mod factory;
+-mod media_section;
+@@ -6 +4 @@ mod messages;
+-mod network_section;
++mod notification_section;
+@@ -8,2 +5,0 @@ mod quick_actions;
+-mod system_stats;
+-mod user_session;
+@@ -12,5 +7,0 @@ mod watchers;
+-use std::{
+-    process::{Command, Stdio},
+-    thread,
+-};
+-
+@@ -21 +11,0 @@ use wayle_widgets::prelude::*;
+-pub(super) use self::factory::Factory;
+@@ -23,5 +13,3 @@ use self::{
+-    battery_section::{BatterySection, BatterySectionInit},
+-    controls::{ControlsInit, ControlsSection},
+-    media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
+-    messages::{DashboardDropdownCmd, DashboardDropdownInit, DashboardDropdownMsg},
+-    network_section::{NetworkSection, NetworkSectionInit, NetworkSectionInput},
++    calendar_section::{CalendarSection, CalendarSectionInput},
++    messages::{DashboardDropdownCmd, DashboardDropdownInit},
++    notification_section::{NotificationSection, NotificationSectionInit},
+@@ -29,2 +16,0 @@ use self::{
+-    system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
+-    user_session::{UserSessionInit, UserSessionSection},
+@@ -31,0 +18 @@ use self::{
++pub(super) use self::{factory::Factory, messages::DashboardDropdownMsg};
+@@ -36,18 +22,0 @@ const BASE_WIDTH: f32 = 380.0;
+-fn spawn_settings_app() {
+-    match Command::new("wayle-settings")
+-        .stdin(Stdio::null())
+-        .stdout(Stdio::null())
+-        .stderr(Stdio::null())
+-        .spawn()
+-    {
+-        Ok(mut child) => {
+-            thread::spawn(move || {
+-                let _ = child.wait();
+-            });
+-        }
+-        Err(err) => {
+-            tracing::warn!(error = %err, "failed to spawn wayle-settings");
+-        }
+-    }
+-}
+-
+@@ -55,0 +25 @@ pub(crate) struct DashboardDropdown {
++    external_host: Option<gtk::Window>,
+@@ -58,6 +28,2 @@ pub(crate) struct DashboardDropdown {
+-    controls: Controller<ControlsSection>,
+-    media: Controller<MediaSection>,
+-    battery: Option<Controller<BatterySection>>,
+-    network: Controller<NetworkSection>,
+-    system_stats: Controller<SystemStatsSection>,
+-    user_session: Controller<UserSessionSection>,
++    calendar: Controller<CalendarSection>,
++    notifications: Controller<NotificationSection>,
+@@ -99,10 +64,0 @@ impl Component for DashboardDropdown {
+-                    #[template_child]
+-                    actions {
+-                        #[template]
+-                        GhostIconButton {
+-                            add_css_class: "dashboard-settings-btn",
+-                            set_icon_name: "ld-settings-symbolic",
+-                            set_tooltip_text: Some(&t!("dropdown-dashboard-open-settings")),
+-                            connect_clicked => DashboardDropdownMsg::OpenSettings,
+-                        },
+-                    },
+@@ -111,7 +67,6 @@ impl Component for DashboardDropdown {
+-                #[template]
+-                #[name = "content"]
+-                DropdownContent {
+-                    set_vexpand: true,
+-
+-                    #[local_ref]
+-                    quick_actions_widget -> gtk::Box {},
++                gtk::ScrolledWindow {
++                    add_css_class: "dashboard-scroll",
++                    set_hscrollbar_policy: gtk::PolicyType::Never,
++                    set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                    set_max_content_height: 900,
++                    set_propagate_natural_height: true,
+@@ -119,2 +74,4 @@ impl Component for DashboardDropdown {
+-                    #[local_ref]
+-                    controls_widget -> gtk::Box {},
++                    #[template]
++                    #[name = "content"]
++                    DropdownContent {
++                        set_vexpand: true,
+@@ -122,2 +79,2 @@ impl Component for DashboardDropdown {
+-                    #[local_ref]
+-                    media_widget -> gtk::Box {},
++                        #[local_ref]
++                        quick_actions_widget -> gtk::Box {},
+@@ -125,2 +82,2 @@ impl Component for DashboardDropdown {
+-                    #[local_ref]
+-                    info_row_widget -> gtk::Box {},
++                        #[local_ref]
++                        calendar_widget -> gtk::Box {},
+@@ -128,5 +85,3 @@ impl Component for DashboardDropdown {
+-                    #[local_ref]
+-                    system_stats_widget -> gtk::Box {},
+-
+-                    #[local_ref]
+-                    user_session_widget -> gtk::Box {},
++                        #[local_ref]
++                        notifications_widget -> gtk::Box {},
++                    },
+@@ -147 +101,0 @@ impl Component for DashboardDropdown {
+-                notification: init.notification.clone(),
+@@ -153,5 +107 @@ impl Component for DashboardDropdown {
+-        let controls = ControlsSection::builder()
+-            .launch(ControlsInit {
+-                audio: init.audio.clone(),
+-            })
+-            .detach();
++        let calendar = CalendarSection::builder().launch(()).detach();
+@@ -159,37 +109,3 @@ impl Component for DashboardDropdown {
+-        let media = MediaSection::builder()
+-            .launch(MediaSectionInit {
+-                media: init.media.clone(),
+-            })
+-            .detach();
+-
+-        let battery_svc = init
+-            .battery
+-            .as_ref()
+-            .filter(|battery_svc| battery_svc.device.is_present.get())
+-            .cloned();
+-        let battery = battery_svc.map(|svc| {
+-            BatterySection::builder()
+-                .launch(BatterySectionInit {
+-                    battery: Some(svc),
+-                    power_profiles: init.power_profiles.clone(),
+-                })
+-                .detach()
+-        });
+-
+-        let network = NetworkSection::builder()
+-            .launch(NetworkSectionInit {
+-                network: init.network.clone(),
+-                sysinfo: init.sysinfo.clone(),
+-            })
+-            .detach();
+-
+-        let system_stats = SystemStatsSection::builder()
+-            .launch(SystemStatsInit {
+-                sysinfo: init.sysinfo.clone(),
+-            })
+-            .detach();
+-
+-        let username = std::env::var("USER").unwrap_or_else(|_| String::from("user"));
+-        let user_session = UserSessionSection::builder()
+-            .launch(UserSessionInit {
+-                username,
++        let notifications = NotificationSection::builder()
++            .launch(NotificationSectionInit {
++                notification: init.notification.clone(),
+@@ -205,0 +122 @@ impl Component for DashboardDropdown {
++            external_host: None,
+@@ -208,6 +125,2 @@ impl Component for DashboardDropdown {
+-            controls,
+-            media,
+-            battery,
+-            network,
+-            system_stats,
+-            user_session,
++            calendar,
++            notifications,
+@@ -223,9 +136,3 @@ impl Component for DashboardDropdown {
+-        let is_visible = root.is_visible();
+-
+-        model
+-            .network
+-            .emit(NetworkSectionInput::SetActive(is_visible));
+-        model
+-            .system_stats
+-            .emit(SystemStatsInput::SetActive(is_visible));
+-        model.media.emit(MediaSectionInput::SetActive(is_visible));
++        if root.is_visible() {
++            model.calendar.emit(CalendarSectionInput::Refresh);
++        }
+@@ -234,18 +141,2 @@ impl Component for DashboardDropdown {
+-        let controls_widget = model.controls.widget();
+-        let media_widget = model.media.widget();
+-        let system_stats_widget = model.system_stats.widget();
+-        let user_session_widget = model.user_session.widget();
+-
+-        let info_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+-        info_row.add_css_class("dashboard-info-row");
+-        info_row.set_homogeneous(true);
+-        if let Some(battery_ctrl) = &model.battery {
+-            info_row.append(battery_ctrl.widget());
+-            battery_ctrl.widget().set_hexpand(true);
+-            info_row.append(model.network.widget());
+-            model.network.widget().set_hexpand(true);
+-        } else {
+-            info_row.append(model.network.widget());
+-            model.network.widget().set_hexpand(true);
+-        }
+-        let info_row_widget = &info_row;
++        let calendar_widget = model.calendar.widget();
++        let notifications_widget = model.notifications.widget();
+@@ -257 +148 @@ impl Component for DashboardDropdown {
+-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, root: &Self::Root) {
++    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+@@ -260,3 +151,3 @@ impl Component for DashboardDropdown {
+-                self.network.emit(NetworkSectionInput::SetActive(visible));
+-                self.system_stats.emit(SystemStatsInput::SetActive(visible));
+-                self.media.emit(MediaSectionInput::SetActive(visible));
++                if visible {
++                    self.calendar.emit(CalendarSectionInput::Refresh);
++                }
+@@ -264,3 +155,10 @@ impl Component for DashboardDropdown {
+-            DashboardDropdownMsg::OpenSettings => {
+-                root.popdown();
+-                spawn_settings_app();
++            DashboardDropdownMsg::SetExternalHost(window) => {
++                let is_visible = window.is_visible();
++                let input_sender = sender.input_sender().clone();
++                window.connect_visible_notify(move |window| {
++                    input_sender.emit(DashboardDropdownMsg::VisibilityChanged(window.is_visible()));
++                });
++                self.external_host = Some(window);
++                if is_visible {
++                    self.calendar.emit(CalendarSectionInput::Refresh);
++                }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+new file mode 100644
+index 0000000..53791e5
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
+@@ -0,0 +1,278 @@
++use std::{sync::Arc, time::Duration};
++
++use gtk::prelude::*;
++use relm4::{gtk, prelude::*};
++use wayle_config::ConfigService;
++use wayle_notification::NotificationService;
++use wayle_widgets::{prelude::*, watch};
++
++use crate::{
++    i18n::t,
++    shell::bar::dropdowns::notification::{
++        helpers::group_by_app,
++        notification_group::{
++            NotificationGroup,
++            messages::{NotificationGroupInit, NotificationGroupInput, NotificationGroupOutput},
++        },
++    },
++};
++
++const TIME_TICK_INTERVAL: Duration = Duration::from_secs(30);
++
++pub(crate) struct NotificationSectionInit {
++    pub notification: Option<Arc<NotificationService>>,
++    pub config: Arc<ConfigService>,
++}
++
++#[derive(Debug)]
++pub(crate) enum NotificationSectionInput {
++    DndToggled(bool),
++    ClearAll,
++    NotificationDismissed,
++}
++
++#[derive(Debug)]
++pub(crate) enum NotificationSectionCmd {
++    NotificationsChanged,
++    DndChanged(bool),
++    IconSourceChanged,
++    TimeTick,
++}
++
++pub(crate) struct NotificationSection {
++    notification: Option<Arc<NotificationService>>,
++    config: Arc<ConfigService>,
++    dnd: bool,
++    notification_count: usize,
++    groups: FactoryVecDeque<NotificationGroup>,
++}
++
++#[relm4::component(pub(crate))]
++impl Component for NotificationSection {
++    type Init = NotificationSectionInit;
++    type Input = NotificationSectionInput;
++    type Output = ();
++    type CommandOutput = NotificationSectionCmd;
++
++    view! {
++        #[root]
++        gtk::Box {
++            set_css_classes: &["card", "dashboard-card", "notification-dropdown", "dashboard-notification-section"],
++            set_orientation: gtk::Orientation::Vertical,
++
++            gtk::Box {
++                add_css_class: "card-header",
++
++                gtk::Box {
++                    add_css_class: "card-title",
++
++                    gtk::Image {
++                        #[watch]
++                        set_icon_name: Some(if model.dnd {
++                            "ld-bell-off-symbolic"
++                        } else {
++                            "ld-bell-symbolic"
++                        }),
++                    },
++
++                    gtk::Label {
++                        set_label: &t!("dropdown-dashboard-notifications"),
++                    },
++                },
++
++                #[template]
++                Switch {
++                    add_css_class: "notification-dropdown-dnd-switch",
++                    set_valign: gtk::Align::Center,
++                    set_tooltip_text: Some(&t!("notification-dropdown-dnd-label")),
++                    set_visible: model.notification.is_some(),
++                    #[watch]
++                    #[block_signal(dnd_toggle)]
++                    set_active: model.dnd,
++                    connect_state_set[sender] => move |switch, active| {
++                        sender.input(NotificationSectionInput::DndToggled(active));
++                        switch.set_state(active);
++                        gtk::glib::Propagation::Stop
++                    } @dnd_toggle,
++                },
++
++                gtk::Box {
++                    set_hexpand: true,
++                },
++
++                #[template]
++                GhostButton {
++                    add_css_class: "notification-dropdown-clear-all",
++                    #[watch]
++                    set_visible: model.notification_count > 0,
++                    connect_clicked[sender] => move |_| {
++                        sender.input(NotificationSectionInput::ClearAll);
++                    },
++                    #[template_child]
++                    label {
++                        set_label: &t!("notification-dropdown-clear-all"),
++                    },
++                },
++            },
++
++            gtk::Label {
++                add_css_class: "dashboard-section-empty",
++                set_halign: gtk::Align::Start,
++                #[watch]
++                set_label: &model.empty_label(),
++                #[watch]
++                set_visible: model.notification_count == 0,
++            },
++
++            gtk::ScrolledWindow {
++                add_css_class: "dashboard-notification-scroll",
++                set_hscrollbar_policy: gtk::PolicyType::Never,
++                set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                // Keep three notification rows visible; additional history is
++                // reached by scrolling inside the card.
++                set_max_content_height: 270,
++                set_propagate_natural_height: true,
++                #[watch]
++                set_visible: model.notification_count > 0,
++
++                #[local_ref]
++                groups_widget -> gtk::Box {
++                    add_css_class: "notification-dropdown-groups",
++                    set_orientation: gtk::Orientation::Vertical,
++                },
++            },
++        }
++    }
++
++    fn init(
++        init: Self::Init,
++        _root: Self::Root,
++        sender: ComponentSender<Self>,
++    ) -> ComponentParts<Self> {
++        let groups = FactoryVecDeque::builder()
++            .launch(gtk::Box::default())
++            .forward(sender.input_sender(), |output| match output {
++                NotificationGroupOutput::Dismissed => {
++                    NotificationSectionInput::NotificationDismissed
++                }
++            });
++
++        let mut model = Self {
++            dnd: init
++                .notification
++                .as_ref()
++                .is_some_and(|notification| notification.dnd.get()),
++            notification: init.notification,
++            config: init.config,
++            notification_count: 0,
++            groups,
++        };
++
++        model.rebuild_groups();
++        model.spawn_watchers(&sender);
++
++        let groups_widget = model.groups.widget();
++        let widgets = view_output!();
++        ComponentParts { model, widgets }
++    }
++
++    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
++        match msg {
++            NotificationSectionInput::DndToggled(active) => {
++                if let Some(notification) = &self.notification {
++                    notification.set_dnd(active);
++                }
++            }
++            NotificationSectionInput::ClearAll => {
++                if let Some(notification) = &self.notification {
++                    for item in notification.notifications.get() {
++                        item.dismiss();
++                    }
++                }
++            }
++            NotificationSectionInput::NotificationDismissed => {}
++        }
++    }
++
++    fn update_cmd(
++        &mut self,
++        msg: Self::CommandOutput,
++        _sender: ComponentSender<Self>,
++        _root: &Self::Root,
++    ) {
++        match msg {
++            NotificationSectionCmd::NotificationsChanged => self.rebuild_groups(),
++            NotificationSectionCmd::DndChanged(dnd) => self.dnd = dnd,
++            NotificationSectionCmd::IconSourceChanged => self.rebuild_groups(),
++            NotificationSectionCmd::TimeTick => {
++                for index in 0..self.groups.len() {
++                    self.groups.send(index, NotificationGroupInput::RefreshTime);
++                }
++            }
++        }
++    }
++}
++
++impl NotificationSection {
++    fn empty_label(&self) -> String {
++        if self.notification.is_some() {
++            t!("notification-dropdown-empty-title")
++        } else {
++            t!("dropdown-dashboard-notifications-unavailable")
++        }
++    }
++
++    fn rebuild_groups(&mut self) {
++        let notifications = self
++            .notification
++            .as_ref()
++            .map(|notification| notification.notifications.get())
++            .unwrap_or_default();
++        self.notification_count = notifications.len();
++
++        let icon_source = self.config.config().modules.notifications.icon_source.get();
++        let mut guard = self.groups.guard();
++        guard.clear();
++        for group in group_by_app(&notifications) {
++            guard.push_back(NotificationGroupInit {
++                app_name: group.app_name,
++                notifications: group.notifications,
++                icon_source,
++            });
++        }
++    }
++
++    fn spawn_watchers(&self, sender: &ComponentSender<Self>) {
++        let Some(notification) = &self.notification else {
++            return;
++        };
++
++        let notifications = notification.notifications.clone();
++        watch!(sender, [notifications.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::NotificationsChanged);
++        });
++
++        let dnd = notification.dnd.clone();
++        watch!(sender, [dnd.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::DndChanged(dnd.get()));
++        });
++
++        let icon_source = self.config.config().modules.notifications.icon_source.clone();
++        watch!(sender, [icon_source.watch()], |out| {
++            let _ = out.send(NotificationSectionCmd::IconSourceChanged);
++        });
++
++        sender.command(|out, shutdown| async move {
++            let shutdown_fut = shutdown.wait();
++            tokio::pin!(shutdown_fut);
++            loop {
++                tokio::select! {
++                    () = &mut shutdown_fut => break,
++                    () = tokio::time::sleep(TIME_TICK_INTERVAL) => {
++                        let _ = out.send(NotificationSectionCmd::TimeTick);
++                    }
++                }
++            }
++        });
++    }
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+index dbc5e36..7acbc1c 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/messages.rs
+@@ -6 +5,0 @@ use wayle_network::NetworkService;
+-use wayle_notification::NotificationService;
+@@ -14 +12,0 @@ pub(crate) struct QuickActionsInit {
+-    pub notification: Option<Arc<NotificationService>>,
+@@ -22,2 +19,0 @@ pub(crate) enum QuickActionsInput {
+-    WifiToggled,
+-    BluetoothToggled,
+@@ -25 +20,0 @@ pub(crate) enum QuickActionsInput {
+-    DndToggled,
+@@ -37 +31,0 @@ pub(crate) enum QuickActionsCmd {
+-    DndChanged(bool),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
+index 8a1c90c..48942f6 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/methods.rs
+@@ -8 +8 @@ impl QuickActionsSection {
+-    pub(super) fn toggle_wifi(&self, sender: &ComponentSender<Self>) {
++    fn toggle_wifi(&self, sender: &ComponentSender<Self>) {
+@@ -25 +25,3 @@ impl QuickActionsSection {
+-    pub(super) fn toggle_bluetooth(&self, sender: &ComponentSender<Self>) {
++    /// Airplane mode's Bluetooth half. The dashboard no longer has its own
++    /// Bluetooth tile; the Waybar audio panel owns that switch.
++    fn toggle_bluetooth(&self, sender: &ComponentSender<Self>) {
+@@ -70,13 +71,0 @@ impl QuickActionsSection {
+-    pub(super) fn toggle_dnd(&self, sender: &ComponentSender<Self>) {
+-        let Some(notification) = self.notification.clone() else {
+-            return;
+-        };
+-
+-        let target = !self.dnd_active;
+-
+-        sender.oneshot_command(async move {
+-            notification.set_dnd(target);
+-            QuickActionsCmd::DndChanged(target)
+-        });
+-    }
+-
+@@ -97,5 +86,22 @@ impl QuickActionsSection {
+-        let target = if self.power_saver_active {
+-            PowerProfile::Balanced
+-        } else {
+-            PowerProfile::PowerSaver
+-        };
++        let current = power_profiles.power_profiles.active_profile.get();
++        let available: Vec<_> = power_profiles
++            .power_profiles
++            .profiles
++            .get()
++            .into_iter()
++            .map(|profile| profile.profile)
++            .collect();
++
++        let order = [
++            PowerProfile::Performance,
++            PowerProfile::Balanced,
++            PowerProfile::PowerSaver,
++        ];
++        let current_index = order
++            .iter()
++            .position(|profile| *profile == current)
++            .unwrap_or(order.len() - 1);
++        let target = (1..=order.len())
++            .map(|offset| order[(current_index + offset) % order.len()])
++            .find(|profile| available.contains(profile))
++            .unwrap_or(PowerProfile::Balanced);
+@@ -109 +115 @@ impl QuickActionsSection {
+-                warn!(error = %err, "power profile toggle failed");
++                warn!(error = %err, "power profile cycle failed");
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+index 6900372..a87bbe3 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/mod.rs
+@@ -12 +11,0 @@ use wayle_network::NetworkService;
+-use wayle_notification::NotificationService;
+@@ -23 +21,0 @@ pub(crate) struct QuickActionsSection {
+-    notification: Option<Arc<NotificationService>>,
+@@ -33 +30,0 @@ pub(crate) struct QuickActionsSection {
+-    dnd_active: bool,
+@@ -39 +35,0 @@ pub(crate) struct QuickActionsSection {
+-    has_notification: bool,
+@@ -67,74 +62,0 @@ impl Component for QuickActionsSection {
+-                #[name = "wifi_btn"]
+-                attach[0, 0, 1, 1] = &gtk::Button {
+-                    add_css_class: "quick-action",
+-                    #[watch]
+-                    set_class_active: ("active", model.wifi_active),
+-                    #[watch]
+-                    set_sensitive: model.has_wifi && !model.airplane_active,
+-                    set_cursor_from_name: Some("pointer"),
+-                    connect_clicked => QuickActionsInput::WifiToggled,
+-
+-                    gtk::Box {
+-                        set_orientation: gtk::Orientation::Vertical,
+-                        set_halign: gtk::Align::Center,
+-                        set_valign: gtk::Align::Center,
+-
+-                        gtk::Box {
+-                            add_css_class: "quick-action-icon",
+-                            set_halign: gtk::Align::Center,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(if model.wifi_active {
+-                                    "ld-wifi-symbolic"
+-                                } else {
+-                                    "ld-wifi-off-symbolic"
+-                                }),
+-                            },
+-                        },
+-
+-                        gtk::Label {
+-                            add_css_class: "quick-action-label",
+-                            set_halign: gtk::Align::Center,
+-                            set_label: &t!("dropdown-dashboard-wifi"),
+-                        },
+-                    },
+-                },
+-
+-                #[name = "bt_btn"]
+-                attach[1, 0, 1, 1] = &gtk::Button {
+-                    add_css_class: "quick-action",
+-                    #[watch]
+-                    set_class_active: ("active", model.bluetooth_active),
+-                    #[watch]
+-                    set_sensitive: model.has_bluetooth && !model.airplane_active,
+-                    set_cursor_from_name: Some("pointer"),
+-                    connect_clicked => QuickActionsInput::BluetoothToggled,
+-
+-                    gtk::Box {
+-                        set_orientation: gtk::Orientation::Vertical,
+-                        set_halign: gtk::Align::Center,
+-                        set_valign: gtk::Align::Center,
+-
+-                        gtk::Box {
+-                            add_css_class: "quick-action-icon",
+-                            set_halign: gtk::Align::Center,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(if model.bluetooth_active {
+-                                    "ld-bluetooth-symbolic"
+-                                } else {
+-                                    "ld-bluetooth-off-symbolic"
+-                                }),
+-                            },
+-                        },
+-
+-                        gtk::Label {
+-                            add_css_class: "quick-action-label",
+-                            set_halign: gtk::Align::Center,
+-                            set_label: &t!("dropdown-dashboard-bluetooth"),
+-                        },
+-                    },
+-                },
+-
+@@ -142 +64 @@ impl Component for QuickActionsSection {
+-                attach[2, 0, 1, 1] = &gtk::Button {
++                attach[0, 0, 1, 1] = &gtk::Button {
+@@ -173,37 +94,0 @@ impl Component for QuickActionsSection {
+-                #[name = "dnd_btn"]
+-                attach[0, 1, 1, 1] = &gtk::Button {
+-                    add_css_class: "quick-action",
+-                    #[watch]
+-                    set_class_active: ("active", model.dnd_active),
+-                    #[watch]
+-                    set_sensitive: model.has_notification,
+-                    set_cursor_from_name: Some("pointer"),
+-                    connect_clicked => QuickActionsInput::DndToggled,
+-
+-                    gtk::Box {
+-                        set_orientation: gtk::Orientation::Vertical,
+-                        set_halign: gtk::Align::Center,
+-                        set_valign: gtk::Align::Center,
+-
+-                        gtk::Box {
+-                            add_css_class: "quick-action-icon",
+-                            set_halign: gtk::Align::Center,
+-
+-                            gtk::Image {
+-                                #[watch]
+-                                set_icon_name: Some(if model.dnd_active {
+-                                    "ld-bell-off-symbolic"
+-                                } else {
+-                                    "ld-bell-symbolic"
+-                                }),
+-                            },
+-                        },
+-
+-                        gtk::Label {
+-                            add_css_class: "quick-action-label",
+-                            set_halign: gtk::Align::Center,
+-                            set_label: &t!("dropdown-dashboard-dnd"),
+-                        },
+-                    },
+-                },
+-
+@@ -211 +96 @@ impl Component for QuickActionsSection {
+-                attach[1, 1, 1, 1] = &gtk::Button {
++                attach[1, 0, 1, 1] = &gtk::Button {
+@@ -241 +126 @@ impl Component for QuickActionsSection {
+-                attach[2, 1, 1, 1] = &gtk::Button {
++                attach[2, 0, 1, 1] = &gtk::Button {
+@@ -295,2 +179,0 @@ impl Component for QuickActionsSection {
+-        let has_notification = init.notification.is_some();
+-
+@@ -307 +189,0 @@ impl Component for QuickActionsSection {
+-            &init.notification,
+@@ -332 +213,0 @@ impl Component for QuickActionsSection {
+-            notification: init.notification,
+@@ -342 +222,0 @@ impl Component for QuickActionsSection {
+-            dnd_active: false,
+@@ -348 +227,0 @@ impl Component for QuickActionsSection {
+-            has_notification,
+@@ -361,2 +239,0 @@ impl Component for QuickActionsSection {
+-            QuickActionsInput::WifiToggled => self.toggle_wifi(&sender),
+-            QuickActionsInput::BluetoothToggled => self.toggle_bluetooth(&sender),
+@@ -364 +240,0 @@ impl Component for QuickActionsSection {
+-            QuickActionsInput::DndToggled => self.toggle_dnd(&sender),
+@@ -402 +277,0 @@ impl Component for QuickActionsSection {
+-            QuickActionsCmd::DndChanged(active) => self.dnd_active = active,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/watchers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/watchers.rs
+index 715a5e2..879b461 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/watchers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/quick_actions/watchers.rs
+@@ -8 +7,0 @@ use wayle_network::{NetworkService, wifi::Wifi};
+-use wayle_notification::NotificationService;
+@@ -19 +17,0 @@ pub(super) fn spawn(
+-    notification: &Option<Arc<NotificationService>>,
+@@ -34,8 +31,0 @@ pub(super) fn spawn(
+-    if let Some(notification) = notification {
+-        let dnd = notification.dnd.clone();
+-
+-        watch!(sender, [dnd.watch()], |out| {
+-            let _ = out.send(QuickActionsCmd::DndChanged(dnd.get()));
+-        });
+-    }
+-
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
+index f2e3b13..3644eb0 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/media/mod.rs
+@@ -12,0 +13 @@ pub(super) use self::factory::Factory;
++pub(crate) use self::messages::MediaDropdownMsg;
+@@ -14 +15 @@ use self::{
+-    messages::{MediaDropdownCmd, MediaDropdownInit, MediaDropdownMsg},
++    messages::{MediaDropdownCmd, MediaDropdownInit},
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+new file mode 100644
+index 0000000..1db1604
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/info.rs
+@@ -0,0 +1,31 @@
++use std::{env, ffi::OsString, sync::Arc};
++
++use wayle_network::NetworkService;
++
++pub(super) async fn load(
++    _network: Arc<NetworkService>,
++    ssid: String,
++) -> Result<String, String> {
++    let output = tokio::process::Command::new(network_manager_binary())
++        .arg("wayle-info")
++        .arg(&ssid)
++        .output()
++        .await
++        .map_err(|error| format!("Could not start network-manager: {error}"))?;
++
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(if detail.trim().is_empty() {
++            format!("network-manager exited with {}", output.status)
++        } else {
++            detail.trim().to_owned()
++        });
++    }
++
++    String::from_utf8(output.stdout)
++        .map_err(|error| format!("network-manager returned invalid UTF-8: {error}"))
++}
++
++pub(super) fn network_manager_binary() -> OsString {
++    env::var_os("WAYLE_NETWORK_MANAGER").unwrap_or_else(|| OsString::from("network-manager"))
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+index 2709bf9..f15ef49 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/messages.rs
+@@ -78,0 +79,8 @@ pub(super) struct ConnectionProgress {
++#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
++pub(super) enum DetailPage {
++    #[default]
++    Hidden,
++    Info,
++    Qr,
++}
++
+@@ -80,0 +89,3 @@ pub(crate) enum ActiveConnectionsInput {
++    ShowWifiInfo,
++    ShowWifiQr,
++    HideDetails,
+@@ -94,0 +106,8 @@ pub(crate) enum ActiveConnectionsCmd {
++    InfoLoaded {
++        ssid: String,
++        result: Result<String, String>,
++    },
++    QrRendered {
++        ssid: String,
++        result: Result<Vec<u8>, String>,
++    },
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+index 5f49901..2356bdc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/methods.rs
+@@ -5 +5,4 @@ use wayle_network::core::access_point::Ssid;
+-use super::ActiveConnections;
++use super::{
++    ActiveConnections,
++    messages::{ActiveConnectionsCmd, DetailPage},
++};
+@@ -8,0 +12,72 @@ impl ActiveConnections {
++    pub(super) fn show_wifi_info(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Info, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::info::load(network, ssid.clone()).await;
++            ActiveConnectionsCmd::InfoLoaded { ssid, result }
++        });
++    }
++
++    pub(super) fn show_wifi_qr(&mut self, sender: &ComponentSender<Self>) {
++        let Some(ssid) = self.wifi.ssid.clone().filter(|_| self.wifi.connected) else {
++            return;
++        };
++
++        self.begin_details(DetailPage::Qr, &ssid);
++
++        let network = self.network.clone();
++        sender.oneshot_command(async move {
++            let result = super::qr::render(network, ssid.clone()).await;
++            ActiveConnectionsCmd::QrRendered { ssid, result }
++        });
++    }
++
++    fn begin_details(&mut self, page: DetailPage, ssid: &str) {
++        self.detail_page = page;
++        self.detail_loading = true;
++        self.detail_ssid = ssid.to_owned();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) fn hide_details(&mut self) {
++        self.detail_page = DetailPage::Hidden;
++        self.detail_loading = false;
++        self.detail_ssid.clear();
++        self.detail_error = None;
++        self.info_text.clear();
++        self.qr_paintable = None;
++    }
++
++    pub(super) const fn details_visible(&self) -> bool {
++        !matches!(self.detail_page, DetailPage::Hidden)
++    }
++
++    pub(super) const fn details_page_name(&self) -> &'static str {
++        match self.detail_page {
++            DetailPage::Hidden => "loading",
++            DetailPage::Info => "info",
++            DetailPage::Qr => "qr",
++        }
++    }
++
++    pub(super) fn details_title(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-title", ssid = self.detail_ssid.clone()),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-title"),
++        }
++    }
++
++    pub(super) fn details_loading_label(&self) -> String {
++        match self.detail_page {
++            DetailPage::Qr => t!("dropdown-network-qr-loading"),
++            DetailPage::Info | DetailPage::Hidden => t!("dropdown-network-info-loading"),
++        }
++    }
++
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+index 633282d..bef004e 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
+@@ -0,0 +1 @@
++mod info;
+@@ -2,0 +4 @@ mod methods;
++mod qr;
+@@ -8 +10 @@ use gtk::prelude::*;
+-use relm4::{gtk, prelude::*};
++use relm4::{gtk, gtk::gdk, prelude::*};
+@@ -12 +14 @@ use wayle_widgets::{WatcherToken, prelude::*};
+-use self::messages::{ActiveConnectionsCmd, ConnectionProgress, WifiState, WiredState};
++use self::messages::{ActiveConnectionsCmd, ConnectionProgress, DetailPage, WifiState, WiredState};
+@@ -21,0 +24,6 @@ pub(crate) struct ActiveConnections {
++    detail_page: DetailPage,
++    detail_loading: bool,
++    detail_ssid: String,
++    detail_error: Option<String>,
++    info_text: String,
++    qr_paintable: Option<gdk::Paintable>,
+@@ -217,0 +226,28 @@ impl Component for ActiveConnections {
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-info",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-info-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-info"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiInfo,
++                            },
++
++                            #[template]
++                            GhostButton {
++                                add_css_class: "network-action-qr",
++                                set_tooltip_text: Some(&t!(
++                                    "dropdown-network-show-qr-tooltip"
++                                )),
++                                #[template_child]
++                                label {
++                                    set_label: &t!("dropdown-network-show-qr"),
++                                },
++                                connect_clicked =>
++                                    ActiveConnectionsInput::ShowWifiQr,
++                            },
++
+@@ -283,0 +320,123 @@ impl Component for ActiveConnections {
++
++            gtk::Revealer {
++                set_transition_type: gtk::RevealerTransitionType::SlideDown,
++                set_transition_duration: 200,
++                #[watch]
++                set_reveal_child: model.details_visible(),
++
++                #[template]
++                Card {
++                    add_css_class: "network-details-card",
++                    set_orientation: gtk::Orientation::Vertical,
++
++                    gtk::Box {
++                        add_css_class: "network-details-header",
++
++                        gtk::Box {
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_hexpand: true,
++
++                            gtk::Label {
++                                add_css_class: "network-details-title",
++                                set_halign: gtk::Align::Start,
++                                #[watch]
++                                set_label: &model.details_title(),
++                            },
++
++                            gtk::Label {
++                                add_css_class: "network-details-description",
++                                set_halign: gtk::Align::Start,
++                                set_label: &t!("dropdown-network-qr-description"),
++                                #[watch]
++                                set_visible: model.detail_page == DetailPage::Qr,
++                            },
++                        },
++
++                        #[template]
++                        GhostIconButton {
++                            set_icon_name: "ld-x-symbolic",
++                            set_tooltip_text: Some(&t!("dropdown-network-close-details")),
++                            connect_clicked => ActiveConnectionsInput::HideDetails,
++                        },
++                    },
++
++                    gtk::Stack {
++                        add_css_class: "network-details-stack",
++                        set_transition_type: gtk::StackTransitionType::Crossfade,
++                        set_transition_duration: 150,
++                        #[watch]
++                        set_visible_child_name: if model.detail_loading {
++                            "loading"
++                        } else if model.detail_error.is_some() {
++                            "error"
++                        } else {
++                            model.details_page_name()
++                        },
++
++                        add_named[Some("loading")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            set_orientation: gtk::Orientation::Vertical,
++                            set_halign: gtk::Align::Center,
++
++                            gtk::Spinner {
++                                set_spinning: true,
++                            },
++
++                            gtk::Label {
++                                #[watch]
++                                set_label: &model.details_loading_label(),
++                            },
++                        },
++
++                        add_named[Some("qr")] = &gtk::Box {
++                            add_css_class: "network-qr-code",
++                            set_halign: gtk::Align::Center,
++                            set_valign: gtk::Align::Center,
++
++                            gtk::Picture {
++                                set_can_shrink: true,
++                                set_content_fit: gtk::ContentFit::Contain,
++                                set_size_request: (400, 400),
++                                #[watch]
++                                set_paintable: model.qr_paintable.as_ref(),
++                            },
++                        },
++
++                        add_named[Some("info")] = &gtk::ScrolledWindow {
++                            add_css_class: "network-info-scroll",
++                            set_has_frame: false,
++                            set_hscrollbar_policy: gtk::PolicyType::Never,
++                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
++                            set_min_content_height: 360,
++
++                            gtk::Label {
++                                add_css_class: "network-info-text",
++                                set_xalign: 0.0,
++                                set_yalign: 0.0,
++                                set_selectable: true,
++                                set_wrap: true,
++                                set_wrap_mode: gtk::pango::WrapMode::WordChar,
++                                #[watch]
++                                set_label: &model.info_text,
++                            },
++                        },
++
++                        add_named[Some("error")] = &gtk::Box {
++                            add_css_class: "network-details-status",
++                            add_css_class: "error",
++                            set_orientation: gtk::Orientation::Vertical,
++
++                            gtk::Image {
++                                set_icon_name: Some("ld-triangle-alert-symbolic"),
++                            },
++
++                            gtk::Label {
++                                set_wrap: true,
++                                set_justify: gtk::Justification::Center,
++                                #[watch]
++                                set_label: model.detail_error.as_deref().unwrap_or_default(),
++                            },
++                        },
++                    },
++                },
++            },
+@@ -311,0 +471,6 @@ impl Component for ActiveConnections {
++            detail_page: DetailPage::Hidden,
++            detail_loading: false,
++            detail_ssid: String::new(),
++            detail_error: None,
++            info_text: String::new(),
++            qr_paintable: None,
+@@ -341,0 +507,9 @@ impl Component for ActiveConnections {
++            ActiveConnectionsInput::ShowWifiInfo => {
++                self.show_wifi_info(&sender);
++            }
++            ActiveConnectionsInput::ShowWifiQr => {
++                self.show_wifi_qr(&sender);
++            }
++            ActiveConnectionsInput::HideDetails => {
++                self.hide_details();
++            }
+@@ -379,0 +554,52 @@ impl Component for ActiveConnections {
++            ActiveConnectionsCmd::InfoLoaded { ssid, result } => {
++                if self.detail_page != DetailPage::Info
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(info) => {
++                        self.info_text = info;
++                        self.detail_error = None;
++                    }
++                    Err(error) => {
++                        self.info_text.clear();
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
++            ActiveConnectionsCmd::QrRendered { ssid, result } => {
++                if self.detail_page != DetailPage::Qr
++                    || self.detail_ssid != ssid
++                    || !self.wifi.connected
++                    || self.wifi.ssid.as_deref() != Some(&ssid)
++                {
++                    return;
++                }
++
++                self.detail_loading = false;
++                match result {
++                    Ok(png) => {
++                        let bytes = gtk::glib::Bytes::from_owned(png);
++                        match gdk::Texture::from_bytes(&bytes) {
++                            Ok(texture) => {
++                                self.qr_paintable = Some(texture.upcast());
++                                self.detail_error = None;
++                            }
++                            Err(error) => {
++                                self.qr_paintable = None;
++                                self.detail_error =
++                                    Some(format!("Could not decode the QR image: {error}"));
++                            }
++                        }
++                    }
++                    Err(error) => {
++                        self.qr_paintable = None;
++                        self.detail_error = Some(error);
++                    }
++                }
++            }
+@@ -397,0 +624,2 @@ impl Component for ActiveConnections {
++                } else {
++                    self.hide_details();
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+new file mode 100644
+index 0000000..a34ed18
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/qr.rs
+@@ -0,0 +1,29 @@
++use std::sync::Arc;
++
++use wayle_network::NetworkService;
++
++pub(super) async fn render(
++    _network: Arc<NetworkService>,
++    ssid: String,
++) -> Result<Vec<u8>, String> {
++    let output = tokio::process::Command::new(super::info::network_manager_binary())
++        .arg("wayle-qr")
++        .arg(&ssid)
++        .output()
++        .await
++        .map_err(|error| format!("Could not start network-manager: {error}"))?;
++
++    if !output.status.success() {
++        let detail = String::from_utf8_lossy(&output.stderr);
++        return Err(if detail.trim().is_empty() {
++            format!("network-manager exited with {}", output.status)
++        } else {
++            detail.trim().to_owned()
++        });
++    }
++    if output.stdout.is_empty() {
++        return Err(String::from("network-manager returned an empty QR image."));
++    }
++
++    Ok(output.stdout)
++}
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+index f0192d5..bf4ce3f 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/messages.rs
+@@ -2,0 +3 @@ use std::sync::Arc;
++use relm4::gtk;
+@@ -14,0 +16,2 @@ pub(crate) enum NetworkDropdownMsg {
++    Reset,
++    SetExternalHost(gtk::Window),
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+index b8c2483..50e73f6 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
+@@ -17,0 +18 @@ pub(super) use self::factory::Factory;
++pub(crate) use self::messages::NetworkDropdownMsg;
+@@ -23 +24 @@ use self::{
+-    messages::{NetworkDropdownCmd, NetworkDropdownInit, NetworkDropdownMsg},
++    messages::{NetworkDropdownCmd, NetworkDropdownInit},
+@@ -27,2 +28,2 @@ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
+-const BASE_WIDTH: f32 = 382.0;
+-const BASE_HEIGHT: f32 = 512.0;
++const BASE_WIDTH: f32 = 520.0;
++const BASE_HEIGHT: f32 = 700.0;
+@@ -59,0 +61 @@ impl Component for NetworkDropdown {
++            #[name = "network_container"]
+@@ -60,0 +63,4 @@ impl Component for NetworkDropdown {
++                #[watch]
++                set_width_request: model.scaled_width,
++                #[watch]
++                set_height_request: model.scaled_height,
+@@ -178,0 +185,12 @@ impl Component for NetworkDropdown {
++            NetworkDropdownMsg::Reset => {
++                self.active_connections
++                    .emit(ActiveConnectionsInput::HideDetails);
++            }
++            NetworkDropdownMsg::SetExternalHost(window) => {
++                let input_sender = sender.input_sender().clone();
++                window.connect_visible_notify(move |window| {
++                    if !window.is_visible() {
++                        input_sender.emit(NetworkDropdownMsg::Reset);
++                    }
++                });
++            }
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
+index 6a2f6b9..3c562cc 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/helpers.rs
+@@ -5 +5 @@ use wayle_notification::core::notification::Notification;
+-pub(super) struct NotificationGroupData {
++pub(crate) struct NotificationGroupData {
+@@ -14 +14 @@ pub(super) struct NotificationGroupData {
+-pub(super) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<NotificationGroupData> {
++pub(crate) fn group_by_app(notifications: &[Arc<Notification>]) -> Vec<NotificationGroupData> {
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+index 85f1f5d..dfe3d02 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/mod.rs
+@@ -2 +2 @@ mod factory;
+-mod helpers;
++pub(crate) mod helpers;
+@@ -5,2 +5,2 @@ mod methods;
+-mod notification_group;
+-mod notification_item;
++pub(crate) mod notification_group;
++pub(crate) mod notification_item;
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
+index 7fe95af..917e860 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/messages.rs
+@@ -14,0 +15 @@ pub(crate) enum NotificationItemInput {
++    ToggleExpanded,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
+index 30897ca..736b501 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
+@@ -13,0 +14,12 @@ impl NotificationItem {
++    /// Whether collapsing hides anything, and so whether the chevron is worth
++    /// showing at all.
++    pub(super) fn can_expand(&self) -> bool {
++        let has_body = self
++            .notification
++            .body
++            .get()
++            .is_some_and(|body| !body.trim().is_empty());
++
++        has_body || self.notification.summary.get().chars().count() > super::LONG_SUMMARY_CHARS
++    }
++
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+index 0f41547..2746a60 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
+@@ -14,0 +15,11 @@ use crate::shell::notification_popup::helpers::{
++/// Lines the title and the body each keep while the item is collapsed.
++const COLLAPSED_LINES: i32 = 2;
++
++/// Summary length past which the title is assumed to need more than
++/// [`COLLAPSED_LINES`] lines at the panel's width.
++///
++/// A GTK label only reports that it is ellipsized after it has been laid out,
++/// which is too late to decide whether to offer the chevron, so the chevron is
++/// offered on a title this long even when there is no body to reveal.
++const LONG_SUMMARY_CHARS: usize = 60;
++
+@@ -19,0 +31 @@ pub(crate) struct NotificationItem {
++    expanded: bool,
+@@ -65 +77,4 @@ impl FactoryComponent for NotificationItem {
+-                            set_halign: gtk::Align::Start,
++                            set_halign: gtk::Align::Fill,
++                            set_xalign: 0.0,
++                            set_wrap: true,
++                            set_wrap_mode: gtk::pango::WrapMode::WordChar,
+@@ -66,0 +82,2 @@ impl FactoryComponent for NotificationItem {
++                            #[watch]
++                            set_lines: if self.expanded { -1 } else { COLLAPSED_LINES },
+@@ -75,0 +93,14 @@ impl FactoryComponent for NotificationItem {
++                        #[name = "expand_btn"]
++                        gtk::Button {
++                            set_css_classes: &["ghost-icon", "notification-dropdown-item-expand"],
++                            set_cursor_from_name: Some("pointer"),
++                            set_valign: gtk::Align::Start,
++                            set_visible: self.can_expand(),
++                            #[watch]
++                            set_icon_name: if self.expanded {
++                                "ld-chevron-up-symbolic"
++                            } else {
++                                "ld-chevron-down-symbolic"
++                            },
++                        },
++
+@@ -86 +117,2 @@ impl FactoryComponent for NotificationItem {
+-                        set_halign: gtk::Align::Start,
++                        set_halign: gtk::Align::Fill,
++                        set_xalign: 0.0,
+@@ -88,2 +120,8 @@ impl FactoryComponent for NotificationItem {
+-                        set_ellipsize: gtk::pango::EllipsizeMode::End,
+-                        set_lines: 2,
++                        #[watch]
++                        set_ellipsize: if self.expanded {
++                            gtk::pango::EllipsizeMode::None
++                        } else {
++                            gtk::pango::EllipsizeMode::End
++                        },
++                        #[watch]
++                        set_lines: if self.expanded { -1 } else { COLLAPSED_LINES },
+@@ -117,0 +156 @@ impl FactoryComponent for NotificationItem {
++            expanded: false,
+@@ -139,0 +179,5 @@ impl FactoryComponent for NotificationItem {
++        let input_sender = sender.input_sender().clone();
++        widgets.expand_btn.connect_clicked(move |_| {
++            input_sender.emit(NotificationItemInput::ToggleExpanded);
++        });
++
+@@ -150,0 +195 @@ impl FactoryComponent for NotificationItem {
++            NotificationItemInput::ToggleExpanded => self.expanded = !self.expanded,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+index 4a0fbdf..3d6bb05 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
+@@ -9,2 +9,2 @@ use gtk::prelude::*;
+-use gtk4_layer_shell::{KeyboardMode, LayerShell};
+-use relm4::{gtk, prelude::*};
++use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
++use relm4::{gtk, gtk::gdk, prelude::*};
+@@ -15 +15,12 @@ use wayle_widgets::prelude::{BarButton, BarButtonInput};
+-use crate::{process, shell::services::ShellServices};
++use crate::{
++    process,
++    shell::{
++        bar::dropdowns::{
++            audio::{AudioDropdown, AudioDropdownMsg},
++            dashboard::{DashboardDropdown, DashboardDropdownMsg},
++            media::{MediaDropdown, MediaDropdownMsg},
++            network::{NetworkDropdown, NetworkDropdownMsg},
++        },
++        services::ShellServices,
++    },
++};
+@@ -43 +54,2 @@ pub(crate) struct DropdownInstance {
+-    _controller: Box<dyn Any>,
++    controller: Box<dyn Any>,
++    external_window: RefCell<Option<gtk::Window>>,
+@@ -87 +99,2 @@ impl DropdownInstance {
+-            _controller: controller,
++            controller,
++            external_window: RefCell::new(None),
+@@ -91,0 +105,161 @@ impl DropdownInstance {
++    /// Toggles a dropdown in a real layer-shell window.
++    ///
++    /// A request initiated by Waybar cannot safely create a GTK popover: the
++    /// input serial belongs to another client. A normal layer surface has no
++    /// popup grab requirement, so it can be shown reliably from D-Bus.
++    fn toggle_external_window(
++        &self,
++        name: &str,
++        monitor: &gdk::Monitor,
++        style: DropdownStyle,
++    ) -> bool {
++        if let Some(window) = self.external_window.borrow().as_ref() {
++            if window.is_visible() {
++                window.set_visible(false);
++                self.external_visibility_changed(false);
++            } else {
++                window.set_keyboard_mode(KeyboardMode::OnDemand);
++                window.present();
++                self.external_visibility_changed(true);
++            }
++            return true;
++        }
++
++        let Some(content) = self.popover.child() else {
++            warn!(
++                dropdown = name,
++                "popover has no content for its external layer window"
++            );
++            return false;
++        };
++        self.popover.set_child(Option::<&gtk::Widget>::None);
++
++        let window = gtk::Window::new();
++        window.set_application(Some(&relm4::main_application()));
++        window.set_decorated(false);
++        // Opposite layer-shell anchors only fill the monitor when GTK allows
++        // the surface to resize. Keeping this false leaves the transparent
++        // host at its tiny natural size and clips most of the dropdown off the
++        // left edge of the monitor.
++        window.set_resizable(true);
++        window.add_css_class(&format!("{name}-dropdown"));
++        window.add_css_class(&format!("{name}-layer-window"));
++        window.add_css_class("external-dropdown-window");
++        window.set_opacity(style.opacity);
++        if style.shadow_enabled {
++            window.add_css_class("shadow");
++        }
++
++        window.init_layer_shell();
++        window.set_namespace(Some(&format!("wayle-{name}")));
++        window.set_layer(Layer::Overlay);
++        window.set_keyboard_mode(KeyboardMode::OnDemand);
++        window.set_exclusive_zone(0);
++        window.set_monitor(Some(monitor));
++        window.set_default_size(0, 0);
++
++        // A content-sized layer surface cannot observe clicks outside itself.
++        // Stretch a transparent host across the monitor and place the visible
++        // dropdown above a click target. The click is intentionally consumed:
++        // it dismisses the panel without activating whatever is underneath.
++        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
++            window.set_anchor(edge, true);
++            window.set_margin(edge, 0);
++        }
++
++        let overlay = gtk::Overlay::new();
++        overlay.set_hexpand(true);
++        overlay.set_vexpand(true);
++
++        let backdrop = gtk::Box::new(gtk::Orientation::Vertical, 0);
++        backdrop.set_hexpand(true);
++        backdrop.set_vexpand(true);
++        let dismiss = gtk::GestureClick::new();
++        let weak_window = window.downgrade();
++        dismiss.connect_released(move |_, _, _, _| {
++            if let Some(window) = weak_window.upgrade() {
++                window.set_visible(false);
++            }
++        });
++        backdrop.add_controller(dismiss);
++        overlay.set_child(Some(&backdrop));
++
++        content.add_css_class("external-dropdown-panel");
++        Self::position_external_content(&content, style.location, name);
++        overlay.add_overlay(&content);
++        window.set_child(Some(&overlay));
++
++        if let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<DashboardDropdown>>()
++        {
++            controller.emit(DashboardDropdownMsg::SetExternalHost(window.clone()));
++        } else if let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<NetworkDropdown>>()
++        {
++            controller.emit(NetworkDropdownMsg::SetExternalHost(window.clone()));
++        }
++
++        if let Some(controller) = self.controller.downcast_ref::<Controller<AudioDropdown>>() {
++            let sender = controller.sender().clone();
++            window.connect_visible_notify(move |window| {
++                sender.emit(AudioDropdownMsg::VisibilityChanged(window.is_visible()));
++            });
++        }
++
++        if let Some(controller) = self.controller.downcast_ref::<Controller<MediaDropdown>>() {
++            let sender = controller.sender().clone();
++            window.connect_visible_notify(move |window| {
++                sender.emit(MediaDropdownMsg::VisibilityChanged(window.is_visible()));
++            });
++        }
++        window.present();
++        self.external_window.replace(Some(window));
++        self.external_visibility_changed(true);
++        true
++    }
++
++    fn external_visibility_changed(&self, visible: bool) {
++        let Some(controller) = self
++            .controller
++            .downcast_ref::<Controller<NetworkDropdown>>()
++        else {
++            return;
++        };
++
++        if visible {
++            controller.emit(NetworkDropdownMsg::ScanRequested);
++        } else {
++            controller.emit(NetworkDropdownMsg::Reset);
++        }
++    }
++
++    fn hide_external_window(&self) {
++        let external_window = self.external_window.borrow();
++        let Some(window) = external_window.as_ref() else {
++            return;
++        };
++        if window.is_visible() {
++            window.set_visible(false);
++            self.external_visibility_changed(false);
++        }
++    }
++
++    fn position_external_content(content: &gtk::Widget, _location: Location, _name: &str) {
++        const WAYBAR_HEIGHT: i32 = 40;
++
++        // GtkOverlay otherwise lets a dropdown marked as expandable consume
++        // the whole host allocation. Its own contents then start at the left
++        // edge even though the widget is end-aligned.
++        content.set_hexpand(false);
++        content.set_vexpand(false);
++        content.set_halign(gtk::Align::End);
++        content.set_valign(gtk::Align::Start);
++        content.set_margin_top(0);
++        content.set_margin_bottom(0);
++        content.set_margin_start(0);
++        content.set_margin_end(0);
++        content.set_margin_top(WAYBAR_HEIGHT);
++    }
++
+@@ -274,0 +449,3 @@ impl Drop for DropdownInstance {
++        if let Some(window) = self.external_window.get_mut().take() {
++            window.destroy();
++        }
+@@ -282,0 +460 @@ struct DropdownStyle {
++    location: Location,
+@@ -380,0 +559,15 @@ impl DropdownRegistry {
++    /// Toggles a dropdown in a monitor-local layer-shell window.
++    pub(crate) fn toggle_external_window(&self, name: &str, monitor: &gdk::Monitor) -> bool {
++        let Some(dropdown) = self.get_or_create(name) else {
++            return false;
++        };
++
++        for (other_name, other) in self.cache.borrow().iter() {
++            if other_name != name {
++                other.hide_external_window();
++            }
++        }
++
++        dropdown.toggle_external_window(name, monitor, dropdown_style(self))
++    }
++
+@@ -475,0 +669 @@ fn dropdown_style(registry: &DropdownRegistry) -> DropdownStyle {
++        location: bar.location.get(),
+diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
+index ccca8d3..f84fc7b 100644
+--- a/crates/wayle-shell/src/shell/bar/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/methods.rs
+@@ -13 +13 @@ use super::{
+-    Bar,
++    ANCHOR_ONLY_CLASS, Bar,
+@@ -47,0 +48,58 @@ impl Bar {
++    /// Hides the bar without unmapping it, so it stays usable as the GTK
++    /// anchor for dropdowns opened from an external bar.
++    ///
++    /// Unmapping is what upstream does for `show = false`, but a GTK popover
++    /// can only be presented from a surface the compositor has already mapped,
++    /// and mapping a layer surface costs a configure round-trip plus a frame.
++    /// Anchor-only mode keeps the window mapped and makes it invisible
++    /// instead: the sections are hidden, the CSS below drops the background,
++    /// borders, shadow and padding, the exclusive zone is released, and an
++    /// empty input region lets clicks through to whatever is underneath.
++    pub(super) fn apply_anchor_only(
++        window: &gtk::Window,
++        right_factory: &gtk::Box,
++        anchor_only: bool,
++        exclusive: bool,
++    ) {
++        if anchor_only {
++            window.add_css_class(ANCHOR_ONLY_CLASS);
++            window.set_exclusive_zone(0);
++        } else {
++            window.remove_css_class(ANCHOR_ONLY_CLASS);
++            Self::apply_exclusive_zone(window, exclusive);
++        }
++
++        // The right section keeps its own visibility so the anchor widget
++        // appended after it stays mapped; only the factory content is hidden.
++        if let Some(center_box) = window
++            .child()
++            .and_then(|child| child.downcast::<gtk::CenterBox>().ok())
++        {
++            if let Some(start) = center_box.start_widget() {
++                start.set_visible(!anchor_only);
++            }
++            if let Some(center) = center_box.center_widget() {
++                center.set_visible(!anchor_only);
++            }
++        }
++        right_factory.set_visible(!anchor_only);
++
++        Self::apply_input_region(window, anchor_only);
++    }
++
++    /// Makes the window click-through while it is only an anchor.
++    ///
++    /// Re-applied from the window's `map` handler because the surface does not
++    /// exist before the window is realized.
++    pub(super) fn apply_input_region(window: &gtk::Window, anchor_only: bool) {
++        let Some(surface) = window.surface() else {
++            return;
++        };
++
++        if anchor_only {
++            surface.set_input_region(Some(&gtk::cairo::Region::create()));
++        } else {
++            surface.set_input_region(None);
++        }
++    }
++
+@@ -120 +178,7 @@ impl Bar {
+-            root.set_visible(new_layout.show);
++            self.anchor_only.set(!new_layout.show);
++            Self::apply_anchor_only(
++                root,
++                self.right.widget(),
++                !new_layout.show,
++                self.services.config.config().bar.exclusive.get(),
++            );
+diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
+index 5b5cf1c..cb1210b 100644
+--- a/crates/wayle-shell/src/shell/bar/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/mod.rs
+@@ -1 +1 @@
+-mod dropdowns;
++pub(crate) mod dropdowns;
+@@ -9 +9 @@ mod watchers;
+-use std::rc::Rc;
++use std::{cell::Cell, rc::Rc};
+@@ -20,0 +21,3 @@ use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
++/// Marks a bar window that stays mapped only to anchor external dropdowns.
++pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
++
+@@ -22,0 +26 @@ pub(crate) struct Bar {
++    monitor: gdk::Monitor,
+@@ -27,0 +32,2 @@ pub(crate) struct Bar {
++    external_anchor: gtk::Box,
++    anchor_only: Rc<Cell<bool>>,
+@@ -45,0 +52 @@ pub(crate) enum BarCmd {
++    ToggleDropdown(String),
+@@ -102,0 +110,2 @@ impl Component for Bar {
++        let exclusive = config.bar.exclusive.get();
++
+@@ -126 +135 @@ impl Component for Bar {
+-        Self::apply_exclusive_zone(&root, config.bar.exclusive.get());
++        Self::apply_exclusive_zone(&root, exclusive);
+@@ -149,0 +159,14 @@ impl Component for Bar {
++        let external_anchor = gtk::Box::default();
++        external_anchor.set_size_request(1, 1);
++
++        // The bar window doubles as the GTK anchor for dropdowns opened from an
++        // external bar, so it stays mapped even when the layout hides it: a
++        // popover can only be presented from a surface the compositor has
++        // already mapped, and `present()` followed by `popup()` in the same
++        // main-loop turn is not that. Hidden means transparent, empty and
++        // click-through instead of unmapped.
++        let anchor_only = Rc::new(Cell::new(!visible_on_startup));
++        let anchor_only_on_map = Rc::clone(&anchor_only);
++        root.connect_map(move |window| {
++            Self::apply_input_region(window, anchor_only_on_map.get());
++        });
+@@ -158,0 +182,8 @@ impl Component for Bar {
++        watchers::external_dropdown::spawn(
++            &sender,
++            &ipc_state,
++            settings
++                .monitor_name
++                .clone()
++                .unwrap_or_else(|| String::from("unknown")),
++        );
+@@ -164,0 +196 @@ impl Component for Bar {
++            monitor: init.monitor,
+@@ -176,0 +209,2 @@ impl Component for Bar {
++            external_anchor,
++            anchor_only,
+@@ -202,0 +237 @@ impl Component for Bar {
++        widgets.right_box.append(&model.external_anchor);
+@@ -204,3 +239,2 @@ impl Component for Bar {
+-        if visible_on_startup {
+-            root.present();
+-        }
++        Self::apply_anchor_only(&root, model.right.widget(), !visible_on_startup, exclusive);
++        root.present();
+@@ -227 +261,5 @@ impl Component for Bar {
+-                Self::apply_exclusive_zone(root, exclusive);
++                // An anchor-only window reserves no space; the configured zone
++                // is restored when the layout shows the bar again.
++                if !self.anchor_only.get() {
++                    Self::apply_exclusive_zone(root, exclusive);
++                }
+@@ -232,0 +271,11 @@ impl Component for Bar {
++            BarCmd::ToggleDropdown(name) => {
++                let toggled =
++                    self.dropdowns.toggle_external_window(&name, &self.monitor);
++
++                if !toggled {
++                    tracing::warn!(
++                        dropdown = %name,
++                        "external bar asked for a dropdown that has no instance"
++                    );
++                }
++            }
+diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
+index 409a9f7..c398de7 100644
+--- a/crates/wayle-shell/src/shell/bar/styling.rs
++++ b/crates/wayle-shell/src/shell/bar/styling.rs
+@@ -177,0 +178,13 @@ impl InlineStyling for Bar {
++            }} \
++            .bar.anchor-only {{ \
++            --bar-opacity: 0%; \
++            --bar-border-top: 0; \
++            --bar-border-bottom: 0; \
++            --bar-border-left: 0; \
++            --bar-border-right: 0; \
++            --bar-shadow: none; \
++            --bar-shadow-margin: 0; \
++            --bar-inset-edge-px: 0; \
++            --bar-inset-ends-px: 0; \
++            --bar-padding-px: 0; \
++            --bar-padding-ends-px: 0; \
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+new file mode 100644
+index 0000000..8954308
+--- /dev/null
++++ b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
+@@ -0,0 +1,30 @@
++//! External dropdown requests delivered by the shell IPC service.
++
++use futures::StreamExt;
++use relm4::ComponentSender;
++
++use crate::{
++    services::shell_ipc::ShellIpcState,
++    shell::bar::{Bar, BarCmd},
++};
++
++pub(crate) fn spawn(sender: &ComponentSender<Bar>, ipc: &ShellIpcState, connector: String) {
++    let request = ipc.dropdown_request.clone();
++    let mut requests = request.watch();
++
++    sender.command(move |out, shutdown| async move {
++        let shutdown_fut = shutdown.wait();
++        tokio::pin!(shutdown_fut);
++
++        loop {
++            tokio::select! {
++                () = &mut shutdown_fut => break,
++                Some(current) = requests.next() => {
++                    if current.serial != 0 && current.monitor == connector {
++                        let _ = out.send(BarCmd::ToggleDropdown(current.name));
++                    }
++                }
++            }
++        }
++    });
++}
+diff --git a/crates/wayle-shell/src/shell/bar/watchers/mod.rs b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+index c900f59..c506130 100644
+--- a/crates/wayle-shell/src/shell/bar/watchers/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/watchers/mod.rs
+@@ -4,0 +5 @@ pub(crate) mod exclusive;
++pub(crate) mod external_dropdown;
+diff --git a/crates/wayle-shell/src/shell/mod.rs b/crates/wayle-shell/src/shell/mod.rs
+index a2e1a66..56f7914 100644
+--- a/crates/wayle-shell/src/shell/mod.rs
++++ b/crates/wayle-shell/src/shell/mod.rs
+@@ -1 +1 @@
+-mod bar;
++pub(crate) mod bar;
+diff --git a/crates/wayle-shell/src/watchers/notification.rs b/crates/wayle-shell/src/watchers/notification.rs
+index abe3e41..ee5a650 100644
+--- a/crates/wayle-shell/src/watchers/notification.rs
++++ b/crates/wayle-shell/src/watchers/notification.rs
+@@ -6 +6 @@ use futures::StreamExt;
+-use wayle_notification::NotificationService;
++use wayle_notification::{NotificationService, core::notification::Notification};
+@@ -17,0 +18,57 @@ pub fn spawn(services: &ShellServices) {
++    spawn_chrome_history_watcher(notification);
++}
++
++/// Chrome marks web notifications transient. Wayle correctly displays those
++/// as popups but normally omits them from history; retain Chrome's entries so
++/// its native notification panels can still reopen them.
++fn spawn_chrome_history_watcher(service: &Arc<NotificationService>) {
++    let popups = service.popups.clone();
++    let history = service.notifications.clone();
++    let mut stream = popups.watch();
++
++    tokio::spawn(async move {
++        while stream.next().await.is_some() {
++            let mut current = history.get();
++            let mut changed = false;
++
++            for popup in popups
++                .get()
++                .iter()
++                .filter(|item| retain_transient(item.as_ref()))
++            {
++                if current.iter().any(|item| item.id == popup.id) {
++                    continue;
++                }
++                current.insert(0, popup.clone());
++                changed = true;
++            }
++
++            if changed {
++                history.set(current);
++            }
++        }
++    });
++}
++
++fn retain_transient(notification: &Notification) -> bool {
++    if !notification.is_transient.get() {
++        return false;
++    }
++
++    let desktop_entry = notification
++        .desktop_entry
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let app_name = notification
++        .app_name
++        .get()
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++
++    desktop_entry == "google-chrome"
++        || desktop_entry == "chromium"
++        || desktop_entry == "chromium-browser"
++        || desktop_entry.starts_with("chrome-")
++        || app_name.contains("chrome")
++        || app_name.contains("chromium")
+diff --git a/resources/icons/hicolor/scalable/actions/ld-arrow-right-symbolic.svg b/resources/icons/hicolor/scalable/actions/ld-arrow-right-symbolic.svg
+new file mode 100644
+index 0000000..f4a970b
+--- /dev/null
++++ b/resources/icons/hicolor/scalable/actions/ld-arrow-right-symbolic.svg
+@@ -0,0 +1,12 @@
++<svg width='16' height='16'
++     xmlns:gpa='https://www.gtk.org/grappa'
++     gpa:version='2'>
++  <path d='M8.47 13.14L13.14 8.47Q13.34 8.28 13.34 8.00Q13.34 7.72 13.14 7.53L8.47 2.86Q8.28 2.66 8.00 2.66Q7.72 2.66 7.53 2.86Q7.34 3.05 7.34 3.33Q7.34 3.61 7.53 3.80L12.20 8.47L12.67 8.00L12.20 7.53L7.53 12.20Q7.34 12.39 7.34 12.67Q7.34 12.95 7.53 13.14Q7.72 13.34 8.00 13.34Q8.28 13.34 8.47 13.14Z'
++stroke='none'
++fill='rgb(0,0,0)'
++gpa:fill='foreground'/>
++  <path d='M3.33 8.66L12.67 8.66Q12.95 8.66 13.14 8.47Q13.34 8.28 13.34 8.00Q13.34 7.72 13.14 7.53Q12.95 7.34 12.67 7.34L3.33 7.34Q3.05 7.34 2.86 7.53Q2.67 7.72 2.66 8.00Q2.67 8.28 2.86 8.47Q3.05 8.66 3.33 8.66Z'
++stroke='none'
++fill='rgb(0,0,0)'
++gpa:fill='foreground'/>
++</svg>

@@ -13,8 +13,8 @@ This repository contains ten Rust packages used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
-The Niri configuration also patches Wayle v0.7.0 to supply the native
-[dashboard, network, and audio panels](#wayle-dashboard).
+The Niri configuration applies one structure-and-behavior Wayle v0.7.0 delta
+to supply the native [dashboard, network, and audio panels](#wayle-dashboard).
 
 ## Live desktop editing
 
@@ -342,17 +342,15 @@ This makes outside-click dismissal work without the cross-client popup grab
 that a GTK popover would require. Closing audio or media also propagates the
 visibility change so background refresh work stops.
 
-### Local patches
+### Local source deltas
 
-| Patches | Purpose |
+Wayle presentation is kept out of source patches. Colours, spacing, card
+shadows, scroll-area sizing, and the dashboard/network/audio appearance live in
+`themes/wayle/index.scss`, which Wayle recompiles on save.
+
+| Source delta | Purpose |
 | --- | --- |
-| `notification-history.patch` | Retain Chrome/Chromium transient notifications in Wayle history. |
-| `dashboard-waybar-host.patch`, `dashboard-layer-window.patch` | Add the external D-Bus request, remove dashboard session-power actions, and host it in a monitor-local layer window. |
-| `network-details-ui.patch`, `network-manager-bridge.patch`, `network-external-window.patch`, `external-dropdown-dismiss.patch` | Add native Info/QR views, the NetworkManager bridge, monitor targeting, and click-away hosting. |
-| `dashboard-power-profile.patch` | Cycle through every power profile supported by the machine. |
-| `dashboard-wifi-tile.patch`, `dashboard-notifications.patch`, `dashboard-slim.patch`, `dashboard-polish.patch` | Remove duplicated dashboard features, add the seven-day agenda and native notification groups, and refine expansion and styling. |
-| `wayle-audio-panel.patch`, `wayle-audio-profile-bridge.patch` | Compose Wayle's native audio/Bluetooth widgets into four tabs and add only the missing inactive-profile bridge. |
-| `external-dropdown-all.patch`, `wayle-behavior-fixes.patch` | Generalize the layer host, correct final placement/lifecycle behavior, and remove dashboard system telemetry. |
+| `wayle-features.patch` | Behavior that CSS cannot provide: D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions, audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
 | `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
 ### Verifying changes
@@ -367,10 +365,10 @@ cargo test --manifest-path scripts/Cargo.toml --locked \
 The media tests cover deduplication, source naming, progress, volume conversion,
 merged volume state, controls, artwork discovery, and cropping. Audio tests
 cover the native picker's profile bridge. The dashboard's seven-day parser and
-the Wayle audio helper functions have focused tests in the patch stack.
+the Wayle audio helper functions have focused tests in the source delta.
 
-Wayle itself is verified from a clean v0.7.0 checkout after applying the patches
-in `niri/wayle/default.nix` order:
+Wayle itself is verified from a clean v0.7.0 checkout after applying
+`niri/wayle/wayle-features.patch`:
 
 ```sh
 cargo check --locked -p wayle-shell --tests

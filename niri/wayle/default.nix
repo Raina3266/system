@@ -31,42 +31,12 @@ in
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        patches =
-          (oldAttrs.patches or [ ])
-          ++ builtins.map stableWaylePatch [
-            ./notification-history.patch
-            ./dashboard-waybar-host.patch
-            ./dashboard-layer-window.patch
-            # Keep each network concern small. The native UI stays in Wayle,
-            # while network-manager owns the duplicated info/QR backend logic.
-            ./network-details-ui.patch
-            ./network-manager-bridge.patch
-            ./network-external-window.patch
-            ./external-dropdown-dismiss.patch
-            ./dashboard-power-profile.patch
-            ./dashboard-wifi-tile.patch
-            ./dashboard-notifications.patch
-            # Keep the audio presentation inside Wayle. The first patch only
-            # composes Wayle's native Bluetooth, device, volume and application
-            # widgets into the four-tab panel and wires existing Wayle APIs for
-            # port selection and per-stream routing. The second delegates the
-            # one missing behaviour — inactive ALSA profile switching — to the
-            # profile-aware audio-control helper.
-            ./wayle-audio-panel.patch
-            ./wayle-audio-profile-bridge.patch
-            ./dashboard-slim.patch
-            ./dashboard-polish.patch
-            # Apply after the feature patches: dashboard-wifi-tile adds Media
-            # to the external host, and this generalises that finished host to
-            # every registered dropdown.
-            ./external-dropdown-all.patch
-            # Correct the final host geometry and visibility lifecycle, then
-            # keep the dashboard to quick actions, agenda and notifications.
-            ./wayle-behavior-fixes.patch
-            # The click-away host fills the selected monitor; every native
-            # panel sits directly below Waybar, flush with the right edge.
-            ./external-dropdown-position.patch
-          ];
+        # One structure-and-behavior delta replaces the old 17-patch sequence.
+        # Keeping the final source change relative to pristine Wayle avoids
+        # dependent hunks and discards intermediate edits that later patches
+        # undid.
+        # Presentation lives in themes/wayle/index.scss and hot-reloads.
+        patches = (oldAttrs.patches or [ ]) ++ [ (stableWaylePatch ./wayle-features.patch) ];
       });
     })
   ];
