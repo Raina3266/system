@@ -124,7 +124,11 @@ pub fn run(app: &gtk::Application, monitor: Option<String>, toggles: Receiver<St
 
     let window = gtk::ApplicationWindow::new(app);
     window.set_decorated(false);
-    window.set_resizable(false);
+    // The host is anchored to all four edges below, but opposite layer-shell
+    // anchors only fill the monitor when GTK is allowed to resize the surface.
+    // Left non-resizable, the host keeps its natural width and the panel is
+    // placed against the left edge of the monitor instead of under its button.
+    window.set_resizable(true);
     window.add_css_class("media-window");
     window.set_child(Some(&host));
 
