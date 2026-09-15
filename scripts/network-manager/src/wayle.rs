@@ -319,6 +319,13 @@ mod tests {
     }
 
     #[test]
+    fn frequency_bands_include_wifi_6e() {
+        assert_eq!(frequency_band(2_437), "2.4 GHz");
+        assert_eq!(frequency_band(5_180), "5 GHz");
+        assert_eq!(frequency_band(6_115), "6 GHz");
+    }
+
+    #[test]
     fn payload_marks_hidden_open_networks() {
         assert_eq!(
             wifi_qr_payload("Hidden", "nopass", None, true),

@@ -6,8 +6,6 @@ use nmrs::NetworkManager;
 
 mod model;
 mod network;
-mod preview;
-mod rofi;
 mod wayle;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
@@ -24,40 +22,6 @@ async fn main() {
 async fn run() -> AppResult<()> {
     let mut arguments = env::args().skip(1);
     match arguments.next().as_deref() {
-        None | Some("launch") => rofi::launch(),
-        Some("script") => {
-            let mode = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("script mode is missing"))?
-                .parse()?;
-            let manager = NetworkManager::new().await?;
-            rofi::run_script(&manager, mode).await
-        }
-        Some("preview-selection") => {
-            let key = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("preview selection is missing"))?;
-            let serial = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("preview serial is missing"))?
-                .parse::<u64>()?;
-            if !preview::is_open() {
-                return Ok(());
-            }
-            let manager = NetworkManager::new().await?;
-            rofi::update_preview_selection(&manager, &key, serial).await
-        }
-        Some("connect-bg") => {
-            // Detached background connect; spawned by `submit_password` so the
-            // Rofi script can render "Connecting…" immediately.
-            let hex_key = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("connect-bg key is missing"))?;
-            let hex_password = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("connect-bg password is missing"))?;
-            rofi::run_connect_bg(&hex_key, &hex_password).await
-        }
         Some("status") => {
             match NetworkManager::new().await {
                 Ok(manager) => network::print_waybar_status(&manager).await,
@@ -84,10 +48,10 @@ async fn run() -> AppResult<()> {
             let manager = NetworkManager::new().await?;
             wayle::write_wifi_qr(&manager, &ssid).await
         }
-        Some("help" | "--help" | "-h") => {
+        None | Some("help" | "--help" | "-h") => {
             print!(
                 "network-manager\n\n\
-                 Usage:\n  network-manager\n  network-manager status\n\
+                 Usage:\n  network-manager status\n\
                  \nWayle bridge:\n  network-manager wayle-info <SSID>\n  network-manager wayle-qr <SSID>\n"
             );
             Ok(())

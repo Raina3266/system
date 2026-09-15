@@ -21,7 +21,6 @@ let
     "media-panel/style.css" = "scripts/media-panel/src/style.css";
     "rofi/rofi-clipboard.rasi" = "themes/rofi-clipboard.rasi";
     "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
-    "rofi/rofi-network.rasi" = "themes/rofi-network.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
     # Wayle's style entry point is hardcoded at styles/index.scss and it
     # watches that whole directory. themes/wayle/index.scss imports the
