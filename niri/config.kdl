@@ -90,8 +90,49 @@ layer-rule {
     place-within-backdrop true
 }
 
+// Niri renders the focus ring and border as a solid rectangle *behind* each
+// window, so the active pink bleeds through anything that does not paint its
+// whole tile: splash screens that keep their own size, and windows that are
+// transparent by design like Waylyrics. Draw them around windows instead.
+//
+// geometry-corner-radius on its own only rounds the ring and the border. The
+// window keeps square corners and paints over them, so clip it to the same
+// shape to get the highlight back.
 window-rule {
     geometry-corner-radius 12
+    clip-to-geometry true
+    draw-border-with-background false
+}
+
+// Chromium anchors its bubbles (extension prompts, permission popups, the PWA
+// menus) as subsurfaces, and clip-to-geometry cuts those off at the window
+// edge: https://github.com/niri-wm/niri/issues/4556. Square corners on the
+// browser windows are the cheaper trade.
+window-rule {
+    match app-id=r#"^(google-)?chrome"#
+    match app-id=r#"^chromium"#
+    clip-to-geometry false
+}
+
+// Kdenlive and Shotcut open a Qt splash screen that ignores the configure
+// niri sends it and keeps its own size, leaving it stranded in the corner of
+// a half-screen tile. Float it at its own size instead. The splash carries no
+// title while every real window carries the app name, so the exclude leaves
+// the splash plus the occasional dialog, which wants floating anyway.
+window-rule {
+    match app-id=r#"^org\.kde\.kdenlive$"#
+    exclude title="Kdenlive"
+
+    open-floating true
+    default-column-width {}
+}
+
+window-rule {
+    match app-id=r#"^org\.shotcut\.Shotcut$"#
+    exclude title="Shotcut"
+
+    open-floating true
+    default-column-width {}
 }
 
 // WezTerm: empty default width to avoid initial configure bug
