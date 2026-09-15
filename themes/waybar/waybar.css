@@ -30,13 +30,11 @@ window#waybar.bottom {
 
 /* ── Standard modules ── */
 
-#clock,
 #custom-ycal,
 #custom-network,
 #custom-audio,
 #custom-clipboard,
 #custom-timer,
-#custom-files,
 #custom-dashboard,
 #tray {
     color: #7afcff;
@@ -132,12 +130,10 @@ window#waybar.bottom {
 /* ── Hover states ── */
 
 #workspaces button:hover,
-#clock:hover,
 #custom-ycal:hover,
 #custom-network:hover,
 #custom-audio:hover,
 #custom-clipboard:hover,
-#custom-files:hover,
 #custom-timer:hover,
 #custom-dashboard:hover,
 #custom-obsidian:hover,
