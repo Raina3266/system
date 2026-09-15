@@ -1,9 +1,6 @@
-# Desktop environment, system packages, services, and the system units that
-# belong to them.
-#
-# Grouped by concern: desktop, sound, desktop daemons, network services,
-# media services, webcam, database, and odds-and-ends. Core system identity
-# (boot, networking, locale, hardware) lives in ./default.nix.
+# Desktop environment, system packages, services and their units, grouped by
+# concern. Core system identity (boot, networking, locale, hardware) lives in
+# ./default.nix.
 {
   config,
   lib,
@@ -99,10 +96,9 @@ in
   services.dleyna.enable = false;
 
   # ── Portals ───────────────────────────────────────────────────────────
-  # The niri and GNOME modules already register portals here, so this must
-  # stay system-level: a second copy in the user profile puts duplicate
-  # .portal and D-Bus activation files on XDG_DATA_DIRS, which is a common
-  # cause of a portal request (file chooser, screencast) never being answered.
+  # Must stay system-level: niri and GNOME already register portals, and a
+  # second copy in the user profile puts duplicate .portal and D-Bus files on
+  # XDG_DATA_DIRS, which strands file-chooser and screencast requests.
   xdg.portal = {
     enable = true;
     extraPortals = with pkgs; [
@@ -111,10 +107,8 @@ in
       xdg-desktop-portal-gnome
     ];
 
-    # Selected only when XDG_CURRENT_DESKTOP is niri. GNOME keeps its own
-    # portal preferences when that session is chosen in GDM. Prefer KDE for
-    # visible desktop integration, while retaining the Niri-compatible GNOME
-    # backends for screencasting and secret storage.
+    # Only when XDG_CURRENT_DESKTOP is niri; GNOME keeps its own. KDE for
+    # visible integration, GNOME backends for screencast and secrets.
     config.niri = lib.mkForce {
       default = [
         "kde"
@@ -272,10 +266,9 @@ in
     };
   };
 
-  # The real camera has no zoom control, so expose only a centre-cropped
-  # v4l2loopback camera to desktop applications. The Rust supervisor keeps a
-  # placeholder producer attached while idle and powers on the real camera
-  # only while an application is consuming the virtual device.
+  # The real camera has no zoom, so expose a centre-cropped v4l2loopback device
+  # instead. The supervisor keeps a placeholder attached while idle and powers
+  # the real camera only while something consumes the virtual one.
   boot.extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
   boot.kernelModules = [ "v4l2loopback" ];
   boot.extraModprobeConfig = ''

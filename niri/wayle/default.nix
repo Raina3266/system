@@ -1,11 +1,8 @@
-# Wayle is the notification daemon: it owns org.freedesktop.Notifications,
-# draws the popups, and keeps the history. Waybar remains the visible bar and
-# Wayle's native dashboard also owns notification history and the seven-day
-# agenda. Its own bar is visually hidden. Every Wayle dropdown opened from
-# Waybar uses a monitor-local layer-shell window, avoiding GTK popup-grab
-# restrictions and providing a shared click-away backdrop. Audio is rendered
-# by Wayle's native components; audio-control only supplies the profile-aware
-# behaviour that Wayle's own audio service does not expose.
+# Wayle is the notification daemon: it owns org.freedesktop.Notifications and
+# the history, and its dashboard owns the agenda. Waybar stays the visible bar,
+# so Wayle's own is hidden. Dropdowns opened from Waybar use monitor-local
+# layer-shell windows, avoiding GTK popup-grab limits. Audio is Wayle's own;
+# audio-control adds only the profile handling it lacks.
 { repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -31,11 +28,9 @@ in
       });
 
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
-        # One structure-and-behavior delta replaces the old 17-patch sequence.
-        # Keeping the final source change relative to pristine Wayle avoids
-        # dependent hunks and discards intermediate edits that later patches
-        # undid.
-        # Presentation lives in the themes/wayle/ partials and hot-reloads.
+        # One delta against pristine Wayle replaces the old 17-patch sequence,
+        # avoiding dependent hunks. Presentation lives in themes/wayle/ and
+        # hot-reloads.
         patches = (oldAttrs.patches or [ ]) ++ [ (stableWaylePatch ./wayle-features.patch) ];
       });
     })

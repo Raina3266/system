@@ -1,11 +1,8 @@
-// Live Wayle presentation overrides, one file per panel. Wayle's compile
-// target is fixed at ~/.config/wayle/styles/index.scss (themes/default.nix
-// links that directory here), so this entry file only imports the partials
-// next to it. Wayle watches the directory and recompiles after every valid
-// save; no NixOS rebuild is required.
+// Live Wayle presentation overrides, one partial per panel. Wayle compiles
+// ~/.config/wayle/styles/index.scss (linked here by themes/default.nix) and
+// recompiles on every valid save, so no rebuild is needed.
 //
-// The media player panel is not here: it is the custom media-panel program,
-// styled by scripts/media-panel/src/style.css.
+// The media panel is not here — it is styled by media-panel/src/style.css.
 @import "shared";
 @import "dashboard";
 @import "network";

@@ -120,10 +120,9 @@ pub fn run(app: &gtk::Application, monitor: Option<String>, toggles: Receiver<St
 
     let window = gtk::ApplicationWindow::new(app);
     window.set_decorated(false);
-    // The host is anchored to all four edges below, but opposite layer-shell
-    // anchors only fill the monitor when GTK is allowed to resize the surface.
-    // Left non-resizable, the host keeps its natural width and the panel is
-    // placed against the left edge of the monitor instead of under its button.
+    // Opposite layer-shell anchors only fill the monitor when GTK may resize
+    // the surface. Left non-resizable, the host keeps its natural width and the
+    // panel lands against the monitor edge instead of under its button.
     window.set_resizable(true);
     window.add_css_class("media-window");
     window.set_child(Some(&host));
@@ -224,11 +223,9 @@ fn spawn_worker(commands: Receiver<Command>, snapshots: Sender<Vec<Player>>) {
         };
         while let Ok(command) = commands.recv() {
             // One command can hold this thread for seconds — `set_playing`
-            // waits on the player to agree — while the panel keeps asking for
-            // a refresh twice a second. Taking everything queued in one pass
-            // stops a click from landing behind that backlog, and collapses
-            // the refreshes into the single snapshot below instead of paying
-            // for one apiece.
+            // waits on the player — while refreshes queue twice a second.
+            // Draining in one pass keeps a click off the back of that backlog
+            // and collapses the refreshes into the single snapshot below.
             let batch = std::iter::once(command).chain(commands.try_iter());
             let started = std::time::Instant::now();
             let mut handled = 0usize;
@@ -323,9 +320,8 @@ fn list_cap(cards: &[Card]) -> i32 {
 
 /// Brings the list in line with a fresh snapshot.
 ///
-/// Cards are matched to players by bus name and updated in place. Rebuilding
-/// the list on every tick would drop the click the pointer is in the middle of
-/// and reset a slider mid-drag.
+/// Cards are matched by bus name and updated in place; rebuilding every tick
+/// would drop an in-flight click and reset a slider mid-drag.
 fn sync(
     list: &gtk::Box,
     cards: &Rc<RefCell<Vec<Card>>>,
@@ -538,9 +534,8 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
         let (commands, state, glyph) = (commands.clone(), state.clone(), play.clone());
         play_button.connect_clicked(move |_| {
             let player = state.borrow().clone();
-            // Show the outcome at once. A player can take a second or more to
-            // report a status change, and a button that only moves once the
-            // next reading comes back round reads as a button that is stuck.
+            // Show the outcome at once: a player can take a second to report
+            // a status change, and a button that waits for it reads as stuck.
             // The next refresh corrects this if the player refused.
             glyph.set_label(if player.status.is_playing() {
                 GLYPH_PLAY
@@ -594,12 +589,9 @@ fn build_card(player: &Player, commands: &Sender<Command>) -> Card {
 
 /// A centred square of the cover, at exactly the size the card draws it.
 ///
-/// `Picture::set_filename` hands GTK the file at its own resolution, and a
-/// widget's size request is a minimum rather than a maximum — so a 1280x720
-/// video thumbnail took as much of the row as the title was willing to give up
-/// and the card grew to match, while a small square cover looked correct. The
-/// natural size is the drawn size now, so neither the row nor the card height
-/// depends on what the artwork happens to be.
+/// A size request is a minimum, not a maximum, so `set_filename` let a
+/// 1280x720 thumbnail stretch the row while a square cover looked right.
+/// Fixing the natural size keeps card height independent of the artwork.
 fn square_texture(path: &Path) -> Option<gdk::Texture> {
     let full = gdk_pixbuf::Pixbuf::from_file(path).ok()?;
     let (x, y, side) = centre_square(full.width(), full.height())?;

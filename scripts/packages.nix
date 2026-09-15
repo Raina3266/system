@@ -12,18 +12,10 @@ let
   # cargo will not load a workspace whose members are absent from disk.
   workspaceMembers = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.members;
 
-  # One build environment for the dependency artifact and for every crate that
-  # reuses it.
-  #
-  # cargoArtifacts below compiles the whole workspace's dependencies once, but
-  # cargo only reuses a compiled dependency when the environment that produced
-  # it still matches. PKG_CONFIG_PATH is the fragile part: it is assembled from
-  # buildInputs, and wrapGAppsHook4 contributes gtk4 and librsvg through
-  # depsTargetTargetPropagated, which lands in buildInputs of anything carrying
-  # the hook. Give one crate a library or a hook the artifact was not built
-  # with and its -sys crates rebuild for that derivation alone, which is the
-  # duplication this is meant to remove. So the set is the union of what every
-  # member needs, and nothing here varies it per crate.
+  # One build environment for the dependency artifact and every crate reusing
+  # it. Cargo only reuses a compiled dependency when the environment matches,
+  # and PKG_CONFIG_PATH comes from buildInputs — vary it per crate and that
+  # crate's -sys deps rebuild alone. So: the union of what every member needs.
   commonArgs = {
     strictDeps = true;
 
@@ -41,12 +33,9 @@ let
     ];
   };
 
-  # Every member's dependencies, compiled once. Crane replaces the crates' own
-  # sources with generated stubs and launders the manifests through the store
-  # before this builds, so editing any .rs file leaves it alone; only a change
-  # to a dependency or to Cargo.lock rebuilds it. `--locked` and the release
-  # profile are crane's defaults, and doCheck is on so dev-dependencies land in
-  # the artifact too rather than being rebuilt by each crate's test run.
+  # Every member's dependencies, compiled once. Crane stubs the crates' own
+  # sources first, so editing any .rs leaves this alone; only a dependency or
+  # Cargo.lock change rebuilds it. doCheck is on so dev-deps land here too.
   cargoArtifacts = craneLib.buildDepsOnly (
     commonArgs
     // {
@@ -56,13 +45,10 @@ let
     }
   );
 
-  # The source one member is built from: every manifest in the workspace, and
-  # that member's Cargo sources.
-  #
-  # Passing the whole of scripts/ as src meant every derivation's input hash
-  # covered all ten crates *and* this file, so touching any one of them - or
-  # editing a wrapper below - rebuilt all ten. Sibling manifests are still an
-  # input, but they only change when a crate gains or drops a dependency.
+  # The source one member is built from: every manifest in the workspace, plus
+  # that member's Cargo sources. Passing all of scripts/ put all ten crates in
+  # every derivation's input hash, so touching one rebuilt all ten. Sibling
+  # manifests still count, but only change when a crate gains a dependency.
   memberSrc =
     pname:
     lib.fileset.toSource {
@@ -85,10 +71,9 @@ let
       : > ${m}/src/main.rs
     '') (lib.remove pname workspaceMembers);
 
-  # `pname` is normally also Cargo's package id and the installed main binary.
-  # network-manager is the one exception: its repository directory and binary
-  # were renamed, while its Cargo package id stays `rofi-network` so the shared
-  # Cargo.lock does not churn for an otherwise dependency-free rename.
+  # `pname` is normally also Cargo's package id and the installed binary.
+  # network-manager is the exception: directory and binary were renamed, but
+  # its package id stays `rofi-network` so the shared Cargo.lock does not churn.
   mkWorkspacePackage =
     pname: extra:
     let

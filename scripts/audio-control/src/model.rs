@@ -365,10 +365,8 @@ const DESCRIPTION_NOISE: &[&str] = &[
 /// Turns a PulseAudio description into something that fits a menu row.
 ///
 /// "GA104 High Definition Audio Controller Digital Stereo (HDMI 2)" becomes
-/// "GA104 (HDMI 2)". When nothing identifying survives — which is what happens
-/// to the bare on-board controller, "Family 17h/19h/20h HD Audio Controller
-/// Analog Stereo" — the active port's name ("Speakers", "Headphones") is a far
-/// better label than the wreckage, so it wins instead.
+/// "GA104 (HDMI 2)". When nothing identifying survives — as for the bare
+/// on-board controller — the active port's name wins instead.
 pub fn short_device_name(description: &str, port: Option<&str>) -> String {
     let mut short = description.to_owned();
     for noise in DESCRIPTION_NOISE {
@@ -403,10 +401,9 @@ pub fn short_device_name(description: &str, port: Option<&str>) -> String {
     }
 }
 
-/// A PCI family code: two or three hex digits followed by `h`, optionally
-/// slash-joined ("17h", "17h/19h/20h"). Deliberately narrow — requiring a
-/// leading digit and at most three of them keeps ordinary words that happen to
-/// end in `h` and spell out in hex, such as "Beach", out of the filter.
+/// A PCI family code: two or three hex digits then `h`, optionally
+/// slash-joined ("17h", "17h/19h/20h"). Narrow on purpose, so hex-spellable
+/// words like "Beach" stay out.
 fn is_pci_family(token: &str) -> bool {
     !token.is_empty()
         && token.split('/').all(|part| {

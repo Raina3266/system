@@ -57,10 +57,9 @@ impl Backend {
     }
 
     pub async fn snapshot(&self) -> AppResult<Vec<BluetoothEntry>> {
-        // Every property is its own D-Bus round trip, and a scan can leave
-        // fifty devices behind. Reading them serially is what made the menu
-        // stall after a scan; the connection multiplexes, so issuing all the
-        // reads at once turns hundreds of sequential trips into a few rounds.
+        // Every property is its own round trip and a scan can leave fifty
+        // devices behind, which is what stalled the menu. The connection
+        // multiplexes, so issue all the reads at once.
         let reads = self
             .adapter
             .device_addresses()
@@ -76,10 +75,8 @@ impl Backend {
             // A device can disappear between the address listing and the
             // property reads; skip it rather than failing the whole render.
             .flatten()
-            // Discovery turns up a long tail of devices that never resolve a
-            // name — beacons, cars, laptops in the next flat. Without a name
-            // there is nothing to pick out of the list, so they are only kept
-            // once they are paired.
+            // Discovery turns up a long tail of unnamed devices — beacons,
+            // cars, neighbours. Nothing to pick, so keep them only once paired.
             .filter(|entry| entry.named || entry.paired || entry.connected)
             .collect();
         entries.sort_by(|left, right| {
@@ -94,10 +91,8 @@ impl Backend {
     /// Runs a bounded discovery window. BlueZ discovers for as long as the
     /// event stream is alive, so the timeout is what stops the scan.
     ///
-    /// This blocks for the whole window, which is why only the detached
-    /// `scan-bg` process calls it — the menu itself never waits on discovery.
-    /// While it runs, a marker file lets the short-lived script invocations
-    /// tell that a scan is in flight.
+    /// Blocks for the whole window, so only the detached `scan-bg` process
+    /// calls it. A marker file tells short-lived invocations a scan is running.
     pub async fn scan(&self) -> AppResult<()> {
         let seconds = env::var("AUDIO_CONTROL_SCAN_SECONDS")
             .ok()
@@ -261,10 +256,9 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 // ---------------------------------------------------------------------------
 // Pairing agent
 //
-// BlueZ calls back into an agent while a device pairs, and whoever owns that
-// agent has to outlive the call. The agent and whatever is showing the prompt
-// talk through a pair of files in $XDG_RUNTIME_DIR: the agent writes a request,
-// the front end renders it, and the front end writes back the typed answer.
+// BlueZ calls back into an agent while a device pairs, so the agent must
+// outlive the call. It and the front end talk through two files in
+// $XDG_RUNTIME_DIR: the agent writes a request, the front end writes the answer.
 // ---------------------------------------------------------------------------
 
 /// A prompt raised by the agent while pairing.
@@ -462,12 +456,10 @@ pub fn cleanup() {
 // ---------------------------------------------------------------------------
 // Scan marker
 //
-// Discovery lives in a detached `scan-bg` process so opening the menu never
-// waits on it. The marker records when that window ends, which is how a script
-// invocation — a separate process that shares no memory with the scanner —
-// knows to report "Scanning…" and to leave a running scan alone. Storing the
-// deadline rather than a plain flag means a scanner that is killed mid-window
-// expires on its own instead of leaving the menu scanning forever.
+// Discovery runs in a detached `scan-bg` process so opening the menu never
+// waits. The marker records when that window ends, so a separate invocation
+// knows to report "Scanning…" and leave a running scan alone. Storing the
+// deadline rather than a flag means a killed scanner expires on its own.
 // ---------------------------------------------------------------------------
 
 fn scanning_path() -> Option<PathBuf> {

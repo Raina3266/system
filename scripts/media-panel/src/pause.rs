@@ -1,12 +1,10 @@
 //! Stopping everything at once, for the Waybar button's right-click.
 //!
-//! Not `playerctl --all-players pause`: that reads each player's `CanPause`
-//! first and skips the ones that answer no, so a browser bridge that cannot
-//! reach its tab is never even asked and the music it publishes keeps playing.
-//! MPRIS tells a player that cannot honour a command to ignore it rather than
-//! fail, and publishers get the property wrong often enough, so asking every
-//! player and letting those that mean it decline stops more music than
-//! trusting what they advertise.
+//! Not `playerctl --all-players pause`: that checks `CanPause` first and skips
+//! players answering no, so a browser bridge that cannot reach its tab is never
+//! asked. MPRIS says a player that cannot comply should ignore the call, and
+//! publishers get the property wrong often, so ask everyone and let them
+//! decline.
 
 use std::fmt::Write as _;
 

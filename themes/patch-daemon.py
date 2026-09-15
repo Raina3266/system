@@ -544,13 +544,10 @@ def gtk_override_css(args: argparse.Namespace) -> str:
         "popover, popover.background, menu, .menu {\n"
         "  border-color: @daemon_structure;\n"
         "}\n"
-        # Breeze and libadwaita both build a scrollbar out of transparent
-        # borders: the slider is a few pixels of background inside a wide
-        # transparent border, clipped to the padding box, and the trough
-        # reserves the rest of the gutter the same way. Colouring those
-        # borders paints the spacing itself, which is how a slider ends up as
-        # wide as the gutter it sits in. Colour the slider's background alone,
-        # leave the borders transparent, and give it the width VS Code uses.
+        # Breeze and libadwaita build scrollbars from transparent borders — the
+        # slider is a few pixels of background inside a wide one — so colouring
+        # the borders paints the spacing and the slider fills the gutter. Colour
+        # the background alone and use VS Code's width.
         "scrollbar trough, scrollbar slider {\n"
         "  border-color: transparent;\n"
         "}\n"
@@ -599,11 +596,9 @@ def append_gtk_overrides(path: pathlib.Path, args: argparse.Namespace) -> None:
 def patch_gtk(args: argparse.Namespace) -> None:
     source = pathlib.Path(args.source)
     output = pathlib.Path(args.out)
-    # Do not copy the upstream settings file in the first place. copytree
-    # preserves the Nix store's read-only directory mode, so copying and then
-    # unlinking it would fail even if the file itself were made writable.
-    # Cursor selection is already managed by Home Manager, and the file also
-    # requests an otherwise unused colour-reload module.
+    # Never copy the upstream settings file: copytree preserves the store's
+    # read-only directory mode, so unlinking it later fails. Cursor selection is
+    # Home Manager's, and the file also pulls in an unused colour-reload module.
     shutil.copytree(
         source,
         output,
@@ -1101,12 +1096,10 @@ def patch_desktop(args: argparse.Namespace) -> None:
         {"BackgroundNormal"},
         hex_to_kde_rgb(args.dim_pink),
     )
-    # These two are the only outline colours the scheme exposes, and a QML
-    # application draws every focus ring, hover frame and highlighted menu row
-    # from them. Kvantum paints its own frames from the SVG, so this decides
-    # how QtQuick applications look and nothing else: give them the structural
-    # colour, which is what frames a menu or a toolbar button everywhere else,
-    # rather than the red reserved for painted push-button frames.
+    # The only outline colours the scheme exposes; a QML app draws every focus
+    # ring, hover frame and menu highlight from them. Kvantum paints QWidget
+    # frames from the SVG, so this affects QtQuick alone — give it the
+    # structural colour, not the red kept for push-button frames.
     decoration_changes = rewrite_ini_keys_in_sections(
         colours,
         "Colors:",
@@ -1150,13 +1143,11 @@ def patch_desktop(args: argparse.Namespace) -> None:
         hex_to_kde_rgb(args.alternate_background),
     )
 
-    # Everything above reaches Qt applications through Kvantum, which paints
-    # QWidgets alone. A QtQuick/Kirigami application - System Monitor, and
-    # every Plasma applet - takes its whole appearance from this colour scheme
-    # instead, and upstream left the semantic roles at stock Breeze. Localise
-    # them so both kinds of application read as the same theme. Placed after
-    # the palette conversion for the same reason the alternate colour is: the
-    # complementary background below is one of the colours it rewrites.
+    # Everything above reaches Qt through Kvantum, which paints QWidgets only.
+    # QtQuick/Kirigami apps take their whole appearance from this scheme, and
+    # upstream left the semantic roles at stock Breeze. Localise them so both
+    # read as one theme. After the palette conversion, which rewrites the
+    # complementary background below.
     semantic_changes = 0
     for keys, colour in (
         ({"ForegroundActive"}, args.pink),

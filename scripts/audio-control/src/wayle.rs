@@ -1,10 +1,8 @@
 //! Small machine interface used by Wayle's device picker.
 //!
-//! Wayle keeps its native device-picker UI. This bridge is only for the
-//! profile-aware selection behaviour its audio service does not expose: the
-//! same `selections` and `set_default` functions used by the Waybar backend
-//! keep mutually exclusive ALSA card profiles (notably laptop Speaker and
-//! Headphones profiles) as separate, stable destinations.
+//! Only for the profile-aware selection Wayle's audio service lacks: the same
+//! `selections` and `set_default` the Waybar backend uses, keeping mutually
+//! exclusive ALSA profiles (laptop Speaker and Headphones) as stable rows.
 
 use std::io::{self, Write};
 
@@ -26,10 +24,9 @@ fn kind(value: &str) -> AppResult<AudioKind> {
     }
 }
 
-/// Prints five NUL-terminated UTF-8 fields for every selectable row:
-/// stable key, compact label, full description, live node name, and default
-/// state (`1` or `0`). NUL cannot occur in data originating from PulseAudio's
-/// C strings, so no escaping or extra serialization dependency is needed.
+/// Prints five NUL-terminated fields per row: stable key, compact label, full
+/// description, live node name, default state. NUL cannot occur in PulseAudio's
+/// C strings, so nothing needs escaping.
 pub fn list(value: &str) -> AppResult<()> {
     let entries = audio::selections(kind(value)?)?;
     write_entries(io::stdout().lock(), &entries)

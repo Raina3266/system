@@ -1,8 +1,7 @@
 //! A media panel for Waybar's centre button.
 //!
-//! This used to be a patch on Wayle's own media dropdown. It reads MPRIS off
-//! the session bus directly, which is what lets the parts the spec is fussy
-//! about be got right, and it lives here so a Wayle release cannot break it.
+//! Reads MPRIS off the session bus directly rather than patching Wayle's own
+//! dropdown, so a Wayle release cannot break it.
 //!
 //!   media-panel            open the panel, or toggle one already running
 //!   media-panel <monitor>  the same, on the output the button was pressed on

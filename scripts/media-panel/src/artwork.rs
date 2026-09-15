@@ -1,10 +1,8 @@
 //! Cover art for a track, including the local files that publish none.
 //!
-//! A player that has art puts it in `mpris:artUrl`; an HTTP one is downloaded
-//! once and kept. Local players routinely publish nothing, because the cover
-//! is inside the file or beside it in the folder and the player never
-//! extracted one — so `xesam:url` is followed to the file and both places are
-//! looked in.
+//! A player with art puts it in `mpris:artUrl`; HTTP ones are downloaded once
+//! and kept. Local players often publish nothing because the cover sits inside
+//! the file or beside it, so `xesam:url` is followed and both places checked.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -42,11 +40,9 @@ fn key(art_url: Option<&str>, track_url: Option<&str>) -> String {
 
 /// The cover if it is already known, and never a download.
 ///
-/// `find` reads tags and fetches over HTTP, either of which can take seconds —
-/// `curl` alone is allowed ten. Doing that on the thread drawing the panel
-/// freezes every card until it returns, which is what a track change used to
-/// cost. A miss starts the lookup out of the way and returns `None`; the
-/// refresh after it finishes picks the answer up.
+/// `find` reads tags and fetches over HTTP, which can take seconds and would
+/// freeze every card on the drawing thread. A miss starts the lookup
+/// off-thread and returns `None`; the next refresh picks the answer up.
 pub fn find_when_known(art_url: Option<&str>, track_url: Option<&str>) -> Option<PathBuf> {
     let key = key(art_url, track_url);
     if let Ok(memo) = memo().lock()
@@ -113,8 +109,8 @@ fn percent_decode(value: &str) -> Option<String> {
 
 /// A cover stored as its own file in the track's folder.
 ///
-/// A picture named after the track wins over the folder's cover, because a
-/// folder holding one album still gets a per-track picture when they differ.
+/// A picture named after the track beats the folder cover: one album per
+/// folder still gets per-track pictures when they differ.
 fn beside(track: &Path) -> Option<PathBuf> {
     let folder = track.parent()?;
     let entries: Vec<String> = std::fs::read_dir(folder)

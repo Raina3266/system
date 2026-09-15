@@ -43,13 +43,10 @@
         };
       };
 
-      # Devshell for the Rust projects under scripts/. Nix builds give each
-      # derivation its own pkg-config and system libraries via
-      # nativeBuildInputs/buildInputs, but rust-analyzer running in the editor
-      # has only the user profile on PATH — so the -sys crates (glib-sys, 
-      # gtk4-sys, libdbus-sys, …) fail their build scripts and RA can't analyze
-      # the workspace. direnv loads this shell via the root .envrc so any edit
-      # anywhere in this repo gets the right PKG_CONFIG_PATH.
+      # Devshell for scripts/. Nix gives each derivation its own pkg-config and
+      # libraries, but a plain shell — and the editor's rust-analyzer — sees
+      # only the user profile, so the -sys crates fail their build scripts.
+      # Enter it with `nix develop .#rust`, or a local untracked .envrc.
       devShells.x86_64-linux.rust = pkgs.mkShell {
         nativeBuildInputs = [ pkgs.pkg-config ];
         buildInputs = with pkgs; [

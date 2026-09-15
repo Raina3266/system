@@ -44,10 +44,9 @@ pub async fn print_status() {
 
 /// The module's single glyph.
 ///
-/// Bluetooth off is the plain sound icon, tracking the default output's level
-/// and mute state. Bluetooth on swaps it for a Bluetooth glyph, distinct at a
-/// glance and distinguishing an idle adapter from a connected one. The full
-/// output state remains available in the tooltip and native Wayle panel.
+/// Bluetooth off shows the sound icon, tracking the default output's level and
+/// mute. Bluetooth on swaps in a Bluetooth glyph that separates an idle adapter
+/// from a connected one. Full state stays in the tooltip and Wayle's panel.
 fn glyph(output: Option<&AudioEntry>, powered: bool, connected: bool) -> &'static str {
     match (powered, connected) {
         (true, true) => "󰂱",

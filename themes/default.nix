@@ -1,9 +1,6 @@
-# Every theme this configuration applies, in one module.
-#
-# Repository-owned application stylesheets are linked into place with
-# mkOutOfStoreSymlink. Daemon's KDE, GTK and VS Code themes instead come from
-# one pinned upstream checkout and are patched together during the Nix build,
-# so every toolkit uses the same local palette and asset revision.
+# Every theme this configuration applies, in one module. Repository stylesheets
+# link in with mkOutOfStoreSymlink; Daemon's KDE, GTK and VS Code themes are
+# patched from one pinned checkout so every toolkit shares a palette.
 {
   config,
   pkgs,
@@ -52,12 +49,8 @@ let
   daemonSecondaryBackground = "#0F0C17";
   daemonChromeBackground = "#170A0F";
 
-  # Reuse the same local palette across KDE, GTK and VS Code: relevant icons
-  # and destructive controls use vivid dark red, as do push-button frames.
-  # Menu separators, popup frames, scrollbars and toolbar-button frames use
-  # cyberpunk yellow; other interactive box outlines use red, their backgrounds
-  # use dimmed pink, table separators use dim grey, and normal surfaces use
-  # darker Daemon burgundy variants.
+  # One palette across KDE, GTK and VS Code: red for destructive controls and
+  # button frames, yellow for separators and popup frames, burgundy surfaces.
   daemonPatched =
     pkgs.runCommandLocal "daemon-2.0-patched"
       {
@@ -92,23 +85,17 @@ let
           --secondary-background "${daemonSecondaryBackground}" \
           --chrome-background "${daemonChromeBackground}"
 
-        # Daemon-Icons declares Inherits=breeze-dark,gnome,hicolor. The "gnome"
-        # fallback targets the deprecated gnome-icon-theme package, which is now
-        # only a Nixpkgs alias. Retarget it at Adwaita — the modern GNOME icon
-        # set — so the inherits chain resolves without the legacy package. The
-        # icons were copied from a read-only store path, so make the directory
-        # writable before sed -i creates its temp file there.
+        # Daemon-Icons inherits "gnome", now only a Nixpkgs alias; retarget it
+        # at Adwaita so the chain resolves. The icons came from a read-only
+        # store path, so make the directory writable before sed -i.
         chmod +w "$out/icons/Daemon-Icons" "$out/icons/Daemon-Icons/index.theme"
         sed -i 's/Inherits=breeze-dark,gnome,hicolor/Inherits=breeze-dark,Adwaita,hicolor/' \
           "$out/icons/Daemon-Icons/index.theme"
       '';
 
-  # Upstream ships the VS Code theme as a plain extension directory rather
-  # than a marketplace package, so repackage it into the layout Home Manager
-  # expects (share/vscode/extensions/<unique id>). Upstream's package.json has
-  # no publisher field, which would leave VS Code calling the extension
-  # "undefined_publisher.daemon-2-0"; add one so the identifier matches the
-  # directory name.
+  # Upstream ships a plain extension directory, so repackage it into the
+  # share/vscode/extensions/<unique id> layout Home Manager expects. Its
+  # package.json has no publisher, which would name it "undefined_publisher.*".
   daemonVscodeSrc = "${daemonTheme}/VSCode/daemon-2-0";
   daemonVscodeManifest = builtins.fromJSON (builtins.readFile "${daemonVscodeSrc}/package.json");
   daemonVscodePublisher = "MathisP75";
@@ -123,10 +110,9 @@ let
           pkgs.jq
           pkgs.python3
         ];
-        # Home Manager takes the extension's identity from these rather than
-        # listing the built directory, which would be an import-from-derivation
-        # on every evaluation. It writes all of them into extensions.json, so
-        # leaving any out is an evaluation error rather than a silent default.
+        # Read instead of listing the built directory, which would be an
+        # import-from-derivation. All three go into extensions.json, so
+        # omitting any is an evaluation error.
         passthru = {
           inherit (daemonVscodeManifest) version;
           vscodeExtPublisher = daemonVscodePublisher;
@@ -171,10 +157,9 @@ let
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
   kdeConfigHome = config.xdg.configHome;
 
-  # Both Kvantum packages ship a set of Kv* colour schemes in share/color-schemes
-  # alongside the style plugin, which is all this configuration wants from them.
-  # Drop the schemes so System Settings -> Colours offers Daemon2 alone. The
-  # style plugin itself lives under lib/ and is untouched.
+  # Both Kvantum packages ship Kv* colour schemes next to the style plugin.
+  # Drop them so System Settings -> Colours offers Daemon2 alone; the plugin
+  # itself lives under lib/ and is untouched.
   withoutColorSchemes =
     package:
     package.overrideAttrs (old: {
@@ -183,10 +168,9 @@ let
       '';
     });
 
-  # Libadwaita controls its own current widget geometry. Importing Daemon's
-  # complete, older Breeze GTK 4 stylesheet here would override that geometry
-  # at user priority, breaking modern dialogs and client-side window controls.
-  # Import only the generated state/structure patch plus semantic colours.
+  # Libadwaita owns its widget geometry, and Daemon's older Breeze GTK 4 sheet
+  # would override it at user priority and break modern dialogs. Import only
+  # the generated state/structure patch and semantic colours.
   daemonGtk4UserCss = ''
     @import url("${daemonPatched}/share/themes/Daemon-2.0/gtk-4.0/daemon-overrides.css");
 
@@ -280,10 +264,9 @@ in
     '';
   };
 
-  # Install every KDE-facing component supplied by Daemon KDE MK2 except
-  # Konsole, which is intentionally excluded. Aurorae
-  # and Plasma assets are harmless under niri and are ready if Plasma/KWin is
-  # started later; Qt/KDE applications use the colours, icons and Kvantum now.
+  # Every KDE-facing Daemon component except Konsole. Aurorae and Plasma assets
+  # are inert under niri but ready if it starts later; Qt/KDE apps use the
+  # colours, icons and Kvantum now.
   xdg.dataFile = (builtins.mapAttrs (_name: link) dataLinks) // {
     "aurorae/themes/daemon-2.0" = {
       source = "${daemonTheme}/Window Decorations/daemon-2.0";
@@ -303,11 +286,9 @@ in
   # Apply only appearance keys instead of replacing the complete KDE config;
   # Dolphin preferences and other unrelated KDE settings remain untouched.
   home.activation.applyDaemonKdeTheme = config.lib.dag.entryAfter [ "linkGeneration" ] ''
-    # plasma-apply-colorscheme copies the scheme's colours into kdeglobals,
-    # which is the file applications actually read. The scheme's name never
-    # changes here - the file behind it does - so drop the recorded name first
-    # rather than rely on the tool noticing that a scheme already selected has
-    # been rebuilt underneath it.
+    # plasma-apply-colorscheme writes into kdeglobals, which apps actually
+    # read. Only the file behind the name changes, so drop the recorded name
+    # first or the tool skips an already-selected scheme.
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
       --group General --key ColorScheme --delete
     $DRY_RUN_CMD ${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme Daemon2

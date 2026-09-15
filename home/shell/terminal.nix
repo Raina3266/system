@@ -95,22 +95,14 @@ in
       clock_format = "%X";
     };
 
-    # btop falls back to its own default theme for every key left out here.
+    # btop falls back to its own defaults for anything left out.
     #
-    # Frames are yellow, as menus, popups and scrollbars are everywhere else.
-    # Text is cyan - which is what colours a pid and its command line, both
-    # drawn from main_fg fading to inactive_fg - headings pink, and the
-    # shortcut letter in a menu label red.
+    # Frames yellow, text cyan, headings pink, menu shortcut letters red.
     #
-    # Every number btop colours by value runs the same three stops: white
-    # where the reading wants no attention, pink on the way, red at the end
-    # that matters. Load, temperature, memory in use and a process climb from
-    # white to red; memory free or available, cached memory and network
-    # throughput run it the other way, since for those it is the low end that
-    # is worth seeing. Memory that is free or available reads the same way
-    # inverted, since there running out is the warning. Cached memory and
-    # network throughput are neither good nor bad, so they stay on their own
-    # hue - cyan down, pink up - and never turn red.
+    # Numbers coloured by value run white -> pink -> red: load, temperature,
+    # memory used and processes climb that way, free memory runs it inverted.
+    # Cached memory and network throughput are neither good nor bad, so they
+    # stay cyan-to-pink and never reach red.
     themes."Daemon-2.0" = ''
       theme[main_fg]="${daemonText}"
       theme[inactive_fg]="${daemonDimText}"
@@ -119,10 +111,8 @@ in
       theme[selected_bg]="${daemonDimPink}"
       theme[selected_fg]="${white}"
 
-      # A followed process and the banner announcing it are blue by default,
-      # the one colour nothing else here uses. The row takes the pink accent
-      # and the banner with it; pausing the list is the state worth noticing,
-      # so that banner is red.
+      # Blue is the one colour nothing else here uses, so a followed process
+      # takes the pink accent; pausing is worth noticing, so that banner is red.
       theme[followed_bg]="${daemonPink}"
       theme[followed_fg]="${white}"
       theme[proc_follow_bg]="${daemonPink}"

@@ -8,12 +8,10 @@
 let
   onlyofficeFonts = "${config.xdg.dataHome}/fonts/onlyoffice";
 
-  # Home Manager writes programs.vscode.profiles.<name>.userSettings as a
-  # symlink into the store, so settings.json ends up read-only and VS Code's
-  # own settings UI fails with "Unable to write into user settings". These
-  # settings are merged into a real file during activation instead, which
-  # leaves the file writable. The keys below still win on every switch;
-  # anything VS Code writes alongside them is preserved.
+  # Home Manager symlinks userSettings into the store, leaving settings.json
+  # read-only so VS Code's settings UI cannot write. Merging into a real file
+  # during activation keeps it writable: the keys below still win on every
+  # switch, and anything VS Code writes alongside them survives.
   vscodeUserSettings = {
     "workbench.colorTheme" = "Daemon-2.0";
     "chat.disableAIFeatures" = true;
@@ -121,11 +119,10 @@ in
         settings="${vscodeUserSettingsPath}"
         managed="${vscodeUserSettingsFile}"
 
-        # Staged in the target's own directory so every update below lands as
-        # a rename. settings.json is then never absent or half written, not
-        # even briefly: a running VS Code that catches it missing reloads an
-        # empty settings model and writes that model straight back out, which
-        # drops everything the file held, the colour theme included.
+        # Staged in the target's directory so each update lands as a rename.
+        # settings.json is then never absent or half written: a running VS Code
+        # that catches it missing loads an empty model and writes it back,
+        # dropping everything the file held.
         staging="$(dirname "$settings")/.settings.json.hm-new"
 
         mkdir -p "$(dirname "$settings")"
@@ -171,17 +168,10 @@ in
     profiles.default = {
       isDefault = true;
 
-      # ../nixos/default.nix makes JetBrainsMono Nerd Font the fontconfig sans
-      # default, so Thunderbird lays its chrome out in a monospace face. Gecko
-      # sizes each dialog window for the text it expects to lay out, the wider
-      # glyphs wrap onto an extra line, and the button row ends up past the
-      # bottom edge. Thunderbird is pinned to XWayland above so birdtray can
-      # find its window, and an X11 window takes whatever size it is handed,
-      # so it cannot grow to fit and the buttons stay unreachable. A
-      # proportional face lets the dialogs measure themselves correctly again.
-      #
-      # This reaches chrome documents only. Message bodies are content
-      # documents and keep the fonts Thunderbird picks for them.
+      # The fontconfig sans default is monospace (../nixos/default.nix), so
+      # Gecko sizes dialogs for text that then wraps an extra line and pushes
+      # the buttons past the bottom edge; on XWayland the window cannot grow to
+      # fit. Chrome documents only — message bodies keep their own fonts.
       userChrome = ''
         * {
           font-family: "Noto Sans", "Noto Sans CJK SC", sans-serif !important;

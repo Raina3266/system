@@ -90,24 +90,19 @@ layer-rule {
     place-within-backdrop true
 }
 
-// Niri renders the focus ring and border as a solid rectangle *behind* each
-// window, so the active pink bleeds through anything that does not paint its
-// whole tile: splash screens that keep their own size, and windows that are
-// transparent by design like Waylyrics. Draw them around windows instead.
-//
-// geometry-corner-radius on its own only rounds the ring and the border. The
-// window keeps square corners and paints over them, so clip it to the same
-// shape to get the highlight back.
+// Niri draws the ring and border as a filled rectangle behind each window, so
+// the pink shows through anything not painting its whole tile — splash screens,
+// and transparent windows like Waylyrics. geometry-corner-radius alone rounds
+// only the ring, so clip the window to match.
 window-rule {
     geometry-corner-radius 12
     clip-to-geometry true
     draw-border-with-background false
 }
 
-// Chromium anchors its bubbles (extension prompts, permission popups, the PWA
-// menus) as subsurfaces, and clip-to-geometry cuts those off at the window
-// edge: https://github.com/niri-wm/niri/issues/4556. Square corners on the
-// browser windows are the cheaper trade.
+// clip-to-geometry cuts Chromium's subsurface bubbles (extension prompts, PWA
+// menus) off at the window edge: niri-wm/niri#4556. Square corners on the
+// browser are the cheaper trade.
 window-rule {
     match app-id=r#"^(google-)?chrome"#
     match app-id=r#"^chromium"#

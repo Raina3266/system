@@ -1,11 +1,8 @@
 //! MPRIS players, read and driven straight over the session bus.
 //!
-//! This is the bus layer the Rofi-era media control used, carried forward.
-//! Talking to the players directly rather than through a media library is what
-//! lets the two things MPRIS is fussy about be got right: `mpris:trackid` is
-//! typed as an object path and a seek that names anything else is required to
-//! be ignored, and `playerctld` mirrors another player wholesale and must not
-//! be shown as a second one.
+//! Going direct rather than through a media library keeps `mpris:trackid`
+//! typed as an object path, and keeps `playerctld` — which mirrors another
+//! player wholesale — from showing up as a second one.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -190,12 +187,9 @@ impl Players {
 
     /// Plays or pauses a card's playback.
     ///
-    /// The command is named rather than toggled. A toggle leaves the decision
-    /// to the player, and a bridge republishing a browser tab decides from its
-    /// own copy of the tab's state; when the two disagree the toggle resolves
-    /// to the state the tab is already in and the press does nothing. Naming
-    /// it also makes it idempotent, which is what lets a card send it to every
-    /// player it stands for.
+    /// Named rather than toggled: a bridge mirroring a browser tab toggles
+    /// from its own stale copy of the state, so the press does nothing. Naming
+    /// it is also idempotent, so a card can send it to every player it covers.
     pub fn set_playing(&self, player: &Player, play: bool) {
         let method = if play { "Play" } else { "Pause" };
         for bus in player.targets() {
@@ -233,16 +227,12 @@ impl Players {
 
     /// Jumps to `fraction` through the track.
     ///
-    /// `SetPosition` names the track it applies to, and MPRIS requires a
-    /// player to ignore the call when that identifier is not the track it is
-    /// on — so the identifier is read back off the bus as the object path the
-    /// spec says it is. A player that publishes none, or ignores the absolute
-    /// call anyway, gets a relative `Seek` measured from its own position,
-    /// which lands in the same place.
+    /// `SetPosition` is ignored unless it names the current track, so the
+    /// trackid is read back as the object path the spec requires. Players
+    /// without one fall back to a relative `Seek`.
     ///
-    /// One player is moved, not all of them: a second seek at the same
-    /// destination is still a second seek, and the stutter is audible. The
-    /// others are tried only if the first did not move.
+    /// Only one player is moved — a second seek to the same place stutters
+    /// audibly. The rest are tried only if the first did not move.
     pub fn seek_to(&self, player: &Player, fraction: f64) {
         let Some(length) = player.length else {
             return;
@@ -375,10 +365,9 @@ fn is_instance(part: &str) -> bool {
 
 /// The player's own name, for a bus that publishes no usable `Identity`.
 ///
-/// mprisence opens one bus per browser tab and names it for the publisher, the
-/// site and the tab: `mprisence_web.youtube_music.pa8082085c72e81fe`. Neither
-/// the leading segment nor the whole tail is a name worth putting on a card,
-/// so drop the publisher and the per-tab id and keep what names the app.
+/// mprisence names a bus for publisher, site and tab —
+/// `mprisence_web.youtube_music.pa8082085c72e81fe` — so drop the publisher and
+/// the per-tab id and keep the middle, which names the app.
 pub fn friendly_source(bus: &str) -> String {
     let tail = bus.strip_prefix(MPRIS_PREFIX).unwrap_or(bus);
     let mut parts: Vec<&str> = tail.split('.').filter(|part| !part.is_empty()).collect();
@@ -459,15 +448,10 @@ pub fn clock(duration: Duration) -> String {
 
 /// Folds every publisher of one piece of playback into a single card.
 ///
-/// Identity is deliberately not what decides it. Two publishers of one
-/// playback routinely disagree about who they are — a bridge names the app or
-/// site it mirrors while the player names itself — so requiring them to agree
-/// leaves a player and its mirror side by side. The metadata carries it
-/// instead: a shared title is something a mirror and an unrelated track can
-/// both have, so two further fields have to line up, and a position the two
-/// disagree about settles it the other way. Publishers that do agree on their
-/// identity are asked for one field, because one app publishing itself twice
-/// is not a coincidence to guard against.
+/// Matched on metadata, not identity: a bridge names the app it mirrors while
+/// the player names itself, so identity would leave the two side by side.
+/// Title alone can collide, so two more fields must agree and a differing
+/// position splits them. Publishers that already agree on identity need one.
 fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
     let mut kept: Vec<Player> = Vec::with_capacity(players.len());
 

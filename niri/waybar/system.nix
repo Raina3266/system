@@ -1,8 +1,7 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
-# The dashboard button carries the current battery reading and opens Wayle's
-# native dashboard, which also contains notifications and the seven-day
-# calendar. Network, audio, and media all open Wayle-native dropdowns.
+# The dashboard button carries the battery reading and opens Wayle's dashboard;
+# network, audio and media all open Wayle-native dropdowns.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -84,11 +83,9 @@ let
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
 
-  # Left-click opens Wayle's native Bluetooth/audio panel. The visible rows,
-  # sliders, Bluetooth controls and per-application volume controls are Wayle's
-  # own components; audio-control is only the profile-aware backend for the
-  # Speaker/Headphones cases Wayle does not natively expose. Right-click remains
-  # the adapter's on/off switch.
+  # Left-click opens Wayle's native Bluetooth/audio panel; the rows, sliders and
+  # per-app volume are Wayle's own, audio-control only adds Speaker/Headphones
+  # profile handling. Right-click toggles the adapter.
   audioModule = monitor: {
     exec = "${packages.audioControl}/bin/audio-control status";
     interval = 5;
@@ -113,9 +110,8 @@ let
     "exec-on-event" = false;
     on-click = "${packages.mediaPanel}/bin/media-panel ${lib.escapeShellArg monitor}";
     # Right-click stops everything. Not `playerctl --all-players pause`: that
-    # reads each player's `CanPause` first and skips the ones that answer no,
-    # so a browser bridge that cannot reach its tab is never even asked, and
-    # the music it is publishing keeps playing.
+    # checks `CanPause` and skips players answering no, so a browser bridge that
+    # cannot reach its tab is never asked and keeps playing.
     on-click-right = "${packages.mediaPanel}/bin/media-panel pause-all";
   };
 in

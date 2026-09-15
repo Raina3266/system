@@ -1,10 +1,8 @@
 //! A single running panel, toggled by running the binary again.
 //!
-//! The Waybar button runs `media-panel toggle <monitor>`. The first run finds
-//! no socket, claims it, and becomes the panel; every run after that hands the
-//! request to the one already running and exits. That keeps the button's
-//! second press a close rather than a second window, without a service file to
-//! install or a bus name to reserve.
+//! The first run finds no socket, claims it, and becomes the panel; later runs
+//! hand their request over and exit. The button's second press is a close
+//! rather than a second window, with no service file or bus name needed.
 
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
