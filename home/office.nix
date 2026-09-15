@@ -170,7 +170,28 @@ in
 
     profiles.default = {
       isDefault = true;
+
+      # ../nixos/default.nix makes JetBrainsMono Nerd Font the fontconfig sans
+      # default, so Thunderbird lays its chrome out in a monospace face. Gecko
+      # sizes each dialog window for the text it expects to lay out, the wider
+      # glyphs wrap onto an extra line, and the button row ends up past the
+      # bottom edge. Thunderbird is pinned to XWayland above so birdtray can
+      # find its window, and an X11 window takes whatever size it is handed,
+      # so it cannot grow to fit and the buttons stay unreachable. A
+      # proportional face lets the dialogs measure themselves correctly again.
+      #
+      # This reaches chrome documents only. Message bodies are content
+      # documents and keep the fonts Thunderbird picks for them.
+      userChrome = ''
+        * {
+          font-family: "Noto Sans", "Noto Sans CJK SC", sans-serif !important;
+        }
+      '';
+
       settings = {
+        # Required for the userChrome.css above to be loaded at all.
+        "toolkit.legacyUserProfileCustomizations.stylesheets" = true;
+
         "mail.spaces.toolbar.enabled" = false;
         "mail.chat.enabled" = false;
         "mailnews.start_page.enabled" = false;
