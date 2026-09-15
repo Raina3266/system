@@ -4026,124 +4026,18 @@ index 4a0fbdf..3d6bb05 100644
 +
 @@ -475,0 +665 @@ fn dropdown_style(registry: &DropdownRegistry) -> DropdownStyle {
 +        location: bar.location.get(),
-diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
-index ccca8d3..f84fc7b 100644
---- a/crates/wayle-shell/src/shell/bar/methods.rs
-+++ b/crates/wayle-shell/src/shell/bar/methods.rs
-@@ -13 +13 @@ use super::{
--    Bar,
-+    ANCHOR_ONLY_CLASS, Bar,
-@@ -47,0 +48,58 @@ impl Bar {
-+    /// Hides the bar without unmapping it, so it stays usable as the GTK
-+    /// anchor for dropdowns opened from an external bar.
-+    ///
-+    /// Unmapping is what upstream does for `show = false`, but a GTK popover
-+    /// can only be presented from a surface the compositor has already mapped,
-+    /// and mapping a layer surface costs a configure round-trip plus a frame.
-+    /// Anchor-only mode keeps the window mapped and makes it invisible
-+    /// instead: the sections are hidden, the CSS below drops the background,
-+    /// borders, shadow and padding, the exclusive zone is released, and an
-+    /// empty input region lets clicks through to whatever is underneath.
-+    pub(super) fn apply_anchor_only(
-+        window: &gtk::Window,
-+        right_factory: &gtk::Box,
-+        anchor_only: bool,
-+        exclusive: bool,
-+    ) {
-+        if anchor_only {
-+            window.add_css_class(ANCHOR_ONLY_CLASS);
-+            window.set_exclusive_zone(0);
-+        } else {
-+            window.remove_css_class(ANCHOR_ONLY_CLASS);
-+            Self::apply_exclusive_zone(window, exclusive);
-+        }
-+
-+        // The right section keeps its own visibility so the anchor widget
-+        // appended after it stays mapped; only the factory content is hidden.
-+        if let Some(center_box) = window
-+            .child()
-+            .and_then(|child| child.downcast::<gtk::CenterBox>().ok())
-+        {
-+            if let Some(start) = center_box.start_widget() {
-+                start.set_visible(!anchor_only);
-+            }
-+            if let Some(center) = center_box.center_widget() {
-+                center.set_visible(!anchor_only);
-+            }
-+        }
-+        right_factory.set_visible(!anchor_only);
-+
-+        Self::apply_input_region(window, anchor_only);
-+    }
-+
-+    /// Makes the window click-through while it is only an anchor.
-+    ///
-+    /// Re-applied from the window's `map` handler because the surface does not
-+    /// exist before the window is realized.
-+    pub(super) fn apply_input_region(window: &gtk::Window, anchor_only: bool) {
-+        let Some(surface) = window.surface() else {
-+            return;
-+        };
-+
-+        if anchor_only {
-+            surface.set_input_region(Some(&gtk::cairo::Region::create()));
-+        } else {
-+            surface.set_input_region(None);
-+        }
-+    }
-+
-@@ -120 +178,7 @@ impl Bar {
--            root.set_visible(new_layout.show);
-+            self.anchor_only.set(!new_layout.show);
-+            Self::apply_anchor_only(
-+                root,
-+                self.right.widget(),
-+                !new_layout.show,
-+                self.services.config.config().bar.exclusive.get(),
-+            );
 diff --git a/crates/wayle-shell/src/shell/bar/mod.rs b/crates/wayle-shell/src/shell/bar/mod.rs
-index 5b5cf1c..cb1210b 100644
+index 5b5cf1c..4691e8d 100644
 --- a/crates/wayle-shell/src/shell/bar/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/mod.rs
 @@ -1 +1 @@
 -mod dropdowns;
 +pub(crate) mod dropdowns;
-@@ -9 +9 @@ mod watchers;
--use std::rc::Rc;
-+use std::{cell::Cell, rc::Rc};
-@@ -20,0 +21,3 @@ use crate::shell::{helpers::layer_shell::apply_layer, services::ShellServices};
-+/// Marks a bar window that stays mapped only to anchor external dropdowns.
-+pub(super) const ANCHOR_ONLY_CLASS: &str = "anchor-only";
-+
-@@ -22,0 +26 @@ pub(crate) struct Bar {
+@@ -22,0 +23 @@ pub(crate) struct Bar {
 +    monitor: gdk::Monitor,
-@@ -27,0 +32,2 @@ pub(crate) struct Bar {
-+    external_anchor: gtk::Box,
-+    anchor_only: Rc<Cell<bool>>,
-@@ -45,0 +52 @@ pub(crate) enum BarCmd {
+@@ -45,0 +47 @@ pub(crate) enum BarCmd {
 +    ToggleDropdown(String),
-@@ -102,0 +110,2 @@ impl Component for Bar {
-+        let exclusive = config.bar.exclusive.get();
-+
-@@ -126 +135 @@ impl Component for Bar {
--        Self::apply_exclusive_zone(&root, config.bar.exclusive.get());
-+        Self::apply_exclusive_zone(&root, exclusive);
-@@ -149,0 +159,14 @@ impl Component for Bar {
-+        let external_anchor = gtk::Box::default();
-+        external_anchor.set_size_request(1, 1);
-+
-+        // The bar window doubles as the GTK anchor for dropdowns opened from an
-+        // external bar, so it stays mapped even when the layout hides it: a
-+        // popover can only be presented from a surface the compositor has
-+        // already mapped, and `present()` followed by `popup()` in the same
-+        // main-loop turn is not that. Hidden means transparent, empty and
-+        // click-through instead of unmapped.
-+        let anchor_only = Rc::new(Cell::new(!visible_on_startup));
-+        let anchor_only_on_map = Rc::clone(&anchor_only);
-+        root.connect_map(move |window| {
-+            Self::apply_input_region(window, anchor_only_on_map.get());
-+        });
-@@ -158,0 +182,8 @@ impl Component for Bar {
+@@ -158,0 +161,8 @@ impl Component for Bar {
 +        watchers::external_dropdown::spawn(
 +            &sender,
 +            &ipc_state,
@@ -4152,27 +4046,9 @@ index 5b5cf1c..cb1210b 100644
 +                .clone()
 +                .unwrap_or_else(|| String::from("unknown")),
 +        );
-@@ -164,0 +196 @@ impl Component for Bar {
+@@ -164,0 +175 @@ impl Component for Bar {
 +            monitor: init.monitor,
-@@ -176,0 +209,2 @@ impl Component for Bar {
-+            external_anchor,
-+            anchor_only,
-@@ -202,0 +237 @@ impl Component for Bar {
-+        widgets.right_box.append(&model.external_anchor);
-@@ -204,3 +239,2 @@ impl Component for Bar {
--        if visible_on_startup {
--            root.present();
--        }
-+        Self::apply_anchor_only(&root, model.right.widget(), !visible_on_startup, exclusive);
-+        root.present();
-@@ -227 +261,5 @@ impl Component for Bar {
--                Self::apply_exclusive_zone(root, exclusive);
-+                // An anchor-only window reserves no space; the configured zone
-+                // is restored when the layout shows the bar again.
-+                if !self.anchor_only.get() {
-+                    Self::apply_exclusive_zone(root, exclusive);
-+                }
-@@ -232,0 +271,11 @@ impl Component for Bar {
+@@ -232,0 +244,11 @@ impl Component for Bar {
 +            BarCmd::ToggleDropdown(name) => {
 +                let toggled =
 +                    self.dropdowns.toggle_external_window(&name, &self.monitor);
@@ -4184,24 +4060,6 @@ index 5b5cf1c..cb1210b 100644
 +                    );
 +                }
 +            }
-diff --git a/crates/wayle-shell/src/shell/bar/styling.rs b/crates/wayle-shell/src/shell/bar/styling.rs
-index 409a9f7..c398de7 100644
---- a/crates/wayle-shell/src/shell/bar/styling.rs
-+++ b/crates/wayle-shell/src/shell/bar/styling.rs
-@@ -177,0 +178,13 @@ impl InlineStyling for Bar {
-+            }} \
-+            .bar.anchor-only {{ \
-+            --bar-opacity: 0%; \
-+            --bar-border-top: 0; \
-+            --bar-border-bottom: 0; \
-+            --bar-border-left: 0; \
-+            --bar-border-right: 0; \
-+            --bar-shadow: none; \
-+            --bar-shadow-margin: 0; \
-+            --bar-inset-edge-px: 0; \
-+            --bar-inset-ends-px: 0; \
-+            --bar-padding-px: 0; \
-+            --bar-padding-ends-px: 0; \
 diff --git a/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs b/crates/wayle-shell/src/shell/bar/watchers/external_dropdown.rs
 new file mode 100644
 index 0000000..8954308
