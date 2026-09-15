@@ -106,7 +106,7 @@ let
   wayleMediaModule = monitor: {
     format = "{}";
     return-type = "json";
-    exec = "${packages.controlCentre}/bin/control-centre media-waybar";
+    exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.controlCentre}/bin/control-centre media-waybar";
     tooltip = true;
     escape = true;
     "restart-interval" = 2;

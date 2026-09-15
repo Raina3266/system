@@ -16,6 +16,7 @@ let
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
+    inherit pkgs;
     packages = repoPackages;
   };
   modules = system.modules // utilities.modules;
@@ -92,7 +93,17 @@ in
         };
 
         systemd.user.services.waybar = {
-          Unit.ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+          Unit = {
+            ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+            Wants = [
+              "waybar-timer.service"
+              "rofi-clipboard-collector.service"
+            ];
+            After = [
+              "waybar-timer.service"
+              "rofi-clipboard-collector.service"
+            ];
+          };
           Service = {
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
