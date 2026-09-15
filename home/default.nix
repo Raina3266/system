@@ -21,6 +21,7 @@ in
     ./shell
     ./cloud.nix
     ./desktop.nix
+    ./fastflix.nix
     ./office.nix
   ];
 
@@ -83,7 +84,6 @@ in
     kid3
     gimp
     yt-dlp
-    fastflix
     waylyrics
 
     inputs.sonora.packages.${pkgs.stdenv.hostPlatform.system}.default

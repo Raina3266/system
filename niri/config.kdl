@@ -146,6 +146,15 @@ window-rule {
     default-window-height { fixed 320; }
 }
 
+// FastFlix scales its entire UI from the window size against a 1200x680
+// reference, so a half-width column leaves its text around 7pt. Open the main
+// window at the size it draws itself for.
+window-rule {
+    match title=r#"^FastFlix$"#
+
+    default-column-width { fixed 1200; }
+}
+
 // WezTerm: empty default width to avoid initial configure bug
 window-rule {
     match app-id=r#"^org\.wezfurlong\.wezterm$"#
