@@ -348,9 +348,18 @@ Wayle presentation is kept out of source patches. Colours, spacing, card
 shadows, scroll-area sizing, and the dashboard/network/audio appearance live in
 `themes/wayle/index.scss`, which Wayle recompiles on save.
 
+One rule is deliberately not left to that file. Wayle's own `base/_index.scss`
+gives every `window` the palette background, and the external dropdown host is
+a layer surface covering the whole monitor, so without an override that host is
+an opaque sheet over the output. Wayle compiles `themes/wayle/index.scss` from
+outside the store and drops all of it when the file is missing or fails to
+compile, which would black out the desktop on every panel press. The transparent
+host therefore lives in `wayle-features.patch`; `index.scss` is still appended
+after it and can restyle the panel.
+
 | Source delta | Purpose |
 | --- | --- |
-| `wayle-features.patch` | Behavior that CSS cannot provide: D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions, audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
+| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions, audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
 | `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
 ### Verifying changes

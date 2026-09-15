@@ -4320,6 +4320,28 @@ index abe3e41..ee5a650 100644
 +        || desktop_entry.starts_with("chrome-")
 +        || app_name.contains("chrome")
 +        || app_name.contains("chromium")
+diff --git a/crates/wayle-styling/scss/main.scss b/crates/wayle-styling/scss/main.scss
+--- a/crates/wayle-styling/scss/main.scss
++++ b/crates/wayle-styling/scss/main.scss
+@@ -11,0 +12,18 @@
++
++// The external dropdown host is a layer surface anchored to all four edges, so
++// that a click outside the panel has somewhere to land. base/_index.scss paints
++// every `window` with --bg-base, which on that host is an opaque sheet over the
++// whole monitor rather than a panel background. Keep the structural part here
++// instead of only in ~/.config/wayle/styles: user styles are compiled from a
++// file outside the store and are dropped wholesale when that file is missing or
++// fails to compile, and losing them should not black out the desktop. They are
++// appended after this rule, so they can still restyle the panel.
++window.external-dropdown-window {
++    background: transparent;
++    box-shadow: none;
++
++    .external-dropdown-panel,
++    > .dropdown {
++        min-width: 0;
++    }
++}
 diff --git a/resources/icons/hicolor/scalable/actions/ld-arrow-right-symbolic.svg b/resources/icons/hicolor/scalable/actions/ld-arrow-right-symbolic.svg
 new file mode 100644
 index 0000000..f4a970b
