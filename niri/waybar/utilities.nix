@@ -1,22 +1,55 @@
 # niri_window_buttons: https://github.com/adelmonte/niri_window_buttons
 # Taskbar (current workspace only): click=focus, middle=close, right=menu
 # Drag to reorder, shift-click for multi-select
-{ packages }:
+{ pkgs, packages }:
 {
-  homeConfig.home.packages = [
-    packages.previewPanel
-    packages.rofiClipboard
-  ];
+  homeConfig = {
+    home.packages = [
+      packages.previewPanel
+      packages.rofiClipboard
+    ];
+
+    # The top bar is instantiated once per output. Keep these two stateful
+    # processes independent of those copies and of Waybar restarts.
+    systemd.user.services.waybar-timer = {
+      Unit = {
+        Description = "Shared Waybar countdown timer";
+        ConditionEnvironment = [ "XDG_CURRENT_DESKTOP=niri" ];
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${packages.waybarTimer}/bin/waybar-timer daemon";
+        Restart = "on-failure";
+        RestartSec = 2;
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+
+    systemd.user.services.rofi-clipboard-collector = {
+      Unit = {
+        Description = "Capture Wayland clipboard history once per session";
+        ConditionEnvironment = [ "WAYLAND_DISPLAY" "XDG_CURRENT_DESKTOP=niri" ];
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${packages.rofiClipboard}/bin/rofi-clipboard capture";
+        Restart = "always";
+        RestartSec = 2;
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+  };
 
   modules = {
     "custom/timer" = {
-      exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.waybarTimer}/bin/waybar-timer";
+      exec = "${packages.waybarTimer}/bin/waybar-timer status";
+      interval = 1;
       format = "{}";
       return-type = "json";
       tooltip = true;
       escape = false;
-      "restart-interval" = 1;
-      "exec-on-event" = false;
       on-click = "${packages.waybarTimer}/bin/waybar-timer add";
       on-click-middle = "${packages.waybarTimer}/bin/waybar-timer toggle";
       on-click-right = "${packages.waybarTimer}/bin/waybar-timer clear";

@@ -1,114 +1,39 @@
 //! Waybar `custom/clipboard` backend.
 //!
-//! `rofi-clipboard status` is a long-running process that folds the old
-//! systemd `wl-paste --watch rofi-clipboard capture` collector into the bar
-//! module itself. A child `wl-paste --watch` keeps capturing every clipboard
-//! change (so history stays event-driven and nothing is missed), while this
-//! process emits one JSON status line whenever the history file changes, so
-//! Waybar updates the glyph and tooltip live.
+//! `rofi-clipboard status` follows the history file and updates Waybar.
+//! A single systemd collector captures clipboard changes independently of
+//! the number of monitors and survives Waybar reloads.
 
 use std::io::Write;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 
-use crate::clipboard::{wl_copy_binary, wl_paste_binary};
+use crate::clipboard::wl_copy_binary;
 use crate::model::{ClipboardItem, ItemKind, json_escape};
 use crate::store::ClipboardStore;
 
 const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const WATCHER_RESTART_DELAY: Duration = Duration::from_secs(2);
 const PREVIEW_LIMIT: usize = 60;
 
-static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn handle_signal(_signum: i32) {
-    SHOULD_EXIT.store(true, Ordering::SeqCst);
-}
-
-unsafe extern "C" {
-    fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
-}
-
-const SIGTERM: i32 = 15;
-const SIGINT: i32 = 2;
-const SIGHUP: i32 = 1;
-
-const PR_SET_PDEATHSIG: i32 = 1;
-const SIGKILL: i32 = 9;
-
-unsafe extern "C" {
-    fn prctl(option: i32, ...) -> i32;
-    fn getppid() -> i32;
-    fn _exit(status: i32) -> !;
-}
-
-fn request_parent_death_signal() {
-    let rc = unsafe { prctl(PR_SET_PDEATHSIG, SIGKILL as usize, 0, 0, 0) };
-    if rc != 0 {
-        return;
-    }
-    if unsafe { getppid() } == 1 {
-        unsafe { _exit(0) };
-    }
-}
-
 pub fn run_status() -> Result<()> {
-    request_parent_death_signal();
-    install_exit_handlers();
-
     // Emit an initial line so the module is not blank until the first change.
-    let _ = print_status();
+    print_status()?;
 
-    let self_exe = std::env::current_exe().context("locate rofi-clipboard executable")?;
     let history = ClipboardStore::discover()?.history_file().to_path_buf();
 
     let mut last_mtime = file_mtime(&history);
-    let mut child: Option<Child> = spawn_watcher(&self_exe);
 
     loop {
-        if SHOULD_EXIT.load(Ordering::SeqCst) {
-            break;
-        }
-
-        // Reap an exited watcher and respawn it, mirroring the old systemd
-        // unit's Restart=on-failure / RestartSec=2 semantics.
-        let exited = match child.as_mut() {
-            Some(process) => process.try_wait().ok().flatten().is_some(),
-            None => true,
-        };
-        if exited {
-            std::thread::sleep(WATCHER_RESTART_DELAY);
-            if SHOULD_EXIT.load(Ordering::SeqCst) {
-                break;
-            }
-            child = spawn_watcher(&self_exe);
-        }
-
         std::thread::sleep(STATUS_POLL_INTERVAL);
-
-        if SHOULD_EXIT.load(Ordering::SeqCst) {
-            break;
-        }
-
         let mtime = file_mtime(&history);
         if mtime != last_mtime {
             last_mtime = mtime;
-            let _ = print_status();
+            print_status()?;
         }
     }
-
-    // Reap the watcher so Waybar reloads do not leave orphaned `wl-paste`
-    // processes behind. `kill` is harmless if the child already exited.
-    if let Some(mut watcher) = child {
-        let _ = watcher.kill();
-        let _ = watcher.wait();
-    }
-    Ok(())
 }
 
 /// `on-click-right` for the Waybar module: clears the current Wayland
@@ -153,40 +78,8 @@ fn print_status() -> Result<()> {
     Ok(())
 }
 
-fn spawn_watcher(self_exe: &Path) -> Option<Child> {
-    let mut command = Command::new(wl_paste_binary());
-    command
-        .arg("--watch")
-        .arg(self_exe)
-        .arg("capture")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
-    unsafe {
-        command.pre_exec(|| {
-            request_parent_death_signal();
-            Ok(())
-        });
-    }
-    match command.spawn() {
-        Ok(child) => Some(child),
-        Err(error) => {
-            eprintln!("rofi-clipboard: failed to spawn wl-paste watcher: {error}");
-            None
-        }
-    }
-}
-
 fn file_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
-}
-
-fn install_exit_handlers() {
-    unsafe {
-        signal(SIGTERM, handle_signal);
-        signal(SIGINT, handle_signal);
-        signal(SIGHUP, handle_signal);
-    }
 }
 
 /// Styling hook for `waybar.css`, mirroring the audio module's class-based

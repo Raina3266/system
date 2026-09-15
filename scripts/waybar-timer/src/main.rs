@@ -149,14 +149,8 @@ fn socket_path() -> PathBuf {
     env::temp_dir().join(format!("waybar-countdown-{safe_user}.sock"))
 }
 
-fn emit(timer: &Timer, previous: &mut Option<(u64, State)>) -> io::Result<()> {
+fn status_json(timer: &Timer) -> String {
     let total_seconds = timer.displayed_seconds();
-    let state = timer.state();
-    let current = (total_seconds, state);
-
-    if previous.as_ref() == Some(&current) {
-        return Ok(());
-    }
 
     let minutes = total_seconds / 60;
     let seconds = total_seconds % 60;
@@ -168,16 +162,10 @@ fn emit(timer: &Timer, previous: &mut Option<(u64, State)>) -> io::Result<()> {
         format!("{ICON} {time}")
     };
 
-    let mut stdout = io::stdout().lock();
-    writeln!(
-        stdout,
+    format!(
         r#"{{"text":"{text}","tooltip":"Timer","class":"{}"}}"#,
         timer.state().output()
-    )?;
-    stdout.flush()?;
-
-    *previous = Some(current);
-    Ok(())
+    )
 }
 
 fn start_alarm() {
@@ -213,11 +201,16 @@ fn start_alarm() {
 fn run_server() -> io::Result<()> {
     let path = socket_path();
 
-    // A socket can remain after Waybar is killed or reloaded.
-    match fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    // Keep a live daemon's socket; remove only a stale socket left by an
+    // unclean shutdown.
+    if path.exists() {
+        match UnixDatagram::unbound()?.send_to(b"status", &path) {
+            Ok(_) => return Err(io::Error::new(ErrorKind::AlreadyExists, "timer is already running")),
+            Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
+                fs::remove_file(&path)?;
+            }
+            Err(error) => return Err(error),
+        }
     }
 
     let socket = UnixDatagram::bind(&path)?;
@@ -225,25 +218,24 @@ fn run_server() -> io::Result<()> {
     socket.set_read_timeout(Some(POLL_INTERVAL))?;
 
     let mut timer = Timer::new();
-    let mut previous_output = None;
     let mut buffer = [0_u8; 32];
-
-    emit(&timer, &mut previous_output)?;
 
     loop {
         if timer.tick() {
             start_alarm();
         }
-        emit(&timer, &mut previous_output)?;
 
-        match socket.recv(&mut buffer) {
-            Ok(length) => {
+        match socket.recv_from(&mut buffer) {
+            Ok((length, sender)) => {
                 let command = str::from_utf8(&buffer[..length]).unwrap_or("").trim();
-
-                if timer.apply(command) {
+                if command == "status" {
+                    if let Some(address) = sender.as_pathname() {
+                        // A Waybar client may disappear during a reload.
+                        let _ = socket.send_to(status_json(&timer).as_bytes(), address);
+                    }
+                } else if timer.apply(command) {
                     start_alarm();
                 }
-                emit(&timer, &mut previous_output)?;
             }
             Err(error)
                 if error.kind() == ErrorKind::WouldBlock || error.kind() == ErrorKind::TimedOut => {
@@ -252,6 +244,21 @@ fn run_server() -> io::Result<()> {
             Err(error) => return Err(error),
         }
     }
+}
+
+fn print_status() -> io::Result<()> {
+    let path = socket_path();
+    let client_path = path.with_file_name(format!("waybar-countdown-{}.sock", process::id()));
+    let socket = UnixDatagram::bind(&client_path)?;
+    let _guard = SocketGuard { path: client_path };
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.send_to(b"status", path)?;
+
+    let mut response = [0_u8; 256];
+    let length = socket.recv(&mut response)?;
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(&response[..length])?;
+    stdout.write_all(b"\n")
 }
 
 fn send_command(command: &str) -> io::Result<()> {
@@ -280,7 +287,7 @@ fn send_command(command: &str) -> io::Result<()> {
 
 fn print_help(program: &str) {
     eprintln!(
-        "Usage:\n  {program}          Run the continuous Waybar module\n  {program} add      Add five minutes\n  {program} toggle   Start or pause\n  {program} clear    Stop and clear"
+        "Usage:\n  {program} daemon   Run the countdown service\n  {program} status   Print Waybar JSON\n  {program} add      Add five minutes\n  {program} toggle   Start or pause\n  {program} clear    Stop and clear"
     );
 }
 
@@ -289,7 +296,8 @@ fn main() {
     let program = args.next().unwrap_or_else(|| "waybar-timer".to_string());
 
     let result = match args.next().as_deref() {
-        None => run_server(),
+        None | Some("daemon") => run_server(),
+        Some("status") => print_status(),
         Some("add") => send_command("add"),
         Some("toggle") => send_command("toggle"),
         Some("clear" | "stop") => send_command("clear"),

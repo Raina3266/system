@@ -96,12 +96,13 @@ fn value_or(info: &HashMap<String, String>, key: &str, fallback: &str) -> String
 }
 
 pub fn watch() -> Result<(), String> {
+    let mut previous_badge = None;
     loop {
         if let Some(proxy) = media() {
             loop {
                 match current_track(&proxy) {
                     Ok(track) => {
-                        if !print_badge(track.as_ref()) {
+                        if !print_badge(track.as_ref(), &mut previous_badge) {
                             return Ok(());
                         }
                     }
@@ -114,7 +115,7 @@ pub fn watch() -> Result<(), String> {
             }
         }
 
-        if !print_badge(None) {
+        if !print_badge(None, &mut previous_badge) {
             return Ok(());
         }
         thread::sleep(RETRY_DELAY);
@@ -229,7 +230,7 @@ fn is_browser_or_proxy(id: &str) -> bool {
     .any(|candidate| id.contains(candidate))
 }
 
-#[derive(Serialize)]
+#[derive(PartialEq, Eq, Serialize)]
 struct Badge {
     text: String,
     class: &'static str,
@@ -267,12 +268,20 @@ fn badge(track: Option<&Track>) -> Badge {
     }
 }
 
-fn print_badge(track: Option<&Track>) -> bool {
-    let Ok(line) = serde_json::to_string(&badge(track)) else {
+fn print_badge(track: Option<&Track>, previous: &mut Option<Badge>) -> bool {
+    let current = badge(track);
+    if previous.as_ref() == Some(&current) {
+        return true;
+    }
+    let Ok(line) = serde_json::to_string(&current) else {
         return false;
     };
     println!("{line}");
-    io::stdout().flush().is_ok()
+    if io::stdout().flush().is_err() {
+        return false;
+    }
+    *previous = Some(current);
+    true
 }
 
 fn truncate_title(title: &str) -> String {
