@@ -1,0 +1,60 @@
+// Network panel: connection details header, QR sharing card, and the raw
+// connection info dump.
+
+.network-details-card {
+    margin-top: var(--space-sm);
+    padding: var(--space-md);
+}
+
+.network-details-header {
+    margin-bottom: var(--space-md);
+}
+
+.network-details-title {
+    font-size: var(--text-md);
+    font-weight: var(--weight-bold);
+    color: var(--fg-default);
+}
+
+.network-details-description {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--fg-subtle);
+}
+
+.network-details-stack,
+.network-details-status {
+    min-height: calc(25rem * var(--global-scale));
+}
+
+.network-details-status {
+    border-spacing: var(--space-sm);
+    color: var(--fg-subtle);
+
+    spinner,
+    image {
+        -gtk-icon-size: var(--icon-lg);
+    }
+
+    &.error {
+        color: var(--status-error);
+    }
+}
+
+.network-qr-code {
+    padding: var(--space-sm);
+    border-radius: var(--rounding-element);
+    background: white;
+}
+
+.network-info-scroll {
+    background: transparent;
+}
+
+.network-info-text {
+    padding: var(--space-sm);
+    font-family: monospace;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--fg-default);
+}

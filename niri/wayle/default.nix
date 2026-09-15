@@ -35,7 +35,7 @@ in
         # Keeping the final source change relative to pristine Wayle avoids
         # dependent hunks and discards intermediate edits that later patches
         # undid.
-        # Presentation lives in themes/wayle/index.scss and hot-reloads.
+        # Presentation lives in the themes/wayle/ partials and hot-reloads.
         patches = (oldAttrs.patches or [ ]) ++ [ (stableWaylePatch ./wayle-features.patch) ];
       });
     })

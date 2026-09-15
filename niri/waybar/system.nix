@@ -164,7 +164,7 @@ in
       hide-empty-text = true;
       return-type = "json";
       format = "󰝚  {text}";
-      exec-if = "pgrep -x tauon >/dev/null || pgrep -x kid3 >/dev/null";
+      exec-if = "pgrep -x tauon >/dev/null || pgrep -x elisa >/dev/null || pgrep -x kid3 >/dev/null";
       exec = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.waybar-lyric}/bin/waybar-lyric -qfpartial";
       on-click = "${packages.withParentDeath}/bin/with-parent-death ${pkgs.waybar-lyric}/bin/waybar-lyric play-pause";
     };

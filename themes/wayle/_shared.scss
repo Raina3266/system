@@ -1,0 +1,24 @@
+// Cross-panel: the layer-shell host every external Waybar-opened dropdown
+// uses. External dropdowns use a transparent monitor-sized host so clicking
+// outside the visible card can close it. Keep only the card itself opaque
+// and shadowed.
+window.external-dropdown-window,
+window.dashboard-layer-window,
+window.network-layer-window,
+window.audio-layer-window {
+    background: transparent;
+    box-shadow: none;
+
+    .external-dropdown-panel,
+    > .dropdown {
+        min-width: 0;
+    }
+
+    &.shadow .external-dropdown-panel,
+    &.shadow > .dropdown {
+        box-shadow:
+            0 0 5px rgba(0, 0, 0, 0.3),
+            0 4px 10px rgba(0, 0, 0, 0.3),
+            0 0 0 1px rgba(255, 255, 255, 0.04);
+    }
+}

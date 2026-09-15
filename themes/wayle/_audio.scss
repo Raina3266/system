@@ -1,0 +1,92 @@
+// Audio panel: Pair/Output/Input/Play tabs, the Bluetooth dropdown embedded
+// in the Pair tab, and the per-stream routing buttons.
+
+.audio-tabs {
+    padding: var(--space-sm) var(--space-md);
+    border-spacing: var(--space-xs);
+    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    border-top-left-radius: var(--rounding-container);
+    border-top-right-radius: var(--rounding-container);
+
+    button.audio-tab {
+        padding: var(--space-xs) var(--space-sm);
+        border-radius: var(--rounding-element);
+        background: transparent;
+        transition:
+            background var(--duration-fast),
+            color var(--duration-fast);
+
+        label {
+            font-size: var(--text-md);
+            font-weight: var(--weight-medium);
+            color: var(--fg-muted);
+        }
+
+        &:hover {
+            background: var(--bg-overlay);
+
+            label {
+                color: var(--fg-default);
+            }
+        }
+
+        &.active {
+            background: var(--accent-subtle);
+
+            label {
+                color: var(--accent);
+                font-weight: var(--weight-semibold);
+            }
+        }
+    }
+}
+
+.audio-page {
+    .audio-device {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    .picker-header {
+        padding-top: var(--space-sm);
+    }
+}
+
+// The Pair tab embeds Wayle's Bluetooth dropdown content without duplicating
+// its outer dropdown frame.
+.bluetooth-section > .dropdown {
+    min-width: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+
+    > .dropdown-content {
+        padding: 0;
+    }
+
+    > .dropdown-header {
+        margin-bottom: var(--space-sm);
+        border-radius: var(--rounding-element);
+    }
+}
+
+button.audio-route-btn {
+    margin-right: var(--space-xs);
+    color: var(--fg-muted);
+    background: var(--bg-overlay);
+    transition:
+        background var(--duration-fast),
+        color var(--duration-fast);
+
+    image.audio-route-icon {
+        margin: calc(var(--space-xs) * 1.5);
+        -gtk-icon-size: var(--icon-md);
+    }
+
+    &:hover {
+        color: var(--fg-default);
+        background: var(--bg-hover);
+    }
+}

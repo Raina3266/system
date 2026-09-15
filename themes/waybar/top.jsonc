@@ -1,7 +1,7 @@
 {
   "position": "top",
   "expand-center": true,
-  "modules-left": ["tray", "custom/ycal"],
+  "modules-left": ["custom/ycal", "tray"],
   "modules-center": ["custom/wayle-media", "custom/lyrics"],
   "modules-right": [
     "custom/timer",

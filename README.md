@@ -25,11 +25,11 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
 | `niri/rofi/config.rasi`, `themes/rofi-*.rasi` | Next Rofi launch |
-| `niri/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
-| `themes/waybar.css` | Waybar reloads CSS automatically |
+| `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
+| `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
 | `themes/preview-panel.css` | Preview panel hot-reloads |
 | `scripts/media-panel/src/style.css` | Open media panel hot-reloads |
-| `themes/wayle/index.scss` | Wayle recompiles the override on save |
+| `themes/wayle/*.scss` | Wayle recompiles the override on save |
 
 Rust, Nix module, package, service, and kernel changes still require a rebuild.
 Each Rust package now hashes only Cargo sources, so changing one UI stylesheet
@@ -345,8 +345,9 @@ visibility change so background refresh work stops.
 ### Local source deltas
 
 Wayle presentation is kept out of source patches. Colours, spacing, card
-shadows, scroll-area sizing, and the dashboard/network/audio appearance live in
-`themes/wayle/index.scss`, which Wayle recompiles on save.
+shadows, scroll-area sizing, and the dashboard/network/audio appearance live
+in `themes/wayle/`, one partial per panel behind the fixed `index.scss` entry
+file, and Wayle recompiles them on save.
 
 One rule is deliberately not left to that file. Wayle's own `base/_index.scss`
 gives every `window` the palette background, and the external dropdown host is

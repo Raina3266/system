@@ -1,5 +1,3 @@
-# Rofi-backed utility modules on the right side of the top bar, plus the
-# niri_window_buttons CFFI taskbar module for the bottom bar.
 # niri_window_buttons: https://github.com/adelmonte/niri_window_buttons
 # Taskbar (current workspace only): click=focus, middle=close, right=menu
 # Drag to reorder, shift-click for multi-select

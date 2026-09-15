@@ -7,7 +7,8 @@
     "custom/gkeep",
     "custom/gphotos",
     "custom/whatsapp",
-    "custom/tauon",
+    "custom/elisa",
+    "custom/email",
     "cffi/niri_window_buttons"
   ],
   "niri/workspaces": {
@@ -22,11 +23,17 @@
     "tooltip-format": "Obsidian",
     "on-click": "obsidian &"
   },
-  "custom/tauon": {
+  "custom/elisa": {
     "format": "🎵",
     "tooltip": true,
-    "tooltip-format": "Tauon",
-    "on-click": "tauon &"
+    "tooltip-format": "Elisa",
+    "on-click": "elisa &"
+  },
+  "custom/email": {
+    "format": "📧",
+    "tooltip": true,
+    "tooltip-format": "Thunderbird",
+    "on-click": "thunderbird &"
   },
   "custom/whatsapp": {
     "format": "💬",

@@ -61,6 +61,7 @@ in
     # Qt/Kde based.
     qdirstat
     qbittorrent
+    kdePackages.kdenlive
     kdePackages.elisa
     kdePackages.dolphin
     kdePackages.ark

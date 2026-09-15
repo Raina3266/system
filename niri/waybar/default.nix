@@ -34,7 +34,7 @@ let
   topBar =
     common
     // {
-      include = [ "${repoRoot}/niri/waybar/top.jsonc" ];
+      include = [ "${repoRoot}/themes/waybar/top.jsonc" ];
     }
     // modules;
 
@@ -59,10 +59,12 @@ let
 
   # ------------ BottomBar -------------
 
+  # No `output`: one config shown on every monitor. The taskbar sizes itself
+  # per monitor through max_taskbar_width_per_output.
   bottomBar =
     common
     // {
-      include = [ "${repoRoot}/niri/waybar/bottom.jsonc" ];
+      include = [ "${repoRoot}/themes/waybar/bottom.jsonc" ];
     }
     // taskbar;
 in
@@ -104,8 +106,8 @@ in
           Unit.Description = "Watch live Waybar layout files";
           Path = {
             PathChanged = [
-              "${repoRoot}/niri/waybar/top.jsonc"
-              "${repoRoot}/niri/waybar/bottom.jsonc"
+              "${repoRoot}/themes/waybar/top.jsonc"
+              "${repoRoot}/themes/waybar/bottom.jsonc"
             ];
             Unit = "waybar-live-layout.service";
           };
