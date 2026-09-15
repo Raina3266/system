@@ -114,25 +114,41 @@ window-rule {
     clip-to-geometry false
 }
 
-// Kdenlive and Shotcut open a Qt splash screen that ignores the configure
-// niri sends it and keeps its own size, leaving it stranded in the corner of
-// a half-screen tile. Float it at its own size instead. The splash carries no
-// title while every real window carries the app name, so the exclude leaves
-// the splash plus the occasional dialog, which wants floating anyway.
+// niri already floats dialogs that announce a parent or fixed size. Catch
+// parentless prompts with recognizable titles regardless of app ID.
+// A titleless window with no dialog hint still needs an application rule.
 window-rule {
-    match app-id=r#"^org\.kde\.kdenlive$"#
-    exclude title="Kdenlive"
+    match title=r#"(?i)^(?:splash screen|(?:confirm|confirmation|warning|error|question|permission|authentication|enable)(?: [^–-]*)?)(?: [–-] .*)?$"#
+
+    open-floating true
+}
+
+// These Qt splash screens keep their own image size instead of filling niri's
+// tile. Match their startup titles (including a titleless initial configure)
+// and both desktop-file and short XWayland app IDs; leave the editors tiled.
+window-rule {
+    match app-id=r#"(?i)(?:^|\.)kdenlive$"# title=r#"^(Splash Screen)?$"#
 
     open-floating true
     default-column-width {}
 }
 
 window-rule {
-    match app-id=r#"^org\.shotcut\.Shotcut$"#
-    exclude title="Shotcut"
+    match app-id=r#"(?i)(?:^|\.)shotcut$"# title=r#"^(Shotcut)?$"#
 
     open-floating true
     default-column-width {}
+}
+
+// FastFlix creates this confirmation as a parentless QDialog. Without a
+// transient-window hint niri tiles it at the full column size; give this one
+// a readable dialog size while keeping the encoder's main window tiled.
+window-rule {
+    match title=r#"^Enable Encoding History(?: [–-] FastFlix)?$"#
+
+    open-floating true
+    default-column-width { fixed 600; }
+    default-window-height { fixed 320; }
 }
 
 // WezTerm: empty default width to avoid initial configure bug

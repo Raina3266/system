@@ -3844,7 +3844,7 @@ index 4a0fbdf..3d6bb05 100644
 -            _controller: controller,
 +            controller,
 +            external_window: RefCell::new(None),
-@@ -91,0 +105,161 @@ impl DropdownInstance {
+@@ -91,0 +105,157 @@ impl DropdownInstance {
 +    /// Toggles a dropdown in a real layer-shell window.
 +    ///
 +    /// A request initiated by Waybar cannot safely create a GTK popover: the
@@ -3990,8 +3990,6 @@ index 4a0fbdf..3d6bb05 100644
 +    }
 +
 +    fn position_external_content(content: &gtk::Widget, _location: Location, _name: &str) {
-+        const WAYBAR_HEIGHT: i32 = 40;
-+
 +        // GtkOverlay otherwise lets a dropdown marked as expandable consume
 +        // the whole host allocation. Its own contents then start at the left
 +        // edge even though the widget is end-aligned.
@@ -3999,20 +3997,18 @@ index 4a0fbdf..3d6bb05 100644
 +        content.set_vexpand(false);
 +        content.set_halign(gtk::Align::End);
 +        content.set_valign(gtk::Align::Start);
-+        content.set_margin_top(0);
 +        content.set_margin_bottom(0);
 +        content.set_margin_start(0);
 +        content.set_margin_end(0);
-+        content.set_margin_top(WAYBAR_HEIGHT);
 +    }
 +
-@@ -274,0 +449,3 @@ impl Drop for DropdownInstance {
+@@ -274,0 +445,3 @@ impl Drop for DropdownInstance {
 +        if let Some(window) = self.external_window.get_mut().take() {
 +            window.destroy();
 +        }
-@@ -282,0 +460 @@ struct DropdownStyle {
+@@ -282,0 +456 @@ struct DropdownStyle {
 +    location: Location,
-@@ -380,0 +559,15 @@ impl DropdownRegistry {
+@@ -380,0 +555,15 @@ impl DropdownRegistry {
 +    /// Toggles a dropdown in a monitor-local layer-shell window.
 +    pub(crate) fn toggle_external_window(&self, name: &str, monitor: &gdk::Monitor) -> bool {
 +        let Some(dropdown) = self.get_or_create(name) else {
@@ -4028,7 +4024,7 @@ index 4a0fbdf..3d6bb05 100644
 +        dropdown.toggle_external_window(name, monitor, dropdown_style(self))
 +    }
 +
-@@ -475,0 +669 @@ fn dropdown_style(registry: &DropdownRegistry) -> DropdownStyle {
+@@ -475,0 +665 @@ fn dropdown_style(registry: &DropdownRegistry) -> DropdownStyle {
 +        location: bar.location.get(),
 diff --git a/crates/wayle-shell/src/shell/bar/methods.rs b/crates/wayle-shell/src/shell/bar/methods.rs
 index ccca8d3..f84fc7b 100644

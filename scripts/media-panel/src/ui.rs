@@ -27,9 +27,6 @@ const TICK: Duration = Duration::from_millis(500);
 /// How often the UI looks for a reading the worker has finished.
 const DRAIN: Duration = Duration::from_millis(80);
 
-/// Distance from the top of the screen: the height of Waybar, plus a gap.
-const TOP_MARGIN: i32 = 46;
-
 const PANEL_WIDTH: i32 = 486;
 /// Cards past this many are reached by scrolling. Up to it, the panel is only
 /// as tall as the cards it holds.
@@ -106,7 +103,6 @@ pub fn run(app: &gtk::Application, monitor: Option<String>, toggles: Receiver<St
     panel.set_width_request(PANEL_WIDTH);
     panel.set_halign(gtk::Align::Center);
     panel.set_valign(gtk::Align::Start);
-    panel.set_margin_top(TOP_MARGIN);
     panel.append(&header());
     panel.append(&content);
 

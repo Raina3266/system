@@ -11,6 +11,8 @@ window.media-window {
 }
 
 .media-panel {
+    /* The layer-shell host is positioned below Waybar by its exclusive zone. */
+    margin-top: 0;
     background: #210e15;
     border: 1px solid rgba(214, 86, 199, 0.30);
     border-radius: 13px;

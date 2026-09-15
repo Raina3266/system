@@ -12,6 +12,8 @@ window.audio-layer-window {
     .external-dropdown-panel,
     > .dropdown {
         min-width: 0;
+        // The layer-shell host already starts beneath Waybar's exclusive area.
+        margin-top: 0;
     }
 
     &.shadow .external-dropdown-panel,
