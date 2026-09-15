@@ -6,15 +6,19 @@
 }:
 
 let
+  # Which of FastFlix's four themes to run. "onyx", "dark" and "light" each
+  # paint a bundled stylesheet over Qt; "system" is the one that paints none,
+  # so it is what hands the window to Kvantum and the Daemon palette that
+  # ../themes/default.nix configures.
+  theme = "system";
+
   # Nixpkgs packages FastFlix exactly as upstream ships it: no desktop entry,
   # no icon outside a Windows .ico, and a bundled Breeze stylesheet painted
   # over whatever Qt style is configured.
   fastflix = pkgs.fastflix.overrideAttrs (old: {
     postPatch = (old.postPatch or "") + ''
-      # "system" is the one theme that applies no stylesheet of its own, which
-      # is what lets Kvantum and the Daemon palette from ../themes through.
       substituteInPlace fastflix/models/config.py \
-        --replace-fail 'theme: str = "onyx"' 'theme: str = "system"'
+        --replace-fail 'theme: str = "onyx"' 'theme: str = "${theme}"'
 
       # FastFlix picks its icon set and its hard-coded label colours from that
       # same name and only recognises its own two dark themes. Daemon is dark
@@ -86,7 +90,7 @@ in
     fastflixConfig="${config.xdg.dataHome}/FastFlix/fastflix.yaml"
 
     if [ -f "$fastflixConfig" ]; then
-      $DRY_RUN_CMD ${pkgs.yq-go}/bin/yq -i '.theme = "system"' "$fastflixConfig"
+      $DRY_RUN_CMD ${pkgs.yq-go}/bin/yq -i '.theme = "${theme}"' "$fastflixConfig"
     fi
   '';
 }
