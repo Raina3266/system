@@ -2,4 +2,4 @@ result
 target/
 **/target/
 .direnv/
-.envrc__pycache__/
+.envrc
