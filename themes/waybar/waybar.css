@@ -38,7 +38,6 @@ window#waybar.bottom {
 #custom-timer,
 #custom-files,
 #custom-dashboard,
-#custom-wayle-media,
 #tray {
     color: #7afcff;
     background-color: transparent;
@@ -65,10 +64,11 @@ window#waybar.bottom {
 
 /* ── Borderless modules (lyrics / workspaces) ── */
 
+#custom-wayle-media,
 #custom-lyrics {
     color: #7afcff;
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: 30px;
+    padding-right: 30px;
     border: none;
     background-color: transparent;
 }
@@ -140,7 +140,6 @@ window#waybar.bottom {
 #custom-files:hover,
 #custom-timer:hover,
 #custom-dashboard:hover,
-#custom-wayle-media:hover,
 #custom-obsidian:hover,
 #custom-elisa:hover,
 #custom-email:hover,
