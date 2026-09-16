@@ -17,11 +17,18 @@ let
   # The session-wide KDE platform theme opens an in-process file chooser that
   # renders but does not populate under PDF4QT. Keep the Kvantum application
   # style while sending only PDF4QT's file dialogs through the working portal.
-  pdf4qtWithPortal = pkgs.pdf4qt.overrideAttrs (old: {
-    preFixup = (old.preFixup or "") + ''
-      qtWrapperArgs+=(--set QT_QPA_PLATFORMTHEME xdgdesktopportal)
+  pdf4qtWithPortal = pkgs.symlinkJoin {
+    name = "pdf4qt-${pkgs.pdf4qt.version}-portal";
+    paths = [ pkgs.pdf4qt ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      for program in "$out/bin/"*; do
+        if [ -x "$program" ]; then
+          wrapProgram "$program" --set QT_QPA_PLATFORMTHEME xdgdesktopportal
+        fi
+      done
     '';
-  });
+  };
 in
 {
   imports = [
