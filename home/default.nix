@@ -13,6 +13,15 @@ let
     rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
+
+  # The session-wide KDE platform theme opens an in-process file chooser that
+  # renders but does not populate under PDF4QT. Keep the Kvantum application
+  # style while sending only PDF4QT's file dialogs through the working portal.
+  pdf4qtWithPortal = pkgs.pdf4qt.overrideAttrs (old: {
+    preFixup = (old.preFixup or "") + ''
+      qtWrapperArgs+=(--set QT_QPA_PLATFORMTHEME xdgdesktopportal)
+    '';
+  });
 in
 {
   imports = [
@@ -54,7 +63,7 @@ in
 
     # productivity
     digikam
-    pdf4qt
+    pdf4qtWithPortal
     obsidian
     krokiet
     exercism
