@@ -3,11 +3,22 @@
   pkgs,
   lib,
   repoPackages,
+  fastflixPackage,
   ...
 }:
 let
   kwriteconfig = "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6";
   kdeConfigHome = config.xdg.configHome;
+
+  fastflixIcon =
+    pkgs.runCommandLocal "fastflix-icon"
+      {
+        nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pillow ])) ];
+      }
+      ''
+        mkdir -p "$out"
+        python3 -c "from PIL import Image; Image.open('${pkgs.fastflix.src}/fastflix/data/icon.ico').convert('RGBA').resize((256, 256)).save('$out/fastflix.png')"
+      '';
 
   # Listed once and used twice: as the Zed desktop entry's MimeType= line and
   # as the set of types that entry is the default handler for.
@@ -174,6 +185,22 @@ in
   # ──────────────────────────────────────────────────────────────────────
   # Desktop entries
   # ──────────────────────────────────────────────────────────────────────
+
+  xdg.dataFile."icons/hicolor/256x256/apps/fastflix.png".source = "${fastflixIcon}/fastflix.png";
+
+  xdg.desktopEntries.fastflix = {
+    name = "FastFlix";
+    genericName = "Video Encoder";
+    comment = "Simple and friendly GUI for encoding videos";
+    exec = lib.getExe fastflixPackage;
+    icon = "fastflix";
+    terminal = false;
+    categories = [
+      "AudioVideo"
+      "Video"
+      "AudioVideoEditing"
+    ];
+  };
 
   xdg.desktopEntries.btop = {
     name = "btop";
