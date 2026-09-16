@@ -4,6 +4,8 @@
   ...
 }:
 let
+  portalizeQtPackage = import ./qt-portal-wrapper.nix { inherit pkgs; };
+
   krokiet = pkgs.runCommand "krokiet-${pkgs.czkawka-full.version}" { } ''
     cp -rL ${pkgs.czkawka-full} $out
     chmod -R +w $out
@@ -14,21 +16,7 @@ let
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
 
-  # The session-wide KDE platform theme opens an in-process file chooser that
-  # renders but does not populate under PDF4QT. Keep the Kvantum application
-  # style while sending only PDF4QT's file dialogs through the working portal.
-  pdf4qtWithPortal = pkgs.symlinkJoin {
-    name = "pdf4qt-${pkgs.pdf4qt.version}-portal";
-    paths = [ pkgs.pdf4qt ];
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postBuild = ''
-      for program in "$out/bin/"*; do
-        if [ -f "$program" ] && [ -x "$program" ]; then
-          wrapProgram "$program" --set QT_QPA_PLATFORMTHEME xdgdesktopportal
-        fi
-      done
-    '';
-  };
+  pdf4qtWithPortal = portalizeQtPackage pkgs.pdf4qt;
 in
 {
   imports = [
