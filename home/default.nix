@@ -1,6 +1,4 @@
 {
-  config,
-  lib,
   pkgs,
   inputs,
   ...
@@ -22,11 +20,11 @@ let
       inherit (package) meta;
     };
 
-  fastflixTheme = "system";
+  fastflixDefaultTheme = "system";
   fastflixPackage = portalizeQtPackage (pkgs.fastflix.overrideAttrs (old: {
     postPatch = (old.postPatch or "") + ''
       substituteInPlace fastflix/models/config.py \
-        --replace-fail 'theme: str = "onyx"' 'theme: str = "${fastflixTheme}"'
+        --replace-fail 'theme: str = "onyx"' 'theme: str = "${fastflixDefaultTheme}"'
 
       # Upstream passes argv lists through a shell, losing FFmpeg's arguments.
       for previewWindow in fastflix/widgets/windows/{crop_window,large_preview}.py; do
@@ -142,12 +140,4 @@ in
 
     inputs.sonora.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
-
-  home.activation.fastflixTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    set -eu
-    fastflixConfig="${config.xdg.dataHome}/FastFlix/fastflix.yaml"
-    if [ -f "$fastflixConfig" ]; then
-      $DRY_RUN_CMD ${pkgs.yq-go}/bin/yq -i '.theme = "${fastflixTheme}"' "$fastflixConfig"
-    fi
-  '';
 }
