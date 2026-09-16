@@ -23,7 +23,7 @@ let
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       for program in "$out/bin/"*; do
-        if [ -x "$program" ]; then
+        if [ -f "$program" ] && [ -x "$program" ]; then
           wrapProgram "$program" --set QT_QPA_PLATFORMTHEME xdgdesktopportal
         fi
       done
