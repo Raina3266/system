@@ -31,6 +31,15 @@ let
       substituteInPlace fastflix/models/config.py \
         --replace-fail 'theme: str = "onyx"' 'theme: str = "${theme}"'
 
+      # These commands are already argv lists. On POSIX, combining a list with
+      # shell=True runs only argv[0] through the shell, so FFmpeg receives no
+      # options and prints its usage instead of producing a preview image.
+      for previewWindow in fastflix/widgets/windows/{crop_window,large_preview}.py; do
+        substituteInPlace "$previewWindow" \
+          --replace-fail 'run(thumb_command, shell=True, stderr=PIPE, stdout=PIPE)' \
+            'run(thumb_command, stderr=PIPE, stdout=PIPE)'
+      done
+
       # FastFlix picks its icon set and its hard-coded label colours from that
       # same name and only recognises its own two dark themes. Daemon is dark
       # as well, so count "system" as dark instead of drawing black on it.
