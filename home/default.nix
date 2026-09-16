@@ -54,6 +54,7 @@ in
 
     # productivity
     digikam
+    pdf4qt
     obsidian
     krokiet
     exercism
