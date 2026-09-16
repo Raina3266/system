@@ -16,6 +16,17 @@ let
   # no icon outside a Windows .ico, and a bundled Breeze stylesheet painted
   # over whatever Qt style is configured.
   fastflix = pkgs.fastflix.overrideAttrs (old: {
+    # The session-wide KDE platform theme opens its file chooser in-process.
+    # With FastFlix's PySide6 wrapper and the mixed Qt 5/6 session plugin path,
+    # that chooser renders but never populates its file view.  Use the portal
+    # implementation for this app only; the KDE portal still supplies the
+    # native chooser, while Kvantum continues to style the FastFlix window.
+    makeWrapperArgs = (old.makeWrapperArgs or [ ]) ++ [
+      "--set"
+      "QT_QPA_PLATFORMTHEME"
+      "xdgdesktopportal"
+    ];
+
     postPatch = (old.postPatch or "") + ''
       substituteInPlace fastflix/models/config.py \
         --replace-fail 'theme: str = "onyx"' 'theme: str = "${theme}"'
