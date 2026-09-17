@@ -3,66 +3,6 @@
   inputs,
   ...
 }:
-let
-  portalizeQtPackage =
-    package:
-    pkgs.symlinkJoin {
-      name = "${package.name}-portal";
-      paths = [ package ];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        for program in "$out/bin/"*; do
-          if [ -f "$program" ] && [ -x "$program" ]; then
-            wrapProgram "$program" --set QT_QPA_PLATFORMTHEME xdgdesktopportal
-          fi
-        done
-      '';
-      inherit (package) meta;
-    };
-
-  fastflixDefaultTheme = "system";
-  fastflixPackage = portalizeQtPackage (pkgs.fastflix.overrideAttrs (old: {
-    postPatch = (old.postPatch or "") + ''
-      substituteInPlace fastflix/models/config.py \
-        --replace-fail 'theme: str = "onyx"' 'theme: str = "${fastflixDefaultTheme}"'
-
-      # Upstream passes argv lists through a shell, losing FFmpeg's arguments.
-      for previewWindow in fastflix/widgets/windows/{crop_window,large_preview}.py; do
-        substituteInPlace "$previewWindow" \
-          --replace-fail 'run(thumb_command, shell=True, stderr=PIPE, stdout=PIPE)' \
-            'run(thumb_command, stderr=PIPE, stdout=PIPE)'
-      done
-
-      # The stylesheet-free system theme still needs dark icons and text.
-      substituteInPlace fastflix/resources.py \
-        --replace-fail 'if theme.lower() in ("dark", "onyx"):' \
-          'if theme.lower() in ("dark", "onyx", "system"):'
-      substituteInPlace fastflix/widgets/main.py \
-        --replace-fail 'self.app.fastflix.config.theme in ("dark", "onyx") else "color: black"' \
-          'self.app.fastflix.config.theme in ("dark", "onyx", "system") else "color: black"'
-
-      substituteInPlace fastflix/widgets/status_bar.py \
-        --replace-fail '"#StatusBarWidget {  background-color: #f0f0f0;  border-top: 1px solid #cccccc;}"' '""' \
-        --replace-fail '"color: #333333; background: transparent;"' '""'
-
-      substituteInPlace fastflix/application.py \
-        --replace-fail 'main_app.setApplicationDisplayName("FastFlix")' \
-          'QtGui.QGuiApplication.setDesktopFileName("fastflix"); main_app.setApplicationDisplayName("FastFlix")'
-    '';
-  }));
-
-  krokiet = pkgs.runCommand "krokiet-${pkgs.czkawka-full.version}" { } ''
-    cp -rL ${pkgs.czkawka-full} $out
-    chmod -R +w $out
-    rm -f $out/bin/czkawka_gui
-    rm -f $out/share/applications/com.github.qarmin.czkawka.desktop
-    rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka.svg
-    rm -f $out/share/icons/hicolor/scalable/apps/com.github.qarmin.czkawka-symbolic.svg
-    rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
-  '';
-
-  pdf4qtWithPortal = portalizeQtPackage pkgs.pdf4qt;
-in
 {
   imports = [
     ../niri
@@ -72,8 +12,6 @@ in
     ./desktop.nix
     ./office.nix
   ];
-
-  _module.args.fastflixPackage = fastflixPackage;
 
   home = {
     username = "raina";
@@ -104,9 +42,7 @@ in
 
     # productivity
     digikam
-    pdf4qtWithPortal
     obsidian
-    krokiet
     exercism
     clash-verge-rev
 
@@ -136,8 +72,6 @@ in
     gimp
     yt-dlp
     waylyrics
-    fastflixPackage
-
     inputs.sonora.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 }
