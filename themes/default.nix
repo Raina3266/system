@@ -243,9 +243,8 @@ in
 
   # Daemon supplies VS Code's complete application/workbench palette; its
   # syntax rules are replaced with Dracula's during the build above. Only the
-  # resulting combined theme is installed. ../home/vscode.nix selects it.
+  # resulting combined theme is installed. ../home/custom.nix selects it.
   programs.vscode.profiles.default.extensions = [ daemonVscodeTheme ];
-
 
   # Kvantum is the application style used by Daemon. The theme directory and
   # its selection file are both managed so System Settings cannot leave an old

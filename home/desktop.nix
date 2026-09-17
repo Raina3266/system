@@ -82,6 +82,16 @@ let
   ];
 
   handledBy = desktopEntry: types: lib.genAttrs types (_type: [ desktopEntry ]);
+
+  fastflixIcon =
+    pkgs.runCommandLocal "fastflix-icon"
+      {
+        nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pillow ])) ];
+      }
+      ''
+        mkdir -p "$out"
+        python3 -c "from PIL import Image; Image.open('${pkgs.fastflix.src}/fastflix/data/icon.ico').convert('RGBA').resize((256, 256)).save('$out/fastflix.png')"
+      '';
 in
 {
   xdg.configFile."menus/applications.menu".source =
@@ -120,7 +130,7 @@ in
     // handledBy "vlc.desktop" mediaMimeTypes;
   };
 
-  home.activation.setGhosttyAsKdeTerminal = config.lib.dag.entryAfter [ "linkGeneration" ] ''
+  home.activation.setGhosttyAsKdeTerminal = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
       --group General --key TerminalApplication ghostty
     $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
@@ -166,7 +176,24 @@ in
     terminal = false;
   };
 
-  # Rofi's wrapper prepends its package to XDG_DATA_DIRS. 
+  # FastFlix's package ships no desktop file or icon of its own
+  xdg.dataFile."icons/hicolor/256x256/apps/fastflix.png".source = "${fastflixIcon}/fastflix.png";
+
+  xdg.desktopEntries.fastflix = {
+    name = "FastFlix";
+    genericName = "Video Encoder";
+    comment = "Simple and friendly GUI for encoding videos";
+    exec = "fastflix";
+    icon = "fastflix";
+    terminal = false;
+    categories = [
+      "AudioVideo"
+      "Video"
+      "AudioVideoEditing"
+    ];
+  };
+
+  # Rofi's wrapper prepends its package to XDG_DATA_DIRS.
   xdg.dataFile."applications/rofi.desktop".text = ''
     [Desktop Entry]
     Type=Application

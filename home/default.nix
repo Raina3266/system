@@ -22,7 +22,6 @@
   programs = {
     home-manager.enable = true;
     zed-editor.enable = true;
-    vscode.enable = true;
     google-chrome.enable = true;
     firefox.enable = true;
   };
