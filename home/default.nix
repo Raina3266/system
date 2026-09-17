@@ -10,7 +10,7 @@
     ./shell
     ./cloud.nix
     ./desktop.nix
-    ./office.nix
+    ./custom.nix
   ];
 
   home = {
