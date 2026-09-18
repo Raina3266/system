@@ -1,8 +1,7 @@
 diff --git a/src/web_bridge/mpris.rs b/src/web_bridge/mpris.rs
-index c58ebfa..74e8562 100644
 --- a/src/web_bridge/mpris.rs
 +++ b/src/web_bridge/mpris.rs
-@@ -461,17 +461,26 @@ fn stabilize_playback(
+@@ -461,24 +461,33 @@ fn stabilize_playback(
  
      let prev_dur_ms = (prev.meta.length_us / 1000).max(0) as u64;
      let prev_pos_ms = (prev.last_position_us / 1000).max(0) as u64;
@@ -13,7 +12,14 @@ index c58ebfa..74e8562 100644
          playback.duration_ms = prev_dur_ms;
      } else if prev_dur_ms > 0 && playback.duration_ms > 0 {
          let diff = prev_dur_ms.abs_diff(playback.duration_ms);
-         if diff > 10_000 && (diff as f64 / prev_dur_ms as f64) > 0.15 {
+         let replacing_ytm_startup_placeholder = track_id.starts_with("/mprisence/track/ytm_")
+             && prev_dur_ms == 100_000
+             && prev_pos_ms == 0
+             && playback.duration_ms != 100_000;
+         if !replacing_ytm_startup_placeholder
+             && diff > 10_000
+             && (diff as f64 / prev_dur_ms as f64) > 0.15
+         {
 +            timing_glitch = true;
              playback.duration_ms = prev_dur_ms;
          }
@@ -30,9 +36,10 @@ index c58ebfa..74e8562 100644
          playback.position_ms = prev_pos_ms;
      }
  
-@@ -864,4 +873,29 @@ mod tests {
-         assert_eq!(playback.duration_ms, 598_000);
-         assert_eq!(playback.position_ms, 156_000);
+@@ -895,5 +904,30 @@ mod tests {
+ 
+         assert_eq!(playback.duration_ms, 214_000);
+         assert_eq!(playback.position_ms, 0);
      }
 +
 +    #[test]
