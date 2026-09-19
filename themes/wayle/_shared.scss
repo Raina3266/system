@@ -1,5 +1,26 @@
-// Cross-panel: the layer-shell host every external Waybar-opened dropdown
-// uses. External dropdowns use a transparent monitor-sized host so clicking
+// Cross-panel: global text sizing, plus the layer-shell host every external
+// Waybar-opened dropdown uses.
+
+// Upstream defines each text token once, in wayle-styling's
+// scss/tokens/_index.scss, as a fixed rem base times var(--global-scale)
+// (styling.scale from niri/wayle/default.nix, 0.9 here). Layering the same
+// tokens back over the built-in stylesheet with one extra multiplier grows
+// only the text: spacing, icons and rounding keep the config scale. Wayle's
+// own bar text is separate (--bar-text-*, unused here — Waybar is the bar).
+$text-bump: 1.15;
+
+:root {
+    --text-xs: calc(0.75rem * var(--global-scale) * #{$text-bump});
+    --text-sm: calc(0.8125rem * var(--global-scale) * #{$text-bump});
+    --text-base: calc(0.875rem * var(--global-scale) * #{$text-bump});
+    --text-md: calc(0.9375rem * var(--global-scale) * #{$text-bump});
+    --text-lg: calc(1.05rem * var(--global-scale) * #{$text-bump});
+    --text-xl: calc(1.375rem * var(--global-scale) * #{$text-bump});
+    --text-2xl: calc(1.75rem * var(--global-scale) * #{$text-bump});
+    --text-3xl: calc(2.25rem * var(--global-scale) * #{$text-bump});
+}
+
+// External dropdowns use a transparent monitor-sized host so clicking
 // outside the visible card can close it. Keep only the card itself opaque
 // and shadowed.
 window.external-dropdown-window,

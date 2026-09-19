@@ -4,7 +4,7 @@
 use std::env;
 use std::io;
 
-use audio_control::{AppResult, waybar, wayle};
+use audio_control::{AppResult, battery_provider, waybar, wayle};
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +41,8 @@ async fn run() -> AppResult<()> {
                 .ok_or_else(|| io::Error::other("wayle-set-default key is missing"))?;
             wayle::set_default(&kind, &key)
         }
+        // Daemon mode for bt-battery-provider.service; never returns.
+        Some("battery-provider") => battery_provider::run().await,
         None | Some("help" | "--help" | "-h") => {
             print!(
                 "audio-control\n\n\
@@ -48,7 +50,8 @@ async fn run() -> AppResult<()> {
                  audio-control status\n  \
                  audio-control bluetooth-power [on|off|toggle]\n  \
                  audio-control wayle-list <output|input>\n  \
-                 audio-control wayle-set-default <output|input> <key>\n"
+                 audio-control wayle-set-default <output|input> <key>\n  \
+                 audio-control battery-provider (bt-battery-provider.service)\n"
             );
             Ok(())
         }

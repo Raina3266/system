@@ -282,8 +282,8 @@ Wi-Fi, media, audio, battery details, settings, session power actions, and syste
 telemetry are omitted because they are either separate Waybar panels or managed
 declaratively. Timed calendar events put their `HH:MM-HH:MM` range above the
 title. The notification viewport fits roughly three rows before it scrolls.
-Long summaries and bodies can expand and collapse instead of being permanently
-ellipsized.
+Titles always show in full; long bodies can expand and collapse instead of
+being permanently ellipsized.
 
 ### Network panel
 
@@ -360,7 +360,7 @@ after it and can restyle the panel.
 
 | Source delta | Purpose |
 | --- | --- |
-| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions, audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
+| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
 | `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
 ### Verifying changes

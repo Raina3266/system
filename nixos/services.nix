@@ -264,6 +264,28 @@ in
         NoNewPrivileges = true;
       };
     };
+
+    # Logitech HID++ devices (the MX Master 3 among them) report 0% over the
+    # standard GATT Battery Service while the real level only travels over
+    # HID++, which the kernel already decodes into
+    # /sys/class/power_supply/hidpp_battery_*. This forwards those levels
+    # into BlueZ's Battery1 via the provider API — which only root may
+    # register, hence a system service rather than a session one.
+    bt-battery-provider = {
+      description = "Forward kernel HID++ battery levels into BlueZ";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "bluetooth.service" ];
+      wants = [ "bluetooth.service" ];
+      serviceConfig = {
+        ExecStart = "${repoPackages.audioControl}/bin/audio-control battery-provider";
+        Restart = "on-failure";
+        RestartSec = "5s";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
+    };
   };
 
   # The real camera has no zoom, so expose a centre-cropped v4l2loopback device

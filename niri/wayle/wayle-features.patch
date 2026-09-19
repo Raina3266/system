@@ -3506,7 +3506,7 @@ index 633282d..bef004e 100644
 +                            gtk::Picture {
 +                                set_can_shrink: true,
 +                                set_content_fit: gtk::ContentFit::Contain,
-+                                set_size_request: (400, 400),
++                                set_size_request: (300, 300),
 +                                #[watch]
 +                                set_paintable: model.qr_paintable.as_ref(),
 +                            },
@@ -3679,7 +3679,7 @@ index b8c2483..50e73f6 100644
 @@ -27,2 +28,2 @@ use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
 -const BASE_WIDTH: f32 = 382.0;
 -const BASE_HEIGHT: f32 = 512.0;
-+const BASE_WIDTH: f32 = 520.0;
++const BASE_WIDTH: f32 = 420.0;
 +const BASE_HEIGHT: f32 = 700.0;
 @@ -59,0 +61 @@ impl Component for NetworkDropdown {
 +            #[name = "network_container"]
@@ -3743,7 +3743,7 @@ index 30897ca..736b501 100644
 +            .get()
 +            .is_some_and(|body| !body.trim().is_empty());
 +
-+        has_body || self.notification.summary.get().chars().count() > super::LONG_SUMMARY_CHARS
++        has_body
 +    }
 +
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
@@ -3751,16 +3751,16 @@ index 0f41547..2746a60 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
 @@ -14,0 +15,11 @@ use crate::shell::notification_popup::helpers::{
-+/// Lines the title and the body each keep while the item is collapsed.
-+const COLLAPSED_LINES: i32 = 2;
-+
-+/// Summary length past which the title is assumed to need more than
-+/// [`COLLAPSED_LINES`] lines at the panel's width.
++/// Lines the body keeps while the item is collapsed.
 +///
-+/// A GTK label only reports that it is ellipsized after it has been laid out,
-+/// which is too late to decide whether to offer the chevron, so the chevron is
-+/// offered on a title this long even when there is no body to reveal.
-+const LONG_SUMMARY_CHARS: usize = 60;
++/// The title is never clamped and always shows in full; only the body folds
++/// behind the expand chevron, which is offered on any notification with a
++/// body. A GTK label only reports that it is ellipsized after it has been
++/// laid out, too late to decide whether the body really wraps past this
++/// many lines, so short bodies get the button even though expanding them
++/// reveals nothing new. Long titles no longer need a heuristic: they are
++/// simply never cut off.
++const COLLAPSED_LINES: i32 = 2;
 +
 @@ -19,0 +31 @@ pub(crate) struct NotificationItem {
 +    expanded: bool,
@@ -3771,8 +3771,8 @@ index 0f41547..2746a60 100644
 +                            set_wrap: true,
 +                            set_wrap_mode: gtk::pango::WrapMode::WordChar,
 @@ -66,0 +82,2 @@ impl FactoryComponent for NotificationItem {
-+                            #[watch]
-+                            set_lines: if self.expanded { -1 } else { COLLAPSED_LINES },
++                            // The title is never clamped; only the body is.
++                            set_lines: -1,
 @@ -75,0 +93,14 @@ impl FactoryComponent for NotificationItem {
 +                        #[name = "expand_btn"]
 +                        gtk::Button {

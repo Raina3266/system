@@ -34,6 +34,14 @@ let
   # inside postPatch. The menu entry and icon live in desktop.nix.
   fastflix = portalizeQtPackage (
     pkgs.fastflix.overrideAttrs (old: {
+      # The crop window renders its previews as TIFFs, but Qt's TIFF image
+      # plugin ships in qtimageformats, which the nixpkgs expression does
+      # not depend on. Without it every preview loads as a null pixmap and
+      # the crop UI silently stops working (JPEG thumbnails are unaffected,
+      # as their plugin lives in qtbase). wrapQtAppsHook picks this up and
+      # adds the plugin directory to QT_PLUGIN_PATH.
+      buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtimageformats ];
+
       postPatch = (old.postPatch or "") + ''
         # Default to the system theme instead of upstream's "onyx".
         substituteInPlace fastflix/models/config.py \

@@ -1,13 +1,25 @@
 // Network panel: connection details header, QR sharing card, and the raw
 // connection info dump.
 
+// The QR view spans the panel, so the panel's own horizontal inset is pinned:
+// 9 px of content padding plus the 1 px panel border is exactly the 10 px the
+// QR subtracts on each side, which keeps the QR page from ever widening the
+// panel. Vertical padding keeps the upstream scale-aware default.
+window.network-layer-window .dropdown-content {
+    padding: calc(0.75rem * var(--global-scale)) 9px;
+}
+
+// The card's own padding is dropped instead: the QR needs the room, and the
+// header/info text below keep their alignment with the connection rows
+// through their own padding.
 .network-details-card {
     margin-top: var(--space-sm);
-    padding: var(--space-md);
+    padding: 20;
 }
 
 .network-details-header {
     margin-bottom: var(--space-md);
+    padding: 50 var(--space-sm);
 }
 
 .network-details-title {
@@ -42,9 +54,14 @@
 }
 
 .network-qr-code {
-    padding: var(--space-sm);
+    padding: 20;
     border-radius: var(--rounding-element);
     background: white;
+
+    > picture {
+        min-width: calc(400px * var(--global-scale));
+        min-height: calc(400px * var(--global-scale));
+    }
 }
 
 .network-info-scroll {

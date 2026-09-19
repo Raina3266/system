@@ -8,6 +8,7 @@
 use std::error::Error;
 
 pub mod audio;
+pub mod battery_provider;
 pub mod bluetooth;
 pub mod model;
 pub mod waybar;

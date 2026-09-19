@@ -19,6 +19,10 @@ path = "src/bin/audio-control.rs"
 bluer = { version = "=0.17.4", default-features = false, features = [
   "bluetoothd",
 ] }
+# System-bus export of HID++ battery levels through BlueZ's provider API
+# (bt-battery-provider.service); same pin as control-centre and media-panel
+# so the shared lock stays single-sourced.
+zbus = "=5.18.0"
 # PulseAudio (served by pipewire-pulse): profile-aware physical device discovery,
 # default selection, and the stable helper interface Wayle calls.
 pulsectl-rs = "=0.3.2"

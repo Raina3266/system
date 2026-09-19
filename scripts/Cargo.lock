@@ -160,6 +160,7 @@ dependencies = [
  "libpulse-binding",
  "pulsectl-rs",
  "tokio",
+ "zbus",
 ]
 
 [[package]]

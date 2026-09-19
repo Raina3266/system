@@ -158,6 +158,8 @@ in
 
     # Hardware (Intel graphics / video acceleration)
     hardware.intel-gpu-tools.enable = true;
+    hardware.bluetooth.enable = true;
+
     hardware.graphics.extraPackages = with pkgs; [
       intel-media-driver
       libvdpau-va-gl

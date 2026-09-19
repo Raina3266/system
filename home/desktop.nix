@@ -138,19 +138,11 @@ in
   '';
 
   systemd.user.services = {
-    bt-agent = {
-      Unit = {
-        Description = "Persistent Bluetooth pairing agent";
-        PartOf = [ "graphical-session.target" ];
-        After = [ "graphical-session.target" ];
-      };
-      Service = {
-        ExecStart = "${pkgs.bluez-tools}/bin/bt-agent --capability=DisplayYesNo";
-        Restart = "on-failure";
-      };
-      Install.WantedBy = [ "graphical-session.target" ];
-    };
-
+    # No standalone pairing agent here: Wayle registers its own BlueZ agent
+    # (/com/wayle/BluetoothAgent) and shows pairing confirmations in its UI,
+    # and GNOME Shell does the same inside GNOME sessions. A bt-agent service
+    # used to steal the default-agent role and then hang on stdin prompts it
+    # could never answer, which is what broke all pairing here.
     kde-baloo = {
       Unit = {
         Description = "Baloo File Indexer";
