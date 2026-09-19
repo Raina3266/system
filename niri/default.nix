@@ -46,9 +46,9 @@ let
       # screens. Derive the factor per screen instead: Wayland clients get
       # theirs from niri regardless, and this makes xcb clients (birdtray,
       # the Qt5-xcb apps bridged by snixembed) pick theirs up from RandR.
-      # Per-app exceptions still belong in custom.nix's wrappers —
-      # onlyofficeScaled unsets this very variable because OnlyOffice
-      # double-scales when it sees one.
+      # An app that misbehaves under an auto-detected factor is a
+      # per-package job: a wrapper in custom.nix can unset this variable
+      # for that binary alone.
       QT_AUTO_SCREEN_SCALE_FACTOR = "1";
     };
 in

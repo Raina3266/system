@@ -192,7 +192,6 @@ in
     # Fonts
     fonts = {
       enableDefaultPackages = true;
-      fontDir.enable = true; # Shared font tree used by the OnlyOffice activation.
       packages = with pkgs; [
         newcomputermodern
         font-awesome

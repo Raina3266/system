@@ -43,6 +43,7 @@
     digikam
     obsidian
     exercism
+    onlyoffice-desktopeditors
     clash-verge-rev
 
     # Qt/Kde based.
