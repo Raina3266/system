@@ -39,16 +39,6 @@ let
       QT_STYLE_OVERRIDE = "kvantum";
       QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
       QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
-
-      # Nothing in this session hands Qt a scale factor the way a full DE
-      # would, and the outputs are mixed-DPI (eDP-1 and DP-8 at 1x, DP-7 at
-      # 1.25x), so one blunt QT_SCALE_FACTOR would misfit two of the three
-      # screens. Derive the factor per screen instead: Wayland clients get
-      # theirs from niri regardless, and this makes xcb clients (birdtray,
-      # the Qt5-xcb apps bridged by snixembed) pick theirs up from RandR.
-      # An app that misbehaves under an auto-detected factor is a
-      # per-package job: a wrapper in custom.nix can unset this variable
-      # for that binary alone.
       QT_AUTO_SCREEN_SCALE_FACTOR = "1";
     };
 in

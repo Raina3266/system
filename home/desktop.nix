@@ -369,15 +369,4 @@ in
       "Utility"
     ];
   };
-
-  xdg.desktopEntries."com.ulduzsoft.Birdtray" = {
-    name = "Birdtray";
-    noDisplay = true;
-    exec = "birdtray";
-    icon = "com.ulduzsoft.Birdtray";
-    terminal = false;
-    categories = [
-      "Email"
-    ];
-  };
 }

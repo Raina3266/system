@@ -1,10 +1,7 @@
 # Applications too bespoke for a plain home.packages line: patched or
-# wrapped builds (FastFlix, Krokiet, Birdtray, PDF4Qt, Thunderbird),
-# VS Code and its managed settings, and the OCR screenshot binding.
-# Menu entries live in desktop.nix.
+# wrapped builds, and the OCR screenshot binding. Menu entries live in
+# desktop.nix.
 {
-  config,
-  lib,
   pkgs,
   repoPackages,
   ...
@@ -87,57 +84,25 @@ let
     rm -f $out/share/metainfo/com.github.qarmin.czkawka.metainfo.xml
   '';
 
-  birdtrayXcb = pkgs.symlinkJoin {
-    name = "birdtray-xcb";
-    paths = [ pkgs.birdtray ];
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postBuild = ''
-      wrapProgram $out/bin/birdtray --set QT_QPA_PLATFORM xcb
-    '';
-  };
+  # PDF4Qt builds its whole suite in one derivation; keep only Editor and
+  # PageMaster by stripping the other apps' binaries, desktop entries,
+  # icons and metainfo. PdfTool, the suite's CLI, stays.
+  pdf4qt = pkgs.runCommand "pdf4qt-${pkgs.pdf4qt.version}" { } ''
+    cp -rL ${pkgs.pdf4qt} $out
+    chmod -R +w $out
+    rm -f $out/bin/Pdf4Qt{Diff,LaunchPad,Viewer}
+    rm -f $out/share/applications/io.github.JakubMelka.Pdf4qt{,.Pdf4QtDiff,.Pdf4QtViewer}.desktop
+    rm -f $out/share/icons/hicolor/*/apps/io.github.JakubMelka.Pdf4qt{,.Pdf4QtDiff,.Pdf4QtViewer}.{png,svg}
+    rm -f $out/share/metainfo/io.github.JakubMelka.Pdf4qt.appdata.xml
+  '';
 
-  thunderbirdXwayland = pkgs.symlinkJoin {
-    name = "thunderbird-xwayland-${pkgs.thunderbird.version}";
-    paths = [ pkgs.thunderbird ];
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    inherit (pkgs.thunderbird) version meta;
-    postBuild = ''
-      wrapProgram $out/bin/thunderbird --set MOZ_ENABLE_WAYLAND 0
-    '';
-  };
-
-  # Home Manager symlinks userSettings into the store, leaving settings.json
-  # read-only so VS Code's settings UI cannot write. Merging into a real file
-  # during activation keeps it writable: the keys below still win on every
-  # switch, and anything VS Code writes alongside them survives.
-  vscodeUserSettings = {
-    "workbench.colorTheme" = "Daemon-2.0";
-    "chat.disableAIFeatures" = true;
-    "chat.commandCenter.enabled" = false;
-    "editor.inlineSuggest.enabled" = false;
-
-    # A scrollbar's thickness is a setting, not a theme colour: the defaults
-    # are 14 and 12 pixels, sized for a slider the eye has to hunt for. This
-    # one is solid Daemon yellow, so a third of that is plenty to grab.
-    "editor.scrollbar.verticalScrollbarSize" = 5;
-    "editor.scrollbar.horizontalScrollbarSize" = 5;
-  };
-
-  vscodeUserSettingsFile =
-    (pkgs.formats.json { }).generate "vscode-user-settings.json"
-      vscodeUserSettings;
-
-  # The same location Home Manager's VS Code module uses for the default
-  # profile of programs.vscode.package (pkgs.vscode).
-  vscodeUserSettingsPath = "${config.xdg.configHome}/Code/User/settings.json";
 in
 {
   # ── Packages ──────────────────────────────────────────────────────────
   home.packages = [
-    birdtrayXcb
     fastflix
     krokiet
-    (portalizeQtPackage pkgs.pdf4qt)
+    (portalizeQtPackage pdf4qt)
     repoPackages.ocrScreenshot
   ];
 
@@ -155,62 +120,12 @@ in
     };
   };
 
-  # ── VS Code ─────────────────────────────────────────────────────
-  programs.vscode.enable = true;
-
-  # Runs after linkGeneration so Home Manager has already cleaned up the
-  # symlink an earlier generation left at this path.
-  home.activation.vscodeUserSettings = lib.hm.dag.entryAfter [ "writeBoundary" "linkGeneration" ] ''
-    set -eu
-
-    settings="${vscodeUserSettingsPath}"
-    managed="${vscodeUserSettingsFile}"
-
-    # Staged in the target's directory so each update lands as a rename.
-    # settings.json is then never absent or half written: a running VS Code
-    # that catches it missing loads an empty model and writes it back,
-    # dropping everything the file held.
-    staging="$(dirname "$settings")/.settings.json.hm-new"
-
-    mkdir -p "$(dirname "$settings")"
-
-    if [ -L "$settings" ] || [ ! -s "$settings" ]; then
-      # Either the read-only symlink from an earlier generation or no
-      # settings worth keeping, so the declared ones simply replace it.
-      ${pkgs.coreutils}/bin/install -m 0644 "$managed" "$staging"
-      mv -f "$staging" "$settings"
-    elif ! ${pkgs.jq}/bin/jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
-      # VS Code accepts comments in settings.json and jq does not, so a
-      # file jq cannot read is not necessarily broken. Rewriting it would
-      # throw away real settings, so say something and leave it alone.
-      echo "VS Code: $settings is not a JSON object; leaving it untouched"
-    elif ${pkgs.jq}/bin/jq -e -s '.[0] * .[1] == .[0]' \
-      "$settings" "$managed" >/dev/null; then
-      # Every declared key already holds its declared value. Writing now
-      # would only reformat what VS Code wrote, so leave the file alone.
-      :
-    else
-      # jq's * merges recursively with the right-hand side winning, so the
-      # settings declared above are restored while everything VS Code
-      # added on its own is carried over.
-      ${pkgs.jq}/bin/jq -s '.[0] * .[1]' "$settings" "$managed" > "$staging"
-      chmod 0644 "$staging"
-      mv -f "$staging" "$settings"
-    fi
-  '';
-
   # ── Thunderbird ───────────────────────────────────────────────────────
   programs.thunderbird = {
     enable = true;
-    package = thunderbirdXwayland;
 
     profiles.default = {
       isDefault = true;
-
-      # The fontconfig sans default is monospace (../nixos/default.nix), so
-      # Gecko sizes dialogs for text that then wraps an extra line and pushes
-      # the buttons past the bottom edge; on XWayland the window cannot grow
-      # to fit. Chrome documents only — message bodies keep their own fonts.
       userChrome = ''
         * {
           font-family: "Noto Sans", "Noto Sans CJK SC", sans-serif !important;
