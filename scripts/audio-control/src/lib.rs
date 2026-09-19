@@ -8,11 +8,13 @@
 use std::error::Error;
 
 pub mod audio;
-pub mod battery_provider;
 pub mod bluetooth;
 pub mod model;
 pub mod waybar;
 pub mod wayle;
+
+#[cfg(test)]
+mod tests;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;

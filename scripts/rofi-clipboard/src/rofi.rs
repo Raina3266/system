@@ -10,10 +10,10 @@ use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::preview;
 use crate::store::ClipboardStore;
 
-const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
-const WAYLAND_KEYBOARD_MODE_ON_DEMAND: &str = "on-demand";
-const PRESERVE_FILTER_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
-const PRESERVE_FILTER_SELECTION_ENABLED: &str = "true";
+pub(crate) const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
+pub(crate) const WAYLAND_KEYBOARD_MODE_ON_DEMAND: &str = "on-demand";
+pub(crate) const PRESERVE_FILTER_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
+pub(crate) const PRESERVE_FILTER_SELECTION_ENABLED: &str = "true";
 
 const RECORD_SEPARATOR: u8 = 0x1e;
 const UNIT_SEPARATOR: u8 = 0x1f;
@@ -35,7 +35,7 @@ impl Mode {
         }
     }
 
-    fn prompt(self) -> &'static str {
+    pub(crate) fn prompt(self) -> &'static str {
         match self {
             Self::Memo => "󰍩 Memo",
             Self::Text => "󰦨 Text",
@@ -43,7 +43,7 @@ impl Mode {
         }
     }
 
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Memo => "memo",
             Self::Text => "text",
@@ -51,7 +51,7 @@ impl Mode {
         }
     }
 
-    fn includes(self, item: &ClipboardItem) -> bool {
+    pub(crate) fn includes(self, item: &ClipboardItem) -> bool {
         match self {
             Self::Memo => item.kind == ItemKind::Memo,
             Self::Text => item.kind == ItemKind::Text,
@@ -84,7 +84,7 @@ impl UiState {
     }
 }
 
-fn configure_rofi_environment(command: &mut Command) {
+pub(crate) fn configure_rofi_environment(command: &mut Command) {
     // The companion editor is another overlay layer surface. On-demand focus
     // lets Niri transfer keyboard input between Rofi and that panel when
     // either one is clicked.
@@ -173,7 +173,7 @@ fn prepare_mode(store: &ClipboardStore, mode: Mode) -> Result<()> {
     Ok(())
 }
 
-fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
+pub(crate) fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
     let mut items: Vec<_> = items.iter().filter(|item| mode.includes(item)).collect();
     if mode == Mode::Memo {
         // The draft is stored near the newest entries so history trimming can
@@ -183,7 +183,10 @@ fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
     items
 }
 
-fn preferred_selection(items: &[&ClipboardItem], selected_id: Option<u64>) -> Option<usize> {
+pub(crate) fn preferred_selection(
+    items: &[&ClipboardItem],
+    selected_id: Option<u64>,
+) -> Option<usize> {
     selected_id
         .and_then(|id| items.iter().position(|item| item.id == id))
         .or_else(|| items.iter().position(|item| !item.pinned))
@@ -273,7 +276,7 @@ fn selection_after_delete(
     Ok(replacement_selection(&items, selected_id))
 }
 
-fn replacement_selection(items: &[&ClipboardItem], selected_id: u64) -> Option<u64> {
+pub(crate) fn replacement_selection(items: &[&ClipboardItem], selected_id: u64) -> Option<u64> {
     let index = items.iter().position(|item| item.id == selected_id)?;
     items
         .get(index + 1)
@@ -387,14 +390,14 @@ fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &s
     output.extend_from_slice(sanitize_option_value(value).as_bytes());
 }
 
-fn row_value(item: &ClipboardItem) -> String {
+pub(crate) fn row_value(item: &ClipboardItem) -> String {
     match item.kind {
         ItemKind::Memo | ItemKind::Text => item.text.clone().unwrap_or_default(),
         ItemKind::File => file_label(item),
     }
 }
 
-fn row_preview(item: &ClipboardItem) -> String {
+pub(crate) fn row_preview(item: &ClipboardItem) -> String {
     match item.kind {
         ItemKind::Memo => {
             let preview = text_row_preview(item);
@@ -473,204 +476,6 @@ fn rofi_binary() -> PathBuf {
         .unwrap_or_else(|| Path::new("rofi").to_path_buf())
 }
 
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn textual_item(id: u64, kind: ItemKind, text: &str, pinned: bool) -> ClipboardItem {
-        ClipboardItem {
-            id,
-            kind,
-            text: Some(text.to_owned()),
-            image_file: None,
-            name: None,
-            mime: "text/plain".to_owned(),
-            pinned,
-            created_at: 0,
-            digest: format!("digest-{id}"),
-        }
-    }
-
-    fn image_item(name: Option<&str>) -> ClipboardItem {
-        ClipboardItem {
-            id: 1,
-            kind: ItemKind::File,
-            text: None,
-            image_file: Some("1.png".to_owned()),
-            name: name.map(str::to_owned),
-            mime: "image/png".to_owned(),
-            pinned: false,
-            created_at: 0,
-            digest: "digest".to_owned(),
-        }
-    }
-
-    #[test]
-    fn image_row_uses_internet_source_url() {
-        let item = image_item(Some("https://example.com/images/photo.png"));
-
-        assert_eq!(row_value(&item), "https://example.com/images/photo.png");
-    }
-
-    #[test]
-    fn image_row_uses_local_source_path() {
-        let item = image_item(Some("/home/raina/Pictures/photo.png"));
-
-        assert_eq!(row_value(&item), "/home/raina/Pictures/photo.png");
-    }
-
-    #[test]
-    fn image_row_falls_back_to_mime_for_entries_without_a_source() {
-        let item = image_item(None);
-
-        assert_eq!(row_value(&item), "Image · png");
-    }
-
-    #[test]
-    fn memo_mode_excludes_pinned_clipboard_items() {
-        let memo = textual_item(1, ItemKind::Memo, "memo", false);
-        let pinned_text = textual_item(2, ItemKind::Text, "clipboard", true);
-        let mut pinned_image = image_item(None);
-        pinned_image.id = 3;
-        pinned_image.pinned = true;
-
-        assert!(Mode::Memo.includes(&memo));
-        assert!(!Mode::Memo.includes(&pinned_text));
-        assert!(!Mode::Memo.includes(&pinned_image));
-        assert!(Mode::Text.includes(&pinned_text));
-        assert!(Mode::Files.includes(&pinned_image));
-    }
-
-    #[test]
-    fn text_mode_contains_urls_and_excludes_them_from_file_mode() {
-        let url = textual_item(
-            5,
-            ItemKind::Text,
-            "https://example.com/download.tar.zst",
-            false,
-        );
-
-        assert!(Mode::Text.includes(&url));
-        assert!(!Mode::Files.includes(&url));
-        assert_eq!(row_value(&url), "https://example.com/download.tar.zst");
-    }
-
-    #[test]
-    fn file_is_the_named_replacement_for_image_mode() {
-        assert_eq!(Mode::parse("files").unwrap(), Mode::Files);
-        assert_eq!(Mode::parse("images").unwrap(), Mode::Files);
-        assert_eq!(Mode::Files.name(), "files");
-        assert_eq!(Mode::Files.prompt(), "󰈔 Files");
-    }
-
-    #[test]
-    fn memo_is_the_named_replacement_for_pinned_mode() {
-        assert_eq!(Mode::parse("memo").unwrap(), Mode::Memo);
-        assert_eq!(Mode::Memo.name(), "memo");
-        assert_eq!(Mode::Memo.prompt(), "󰍩 Memo");
-        assert!(Mode::parse("pinned").is_err());
-    }
-
-    #[test]
-    fn empty_memo_has_a_visible_draft_label() {
-        let memo = textual_item(4, ItemKind::Memo, "", false);
-
-        assert_eq!(row_preview(&memo), "New memo");
-        assert_eq!(row_value(&memo), "");
-    }
-
-    #[test]
-    fn empty_memo_is_the_last_item_in_memo_mode() {
-        let draft = textual_item(4, ItemKind::Memo, "", false);
-        let newer = textual_item(3, ItemKind::Memo, "newer", false);
-        let clipboard_text = textual_item(2, ItemKind::Text, "clipboard", false);
-        let older = textual_item(1, ItemKind::Memo, "older", true);
-        let history = vec![draft, newer, clipboard_text, older];
-
-        let items = mode_items(&history, Mode::Memo);
-
-        assert_eq!(
-            items.iter().map(|item| item.id).collect::<Vec<_>>(),
-            vec![3, 1, 4]
-        );
-    }
-
-    #[test]
-    fn clipboard_rofi_enables_companion_focus_and_stable_filter_selection() {
-        let mut command = Command::new("rofi");
-        configure_rofi_environment(&mut command);
-
-        let keyboard_mode = command
-            .get_envs()
-            .find(|(name, _)| *name == std::ffi::OsStr::new(WAYLAND_KEYBOARD_MODE_ENV))
-            .and_then(|(_, value)| value)
-            .and_then(std::ffi::OsStr::to_str);
-        assert_eq!(keyboard_mode, Some(WAYLAND_KEYBOARD_MODE_ON_DEMAND));
-
-        let preserve_selection = command
-            .get_envs()
-            .find(|(name, _)| *name == std::ffi::OsStr::new(PRESERVE_FILTER_SELECTION_ENV))
-            .and_then(|(_, value)| value)
-            .and_then(std::ffi::OsStr::to_str);
-        assert_eq!(preserve_selection, Some(PRESERVE_FILTER_SELECTION_ENABLED));
-    }
-
-    #[test]
-    fn text_row_preview_collapses_whitespace_to_one_line() {
-        let item = textual_item(2, ItemKind::Text, "first line\nsecond\tline   third", false);
-
-        assert_eq!(row_preview(&item), "first line second line third");
-        assert_eq!(row_value(&item), "first line\nsecond\tline   third");
-    }
-
-    #[test]
-    fn text_row_preview_truncates_long_text() {
-        let text = "x".repeat(111);
-        let item = textual_item(3, ItemKind::Text, &text, false);
-
-        assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
-    }
-
-    #[test]
-    fn selection_callback_executable_is_shell_quoted() {
-        assert_eq!(
-            shell_quote("/nix/store/example/bin/tool"),
-            "'/nix/store/example/bin/tool'"
-        );
-        assert_eq!(shell_quote("/tmp/raina's tool"), "'/tmp/raina'\\''s tool'");
-    }
-
-    #[test]
-    fn deletion_selects_the_following_row_or_the_previous_row_at_the_end() {
-        let first = textual_item(1, ItemKind::Text, "first", false);
-        let second = textual_item(2, ItemKind::Text, "second", false);
-        let third = textual_item(3, ItemKind::Text, "third", false);
-        let items = vec![&first, &second, &third];
-
-        assert_eq!(replacement_selection(&items, first.id), Some(second.id));
-        assert_eq!(replacement_selection(&items, second.id), Some(third.id));
-        assert_eq!(replacement_selection(&items, third.id), Some(second.id));
-        assert_eq!(replacement_selection(&[&first], first.id), None);
-    }
-
-    #[test]
-    fn initial_selection_prefers_the_first_unpinned_item_in_every_mode() {
-        let first_pin = textual_item(1, ItemKind::Text, "first pin", true);
-        let second_pin = textual_item(2, ItemKind::Text, "second pin", true);
-        let first_unpinned = textual_item(3, ItemKind::Text, "first normal", false);
-        let second_unpinned = textual_item(4, ItemKind::Text, "second normal", false);
-        let items = vec![&first_pin, &second_pin, &first_unpinned, &second_unpinned];
-
-        assert_eq!(preferred_selection(&items, None), Some(2));
-        assert_eq!(preferred_selection(&items, Some(first_pin.id)), Some(0));
-        assert_eq!(
-            preferred_selection(&[&first_pin, &second_pin], None),
-            Some(0)
-        );
-        assert_eq!(preferred_selection(&[], None), None);
-    }
 }

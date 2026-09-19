@@ -11,9 +11,10 @@
 mod artwork;
 mod ipc;
 mod mpris;
-mod pause;
-mod style;
 mod ui;
+
+#[cfg(test)]
+mod tests;
 
 use std::process::ExitCode;
 
@@ -25,7 +26,7 @@ fn main() -> ExitCode {
     let argument = std::env::args().nth(1).unwrap_or_default();
 
     if argument == "pause-all" {
-        return match pause::everything() {
+        return match mpris::pause_everything() {
             Ok(report) => {
                 print!("{report}");
                 ExitCode::SUCCESS
@@ -108,7 +109,7 @@ fn main() -> ExitCode {
         .build();
 
     let toggles = std::cell::RefCell::new(Some(toggles));
-    app.connect_startup(|_| style::install());
+    app.connect_startup(|_| ui::install_style());
     app.connect_activate(move |app| {
         if let Some(toggles) = toggles.borrow_mut().take() {
             ui::run(app, monitor.clone(), toggles);

@@ -230,7 +230,7 @@ fn prompt(mode: Mode, state: &UiState) -> String {
     }
 }
 
-fn mode_theme(mode: Mode) -> String {
+pub(crate) fn mode_theme(mode: Mode) -> String {
     let preview_colour = if matches!(mode, Mode::File | Mode::Folder) {
         "@cyan"
     } else {
@@ -249,7 +249,7 @@ fn mode_theme(mode: Mode) -> String {
     )
 }
 
-fn write_row(output: &mut Vec<u8>, entry: &Entry) -> io::Result<()> {
+pub(crate) fn write_row(output: &mut Vec<u8>, entry: &Entry) -> io::Result<()> {
     write!(output, "{}", entry.key)?;
     let mut first = true;
     write_row_option(output, &mut first, "display", &entry.display);
@@ -301,7 +301,7 @@ fn sanitize_option_value(value: &str) -> String {
     sanitize_record_value(value).replace(char::from(UNIT_SEPARATOR), " ")
 }
 
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
@@ -334,41 +334,4 @@ fn xdg_open_binary() -> OsString {
 
 fn dolphin_binary() -> OsString {
     binary("ROFI_FILESEARCH_DOLPHIN", "dolphin")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_file_rows_request_two_lines() {
-        assert!(mode_theme(Mode::App).contains("eh: 1;"));
-        assert!(mode_theme(Mode::Folder).contains("eh: 1;"));
-        assert!(mode_theme(Mode::File).contains("eh: 2;"));
-    }
-
-    #[test]
-    fn folder_mode_enables_preview_but_not_reveal() {
-        let theme = mode_theme(Mode::Folder);
-        assert!(theme.contains("button-preview { text-color: @cyan;"));
-        assert!(theme.contains("button-reveal { text-color: @dim;"));
-    }
-
-    #[test]
-    fn paths_with_quotes_are_safe_in_the_selection_callback() {
-        assert_eq!(shell_quote("/tmp/Raina's app"), "'/tmp/Raina'\\''s app'");
-    }
-
-    #[test]
-    fn row_options_share_one_nul_metadata_marker() {
-        let entry = Entry {
-            key: "file:4141".to_owned(),
-            display: "Visible".to_owned(),
-            meta: "Searchable".to_owned(),
-            icon: "text-x-generic".to_owned(),
-        };
-        let mut output = Vec::new();
-        write_row(&mut output, &entry).unwrap();
-        assert_eq!(output.iter().filter(|byte| **byte == 0).count(), 1);
-    }
 }

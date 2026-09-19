@@ -27,7 +27,7 @@ let
   '';
 
   # Shared by niri's environment block and environment.d below, so Qt apps
-  # are themed however they get started.
+  # are themed and scaled however they get started.
   qtEnvironment =
     let
       inherit (config.home) profileDirectory;
@@ -39,6 +39,17 @@ let
       QT_STYLE_OVERRIDE = "kvantum";
       QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
       QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
+
+      # Nothing in this session hands Qt a scale factor the way a full DE
+      # would, and the outputs are mixed-DPI (eDP-1 and DP-8 at 1x, DP-7 at
+      # 1.25x), so one blunt QT_SCALE_FACTOR would misfit two of the three
+      # screens. Derive the factor per screen instead: Wayland clients get
+      # theirs from niri regardless, and this makes xcb clients (birdtray,
+      # the Qt5-xcb apps bridged by snixembed) pick theirs up from RandR.
+      # Per-app exceptions still belong in custom.nix's wrappers —
+      # onlyofficeScaled unsets this very variable because OnlyOffice
+      # double-scales when it sees one.
+      QT_AUTO_SCREEN_SCALE_FACTOR = "1";
     };
 in
 {

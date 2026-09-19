@@ -30,22 +30,19 @@ trait WayleMedia {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Track {
-    id: String,
-    identity: String,
-    state: String,
-    title: String,
-    artist: String,
-    album: String,
-    art_url: String,
-    length_us: Option<u64>,
+pub(crate) struct Track {
+    pub(crate) id: String,
+    pub(crate) identity: String,
+    pub(crate) state: String,
+    pub(crate) title: String,
+    pub(crate) artist: String,
+    pub(crate) album: String,
+    pub(crate) art_url: String,
+    pub(crate) length_us: Option<u64>,
 }
 
 impl Track {
-    fn read(
-        proxy: &WayleMediaProxy<'_>,
-        player: &(String, String, String),
-    ) -> zbus::Result<Self> {
+    fn read(proxy: &WayleMediaProxy<'_>, player: &(String, String, String)) -> zbus::Result<Self> {
         let info = proxy.get_player_info(player.0.clone())?;
         Ok(Self {
             id: player.0.clone(),
@@ -164,7 +161,7 @@ fn current_track(proxy: &WayleMediaProxy<'_>) -> zbus::Result<Option<Track>> {
     Ok(Some(selected))
 }
 
-fn preferred_duplicate(selected: Track, bridge: Track) -> Track {
+pub(crate) fn preferred_duplicate(selected: Track, bridge: Track) -> Track {
     if selected.is_playing() != bridge.is_playing() {
         if bridge.is_playing() {
             bridge
@@ -178,7 +175,7 @@ fn preferred_duplicate(selected: Track, bridge: Track) -> Track {
     }
 }
 
-fn duplicate_metadata(left: &Track, right: &Track) -> bool {
+pub(crate) fn duplicate_metadata(left: &Track, right: &Track) -> bool {
     let title = normalized(&left.title);
     if title.is_empty() || title != normalized(&right.title) {
         return false;
@@ -208,7 +205,7 @@ fn normalized(value: &str) -> String {
         .to_lowercase()
 }
 
-fn is_bridge(id: &str) -> bool {
+pub(crate) fn is_bridge(id: &str) -> bool {
     id.to_ascii_lowercase().contains("mprisence")
 }
 
@@ -284,7 +281,7 @@ fn print_badge(track: Option<&Track>, previous: &mut Option<Badge>) -> bool {
     true
 }
 
-fn truncate_title(title: &str) -> String {
+pub(crate) fn truncate_title(title: &str) -> String {
     let mut output = String::new();
     let mut ideographs = 0;
 
@@ -311,76 +308,4 @@ fn is_cjk_ideograph(character: char) -> bool {
             | '\u{20000}'..='\u{2ebef}'
             | '\u{30000}'..='\u{3134f}'
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn track(id: &str, title: &str, artist: &str) -> Track {
-        Track {
-            id: id.to_owned(),
-            identity: String::from("Browser"),
-            state: String::from("Playing"),
-            title: title.to_owned(),
-            artist: artist.to_owned(),
-            album: String::new(),
-            art_url: String::new(),
-            length_us: None,
-        }
-    }
-
-    #[test]
-    fn exactly_fifty_characters_are_untouched() {
-        let title = "a".repeat(50);
-        assert_eq!(truncate_title(&title), title);
-    }
-
-    #[test]
-    fn the_fifty_first_character_is_truncated() {
-        assert_eq!(truncate_title(&"a".repeat(51)), format!("{}…", "a".repeat(50)));
-    }
-
-    #[test]
-    fn the_thirty_sixth_ideograph_is_truncated() {
-        assert_eq!(truncate_title(&"真".repeat(36)), format!("{}…", "真".repeat(35)));
-    }
-
-    #[test]
-    fn a_mixed_title_stops_at_whichever_limit_arrives_first() {
-        let title = format!("{}abcdefghijklmnop", "真".repeat(35));
-        assert_eq!(
-            truncate_title(&title),
-            format!("{}abcdefghijklmno…", "真".repeat(35))
-        );
-    }
-
-    #[test]
-    fn a_richer_bridge_replaces_playerctld_for_the_same_track() {
-        let selected = track(
-            "org.mpris.MediaPlayer2.playerctld",
-            "Being a Good Girl Hurts",
-            "YENA",
-        );
-        let mut bridge = track(
-            "org.mpris.MediaPlayer2.mprisence.tab-1",
-            "Being a Good Girl Hurts",
-            "YENA",
-        );
-        bridge.album = String::from("Good Morning");
-        assert!(duplicate_metadata(&selected, &bridge));
-        assert!(is_bridge(&preferred_duplicate(selected, bridge).id));
-    }
-
-    #[test]
-    fn a_real_elisa_player_is_not_treated_as_the_bridge() {
-        assert!(!is_bridge("org.mpris.MediaPlayer2.elisa"));
-    }
-
-    #[test]
-    fn title_only_matches_do_not_merge_unrelated_players() {
-        let left = track("org.mpris.MediaPlayer2.chromium", "Intro", "");
-        let right = track("org.mpris.MediaPlayer2.mprisence.tab-1", "Intro", "");
-        assert!(!duplicate_metadata(&left, &right));
-    }
 }

@@ -85,13 +85,13 @@ fn resolve(art_url: Option<&str>, track_url: Option<&str>) -> Option<PathBuf> {
 
 /// Turns a `file://` URL into a path, undoing the percent-encoding a player
 /// applies to spaces and to anything non-ASCII in a filename.
-fn local_path(url: &str) -> Option<PathBuf> {
+pub(crate) fn local_path(url: &str) -> Option<PathBuf> {
     let encoded = url.strip_prefix("file://")?;
     let path = PathBuf::from(percent_decode(encoded)?);
     path.is_absolute().then_some(path)
 }
 
-fn percent_decode(value: &str) -> Option<String> {
+pub(crate) fn percent_decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -111,7 +111,7 @@ fn percent_decode(value: &str) -> Option<String> {
 ///
 /// A picture named after the track beats the folder cover: one album per
 /// folder still gets per-track pictures when they differ.
-fn beside(track: &Path) -> Option<PathBuf> {
+pub(crate) fn beside(track: &Path) -> Option<PathBuf> {
     let folder = track.parent()?;
     let entries: Vec<String> = std::fs::read_dir(folder)
         .ok()?
@@ -216,6 +216,3 @@ fn cache_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
     Some(base.join(CACHE_DIR))
 }
-
-#[cfg(test)]
-mod tests;

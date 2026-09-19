@@ -46,7 +46,6 @@ impl WifiEntry {
     pub fn security_label(&self) -> &'static str {
         security_label(&self.network.security_features)
     }
-
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +61,6 @@ impl EthernetEntry {
     pub fn connecting(&self) -> bool {
         self.device.state.is_transitional()
     }
-
 }
 
 #[derive(Default)]
@@ -134,38 +132,4 @@ pub fn signal_icon(strength: u8) -> &'static str {
         1 => "󰤟",
         _ => "󰤯",
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use nmrs::SecurityFeatures;
-
-    use super::*;
-
-    #[test]
-    fn security_names_distinguish_wpa2_and_wpa3() {
-        let mut mixed = SecurityFeatures::default();
-        mixed.privacy = true;
-        mixed.psk = true;
-        mixed.sae = true;
-        mixed.ccmp = true;
-        assert_eq!(security_label(&mixed), "WPA2/WPA3");
-
-        let mut enterprise = SecurityFeatures::default();
-        enterprise.privacy = true;
-        enterprise.eap_suite_b_192 = true;
-        enterprise.ccmp = true;
-        assert_eq!(security_label(&enterprise), "WPA3 Enterprise");
-    }
-
-    #[test]
-    fn signal_ordering_ignores_drift_inside_one_bar() {
-        // Two readings that draw the same icon have to compare equal, or the
-        // timed refresh would keep swapping their rows.
-        assert_eq!(signal_bars(77), signal_bars(94));
-        assert_eq!(signal_icon(77), signal_icon(94));
-        assert!(signal_bars(51) > signal_bars(50));
-        assert_eq!(signal_bars(0), 0);
-    }
-
 }

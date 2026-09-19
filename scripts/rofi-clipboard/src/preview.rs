@@ -16,27 +16,28 @@ use crate::store::ClipboardStore;
 pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
 const UPDATE_TEXT: u8 = 1;
 const UPDATE_IMAGE: u8 = 3;
-const CLOSE: u8 = 2;
-const SAVE_AND_CLOSE: u8 = 4;
-const PANEL_STATE: u8 = 5;
+pub(crate) const CLOSE: u8 = 2;
+pub(crate) const SAVE_AND_CLOSE: u8 = 4;
+pub(crate) const PANEL_STATE: u8 = 5;
 const PREPARE_SWITCH: u8 = 6;
 const HEADER_SIZE: usize = 17;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
-const SWITCH_REJECTED: u8 = 0;
-const SWITCH_SAME_ITEM: u8 = 1;
-const SWITCH_READY: u8 = 2;
-const CONTENT_NONE: u8 = 0;
-const CONTENT_TEXT: u8 = 1;
+pub(crate) const SWITCH_REJECTED: u8 = 0;
+pub(crate) const SWITCH_SAME_ITEM: u8 = 1;
+pub(crate) const SWITCH_READY: u8 = 2;
+pub(crate) const CONTENT_NONE: u8 = 0;
+pub(crate) const CONTENT_TEXT: u8 = 1;
 const CONTENT_IMAGE: u8 = 2;
-const TEXT_EDITOR_ARGUMENTS: [&str; 4] = ["--stdin", "--title", "Edit clipboard text", "--panel"];
-const IMAGE_PREVIEW_ARGUMENTS: [&str; 5] = [
+pub(crate) const TEXT_EDITOR_ARGUMENTS: [&str; 4] =
+    ["--stdin", "--title", "Edit clipboard text", "--panel"];
+pub(crate) const IMAGE_PREVIEW_ARGUMENTS: [&str; 5] = [
     "--stdin",
     "--title",
     "Preview clipboard image",
     "--read-only",
     "--panel",
 ];
-const FILE_PREVIEW_ARGUMENTS: [&str; 5] = [
+pub(crate) const FILE_PREVIEW_ARGUMENTS: [&str; 5] = [
     "--stdin",
     "--title",
     "Preview clipboard file",
@@ -45,20 +46,20 @@ const FILE_PREVIEW_ARGUMENTS: [&str; 5] = [
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum PanelContent {
+pub(crate) enum PanelContent {
     Text(String),
     ReadOnlyText(String),
     Image(PathBuf),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum PanelSnapshot {
+pub(crate) enum PanelSnapshot {
     Text { id: u64, text: String },
     Image { id: u64 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum SwitchReply {
+pub(crate) enum SwitchReply {
     Rejected,
     SameItem,
     Ready(Option<PanelSnapshot>),
@@ -230,9 +231,7 @@ fn launch_panel(
 ) -> Result<()> {
     let mut command = Command::new(preview_panel_binary());
     command.args(arguments);
-    command
-        .arg("--layout-file")
-        .arg(crate::rofi::theme_path()?);
+    command.arg("--layout-file").arg(crate::rofi::theme_path()?);
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_WIDTH", "--width");
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_HEIGHT", "--height");
     append_preview_override(
@@ -319,7 +318,10 @@ fn item_content(store: &ClipboardStore, id: u64) -> Result<Option<PanelContent>>
         .and_then(|item| panel_content(item, store.image_path(item))))
 }
 
-fn panel_content(item: &ClipboardItem, image_path: Option<PathBuf>) -> Option<PanelContent> {
+pub(crate) fn panel_content(
+    item: &ClipboardItem,
+    image_path: Option<PathBuf>,
+) -> Option<PanelContent> {
     match item.kind {
         ItemKind::Memo | ItemKind::Text => {
             Some(PanelContent::Text(item.text.clone().unwrap_or_default()))
@@ -362,7 +364,7 @@ fn save_snapshot(store: &ClipboardStore, snapshot: PanelSnapshot) -> Result<Opti
     }
 }
 
-fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
+pub(crate) fn text_is_changed(item: &ClipboardItem, text: &str) -> Result<bool> {
     if !item.kind.is_textual() {
         bail!("files cannot be edited as text");
     }
@@ -398,7 +400,10 @@ fn request(path: &Path, operation: u8, serial: u64, payload: &[u8]) -> Result<Op
         .with_context(|| format!("read panel state from {}", path.display()))
 }
 
-fn read_switch_reply(mut reader: impl Read, expected_serial: u64) -> io::Result<SwitchReply> {
+pub(crate) fn read_switch_reply(
+    mut reader: impl Read,
+    expected_serial: u64,
+) -> io::Result<SwitchReply> {
     let mut header = [0_u8; HEADER_SIZE];
     reader.read_exact(&mut header)?;
     if header[0] != PANEL_STATE {
@@ -494,7 +499,7 @@ fn send(path: &Path, operation: u8, serial: u64, payload: &[u8]) -> Result<bool>
     Ok(true)
 }
 
-fn write_frame(
+pub(crate) fn write_frame(
     mut writer: impl Write,
     operation: u8,
     serial: u64,
@@ -510,146 +515,4 @@ fn preview_panel_binary() -> PathBuf {
     env::var_os("ROFI_CLIPBOARD_PREVIEW_PANEL")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new("preview-panel").to_path_buf())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(kind: ItemKind, text: Option<&str>, name: Option<&str>) -> ClipboardItem {
-        ClipboardItem {
-            id: 7,
-            kind,
-            text: text.map(str::to_owned),
-            image_file: (kind == ItemKind::File).then(|| "7.png".to_owned()),
-            name: name.map(str::to_owned),
-            mime: match kind {
-                ItemKind::Memo | ItemKind::Text => "text/plain",
-                ItemKind::File => "image/png",
-            }
-            .to_owned(),
-            pinned: false,
-            created_at: 0,
-            digest: "digest".to_owned(),
-        }
-    }
-
-    #[test]
-    fn editable_text_is_byte_for_byte_unchanged() {
-        let original = "heading\r\n\t  repeated    spaces\n中文 👩🏽‍💻  \n";
-        assert_eq!(
-            panel_content(&item(ItemKind::Text, Some(original), None), None,),
-            Some(PanelContent::Text(original.to_owned()))
-        );
-    }
-
-    #[test]
-    fn memo_content_uses_the_editable_text_panel() {
-        assert_eq!(
-            panel_content(&item(ItemKind::Memo, Some("draft memo"), None), None),
-            Some(PanelContent::Text("draft memo".to_owned()))
-        );
-    }
-
-    #[test]
-    fn image_items_open_the_cached_image_preview() {
-        let path = PathBuf::from("/home/raina/.local/share/rofi-clipboard/images/7.png");
-        assert_eq!(
-            panel_content(
-                &item(
-                    ItemKind::File,
-                    None,
-                    Some("/home/raina/Pictures/example.png"),
-                ),
-                Some(path.clone()),
-            ),
-            Some(PanelContent::Image(path))
-        );
-    }
-
-    #[test]
-    fn file_references_open_a_read_only_text_preview() {
-        let mut file = item(
-            ItemKind::File,
-            Some("file:///home/raina/Documents/report.pdf\n"),
-            Some("/home/raina/Documents/report.pdf"),
-        );
-        file.image_file = None;
-
-        assert_eq!(
-            panel_content(&file, None),
-            Some(PanelContent::ReadOnlyText(
-                "/home/raina/Documents/report.pdf".to_owned()
-            ))
-        );
-    }
-
-    #[test]
-    fn close_frame_has_no_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, CLOSE, 0, &[]).unwrap();
-        assert_eq!(
-            frame,
-            [CLOSE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        );
-    }
-
-    #[test]
-    fn save_request_has_no_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, SAVE_AND_CLOSE, 0, &[]).unwrap();
-        assert_eq!(frame[0], SAVE_AND_CLOSE);
-        assert_eq!(u64::from_be_bytes(frame[9..17].try_into().unwrap()), 0);
-    }
-
-    #[test]
-    fn panel_response_preserves_item_ownership_and_complete_buffer() {
-        let text = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
-        let mut payload = vec![SWITCH_READY, CONTENT_TEXT];
-        payload.extend_from_slice(&73_u64.to_be_bytes());
-        payload.extend_from_slice(text.as_bytes());
-        let mut frame = Vec::new();
-        write_frame(&mut frame, PANEL_STATE, 29, &payload).unwrap();
-
-        assert_eq!(
-            read_switch_reply(frame.as_slice(), 29).unwrap(),
-            SwitchReply::Ready(Some(PanelSnapshot::Text {
-                id: 73,
-                text: text.to_owned(),
-            }))
-        );
-    }
-
-    #[test]
-    fn rejected_and_same_item_responses_are_distinct() {
-        for (disposition, expected) in [
-            (SWITCH_REJECTED, SwitchReply::Rejected),
-            (SWITCH_SAME_ITEM, SwitchReply::SameItem),
-        ] {
-            let mut payload = vec![disposition, CONTENT_NONE];
-            payload.extend_from_slice(&0_u64.to_be_bytes());
-            let mut frame = Vec::new();
-            write_frame(&mut frame, PANEL_STATE, 7, &payload).unwrap();
-            assert_eq!(read_switch_reply(frame.as_slice(), 7).unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn unchanged_text_does_not_need_a_database_rewrite() {
-        let item = item(ItemKind::Text, Some("typed text"), None);
-        assert!(!text_is_changed(&item, "typed text").unwrap());
-        assert!(text_is_changed(&item, "modified text").unwrap());
-    }
-
-    #[test]
-    fn text_editor_is_editable_and_soft_wraps() {
-        assert!(!TEXT_EDITOR_ARGUMENTS.contains(&"--read-only"));
-        assert!(!TEXT_EDITOR_ARGUMENTS.contains(&"--no-wrap"));
-    }
-
-    #[test]
-    fn image_preview_is_read_only() {
-        assert!(IMAGE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
-        assert!(FILE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
-    }
 }

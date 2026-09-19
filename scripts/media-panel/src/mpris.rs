@@ -5,6 +5,7 @@
 //! player wholesale — from showing up as a second one.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use zbus::blocking::{Connection, Proxy, fdo::DBusProxy};
@@ -105,7 +106,7 @@ impl Player {
     }
 
     /// Every player this card stands for, itself first.
-    fn targets(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn targets(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.bus.as_str()).chain(self.also.iter().map(String::as_str))
     }
 }
@@ -348,7 +349,7 @@ fn is_player(name: &OwnedBusName) -> bool {
 /// Music` — and the card shows it untouched. A few echo their bus name back
 /// instead, which is dotted and carries no spaces; that gets the same cleanup
 /// as a bus publishing no identity at all.
-fn echoes_the_bus_name(identity: &str) -> bool {
+pub(crate) fn echoes_the_bus_name(identity: &str) -> bool {
     identity.contains('.') && !identity.contains(' ')
 }
 
@@ -397,7 +398,7 @@ fn micros(value: Duration) -> i64 {
     i64::try_from(value.as_micros()).unwrap_or(i64::MAX)
 }
 
-fn volume_percent(volume: f64) -> Option<u32> {
+pub(crate) fn volume_percent(volume: f64) -> Option<u32> {
     volume
         .is_finite()
         .then(|| (volume.clamp(0.0, 1.0) * 100.0).round() as u32)
@@ -452,7 +453,7 @@ pub fn clock(duration: Duration) -> String {
 /// the player names itself, so identity would leave the two side by side.
 /// Title alone can collide, so two more fields must agree and a differing
 /// position splits them. Publishers that already agree on identity need one.
-fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
+pub(crate) fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
     let mut kept: Vec<Player> = Vec::with_capacity(players.len());
 
     for player in players {
@@ -474,7 +475,7 @@ fn merge_duplicates(players: Vec<Player>) -> Vec<Player> {
     kept
 }
 
-fn same_playback(left: &Player, right: &Player) -> bool {
+pub(crate) fn same_playback(left: &Player, right: &Player) -> bool {
     same_text(&left.title, &right.title)
         && agreeing_fields(left, right) >= required_agreement(left, right)
         && !positions_disagree(left, right)
@@ -531,5 +532,35 @@ fn normalised(value: &str) -> String {
         .to_lowercase()
 }
 
-#[cfg(test)]
-mod tests;
+/// Stopping everything at once, for the Waybar button's right-click.
+///
+/// Not `playerctl --all-players pause`: that checks `CanPause` first and skips
+/// players answering no, so a browser bridge that cannot reach its tab is never
+/// asked. MPRIS says a player that cannot comply should ignore the call, and
+/// publishers get the property wrong often, so ask everyone and let them
+/// decline.
+///
+/// Pauses every player, and reports the ones still going afterwards.
+pub fn pause_everything() -> Result<String, String> {
+    let players = Players::connect()?;
+    let snapshot = players.snapshot();
+
+    if snapshot.is_empty() {
+        return Ok(String::from("no MPRIS players on the bus\n"));
+    }
+
+    for player in &snapshot {
+        players.set_playing(player, false);
+    }
+
+    let mut report = String::new();
+    for player in players.snapshot() {
+        let state = if player.status == Status::Playing {
+            "still playing"
+        } else {
+            "paused"
+        };
+        let _ = writeln!(report, "{}: {state}", player.bus);
+    }
+    Ok(report)
+}

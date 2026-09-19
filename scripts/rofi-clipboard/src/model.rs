@@ -32,7 +32,7 @@ pub fn abbreviate_home_path(value: &str) -> String {
     abbreviate_home_path_with(value, Path::new(&home))
 }
 
-fn abbreviate_home_path_with(value: &str, home: &Path) -> String {
+pub(crate) fn abbreviate_home_path_with(value: &str, home: &Path) -> String {
     let Ok(relative) = Path::new(value).strip_prefix(home) else {
         return value.to_owned();
     };
@@ -65,69 +65,6 @@ pub enum ItemKind {
 impl ItemKind {
     pub fn is_textual(self) -> bool {
         matches!(self, Self::Memo | Self::Text)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn legacy_image_kind_loads_as_file() {
-        assert_eq!(
-            serde_json::from_str::<ItemKind>("\"image\"").unwrap(),
-            ItemKind::File
-        );
-        assert_eq!(serde_json::to_string(&ItemKind::File).unwrap(), "\"file\"");
-    }
-
-    #[test]
-    fn abbreviates_only_paths_inside_home() {
-        let home = Path::new("/home/raina");
-
-        assert_eq!(
-            abbreviate_home_path_with("/home/raina/Documents/report.pdf", home),
-            "~/Documents/report.pdf"
-        );
-        assert_eq!(abbreviate_home_path_with("/home/raina", home), "~");
-        assert_eq!(
-            abbreviate_home_path_with("/home/rainart/report.pdf", home),
-            "/home/rainart/report.pdf"
-        );
-        assert_eq!(
-            abbreviate_home_path_with("https://example.com/report.pdf", home),
-            "https://example.com/report.pdf"
-        );
-    }
-
-    #[test]
-    fn url_value_recognizes_standalone_http_and_https_references() {
-        assert_eq!(
-            url_value("https://example.com/docs/report.pdf?a=1&b=2").as_deref(),
-            Some("https://example.com/docs/report.pdf?a=1&b=2")
-        );
-        assert_eq!(
-            url_value("http://example.com/image.png").as_deref(),
-            Some("http://example.com/image.png")
-        );
-        assert_eq!(
-            url_value("  https://example.com/page  ").as_deref(),
-            Some("https://example.com/page")
-        );
-        assert_eq!(
-            url_value("https://example.com/x?a=1&amp;b=2").as_deref(),
-            Some("https://example.com/x?a=1&b=2")
-        );
-    }
-
-    #[test]
-    fn url_value_rejects_non_urls_and_urls_with_whitespace() {
-        assert!(url_value("").is_none());
-        assert!(url_value("/home/raina/report.pdf").is_none());
-        assert!(url_value("file:///home/raina/report.pdf").is_none());
-        assert!(url_value("See https://example.com for details").is_none());
-        assert!(url_value("https://example.com\npage").is_none());
-        assert!(url_value("ftp://example.com/resource").is_none());
     }
 }
 

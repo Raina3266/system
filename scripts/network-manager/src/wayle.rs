@@ -14,7 +14,9 @@ pub async fn print_wifi_info(manager: &NetworkManager, expected_ssid: &str) -> A
         .wifi
         .iter()
         .find(|entry| entry.connected && entry.ssid() == expected_ssid)
-        .ok_or_else(|| io::Error::other("the Wi-Fi connection changed while reading its details"))?;
+        .ok_or_else(|| {
+            io::Error::other("the Wi-Fi connection changed while reading its details")
+        })?;
     let info = manager.show_details(&entry.network).await?;
 
     let profile = entry
@@ -106,11 +108,12 @@ pub async fn write_wifi_qr(manager: &NetworkManager, expected_ssid: &str) -> App
         .wifi
         .iter()
         .find(|entry| entry.connected && entry.ssid() == expected_ssid)
-        .ok_or_else(|| io::Error::other("the Wi-Fi connection changed while creating its QR code"))?;
-    let saved = entry
-        .saved
-        .as_ref()
-        .ok_or_else(|| io::Error::other("no saved NetworkManager profile was found for this connection"))?;
+        .ok_or_else(|| {
+            io::Error::other("the Wi-Fi connection changed while creating its QR code")
+        })?;
+    let saved = entry.saved.as_ref().ok_or_else(|| {
+        io::Error::other("no saved NetworkManager profile was found for this connection")
+    })?;
 
     if entry.security_kind() == SecurityKind::Enterprise {
         return Err(io::Error::other(
@@ -150,19 +153,26 @@ pub async fn write_wifi_qr(manager: &NetworkManager, expected_ssid: &str) -> App
         SecurityKind::Personal => {
             let password = saved_secret(&saved.uuid, "802-11-wireless-security.psk")
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| io::Error::other("NetworkManager did not return the saved WPA password"))?;
+                .ok_or_else(|| {
+                    io::Error::other("NetworkManager did not return the saved WPA password")
+                })?;
             ("WPA", Some(password))
         }
         SecurityKind::Legacy => {
             let password = saved_secret(&saved.uuid, "802-11-wireless-security.wep-key0")
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| io::Error::other("NetworkManager did not return the saved WEP key"))?;
+                .ok_or_else(|| {
+                    io::Error::other("NetworkManager did not return the saved WEP key")
+                })?;
             ("WEP", Some(password))
         }
         SecurityKind::Enterprise | SecurityKind::EnhancedOpen => unreachable!(),
     };
 
-    if matches!(key_mgmt.as_str(), "wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x") {
+    if matches!(
+        key_mgmt.as_str(),
+        "wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x"
+    ) {
         return Err(io::Error::other(
             "enterprise Wi-Fi credentials cannot be represented by this QR format",
         )
@@ -204,7 +214,11 @@ fn device_dns(interface: &str) -> Vec<String> {
         return Vec::new();
     };
     let mut servers = Vec::new();
-    for value in values.lines().map(str::trim).filter(|value| !value.is_empty()) {
+    for value in values
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         if !servers.iter().any(|server| server == value) {
             servers.push(value.to_owned());
         }
@@ -263,7 +277,7 @@ fn qrencode_binary() -> PathBuf {
         .unwrap_or_else(|| Path::new("qrencode").to_path_buf())
 }
 
-fn frequency_band(frequency: u32) -> &'static str {
+pub(crate) fn frequency_band(frequency: u32) -> &'static str {
     if frequency >= 59_400 {
         "60 GHz"
     } else if frequency >= 5_925 {
@@ -275,7 +289,7 @@ fn frequency_band(frequency: u32) -> &'static str {
     }
 }
 
-fn wifi_qr_payload(
+pub(crate) fn wifi_qr_payload(
     ssid: &str,
     authentication: &str,
     password: Option<&str>,
@@ -304,32 +318,4 @@ fn wifi_qr_escape(value: &str) -> String {
         escaped.push(character);
     }
     escaped
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn payload_escapes_wifi_qr_delimiters() {
-        assert_eq!(
-            wifi_qr_payload("Cafe;Guest", "WPA", Some("a:b,c\\d"), false),
-            "WIFI:T:WPA;S:Cafe\\;Guest;P:a\\:b\\,c\\\\d;H:false;;"
-        );
-    }
-
-    #[test]
-    fn frequency_bands_include_wifi_6e() {
-        assert_eq!(frequency_band(2_437), "2.4 GHz");
-        assert_eq!(frequency_band(5_180), "5 GHz");
-        assert_eq!(frequency_band(6_115), "6 GHz");
-    }
-
-    #[test]
-    fn payload_marks_hidden_open_networks() {
-        assert_eq!(
-            wifi_qr_payload("Hidden", "nopass", None, true),
-            "WIFI:T:nopass;S:Hidden;H:true;;"
-        );
-    }
 }

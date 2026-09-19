@@ -13,7 +13,7 @@ use crate::{
 
 const FIELD_SEPARATOR: u8 = 0;
 
-fn kind(value: &str) -> AppResult<AudioKind> {
+pub(crate) fn kind(value: &str) -> AppResult<AudioKind> {
     match value {
         "output" => Ok(AudioKind::Output),
         "input" => Ok(AudioKind::Input),
@@ -43,7 +43,7 @@ pub fn set_default(value: &str, key: &str) -> AppResult<()> {
     audio::set_default(entry)
 }
 
-fn write_entries(mut output: impl Write, entries: &[AudioEntry]) -> AppResult<()> {
+pub(crate) fn write_entries(mut output: impl Write, entries: &[AudioEntry]) -> AppResult<()> {
     for entry in entries {
         for field in [
             entry.key.as_str(),
@@ -60,44 +60,4 @@ fn write_entries(mut output: impl Write, entries: &[AudioEntry]) -> AppResult<()
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn entry(default: bool) -> AudioEntry {
-        AudioEntry {
-            key: "card-output:01:port:02".into(),
-            kind: AudioKind::Output,
-            name: "alsa_output.pci".into(),
-            card: Some("alsa_card.pci".into()),
-            description: "Alder Lake Controller — Headphones".into(),
-            label: "Headphones".into(),
-            volume: 50,
-            muted: false,
-            default,
-            port: Some("[Out] Headphones".into()),
-        }
-    }
-
-    #[test]
-    fn bridge_rows_have_fixed_nul_delimited_fields() {
-        let mut bytes = Vec::new();
-        write_entries(&mut bytes, &[entry(true), entry(false)]).unwrap();
-        let mut fields: Vec<_> = bytes.split(|byte| *byte == 0).collect();
-        assert_eq!(fields.pop(), Some(&[][..]));
-        assert_eq!(fields.len(), 10);
-        assert_eq!(fields[0], b"card-output:01:port:02");
-        assert_eq!(fields[1], b"Headphones");
-        assert_eq!(fields[4], b"1");
-        assert_eq!(fields[9], b"0");
-    }
-
-    #[test]
-    fn only_device_tabs_are_accepted() {
-        assert_eq!(kind("output").unwrap(), AudioKind::Output);
-        assert_eq!(kind("input").unwrap(), AudioKind::Input);
-        assert!(kind("playback").is_err());
-    }
 }

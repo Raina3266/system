@@ -149,17 +149,3 @@ pub fn json_escape(value: &str) -> String {
     }
     escaped
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn waybar_json_escapes_markup_tooltips_safely() {
-        assert_eq!(
-            json_escape("A \"network\"\nline"),
-            "A \\\"network\\\"\\nline"
-        );
-    }
-
-}

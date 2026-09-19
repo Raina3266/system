@@ -8,6 +8,9 @@ mod model;
 mod network;
 mod wayle;
 
+#[cfg(test)]
+mod tests;
+
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
 

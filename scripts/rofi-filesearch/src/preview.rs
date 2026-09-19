@@ -16,7 +16,7 @@ use crate::model::{Mode, mode_from_key, path_from_key};
 
 pub const SOCKET_ENV: &str = "ROFI_FILESEARCH_PREVIEW_SOCKET";
 const UPDATE_TEXT: u8 = 1;
-const CLOSE: u8 = 2;
+pub(crate) const CLOSE: u8 = 2;
 const UPDATE_IMAGE: u8 = 3;
 const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -27,7 +27,7 @@ enum PanelContent {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PreviewKind {
+pub(crate) enum PreviewKind {
     Text,
     Image,
     Pdf,
@@ -99,7 +99,7 @@ pub fn selection_changed(key: &str, serial: u64) -> AppResult<()> {
     update_at(&socket, &file, &content, serial)
 }
 
-fn preview_file_from_key(key: &str) -> Option<PathBuf> {
+pub(crate) fn preview_file_from_key(key: &str) -> Option<PathBuf> {
     let mode = mode_from_key(key)?;
     if !matches!(mode, Mode::File | Mode::Folder) {
         return None;
@@ -136,7 +136,7 @@ fn mime_type(path: &Path) -> AppResult<String> {
     Ok(String::from_utf8(output.stdout)?.trim().to_owned())
 }
 
-fn preview_kind(mime: &str) -> PreviewKind {
+pub(crate) fn preview_kind(mime: &str) -> PreviewKind {
     if mime == "application/pdf" {
         PreviewKind::Pdf
     } else if mime.starts_with("image/") {
@@ -272,10 +272,7 @@ fn render_pdf_to(input: &Path, output: &Path, size: u32) -> AppResult<()> {
 }
 
 fn pdf_render_prefix(output: &Path) -> PathBuf {
-    output.with_file_name(format!(
-        ".rofi-filesearch-pdf-{}",
-        std::process::id()
-    ))
+    output.with_file_name(format!(".rofi-filesearch-pdf-{}", std::process::id()))
 }
 
 fn temporary_path(target: &Path) -> PathBuf {
@@ -300,9 +297,7 @@ fn launch_panel(path: &Path, file: &Path, content: &PanelContent) -> AppResult<(
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
-    command
-        .arg("--layout-file")
-        .arg(crate::rofi::theme_path()?);
+    command.arg("--layout-file").arg(crate::rofi::theme_path()?);
     append_override(
         &mut command,
         "ROFI_FILESEARCH_ROFI_WIDTH",
@@ -392,7 +387,7 @@ fn send(path: &Path, operation: u8, serial: u64, id: u64, content: &[u8]) -> App
     Ok(true)
 }
 
-fn write_frame(
+pub(crate) fn write_frame(
     mut writer: impl Write,
     operation: u8,
     serial: u64,
@@ -433,54 +428,4 @@ fn pdftoppm_binary() -> OsString {
 
 fn ffmpegthumbnailer_binary() -> OsString {
     binary("ROFI_FILESEARCH_FFMPEGTHUMBNAILER", "ffmpegthumbnailer")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::path_key;
-
-    #[test]
-    fn only_requested_preview_families_are_supported() {
-        assert_eq!(preview_kind("text/plain"), PreviewKind::Text);
-        assert_eq!(preview_kind("application/json"), PreviewKind::Text);
-        assert_eq!(preview_kind("image/webp"), PreviewKind::Image);
-        assert_eq!(preview_kind("application/pdf"), PreviewKind::Pdf);
-        assert_eq!(preview_kind("video/mp4"), PreviewKind::Video);
-        assert_eq!(preview_kind("audio/mpeg"), PreviewKind::Unsupported);
-    }
-
-    #[test]
-    fn close_frame_has_no_item_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, CLOSE, 0, &[]).unwrap();
-        assert_eq!(frame.len(), 17);
-        assert_eq!(frame[0], CLOSE);
-    }
-
-    #[test]
-    fn file_and_folder_mode_keys_can_preview_files_but_not_directories() {
-        let root = env::temp_dir().join(format!(
-            "rofi-filesearch-preview-key-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let file = root.join("notes.txt");
-        fs::write(&file, "notes").unwrap();
-
-        assert_eq!(
-            preview_file_from_key(&path_key(Mode::File, &file)),
-            Some(file.clone())
-        );
-        assert_eq!(
-            preview_file_from_key(&path_key(Mode::Folder, &file)),
-            Some(file)
-        );
-        assert_eq!(
-            preview_file_from_key(&path_key(Mode::Folder, &root)),
-            None
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
 }

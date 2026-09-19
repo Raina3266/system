@@ -42,7 +42,7 @@ fn file_entries() -> AppResult<Vec<Entry>> {
         .collect()
 }
 
-fn file_entry(home: &Path, relative: PathBuf) -> AppResult<Entry> {
+pub(crate) fn file_entry(home: &Path, relative: PathBuf) -> AppResult<Entry> {
     let path = home.join(&relative);
     let name = path
         .file_name()
@@ -141,68 +141,4 @@ pub fn abbreviate_home(path: &Path, home: &Path) -> String {
 
 fn fd_binary() -> OsString {
     env::var_os("ROFI_FILESEARCH_FD").unwrap_or_else(|| OsString::from("fd"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn home_paths_are_abbreviated_for_the_second_file_line() {
-        let home = Path::new("/home/raina");
-        assert_eq!(abbreviate_home(Path::new("/home/raina"), home), "~");
-        assert_eq!(
-            abbreviate_home(Path::new("/home/raina/Documents/PDF"), home),
-            "~/Documents/PDF"
-        );
-    }
-
-    #[test]
-    fn only_file_rows_contain_a_second_display_line() {
-        let home = Path::new("/home/raina");
-        let relative = PathBuf::from("Documents/notes.txt");
-        let file = file_entry(home, relative).unwrap();
-        assert!(file.display.contains('\u{2029}'));
-    }
-
-    #[test]
-    fn folder_root_lists_only_visible_home_directories() {
-        let home = test_home("root");
-        fs::create_dir_all(home.join("Documents")).unwrap();
-        fs::create_dir_all(home.join(".hidden")).unwrap();
-        fs::write(home.join("notes.txt"), "notes").unwrap();
-
-        let entries = folder_entries(&home, &home).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].display, "Documents");
-        fs::remove_dir_all(home).unwrap();
-    }
-
-    #[test]
-    fn nested_folder_lists_parent_folders_then_files() {
-        let home = test_home("nested");
-        let current = home.join("Documents");
-        fs::create_dir_all(current.join("Projects")).unwrap();
-        fs::write(current.join("notes.txt"), "notes").unwrap();
-
-        let entries = folder_entries(&home, &current).unwrap();
-        let displays = entries
-            .iter()
-            .map(|entry| entry.display.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(displays, ["󰁞  ..", "Projects", "notes.txt"]);
-        assert!(
-            entries
-                .iter()
-                .all(|entry| !entry.display.contains('\u{2029}'))
-        );
-        fs::remove_dir_all(home).unwrap();
-    }
-
-    fn test_home(name: &str) -> PathBuf {
-        let path = env::temp_dir().join(format!("rofi-filesearch-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
 }

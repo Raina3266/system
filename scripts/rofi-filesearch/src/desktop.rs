@@ -105,7 +105,7 @@ fn parse_entry(path: &Path) -> AppResult<Option<Entry>> {
     )))
 }
 
-fn desktop_fields(content: &str) -> HashMap<String, String> {
+pub(crate) fn desktop_fields(content: &str) -> HashMap<String, String> {
     let mut fields = HashMap::new();
     let mut in_desktop_entry = false;
     for raw_line in content.lines() {
@@ -162,7 +162,7 @@ fn locale_candidates() -> Vec<String> {
     candidates
 }
 
-fn desktop_unescape(value: &str) -> String {
+pub(crate) fn desktop_unescape(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut characters = value.chars();
     while let Some(character) = characters.next() {
@@ -182,26 +182,4 @@ fn desktop_unescape(value: &str) -> String {
         }
     }
     output
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn desktop_parser_only_reads_the_desktop_entry_group() {
-        let fields = desktop_fields(
-            "[Desktop Entry]\nType=Application\nName=Raina & App\n\
-             [Desktop Action New]\nName=Wrong name\n",
-        );
-        assert_eq!(fields.get("Name").map(String::as_str), Some("Raina & App"));
-    }
-
-    #[test]
-    fn desktop_escapes_are_decoded() {
-        assert_eq!(
-            desktop_unescape(r"Line\sOne\nLine\sTwo"),
-            "Line One\nLine Two"
-        );
-    }
 }

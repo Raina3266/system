@@ -12,15 +12,13 @@ use crate::model::{
     AudioEntry, AudioKind, StreamEntry, hex_encode, short_device_name, single_line,
 };
 
-mod profiles;
-
 /// Volume step, in percent, for one press of the volume buttons.
 pub const STEP: i16 = 5;
 
 /// `SinkController` and `SourceController` implement the same `DeviceControl`
 /// trait but are distinct types, so one small enum lets every operation below
 /// be written once for outputs and inputs alike.
-enum Controller {
+pub(crate) enum Controller {
     Sink(SinkController),
     Source(SourceController),
 }
@@ -164,7 +162,7 @@ fn move_stream_to(
     controller.change(|api, done| api.move_sink_input_by_index(app.index, device.index, Some(done)))
 }
 
-fn available_port<'a>(ports: &'a [DevicePortInfo], name: &str) -> AppResult<&'a str> {
+pub(crate) fn available_port<'a>(ports: &'a [DevicePortInfo], name: &str) -> AppResult<&'a str> {
     ports
         .iter()
         .find(|p| p.name.as_deref() == Some(name))
@@ -224,7 +222,7 @@ fn stream_key(app: &ApplicationInfo) -> String {
     )
 }
 
-fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
+pub(crate) fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
     // The PipeWire object serial protects a picker from stream-index reuse.
     // Native PulseAudio uses monotonically allocated stream/client indices.
     format!(
@@ -315,7 +313,10 @@ fn snapshot_with_rows(
 /// Ports carry the useful difference (Speakers, Headphones, HDMI/DisplayPort
 /// number). Only repeat the hardware name when two choices would otherwise
 /// look identical. Keep all identifiers and full search descriptions intact.
-fn clarify_selection_labels(entries: &mut [AudioEntry], device_labels: &HashMap<String, String>) {
+pub(crate) fn clarify_selection_labels(
+    entries: &mut [AudioEntry],
+    device_labels: &HashMap<String, String>,
+) {
     let labels: Vec<_> = entries.iter().map(|e| e.label.to_lowercase()).collect();
     for (entry, label) in entries.iter_mut().zip(&labels) {
         if labels.iter().filter(|other| *other == label).count() > 1
@@ -388,18 +389,18 @@ pub fn nudge_volume(entry: &AudioEntry, delta: i16) -> AppResult<u8> {
     Ok(percent(&volumes))
 }
 
-fn require_live_output(entry: &AudioEntry) -> AppResult<()> {
+pub(crate) fn require_live_output(entry: &AudioEntry) -> AppResult<()> {
     if entry.inactive() {
         return Err(io::Error::other("Select this output first").into());
     }
     Ok(())
 }
 
-fn volume_target(current: u8, kind: AudioKind, delta: i16) -> u8 {
+pub(crate) fn volume_target(current: u8, kind: AudioKind, delta: i16) -> u8 {
     (i16::from(current) + delta).clamp(0, kind.maximum()) as u8
 }
 
-fn adjusted_volume(
+pub(crate) fn adjusted_volume(
     mut volume: ChannelVolumes,
     kind: AudioKind,
     delta: i16,
@@ -457,7 +458,11 @@ fn entry(kind: AudioKind, device: &DeviceInfo, default_name: Option<&str>) -> Op
     })
 }
 
-fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -> Vec<AudioEntry> {
+pub(crate) fn port_rows(
+    base: AudioEntry,
+    ports: &[DevicePortInfo],
+    active: Option<&str>,
+) -> Vec<AudioEntry> {
     // USB/Bluetooth/virtual devices without named ports still get one row.
     if !ports
         .iter()
@@ -491,347 +496,470 @@ fn port_rows(base: AudioEntry, ports: &[DevicePortInfo], active: Option<&str>) -
         .collect()
 }
 
-fn percent(volumes: &ChannelVolumes) -> u8 {
+pub(crate) fn percent(volumes: &ChannelVolumes) -> u8 {
     let normal = f64::from(Volume::NORMAL.0);
     let average = f64::from(volumes.avg().0);
     ((average / normal) * 100.0).round().clamp(0.0, 255.0) as u8
 }
 
-fn from_percent(percent: u8) -> Volume {
+pub(crate) fn from_percent(percent: u8) -> Volume {
     let normal = f64::from(Volume::NORMAL.0);
     Volume((normal * f64::from(percent) / 100.0).round() as u32)
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod profiles {
+    //! ALSA outputs that are exposed by mutually exclusive card profiles.
+    //! Card/port names are the identity; sink names and indexes are re-resolved.
+    use std::{cell::RefCell, thread, time::Duration};
+
+    use libpulse_binding::{callbacks::ListResult, context::introspect::CardInfo, direction};
+
     use super::*;
 
-    fn device(kind: AudioKind) -> AudioEntry {
-        AudioEntry {
-            key: format!("{}:{}", kind.key_prefix(), hex_encode("built-in")),
-            kind,
-            name: "built-in".into(),
-            card: None,
-            description: "Built-in Audio Analog Stereo".into(),
-            label: "Built-in Audio".into(),
-            volume: 65,
-            muted: true,
-            default: true,
-            port: None,
-        }
+    #[derive(Clone, Debug)]
+    pub(crate) struct Card {
+        pub(crate) index: u32,
+        pub name: String,
+        pub label: String,
+        pub(crate) active: String,
+        pub(crate) profiles: Vec<Profile>,
+        pub(crate) ports: Vec<Port>,
     }
 
-    fn port(name: &str, label: &str, available: PortAvailable) -> DevicePortInfo {
-        DevicePortInfo {
-            name: Some(name.into()),
-            description: Some(label.into()),
-            priority: 100,
-            available,
-        }
+    #[derive(Clone, Debug)]
+    pub(crate) struct Profile {
+        pub(crate) name: String,
+        pub(crate) available: bool,
+        pub(crate) sinks: u32,
+        pub(crate) sources: u32,
+        pub(crate) priority: u32,
     }
 
-    #[test]
-    fn output_and_input_ports_are_distinct_rows_with_only_the_active_default_marked() {
-        for (kind, labels) in [
-            (AudioKind::Output, ["Speakers", "Headphones"]),
-            (AudioKind::Input, ["Internal microphone", "Microphone jack"]),
-        ] {
-            let ports = [
-                port("internal", labels[0], PortAvailable::Yes),
-                port("jack", labels[1], PortAvailable::Yes),
-            ];
-            let rows = port_rows(device(kind), &ports, Some("jack"));
-            assert_eq!(rows.len(), 2);
-            assert_ne!(rows[0].key, rows[1].key);
-            assert_eq!(rows[0].port.as_deref(), Some("internal"));
-            assert_eq!(rows[1].port.as_deref(), Some("jack"));
-            assert!(!rows[0].default);
-            assert!(rows[1].default);
-            for (row, label) in rows.iter().zip(labels) {
-                assert_eq!(row.name, "built-in");
-                assert_eq!(row.label, label);
-                assert!(row.description.contains(label));
-                assert_eq!(row.volume, 65);
-                assert!(row.muted);
-            }
-            let mut other = device(kind);
-            other.default = false;
-            assert!(
-                port_rows(other, &ports, Some("jack"))
+    #[derive(Clone, Debug)]
+    pub(crate) struct Port {
+        pub(crate) name: String,
+        pub(crate) label: String,
+        pub(crate) output: bool,
+        pub(crate) available: PortAvailable,
+        pub(crate) profiles: Vec<String>,
+    }
+
+    #[derive(Clone, Debug)]
+    pub(crate) struct Output {
+        pub(crate) card: Option<u32>,
+        pub(crate) name: String,
+        pub(crate) ports: Vec<String>,
+    }
+
+    impl Card {
+        fn from_info(info: &CardInfo<'_>) -> Option<Self> {
+            let name = info
+                .name
+                .as_deref()
+                .filter(|name| !name.is_empty())?
+                .to_owned();
+            Some(Self {
+                index: info.index,
+                label: info
+                    .proplist
+                    .get_str("device.description")
+                    .unwrap_or_else(|| name.clone()),
+                name,
+                active: info
+                    .active_profile
+                    .as_ref()
+                    .and_then(|p| p.name.as_deref())
+                    .unwrap_or_default()
+                    .into(),
+                profiles: info
+                    .profiles
                     .iter()
-                    .all(|r| !r.default)
-            );
-            assert!(
-                port_rows(device(kind), &ports, None)
+                    .filter_map(|p| {
+                        Some(Profile {
+                            name: p.name.as_deref()?.into(),
+                            available: p.available,
+                            sinks: p.n_sinks,
+                            sources: p.n_sources,
+                            priority: p.priority,
+                        })
+                    })
+                    .collect(),
+                ports: info
+                    .ports
                     .iter()
-                    .all(|r| !r.default)
-            );
-        }
-    }
-
-    #[test]
-    fn unavailable_ports_are_hidden_but_unknown_availability_is_allowed() {
-        let ports = [
-            port("speaker", "Speakers", PortAvailable::Unknown),
-            port("jack", "Headphones", PortAvailable::No),
-        ];
-        let rows = port_rows(device(AudioKind::Output), &ports, Some("speaker"));
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].port.as_deref(), Some("speaker"));
-        // Do not add a generic row that would bypass unavailable-port checks.
-        assert!(port_rows(device(AudioKind::Output), &ports[1..], Some("jack")).is_empty());
-    }
-
-    #[test]
-    fn devices_without_named_ports_keep_a_single_device_row() {
-        let base = device(AudioKind::Output);
-        let mut unnamed = port("", "", PortAvailable::Unknown);
-        unnamed.name = None;
-        for ports in [
-            vec![],
-            vec![unnamed],
-            vec![port("", "", PortAvailable::Unknown)],
-        ] {
-            let rows = port_rows(base.clone(), &ports, None);
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].key, base.key);
-            assert_eq!(rows[0].label, base.label);
-            assert!(rows[0].port.is_none());
-            assert!(rows[0].default);
-        }
-    }
-
-    #[test]
-    fn port_identity_uses_names_not_labels_and_survives_active_port_changes() {
-        let ports = [
-            port("jack:one;🎧", "Headphones", PortAvailable::Yes),
-            port("jack:two", "Headphones", PortAvailable::Yes),
-        ];
-        let before = port_rows(device(AudioKind::Output), &ports, Some("jack:one;🎧"));
-        let after = port_rows(device(AudioKind::Output), &ports, Some("jack:two"));
-        assert_ne!(before[0].key, before[1].key);
-        assert_eq!(before[0].key, after[0].key);
-        assert_eq!(before[1].key, after[1].key);
-        assert!(before[0].key.is_ascii());
-        assert!(!before[0].key.contains(';'));
-        let mut other = device(AudioKind::Output);
-        other.key = format!("sink:{}", hex_encode("usb"));
-        assert_ne!(before[0].key, port_rows(other, &ports, None)[0].key);
-        assert_ne!(
-            before[0].key,
-            port_rows(device(AudioKind::Input), &ports, None)[0].key
-        );
-    }
-
-    #[test]
-    fn routing_choices_mark_only_the_streams_active_port() {
-        for on_stream_device in [true, false] {
-            let mut base = device(AudioKind::Output);
-            base.default = on_stream_device;
-            let ports = [
-                port("speaker", "Speaker", PortAvailable::Unknown),
-                port("jack", "Headphones", PortAvailable::Yes),
-            ];
-            let choices: Vec<_> = port_rows(base, &ports, Some("jack"))
-                .into_iter()
-                .map(crate::model::ChoiceEntry::route)
-                .collect();
-            assert_eq!(choices.len(), 2);
-            assert_eq!(choices[0].label, "Speaker");
-            assert_eq!(choices[1].label, "Headphones");
-            assert!(!choices[0].active);
-            assert_eq!(choices[1].active, on_stream_device);
-            assert!(choices.iter().all(|choice| choice.enabled));
-            assert_ne!(choices[0].key, choices[1].key);
-        }
-    }
-
-    #[test]
-    fn routing_choices_without_ports_keep_the_device_name() {
-        let mut base = device(AudioKind::Output);
-        base.label = "WH-1000XM4".into();
-        let rows = port_rows(base.clone(), &[], None);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].label, "WH-1000XM4");
-        assert_eq!(rows[0].key, base.key);
-    }
-
-    #[test]
-    fn routing_choices_disambiguate_identical_port_names() {
-        let mut usb = device(AudioKind::Output);
-        usb.name = "usb".into();
-        usb.key = format!("sink:{}", hex_encode(&usb.name));
-        let ports = [port("speaker", "Speakers", PortAvailable::Unknown)];
-        let mut rows: Vec<_> = [device(AudioKind::Output), usb]
-            .into_iter()
-            .flat_map(|base| port_rows(base, &ports, Some("speaker")))
-            .collect();
-        clarify_selection_labels(
-            &mut rows,
-            &HashMap::from([
-                ("built-in".into(), "Built-in Audio".into()),
-                ("usb".into(), "USB Audio".into()),
-            ]),
-        );
-        assert_eq!(rows[0].label, "Speakers — Built-in Audio");
-        assert_eq!(rows[1].label, "Speakers — USB Audio");
-        assert!(
-            rows.iter()
-                .all(|row| row.port.as_deref() == Some("speaker"))
-        );
-        assert_ne!(rows[0].key, rows[1].key);
-    }
-
-    #[test]
-    fn long_hardware_names_do_not_hide_the_port() {
-        let mut base = device(AudioKind::Output);
-        base.description = "An extremely long descriptive device name for a sound card".into();
-        let ports = [port("jack", "Headphones", PortAvailable::Yes)];
-        let rows = port_rows(base, &ports, Some("jack"));
-        assert_eq!(rows[0].label, "Headphones");
-        assert!(rows[0].row_label().ends_with("Headphones"));
-    }
-
-    #[test]
-    fn hdmi_port_numbers_survive_without_repeated_chipset_names() {
-        let mut base = device(AudioKind::Output);
-        base.description = "Alder Lake PCH-P HDMI / DisplayPort".into();
-        let ports = [
-            port("hdmi-1", "HDMI / DisplayPort 1", PortAvailable::Yes),
-            port("hdmi-2", "HDMI / DisplayPort 2", PortAvailable::Yes),
-        ];
-        let mut rows = port_rows(base, &ports, Some("hdmi-1"));
-        clarify_selection_labels(&mut rows, &HashMap::new());
-        assert_eq!(rows[0].label, "HDMI / DisplayPort 1");
-        assert_eq!(rows[1].label, "HDMI / DisplayPort 2");
-        assert!(rows[0].description.contains("Alder Lake PCH-P"));
-        assert!(rows[0].row_label().ends_with('1'));
-        assert!(rows[1].row_label().ends_with('2'));
-    }
-
-    #[test]
-    fn identical_port_labels_only_add_hardware_context_when_needed() {
-        for kind in [AudioKind::Output, AudioKind::Input] {
-            let ports = [port("jack", "Headphones", PortAvailable::Yes)];
-            let mut usb = device(kind);
-            usb.name = "usb".into();
-            usb.key = format!("{}:{}", kind.key_prefix(), hex_encode(&usb.name));
-            let mut rows = port_rows(device(kind), &ports, Some("jack"));
-            rows.extend(port_rows(usb, &ports, Some("jack")));
-            let keys: Vec<_> = rows.iter().map(|e| e.key.clone()).collect();
-            let names = HashMap::from([
-                ("built-in".into(), "Built-in Audio".into()),
-                ("usb".into(), "USB Headset".into()),
-            ]);
-            clarify_selection_labels(&mut rows, &names);
-            assert_eq!(rows[0].label, "Headphones — Built-in Audio");
-            assert_eq!(rows[1].label, "Headphones — USB Headset");
-            assert_eq!(rows.iter().map(|e| e.key.clone()).collect::<Vec<_>>(), keys);
-            assert!(rows.iter().all(|e| e.port.as_deref() == Some("jack")));
-        }
-    }
-
-    #[test]
-    fn identical_models_and_clipped_labels_still_have_distinct_rows() {
-        let ports = [
-            port("jack-1", "Headphones", PortAvailable::Yes),
-            port("jack-2", "Headphones", PortAvailable::Yes),
-        ];
-        let mut rows = port_rows(device(AudioKind::Output), &ports, Some("jack-1"));
-        clarify_selection_labels(&mut rows, &HashMap::new());
-        assert_eq!(rows[0].label, "#1 Headphones");
-        assert_eq!(rows[1].label, "#2 Headphones");
-        assert_ne!(rows[0].key, rows[1].key);
-
-        for (i, row) in rows.iter_mut().enumerate() {
-            row.label = format!("{} {i}", "Long device name ".repeat(10));
-        }
-        clarify_selection_labels(&mut rows, &HashMap::new());
-        assert_ne!(rows[0].row_label(), rows[1].row_label());
-    }
-
-    #[test]
-    fn unique_bluetooth_usb_and_virtual_device_names_are_unchanged() {
-        let mut rows: Vec<_> = ["WH-1000XM4", "Scarlett 2i2 USB", "Virtual Output"]
-            .into_iter()
-            .map(|label| AudioEntry {
-                label: label.into(),
-                ..device(AudioKind::Output)
+                    .filter_map(|p| {
+                        let name = p.name.as_deref().filter(|name| !name.is_empty())?;
+                        Some(Port {
+                            name: name.into(),
+                            label: p
+                                .description
+                                .as_deref()
+                                .filter(|label| !label.is_empty())
+                                .unwrap_or(name)
+                                .into(),
+                            output: p.direction.contains(direction::FlagSet::OUTPUT),
+                            available: p.available,
+                            profiles: p
+                                .profiles
+                                .iter()
+                                .filter_map(|profile| profile.name.as_deref().map(str::to_owned))
+                                .collect(),
+                        })
+                    })
+                    .collect(),
             })
-            .collect();
-        clarify_selection_labels(&mut rows, &HashMap::new());
-        assert_eq!(rows[0].label, "WH-1000XM4");
-        assert_eq!(rows[1].label, "Scarlett 2i2 USB");
-        assert_eq!(rows[2].label, "Virtual Output");
-    }
+        }
 
-    #[test]
-    fn selecting_a_missing_or_unplugged_port_is_rejected() {
-        let ports = [
-            port("speaker", "Speakers", PortAvailable::Unknown),
-            port("jack", "Headphones", PortAvailable::No),
-        ];
-        assert_eq!(available_port(&ports, "speaker").unwrap(), "speaker");
-        assert!(available_port(&ports, "jack").is_err());
-        assert!(available_port(&ports, "removed").is_err());
-    }
-
-    #[test]
-    fn percentages_round_trip_through_pulseaudio_volume_units() {
-        for level in [0_u8, 5, 33, 50, 66, 100, 125, 150] {
-            let mut volumes = ChannelVolumes::default();
-            volumes.set(2, from_percent(level));
-            assert_eq!(percent(&volumes), level);
+        fn output_port(&self, name: &str) -> AppResult<&Port> {
+            if !self.name.starts_with("alsa_card.") {
+                return Err(io::Error::other(
+                    "Automatic profile switching is only supported for ALSA outputs",
+                )
+                .into());
+            }
+            self.ports
+                .iter()
+                .find(|p| p.name == name && p.output && p.available != PortAvailable::No)
+                .ok_or_else(|| {
+                    io::Error::other("The selected output is no longer available").into()
+                })
         }
     }
 
-    #[test]
-    fn normal_volume_is_exactly_one_hundred_percent() {
-        let mut volumes = ChannelVolumes::default();
-        volumes.set(2, Volume::NORMAL);
-        assert_eq!(percent(&volumes), 100);
-        assert_eq!(from_percent(100), Volume::NORMAL);
-        assert_eq!(from_percent(0), Volume::MUTED);
+    pub(crate) fn cards(controller: &mut Controller) -> AppResult<Vec<Card>> {
+        let result = Rc::new(RefCell::new(Vec::new()));
+        let result_cb = result.clone();
+        let complete = Rc::new(Cell::new(false));
+        let complete_cb = complete.clone();
+        let handler = controller.handler();
+        let op = handler
+            .introspect
+            .get_card_info_list(move |item| match item {
+                ListResult::Item(info) => {
+                    if let Some(card) = Card::from_info(info) {
+                        result_cb.borrow_mut().push(card);
+                    }
+                }
+                ListResult::End => complete_cb.set(true),
+                ListResult::Error => complete_cb.set(false),
+            });
+        handler.wait_for_operation(op)?;
+        if !complete.get() {
+            return Err(io::Error::other("Cannot read audio card profiles").into());
+        }
+        let cards = std::mem::take(&mut *result.borrow_mut());
+        Ok(cards)
     }
 
-    #[test]
-    fn output_can_amplify_but_input_stays_at_one_hundred() {
-        assert_eq!(volume_target(100, AudioKind::Output, STEP), 105);
-        assert_eq!(volume_target(148, AudioKind::Output, STEP), 150);
-        assert_eq!(volume_target(150, AudioKind::Output, STEP), 150);
-        assert_eq!(volume_target(100, AudioKind::Input, STEP), 100);
-        assert_eq!(volume_target(97, AudioKind::Input, STEP), 100);
-        assert_eq!(volume_target(3, AudioKind::Output, -STEP), 0);
-        assert_eq!(volume_target(0, AudioKind::Input, -STEP), 0);
+    pub(crate) fn outputs(devices: &[DeviceInfo]) -> Vec<Output> {
+        devices
+            .iter()
+            .filter_map(|device| {
+                Some(Output {
+                    card: device.card,
+                    name: device.name.as_ref()?.clone(),
+                    ports: device
+                        .ports
+                        .iter()
+                        .filter(|p| p.available != PortAvailable::No)
+                        .filter_map(|p| p.name.clone())
+                        .collect(),
+                })
+            })
+            .collect()
     }
 
-    #[test]
-    fn nudges_preserve_existing_channel_balance() {
-        let mut volume = ChannelVolumes::default();
-        volume.set(2, from_percent(60));
-        volume.get_mut()[0] = from_percent(30);
-        let adjusted = adjusted_volume(volume, AudioKind::Output, STEP).unwrap();
-        assert_eq!(percent(&adjusted), 50);
-        assert!((i64::from(adjusted.get()[0].0) * 2 - i64::from(adjusted.get()[1].0)).abs() <= 2);
-        let limited = adjusted_volume(adjusted, AudioKind::Output, 200).unwrap();
-        assert!(limited.max().0 <= from_percent(150).0);
+    pub(crate) fn key(card: &str, port: &str) -> String {
+        format!("card-output:{}:port:{}", hex_encode(card), hex_encode(port))
     }
 
-    #[test]
-    fn zero_volume_can_be_raised() {
-        let mut volume = ChannelVolumes::default();
-        volume.set(2, Volume::MUTED);
-        assert_eq!(
-            percent(&adjusted_volume(volume, AudioKind::Output, STEP).unwrap()),
-            5
-        );
+    /// Prefer the current profile, then the one retaining the most existing ports.
+    /// Never automatically drop microphone ports/input devices of the current profile.
+    /// Bluetooth codecs and profiles without an explicit port association are excluded.
+    pub(crate) fn profile_for<'a>(card: &'a Card, port: &Port) -> Option<&'a str> {
+        if !card.name.starts_with("alsa_card.")
+            || !port.output
+            || port.available == PortAvailable::No
+        {
+            return None;
+        }
+        let active = card.profiles.iter().find(|p| p.name == card.active);
+        card.profiles
+            .iter()
+            .filter(|profile| {
+                profile.available
+                    && profile.sinks > 0
+                    && port.profiles.contains(&profile.name)
+                    && active.is_none_or(|active| profile.sources >= active.sources)
+                    && card
+                        .ports
+                        .iter()
+                        .filter(|p| !p.output && p.profiles.contains(&card.active))
+                        .all(|p| p.profiles.contains(&profile.name))
+            })
+            .max_by(|left, right| {
+                let rank = |profile: &Profile| {
+                    (
+                        profile.name == card.active,
+                        card.ports
+                            .iter()
+                            .filter(|p| {
+                                p.profiles.contains(&card.active)
+                                    && p.profiles.contains(&profile.name)
+                            })
+                            .count(),
+                        profile.priority,
+                    )
+                };
+                rank(left)
+                    .cmp(&rank(right))
+                    .then_with(|| right.name.cmp(&left.name))
+            })
+            .map(|profile| profile.name.as_str())
     }
 
-    #[test]
-    fn stream_keys_separate_clients_and_reused_indices() {
-        let key = stream_identity(7, Some(3), "100");
-        assert!(key.starts_with("playback:"));
-        assert_ne!(key, stream_identity(7, Some(4), "100"));
-        assert_ne!(key, stream_identity(7, Some(3), "101"));
+    pub(crate) fn complete_outputs(
+        cards: &[Card],
+        outputs: &[Output],
+        entries: &mut Vec<AudioEntry>,
+    ) {
+        for card in cards
+            .iter()
+            .filter(|card| card.name.starts_with("alsa_card."))
+        {
+            for port in card
+                .ports
+                .iter()
+                .filter(|p| p.output && p.available != PortAvailable::No)
+            {
+                let matches: Vec<_> = entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| {
+                        entry.port.as_deref() == Some(port.name.as_str())
+                            && outputs.iter().any(|output| {
+                                output.card == Some(card.index) && output.name == entry.name
+                            })
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                match matches.as_slice() {
+                    [index] => {
+                        let entry = &mut entries[*index];
+                        entry.key = key(&card.name, &port.name);
+                        entry.card = Some(card.name.clone());
+                    }
+                    [] if profile_for(card, port).is_some() => entries.push(AudioEntry {
+                        key: key(&card.name, &port.name),
+                        kind: AudioKind::Output,
+                        name: String::new(),
+                        card: Some(card.name.clone()),
+                        description: format!("{} — {}", card.label, port.label),
+                        label: single_line(&port.label, usize::MAX),
+                        // Not a real sink yet: display an em dash, not a made-up volume.
+                        volume: 0,
+                        muted: false,
+                        default: false,
+                        port: Some(port.name.clone()),
+                    }),
+                    // A card port shared by multiple live sinks is ambiguous. Keep
+                    // their existing device-specific rows rather than merging them.
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub(crate) trait Backend {
+        fn card(&mut self, name: &str) -> AppResult<Card>;
+        fn outputs(&mut self) -> AppResult<Vec<Output>>;
+        fn default_output(&mut self) -> AppResult<Option<String>>;
+        fn set_profile(&mut self, card: &str, profile: &str) -> AppResult<()>;
+        fn set_port(&mut self, output: &Output, port: &str) -> AppResult<()>;
+        fn set_default(&mut self, name: &str) -> AppResult<()>;
+        fn pause(&mut self) {
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    impl Backend for Controller {
+        fn card(&mut self, name: &str) -> AppResult<Card> {
+            cards(self)?
+                .into_iter()
+                .find(|card| card.name == name)
+                .ok_or_else(|| io::Error::other("The selected sound card disappeared").into())
+        }
+
+        fn outputs(&mut self) -> AppResult<Vec<Output>> {
+            Ok(outputs(&self.list_devices()?))
+        }
+
+        fn default_output(&mut self) -> AppResult<Option<String>> {
+            self.default_name()
+        }
+
+        fn set_profile(&mut self, card: &str, profile: &str) -> AppResult<()> {
+            self.change(|api, done| api.set_card_profile_by_name(card, profile, Some(done)))
+        }
+
+        fn set_port(&mut self, output: &Output, port: &str) -> AppResult<()> {
+            let device = self.device_by_name(&output.name)?;
+            if device.card != output.card {
+                return Err(io::Error::other("The selected output changed sound cards").into());
+            }
+            let port = available_port(&device.ports, port)?;
+            if device.active_port.as_ref().and_then(|p| p.name.as_deref()) == Some(port) {
+                return Ok(());
+            }
+            self.change(|api, done| api.set_sink_port_by_name(&output.name, port, Some(done)))
+        }
+
+        fn set_default(&mut self, name: &str) -> AppResult<()> {
+            if self.set_default_device(name)? {
+                Ok(())
+            } else {
+                Err(io::Error::other("Audio server rejected the default output").into())
+            }
+        }
+    }
+
+    pub(crate) fn find_output(
+        outputs: Vec<Output>,
+        card: u32,
+        port: &str,
+    ) -> AppResult<Option<Output>> {
+        let mut matching = outputs
+            .into_iter()
+            .filter(|o| o.card == Some(card) && o.ports.iter().any(|p| p == port));
+        let output = matching.next();
+        if matching.next().is_some() {
+            return Err(io::Error::other("More than one output matches this card port").into());
+        }
+        Ok(output)
+    }
+
+    const POLL_ATTEMPTS: usize = 40;
+
+    fn wait_for_output(
+        backend: &mut impl Backend,
+        original: &Card,
+        port: &str,
+        profile: &str,
+    ) -> AppResult<Output> {
+        for _ in 0..POLL_ATTEMPTS {
+            let card = backend.card(&original.name)?;
+            card.output_port(port)?;
+            if card.active == profile {
+                if let Some(output) = find_output(backend.outputs()?, card.index, port)? {
+                    return Ok(output);
+                }
+            } else if card.active != original.active {
+                return Err(io::Error::other("The audio profile changed elsewhere").into());
+            }
+            backend.pause();
+        }
+        Err(io::Error::other("Timed out waiting for the selected output").into())
+    }
+
+    fn rollback(
+        backend: &mut impl Backend,
+        original: &Card,
+        selected: &str,
+        default: Option<&str>,
+    ) -> AppResult<()> {
+        let current = backend.card(&original.name)?;
+        // Do not overwrite another application's/user's newer profile choice.
+        if current.active != selected {
+            return Err(io::Error::other("Profile changed elsewhere; not restoring it").into());
+        }
+        if !current
+            .profiles
+            .iter()
+            .any(|p| p.name == original.active && p.available)
+        {
+            return Err(io::Error::other("Previous profile is no longer available").into());
+        }
+        backend.set_profile(&original.name, &original.active)?;
+        for _ in 0..POLL_ATTEMPTS {
+            let current = backend.card(&original.name)?;
+            if current.active == original.active {
+                match default {
+                    None => return Ok(()),
+                    Some(name) if backend.outputs()?.iter().any(|o| o.name == name) => {
+                        return backend.set_default(name);
+                    }
+                    _ => {}
+                }
+            } else if current.active != selected {
+                return Err(
+                    io::Error::other("Profile changed elsewhere during restoration").into(),
+                );
+            }
+            backend.pause();
+        }
+        Err(io::Error::other("Previous profile or default output did not return").into())
+    }
+
+    pub(crate) fn activate(controller: &mut Controller, card: &str, port: &str) -> AppResult<()> {
+        activate_with(controller, card, port)
+    }
+
+    pub(crate) fn route(
+        controller: &mut Controller,
+        card: &str,
+        port: &str,
+        stream: &StreamEntry,
+    ) -> AppResult<()> {
+        activate_with_action(controller, card, port, |controller, output| {
+            move_stream_to(controller, stream, output)
+        })
+    }
+
+    pub(crate) fn activate_with(
+        backend: &mut impl Backend,
+        card_name: &str,
+        port_name: &str,
+    ) -> AppResult<()> {
+        activate_with_action(backend, card_name, port_name, |backend, output| {
+            backend.set_default(output)
+        })
+    }
+
+    pub(crate) fn activate_with_action<B: Backend>(
+        backend: &mut B,
+        card_name: &str,
+        port_name: &str,
+        finish: impl FnOnce(&mut B, &str) -> AppResult<()>,
+    ) -> AppResult<()> {
+        let card = backend.card(card_name)?;
+        let port = card.output_port(port_name)?;
+        if let Some(output) = find_output(backend.outputs()?, card.index, port_name)? {
+            backend.set_port(&output, port_name)?;
+            return finish(backend, &output.name);
+        }
+        let profile = profile_for(&card, port)
+            .ok_or_else(|| io::Error::other("No compatible profile for the selected output"))?;
+        let previous_default = backend.default_output()?;
+        let switched = profile != card.active;
+        if switched {
+            backend.set_profile(card_name, profile)?;
+        }
+        let result = (|| {
+            let output = wait_for_output(backend, &card, port_name, profile)?;
+            backend.set_port(&output, port_name)?;
+            finish(backend, &output.name)
+        })();
+        if let Err(error) = result {
+            if switched {
+                let recovery = match rollback(backend, &card, profile, previous_default.as_deref())
+                {
+                    Ok(()) => "Previous profile restored".to_owned(),
+                    Err(restore) => format!("Could not restore: {restore}"),
+                };
+                return Err(io::Error::other(format!("{error}. {recovery}")).into());
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 }

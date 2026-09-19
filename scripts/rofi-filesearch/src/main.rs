@@ -9,6 +9,9 @@ mod preview;
 mod rofi;
 mod search;
 
+#[cfg(test)]
+mod tests;
+
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
 

@@ -14,8 +14,8 @@ use crate::model::{ClipboardItem, ItemKind, url_value};
 use crate::store::ClipboardStore;
 
 const SCREENSHOT_DIRECTORY_ENV: &str = "ROFI_CLIPBOARD_SCREENSHOT_DIR";
-const GNOME_COPIED_FILES_MIME: &str = "x-special/gnome-copied-files";
-const TEXT_URI_LIST_MIME: &str = "text/uri-list";
+pub(crate) const GNOME_COPIED_FILES_MIME: &str = "x-special/gnome-copied-files";
+pub(crate) const TEXT_URI_LIST_MIME: &str = "text/uri-list";
 const SCREENSHOT_MATCH_ATTEMPTS: usize = 20;
 const SCREENSHOT_MATCH_DELAY: Duration = Duration::from_millis(25);
 const SCREENSHOT_CANDIDATE_LIMIT: usize = 16;
@@ -46,7 +46,10 @@ pub fn copy_item(store: &ClipboardStore, id: u64) -> Result<()> {
     Ok(())
 }
 
-fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String, Vec<u8>)> {
+pub(crate) fn copy_payload(
+    store: &ClipboardStore,
+    item: &ClipboardItem,
+) -> Result<(String, Vec<u8>)> {
     if item.kind == ItemKind::File
         && item.image_file.is_none()
         && let Some(path) = item
@@ -63,7 +66,7 @@ fn copy_payload(store: &ClipboardStore, item: &ClipboardItem) -> Result<(String,
     Ok((item.mime.clone(), store.item_bytes(item)?))
 }
 
-fn local_file_copy_payload(path: &Path) -> Vec<u8> {
+pub(crate) fn local_file_copy_payload(path: &Path) -> Vec<u8> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
     // Dolphin and other freedesktop-aware file managers accept local files as
@@ -184,7 +187,7 @@ fn store_file_references(types: &str, watched_bytes: &[u8]) -> Result<bool> {
     Ok(stored)
 }
 
-fn file_reference_payload(mime: &str, clipboard_text: &str, reference: &str) -> String {
+pub(crate) fn file_reference_payload(mime: &str, clipboard_text: &str, reference: &str) -> String {
     let reference = reference.trim();
     if mime == GNOME_COPIED_FILES_MIME {
         let action = clipboard_text
@@ -269,7 +272,7 @@ fn screenshot_image_source(types: &str, bytes: &[u8]) -> Option<String> {
     None
 }
 
-fn is_pathless_png(types: &str) -> bool {
+pub(crate) fn is_pathless_png(types: &str) -> bool {
     let mut types = types.lines().filter(|mime| !mime.is_empty());
     types.next() == Some("image/png") && types.next().is_none()
 }
@@ -286,7 +289,7 @@ fn screenshot_directory() -> Option<PathBuf> {
         })
 }
 
-fn matching_screenshot_path(directory: &Path, bytes: &[u8]) -> Option<PathBuf> {
+pub(crate) fn matching_screenshot_path(directory: &Path, bytes: &[u8]) -> Option<PathBuf> {
     let mut candidates: Vec<_> = fs::read_dir(directory)
         .ok()?
         .filter_map(|entry| {
@@ -307,7 +310,7 @@ fn matching_screenshot_path(directory: &Path, bytes: &[u8]) -> Option<PathBuf> {
         .find_map(|(_, path)| (fs::read(&path).ok().as_deref() == Some(bytes)).then_some(path))
 }
 
-fn is_browser_image_source_mime(mime: &str) -> bool {
+pub(crate) fn is_browser_image_source_mime(mime: &str) -> bool {
     matches!(
         mime.split(';').next().unwrap_or(mime),
         "chromium/x-source-url"
@@ -328,7 +331,7 @@ fn read_clipboard_text(mime: &str) -> Result<Option<String>> {
     Ok(Some(decode_clipboard_text(&output.stdout)))
 }
 
-fn decode_clipboard_text(bytes: &[u8]) -> String {
+pub(crate) fn decode_clipboard_text(bytes: &[u8]) -> String {
     if let Some(bytes) = bytes.strip_prefix(&[0xff, 0xfe]) {
         return decode_utf16(bytes, u16::from_le_bytes);
     }
@@ -380,7 +383,7 @@ fn source_from_value(value: &str) -> Option<String> {
     local_file_path(&value).map(|path| path.to_string_lossy().into_owned())
 }
 
-fn standalone_file_source(text: &str) -> Option<String> {
+pub(crate) fn standalone_file_source(text: &str) -> Option<String> {
     let value = text.trim();
     if value.is_empty() || value.lines().count() != 1 {
         return None;
@@ -388,7 +391,7 @@ fn standalone_file_source(text: &str) -> Option<String> {
     source_from_value(value)
 }
 
-fn image_source_from_html(html: &str) -> Option<String> {
+pub(crate) fn image_source_from_html(html: &str) -> Option<String> {
     let lowercase = html.to_ascii_lowercase();
     let mut offset = 0;
     while let Some(relative_start) = lowercase[offset..].find("<img") {
@@ -528,7 +531,7 @@ pub fn store_stdin(mime: &str) -> Result<()> {
     Ok(())
 }
 
-fn store_text_or_file(store: &ClipboardStore, text: String, mime: String) -> Result<()> {
+pub(crate) fn store_text_or_file(store: &ClipboardStore, text: String, mime: String) -> Result<()> {
     if let Some(source) = standalone_file_source(&text) {
         if let Some(url) = url_value(&source) {
             store.add_text(url, mime)?;
@@ -611,284 +614,4 @@ fn env_binary(variable: &str, fallback: &str) -> PathBuf {
     env::var_os(variable)
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(fallback).to_path_buf())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::SystemTime;
-
-    struct TestDirectory(PathBuf);
-
-    impl Drop for TestDirectory {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn test_directory() -> TestDirectory {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        TestDirectory(env::temp_dir().join(format!(
-            "rofi-clipboard-screenshot-test-{}-{unique}",
-            std::process::id()
-        )))
-    }
-
-    #[test]
-    fn decodes_utf8_clipboard_url() {
-        let value = decode_clipboard_text(b"https://example.com/image.png\n");
-
-        assert_eq!(value, "https://example.com/image.png\n");
-    }
-
-    #[test]
-    fn recognizes_standalone_urls_and_local_file_paths() {
-        assert_eq!(
-            standalone_file_source("https://example.com/docs/report.pdf\n").as_deref(),
-            Some("https://example.com/docs/report.pdf")
-        );
-        assert_eq!(
-            standalone_file_source("file:///home/raina/My%20Report.pdf").as_deref(),
-            Some("/home/raina/My Report.pdf")
-        );
-        assert_eq!(
-            standalone_file_source("/home/raina/My Report.pdf").as_deref(),
-            Some("/home/raina/My Report.pdf")
-        );
-    }
-
-    #[test]
-    fn ordinary_text_that_mentions_a_url_stays_text() {
-        assert!(standalone_file_source("See https://example.com for details").is_none());
-        assert!(standalone_file_source("https://example.com\npage title").is_none());
-    }
-
-    #[test]
-    fn standalone_url_text_is_stored_in_text_mode() -> Result<()> {
-        let root = test_directory();
-        let store = ClipboardStore::at(root.0.join("data"));
-
-        store_text_or_file(
-            &store,
-            "https://example.com/report.pdf".to_owned(),
-            "text/plain;charset=utf-8".to_owned(),
-        )?;
-
-        let history = store.load()?;
-        assert_eq!(history.items.len(), 1);
-        let item = &history.items[0];
-        assert_eq!(item.kind, ItemKind::Text);
-        assert_eq!(item.text.as_deref(), Some("https://example.com/report.pdf"));
-        assert!(item.name.is_none());
-        assert_eq!(item.mime, "text/plain;charset=utf-8");
-        Ok(())
-    }
-
-    #[test]
-    fn standalone_url_text_trims_surrounding_whitespace_into_text_mode() -> Result<()> {
-        let root = test_directory();
-        let store = ClipboardStore::at(root.0.join("data"));
-
-        store_text_or_file(
-            &store,
-            "  https://example.com/page  ".to_owned(),
-            "text/plain;charset=utf-8".to_owned(),
-        )?;
-
-        let item = &store.load()?.items[0];
-        assert_eq!(item.kind, ItemKind::Text);
-        assert_eq!(item.text.as_deref(), Some("https://example.com/page"));
-        Ok(())
-    }
-
-    #[test]
-    fn standalone_local_path_text_stays_in_file_mode() -> Result<()> {
-        let root = test_directory();
-        let store = ClipboardStore::at(root.0.join("data"));
-        let path = root.0.join("share.png").to_string_lossy().into_owned();
-
-        store_text_or_file(&store, path.clone(), "text/plain;charset=utf-8".to_owned())?;
-
-        let item = &store.load()?.items[0];
-        assert_eq!(item.kind, ItemKind::File);
-        assert_eq!(item.name.as_deref(), Some(path.as_str()));
-        Ok(())
-    }
-
-    #[test]
-    fn text_that_only_mentions_a_url_is_stored_verbatim_as_text() -> Result<()> {
-        let root = test_directory();
-        let store = ClipboardStore::at(root.0.join("data"));
-        let text = "See https://example.com for details".to_owned();
-
-        store_text_or_file(&store, text.clone(), "text/plain;charset=utf-8".to_owned())?;
-
-        let item = &store.load()?.items[0];
-        assert_eq!(item.kind, ItemKind::Text);
-        assert_eq!(item.text.as_deref(), Some(text.as_str()));
-        assert!(item.name.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn builds_single_file_payloads_for_wayland_uri_targets() {
-        assert_eq!(
-            file_reference_payload(
-                "text/uri-list",
-                "file:///tmp/one.pdf\nfile:///tmp/two.pdf\n",
-                "file:///tmp/two.pdf",
-            ),
-            "file:///tmp/two.pdf\n"
-        );
-        assert_eq!(
-            file_reference_payload(
-                "x-special/gnome-copied-files",
-                "cut\nfile:///tmp/report.pdf\n",
-                "file:///tmp/report.pdf",
-            ),
-            "cut\nfile:///tmp/report.pdf"
-        );
-    }
-
-    #[test]
-    fn local_paths_copy_back_as_uri_lists_for_dolphin() {
-        let payload = local_file_copy_payload(Path::new("/home/raina/My Report #1.pdf"));
-
-        assert_eq!(payload, b"file:///home/raina/My%20Report%20%231.pdf\n");
-    }
-
-    #[test]
-    fn local_paths_use_uri_list_payloads_while_urls_stay_text() -> Result<()> {
-        let root = test_directory();
-        let store = ClipboardStore::at(root.0.join("data"));
-        let mut item = ClipboardItem {
-            id: 1,
-            kind: ItemKind::File,
-            text: Some("/home/raina/My Report.pdf".to_owned()),
-            image_file: None,
-            name: Some("/home/raina/My Report.pdf".to_owned()),
-            mime: "text/plain;charset=utf-8".to_owned(),
-            pinned: false,
-            created_at: 0,
-            digest: "digest".to_owned(),
-        };
-
-        assert_eq!(
-            copy_payload(&store, &item)?,
-            (
-                TEXT_URI_LIST_MIME.to_owned(),
-                b"file:///home/raina/My%20Report.pdf\n".to_vec()
-            )
-        );
-
-        item.text = Some("https://example.com/report.pdf".to_owned());
-        item.name = item.text.clone();
-        assert_eq!(
-            copy_payload(&store, &item)?,
-            (
-                "text/plain;charset=utf-8".to_owned(),
-                b"https://example.com/report.pdf".to_vec()
-            )
-        );
-
-        item.text = Some("file:///home/raina/My%20Report.pdf\n".to_owned());
-        item.name = Some("/home/raina/My Report.pdf".to_owned());
-        item.mime = "text/uri-list".to_owned();
-        assert_eq!(
-            copy_payload(&store, &item)?,
-            (
-                TEXT_URI_LIST_MIME.to_owned(),
-                b"file:///home/raina/My%20Report.pdf\n".to_vec()
-            )
-        );
-
-        item.text = Some("cut\nfile:///home/raina/My%20Report.pdf\n".to_owned());
-        item.mime = GNOME_COPIED_FILES_MIME.to_owned();
-        assert_eq!(
-            copy_payload(&store, &item)?,
-            (
-                TEXT_URI_LIST_MIME.to_owned(),
-                b"file:///home/raina/My%20Report.pdf\n".to_vec()
-            )
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn decodes_bomless_utf16_little_endian_mozilla_url() {
-        let mut bytes = Vec::new();
-        for word in "https://example.com/image.png\nImage title".encode_utf16() {
-            bytes.extend_from_slice(&word.to_le_bytes());
-        }
-
-        assert_eq!(
-            decode_clipboard_text(&bytes),
-            "https://example.com/image.png\nImage title"
-        );
-    }
-
-    #[test]
-    fn recognizes_chromium_and_mozilla_image_source_targets() {
-        assert!(is_browser_image_source_mime("chromium/x-source-url"));
-        assert!(is_browser_image_source_mime("text/x-moz-url"));
-        assert!(is_browser_image_source_mime(
-            "text/x-moz-url-data;charset=utf-8"
-        ));
-        assert!(!is_browser_image_source_mime("image/png"));
-    }
-
-    #[test]
-    fn extracts_image_source_from_html() {
-        let html =
-            r#"<div><img alt="photo" src="https://example.com/image.png?a=1&amp;b=2"></div>"#;
-
-        assert_eq!(
-            image_source_from_html(html).as_deref(),
-            Some("https://example.com/image.png?a=1&b=2")
-        );
-    }
-
-    #[test]
-    fn recognizes_niri_pathless_png_selection() {
-        assert!(is_pathless_png("image/png\n"));
-        assert!(!is_pathless_png("image/png\ntext/plain\n"));
-        assert!(!is_pathless_png("image/jpeg\n"));
-    }
-
-    #[test]
-    fn finds_screenshot_with_identical_png_bytes() {
-        let directory = test_directory();
-        fs::create_dir_all(&directory.0).unwrap();
-        let matching = directory.0.join("Screenshot from 2026-08-11 12-00-00.png");
-        fs::write(&matching, b"same PNG bytes").unwrap();
-        fs::write(
-            directory.0.join("Screenshot from 2026-08-11 12-00-01.png"),
-            b"different bytes",
-        )
-        .unwrap();
-
-        assert_eq!(
-            matching_screenshot_path(&directory.0, b"same PNG bytes"),
-            Some(matching)
-        );
-    }
-
-    #[test]
-    fn does_not_guess_a_screenshot_path_from_length_alone() {
-        let directory = test_directory();
-        fs::create_dir_all(&directory.0).unwrap();
-        fs::write(
-            directory.0.join("Screenshot from 2026-08-11 12-00-00.png"),
-            b"different bytes",
-        )
-        .unwrap();
-
-        assert_eq!(
-            matching_screenshot_path(&directory.0, b"same byte count"),
-            None
-        );
-    }
 }

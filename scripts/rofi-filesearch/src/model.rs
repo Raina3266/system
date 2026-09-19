@@ -142,36 +142,3 @@ pub fn single_line(value: &str) -> String {
 pub fn lossy(value: &OsStr) -> String {
     value.to_string_lossy().into_owned()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn arbitrary_unix_paths_round_trip_through_rofi_keys() {
-        let path = PathBuf::from(OsString::from_vec(b"/tmp/Raina's \xff.pdf".to_vec()));
-        let key = path_key(Mode::File, &path);
-        assert_eq!(path_from_key(&key, Mode::File).as_ref(), Some(&path));
-        assert_eq!(path_from_key(&key, Mode::Folder), None);
-    }
-
-    #[test]
-    fn markup_from_file_and_application_names_is_escaped() {
-        assert_eq!(
-            escape_markup("A&B <Preview> \"Raina's\""),
-            "A&amp;B &lt;Preview&gt; &quot;Raina&apos;s&quot;"
-        );
-    }
-
-    #[test]
-    fn hostile_row_text_is_flattened_to_one_visual_line() {
-        assert_eq!(single_line("one\n two\tthree"), "one two three");
-    }
-
-    #[test]
-    fn modes_parse_their_singular_and_plural_names() {
-        assert_eq!("applications".parse::<Mode>().unwrap(), Mode::App);
-        assert_eq!("files".parse::<Mode>().unwrap(), Mode::File);
-        assert_eq!("folders".parse::<Mode>().unwrap(), Mode::Folder);
-    }
-}

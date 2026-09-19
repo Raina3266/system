@@ -7,6 +7,9 @@ mod ipc;
 mod panel_state;
 mod ui;
 
+#[cfg(test)]
+mod tests;
+
 use crate::cli::Action;
 
 fn main() {
@@ -22,11 +25,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         Action::Version => println!("preview-panel {}", env!("CARGO_PKG_VERSION")),
         Action::Run(options) => {
             let text = document::load(&options.source)?;
-            let server = options
-                .listen
-                .as_deref()
-                .map(ipc::bind)
-                .transpose()?;
+            let server = options.listen.as_deref().map(ipc::bind).transpose()?;
             let (receiver, socket_guard) = match server {
                 Some((receiver, guard)) => (Some(receiver), Some(guard)),
                 None => (None, None),

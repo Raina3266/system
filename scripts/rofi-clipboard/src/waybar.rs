@@ -16,7 +16,7 @@ use crate::model::{ClipboardItem, ItemKind, json_escape};
 use crate::store::ClipboardStore;
 
 const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const PREVIEW_LIMIT: usize = 60;
+pub(crate) const PREVIEW_LIMIT: usize = 60;
 
 pub fn run_status() -> Result<()> {
     // Emit an initial line so the module is not blank until the first change.
@@ -94,7 +94,7 @@ fn class(latest: Option<&ClipboardItem>) -> &'static str {
     }
 }
 
-fn tooltip(count: usize, latest: Option<&ClipboardItem>) -> String {
+pub(crate) fn tooltip(count: usize, latest: Option<&ClipboardItem>) -> String {
     let mut lines = vec![format!("Clipboard: {count} item{}", plural_s(count))];
     if let Some(item) = latest
         && let Some(preview) = preview_line(item)
@@ -104,7 +104,7 @@ fn tooltip(count: usize, latest: Option<&ClipboardItem>) -> String {
     lines.join("\n")
 }
 
-fn preview_line(item: &ClipboardItem) -> Option<String> {
+pub(crate) fn preview_line(item: &ClipboardItem) -> Option<String> {
     if let Some(text) = item.text.as_ref() {
         // Collapse whitespace so the "Last:" line stays a single tooltip row.
         let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -130,69 +130,6 @@ fn truncate_chars(value: &str, maximum: usize) -> String {
     result
 }
 
-fn plural_s(count: usize) -> &'static str {
+pub(crate) fn plural_s(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tooltip_collapses_multiline_text_into_one_preview_row() {
-        let item = ClipboardItem {
-            id: 1,
-            kind: ItemKind::Text,
-            text: Some("  hello\n  world  ".to_owned()),
-            image_file: None,
-            name: None,
-            mime: "text/plain;charset=utf-8".to_owned(),
-            pinned: false,
-            created_at: 1,
-            digest: "d".to_owned(),
-        };
-        assert_eq!(preview_line(&item).as_deref(), Some("hello world"));
-        assert!(tooltip(1, Some(&item)).contains("Last: hello world"));
-    }
-
-    #[test]
-    fn empty_text_yields_no_preview() {
-        let item = ClipboardItem {
-            id: 1,
-            kind: ItemKind::Text,
-            text: Some("   \n  ".to_owned()),
-            image_file: None,
-            name: None,
-            mime: "text/plain;charset=utf-8".to_owned(),
-            pinned: false,
-            created_at: 1,
-            digest: "d".to_owned(),
-        };
-        assert_eq!(preview_line(&item), None);
-    }
-
-    #[test]
-    fn long_text_is_truncated_with_an_ellipsis() {
-        let item = ClipboardItem {
-            id: 1,
-            kind: ItemKind::Text,
-            text: Some("a".repeat(80)),
-            image_file: None,
-            name: None,
-            mime: "text/plain;charset=utf-8".to_owned(),
-            pinned: false,
-            created_at: 1,
-            digest: "d".to_owned(),
-        };
-        let preview = preview_line(&item).unwrap();
-        assert_eq!(preview.chars().count(), PREVIEW_LIMIT + 1);
-        assert!(preview.ends_with('…'));
-    }
-
-    #[test]
-    fn pluralization_is_correct() {
-        assert_eq!(plural_s(0), "s");
-        assert_eq!(plural_s(1), "");
-        assert_eq!(plural_s(2), "s");
-    }
 }

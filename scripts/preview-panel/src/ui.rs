@@ -25,7 +25,7 @@ const THEME_RELOAD_INTERVAL: Duration = Duration::from_millis(250);
 const NETWORK_QR_SIZE: i32 = 200;
 
 #[derive(Clone, Copy)]
-enum PanelKeyboardState {
+pub(crate) enum PanelKeyboardState {
     Browsing,
     EditorArmed,
 }
@@ -46,7 +46,7 @@ struct LiveWidgets {
 }
 
 impl PanelKeyboardState {
-    fn mode(self) -> KeyboardMode {
+    pub(crate) fn mode(self) -> KeyboardMode {
         match self {
             Self::Browsing => KeyboardMode::None,
             Self::EditorArmed => KeyboardMode::OnDemand,
@@ -479,11 +479,16 @@ fn update_companion_margins(
     );
 }
 
-fn companion_margin(monitor_width: i32, companion_width: i32, panel_width: i32, gap: i32) -> i32 {
+pub(crate) fn companion_margin(
+    monitor_width: i32,
+    companion_width: i32,
+    panel_width: i32,
+    gap: i32,
+) -> i32 {
     ((monitor_width - companion_width) / 2 - panel_width - gap).max(0)
 }
 
-fn horizontal_margin(
+pub(crate) fn horizontal_margin(
     monitor_width: i32,
     companion_width: i32,
     panel_width: i32,
@@ -499,7 +504,7 @@ fn horizontal_margin(
     clamp_margin(adjusted, monitor_width, panel_width)
 }
 
-fn vertical_margin(monitor_height: i32, panel_height: i32, y: i32) -> i32 {
+pub(crate) fn vertical_margin(monitor_height: i32, panel_height: i32, y: i32) -> i32 {
     let centered = (monitor_height - panel_height) / 2;
     clamp_margin(centered + y, monitor_height, panel_height)
 }
@@ -625,44 +630,5 @@ fn current_snapshot(state: &LiveState, text_view: &TextView) -> Option<ContentSn
             kind: ContentKind::Network,
             ..
         } => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{PanelKeyboardState, companion_margin, horizontal_margin, vertical_margin};
-    use crate::cli::Side;
-    use gtk4_layer_shell::KeyboardMode;
-
-    #[test]
-    fn panel_only_accepts_keyboard_focus_after_the_editor_is_armed() {
-        assert!(matches!(
-            PanelKeyboardState::Browsing.mode(),
-            KeyboardMode::None
-        ));
-        assert!(matches!(
-            PanelKeyboardState::EditorArmed.mode(),
-            KeyboardMode::OnDemand
-        ));
-    }
-
-    #[test]
-    fn companion_margin_places_the_panel_beside_a_centered_window() {
-        assert_eq!(companion_margin(1920, 400, 480, 10), 270);
-        assert_eq!(companion_margin(1280, 400, 480, 10), 0);
-    }
-
-    #[test]
-    fn x_offset_moves_in_the_same_screen_direction_on_both_sides() {
-        assert_eq!(horizontal_margin(1920, 400, 480, 10, Side::Left, 25), 295);
-        assert_eq!(horizontal_margin(1920, 400, 480, 10, Side::Right, 25), 245);
-    }
-
-    #[test]
-    fn y_offset_moves_from_center_and_stays_on_screen() {
-        assert_eq!(vertical_margin(1080, 615, 0), 232);
-        assert_eq!(vertical_margin(1080, 615, 40), 272);
-        assert_eq!(vertical_margin(1080, 615, -500), 0);
-        assert_eq!(vertical_margin(1080, 615, 1000), 465);
     }
 }

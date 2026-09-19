@@ -5,6 +5,9 @@ mod rofi;
 mod store;
 mod waybar;
 
+#[cfg(test)]
+mod tests;
+
 use std::env;
 
 use anyhow::{Context, Result, bail};

@@ -9,13 +9,13 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-const UPDATE_TEXT: u8 = 1;
-const CLOSE: u8 = 2;
-const UPDATE_IMAGE: u8 = 3;
-const SAVE_AND_CLOSE: u8 = 4;
-const PANEL_STATE: u8 = 5;
-const PREPARE_SWITCH: u8 = 6;
-const UPDATE_NETWORK: u8 = 7;
+pub(crate) const UPDATE_TEXT: u8 = 1;
+pub(crate) const CLOSE: u8 = 2;
+pub(crate) const UPDATE_IMAGE: u8 = 3;
+pub(crate) const SAVE_AND_CLOSE: u8 = 4;
+pub(crate) const PANEL_STATE: u8 = 5;
+pub(crate) const PREPARE_SWITCH: u8 = 6;
+pub(crate) const UPDATE_NETWORK: u8 = 7;
 const HEADER_SIZE: usize = 17;
 const ITEM_ID_SIZE: usize = 8;
 const NETWORK_PREFIX_SIZE: usize = ITEM_ID_SIZE * 2;
@@ -24,9 +24,9 @@ const SAVE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SWITCH_REJECTED: u8 = 0;
 const SWITCH_SAME_ITEM: u8 = 1;
-const SWITCH_READY: u8 = 2;
+pub(crate) const SWITCH_READY: u8 = 2;
 const CONTENT_NONE: u8 = 0;
-const CONTENT_TEXT: u8 = 1;
+pub(crate) const CONTENT_TEXT: u8 = 1;
 const CONTENT_IMAGE: u8 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,16 +72,27 @@ pub enum Message {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Request {
-    UpdateText { serial: u64, id: u64, text: String },
-    UpdateImage { serial: u64, id: u64, path: PathBuf },
+pub(crate) enum Request {
+    UpdateText {
+        serial: u64,
+        id: u64,
+        text: String,
+    },
+    UpdateImage {
+        serial: u64,
+        id: u64,
+        path: PathBuf,
+    },
     UpdateNetwork {
         serial: u64,
         id: u64,
         details: String,
         png: Vec<u8>,
     },
-    PrepareSwitch { serial: u64, target_id: u64 },
+    PrepareSwitch {
+        serial: u64,
+        target_id: u64,
+    },
     SaveAndClose,
     Close,
 }
@@ -138,7 +149,10 @@ pub fn bind(path: &Path) -> io::Result<(Receiver<Message>, SocketGuard)> {
     Ok((receiver, SocketGuard { path: socket_path }))
 }
 
-fn handle_connection(stream: &mut UnixStream, sender: &Sender<Message>) -> io::Result<bool> {
+pub(crate) fn handle_connection(
+    stream: &mut UnixStream,
+    sender: &Sender<Message>,
+) -> io::Result<bool> {
     match read_request(&mut *stream)? {
         Request::UpdateText { serial, id, text } => {
             send_to_ui(sender, Message::UpdateText { serial, id, text })?;
@@ -200,15 +214,17 @@ fn send_to_ui(sender: &Sender<Message>, message: Message) -> io::Result<()> {
 }
 
 fn receive_panel_response<T>(response: Receiver<T>) -> io::Result<T> {
-    response.recv_timeout(SAVE_RESPONSE_TIMEOUT).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!("wait for current panel state: {error}"),
-        )
-    })
+    response
+        .recv_timeout(SAVE_RESPONSE_TIMEOUT)
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("wait for current panel state: {error}"),
+            )
+        })
 }
 
-fn read_request(mut reader: impl Read) -> io::Result<Request> {
+pub(crate) fn read_request(mut reader: impl Read) -> io::Result<Request> {
     let mut header = [0_u8; HEADER_SIZE];
     reader.read_exact(&mut header)?;
     let operation = header[0];
@@ -322,7 +338,11 @@ fn read_network_payload(
     Ok((u64::from_be_bytes(id), details, png))
 }
 
-fn write_panel_state(mut writer: impl Write, serial: u64, reply: &SwitchReply) -> io::Result<()> {
+pub(crate) fn write_panel_state(
+    mut writer: impl Write,
+    serial: u64,
+    reply: &SwitchReply,
+) -> io::Result<()> {
     let mut payload = Vec::new();
     match reply {
         SwitchReply::Rejected => {
@@ -357,190 +377,4 @@ fn write_panel_state(mut writer: impl Write, serial: u64, reply: &SwitchReply) -
     writer.write_all(&serial.to_be_bytes())?;
     writer.write_all(&(payload.len() as u64).to_be_bytes())?;
     writer.write_all(&payload)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-    use std::os::unix::net::UnixStream;
-
-    use super::*;
-
-    fn frame(operation: u8, serial: u64, payload: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![operation];
-        bytes.extend_from_slice(&serial.to_be_bytes());
-        bytes.extend_from_slice(&(payload.len() as u64).to_be_bytes());
-        bytes.extend_from_slice(payload);
-        bytes
-    }
-
-    fn item_frame(operation: u8, serial: u64, id: u64, payload: &[u8]) -> Vec<u8> {
-        let mut item = id.to_be_bytes().to_vec();
-        item.extend_from_slice(payload);
-        frame(operation, serial, &item)
-    }
-
-    #[test]
-    fn update_preserves_whitespace_and_unicode_exactly() {
-        let text = "heading\r\n\t  first    value\n\n中文 👩🏽‍💻  \n";
-        let message = read_request(Cursor::new(item_frame(
-            UPDATE_TEXT,
-            17,
-            42,
-            text.as_bytes(),
-        )))
-        .unwrap();
-        assert_eq!(
-            message,
-            Request::UpdateText {
-                serial: 17,
-                id: 42,
-                text: text.to_owned()
-            }
-        );
-    }
-
-    #[test]
-    fn image_update_preserves_the_cached_file_path() {
-        let path = "/home/raina/.local/share/rofi-clipboard/images/7.png";
-        assert_eq!(
-            read_request(Cursor::new(item_frame(
-                UPDATE_IMAGE,
-                19,
-                7,
-                path.as_bytes()
-            )))
-            .unwrap(),
-            Request::UpdateImage {
-                serial: 19,
-                id: 7,
-                path: PathBuf::from(path),
-            }
-        );
-    }
-
-    #[test]
-    fn network_update_separates_details_from_png_bytes() {
-        let details = "SSID: Café\nIPv4: 192.0.2.10/24";
-        let png = b"\x89PNG\r\n\x1a\nmock";
-        let mut payload = 88_u64.to_be_bytes().to_vec();
-        payload.extend_from_slice(&(details.len() as u64).to_be_bytes());
-        payload.extend_from_slice(details.as_bytes());
-        payload.extend_from_slice(png);
-
-        assert_eq!(
-            read_request(Cursor::new(frame(UPDATE_NETWORK, 29, &payload))).unwrap(),
-            Request::UpdateNetwork {
-                serial: 29,
-                id: 88,
-                details: details.to_owned(),
-                png: png.to_vec(),
-            }
-        );
-    }
-
-    #[test]
-    fn network_update_rejects_an_out_of_bounds_details_length() {
-        let mut payload = 88_u64.to_be_bytes().to_vec();
-        payload.extend_from_slice(&99_u64.to_be_bytes());
-        payload.extend_from_slice(b"short");
-        let error = read_request(Cursor::new(frame(UPDATE_NETWORK, 29, &payload))).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn prepare_switch_preserves_target_id_and_serial() {
-        assert_eq!(
-            read_request(Cursor::new(frame(
-                PREPARE_SWITCH,
-                23,
-                &91_u64.to_be_bytes()
-            )))
-            .unwrap(),
-            Request::PrepareSwitch {
-                serial: 23,
-                target_id: 91,
-            }
-        );
-    }
-
-    #[test]
-    fn close_requires_an_empty_payload() {
-        assert_eq!(
-            read_request(Cursor::new(frame(CLOSE, 0, &[]))).unwrap(),
-            Request::Close
-        );
-        let error = read_request(Cursor::new(frame(CLOSE, 0, b"unexpected"))).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn save_and_close_requires_an_empty_payload() {
-        assert_eq!(
-            read_request(Cursor::new(frame(SAVE_AND_CLOSE, 0, &[]))).unwrap(),
-            Request::SaveAndClose
-        );
-        let error = read_request(Cursor::new(frame(SAVE_AND_CLOSE, 0, b"unexpected"))).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn panel_state_response_preserves_item_id_and_complete_buffer() {
-        let text = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
-        let mut response = Vec::new();
-        write_panel_state(
-            &mut response,
-            31,
-            &SwitchReply::Ready(Some(ContentSnapshot::Text {
-                id: 77,
-                text: text.to_owned(),
-            })),
-        )
-        .unwrap();
-
-        assert_eq!(response[0], PANEL_STATE);
-        assert_eq!(u64::from_be_bytes(response[1..9].try_into().unwrap()), 31);
-        assert_eq!(
-            u64::from_be_bytes(response[9..17].try_into().unwrap()),
-            (10 + text.len()) as u64
-        );
-        assert_eq!(response[17], SWITCH_READY);
-        assert_eq!(response[18], CONTENT_TEXT);
-        assert_eq!(u64::from_be_bytes(response[19..27].try_into().unwrap()), 77);
-        assert_eq!(&response[27..], text.as_bytes());
-    }
-
-    #[test]
-    fn save_request_round_trip_returns_the_ui_buffer() {
-        let (mut client, mut server) = UnixStream::pair().unwrap();
-        let (sender, receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || handle_connection(&mut server, &sender).unwrap());
-        client.write_all(&frame(SAVE_AND_CLOSE, 0, &[])).unwrap();
-
-        let edited = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
-        match receiver.recv_timeout(Duration::from_secs(1)).unwrap() {
-            Message::SaveAndClose { reply } => reply
-                .send(Some(ContentSnapshot::Text {
-                    id: 55,
-                    text: edited.to_owned(),
-                }))
-                .unwrap(),
-            message => panic!("expected save request, got {message:?}"),
-        }
-
-        let mut response = Vec::new();
-        client.read_to_end(&mut response).unwrap();
-        assert!(server.join().unwrap());
-        assert_eq!(response[0], PANEL_STATE);
-        assert_eq!(response[17], SWITCH_READY);
-        assert_eq!(response[18], CONTENT_TEXT);
-        assert_eq!(u64::from_be_bytes(response[19..27].try_into().unwrap()), 55);
-        assert_eq!(&response[27..], edited.as_bytes());
-    }
-
-    #[test]
-    fn rejects_unknown_operations() {
-        let error = read_request(Cursor::new(frame(99, 0, &[]))).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
 }

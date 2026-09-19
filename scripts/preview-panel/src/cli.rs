@@ -193,10 +193,8 @@ where
                     continue;
                 }
                 Some("--layout-file") => {
-                    options.layout_file = Some(PathBuf::from(next_os(
-                        &mut arguments,
-                        "--layout-file",
-                    )?));
+                    options.layout_file =
+                        Some(PathBuf::from(next_os(&mut arguments, "--layout-file")?));
                     continue;
                 }
                 Some("-t" | "--title") => {
@@ -233,9 +231,7 @@ where
                     continue;
                 }
                 Some(value) if value.starts_with("--layout-file=") => {
-                    options.layout_file = Some(PathBuf::from(
-                        &value["--layout-file=".len()..],
-                    ));
+                    options.layout_file = Some(PathBuf::from(&value["--layout-file=".len()..]));
                     continue;
                 }
                 Some(value) if value.starts_with("--width=") => {
@@ -350,112 +346,5 @@ fn parse_side(value: &str) -> Result<Side, CliError> {
         "left" => Ok(Side::Left),
         "right" => Ok(Side::Right),
         _ => Err(CliError::new("--side must be either left or right")),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(arguments: &[&str]) -> Options {
-        match parse_from(arguments.iter().copied()).expect("arguments should parse") {
-            Action::Run(options) => options,
-            other => panic!("expected run action, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn defaults_to_editable_wrapped_standard_input() {
-        assert_eq!(run(&[]), Options::default());
-    }
-
-    #[test]
-    fn accepts_a_file_without_changing_its_path() {
-        let options = run(&["folder/a file.txt"]);
-        assert_eq!(
-            options.source,
-            Source::File(PathBuf::from("folder/a file.txt"))
-        );
-    }
-
-    #[test]
-    fn parses_window_and_editor_options() {
-        let options = run(&[
-            "--title",
-            "Clipboard preview",
-            "--read-only",
-            "--no-wrap",
-            "--listen",
-            "/run/user/1000/preview.sock",
-            "--layout-file",
-            "/tmp/rofi-network.rasi",
-            "--panel",
-            "--width=900",
-            "--height",
-            "700",
-            "--companion-width=420",
-            "--side",
-            "right",
-            "--gap",
-            "12",
-        ]);
-        assert_eq!(options.title, "Clipboard preview");
-        assert!(!options.editable);
-        assert!(!options.wrap);
-        assert_eq!((options.width, options.height), (900, 700));
-        assert_eq!(
-            options.listen,
-            Some(PathBuf::from("/run/user/1000/preview.sock"))
-        );
-        assert_eq!(
-            options.layout_file,
-            Some(PathBuf::from("/tmp/rofi-network.rasi"))
-        );
-        assert!(options.panel);
-        assert_eq!(options.companion_width, 420);
-        assert_eq!(options.side, Side::Right);
-        assert_eq!(options.gap, 12);
-        assert_eq!(
-            options.window_overrides,
-            WindowOverrides {
-                width: Some(900),
-                height: Some(700),
-                companion_width: Some(420),
-                side: Some(Side::Right),
-                gap: Some(12),
-                x: None,
-                y: None,
-            }
-        );
-    }
-
-    #[test]
-    fn double_dash_allows_a_filename_starting_with_a_dash() {
-        let options = run(&["--", "--notes.txt"]);
-        assert_eq!(options.source, Source::File(PathBuf::from("--notes.txt")));
-    }
-
-    #[test]
-    fn rejects_file_with_explicit_stdin() {
-        let error = parse_from(["--stdin", "notes.txt"]).unwrap_err();
-        assert!(error.to_string().contains("cannot be combined"));
-    }
-
-    #[test]
-    fn rejects_dimensions_that_would_make_an_unusable_window() {
-        let error = parse_from(["--width", "50"]).unwrap_err();
-        assert!(error.to_string().contains("between 200 and 8192"));
-    }
-
-    #[test]
-    fn rejects_negative_panel_gaps() {
-        let error = parse_from(["--gap=-1"]).unwrap_err();
-        assert!(error.to_string().contains("between 0 and 512"));
-    }
-
-    #[test]
-    fn rejects_unknown_panel_sides() {
-        let error = parse_from(["--side", "middle"]).unwrap_err();
-        assert!(error.to_string().contains("left or right"));
     }
 }

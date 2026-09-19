@@ -4,7 +4,7 @@
 use std::env;
 use std::io;
 
-use audio_control::{AppResult, battery_provider, waybar, wayle};
+use audio_control::{AppResult, bluetooth, waybar, wayle};
 
 #[tokio::main]
 async fn main() {
@@ -42,7 +42,7 @@ async fn run() -> AppResult<()> {
             wayle::set_default(&kind, &key)
         }
         // Daemon mode for bt-battery-provider.service; never returns.
-        Some("battery-provider") => battery_provider::run().await,
+        Some("battery-provider") => bluetooth::battery_provider::run().await,
         None | Some("help" | "--help" | "-h") => {
             print!(
                 "audio-control\n\n\

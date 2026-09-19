@@ -3,12 +3,15 @@
 use std::env;
 use std::process::ExitCode;
 
-mod media_badge;
+mod waybar;
+
+#[cfg(test)]
+mod tests;
 
 fn main() -> ExitCode {
     let mut arguments = env::args().skip(1);
     match arguments.next().as_deref() {
-        Some("media-waybar") => match media_badge::watch() {
+        Some("media-waybar") => match waybar::watch() {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("control-centre: {error}");
