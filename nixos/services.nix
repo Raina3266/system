@@ -266,9 +266,18 @@ in
       };
     };
 
+    # BlueZ gives a device's Battery1 to whichever source registers first, and
+    # the GATT stub a Logitech mouse answers with 0% is registered on connect.
+    # So this has to be up and registered before the devices reconnect: tied to
+    # bluetoothd's own lifecycle, it is stopped with the daemon and started
+    # again by it, instead of staying registered against a daemon that is gone.
     bt-battery-provider = {
       description = "Forward kernel HID++ battery levels into BlueZ";
-      wantedBy = [ "multi-user.target" ];
+      wantedBy = [
+        "multi-user.target"
+        "bluetooth.service"
+      ];
+      partOf = [ "bluetooth.service" ];
       after = [ "bluetooth.service" ];
       wants = [ "bluetooth.service" ];
       serviceConfig = {

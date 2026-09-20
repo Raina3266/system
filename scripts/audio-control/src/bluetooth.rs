@@ -686,9 +686,13 @@ pub mod battery_provider {
     ) -> AppResult<bool> {
         let Some(owner) = bluez_owner(connection).await? else {
             // bluetoothd is down; our objects stay exported and the next owner
-            // gets a fresh registration. Nothing to retry against until then.
+            // gets a fresh registration. Report that as unsurfaced so the loop
+            // keeps the fast interval: devices reconnect within a second or two
+            // of the daemon coming back, and a registration that lands after
+            // theirs leaves the GATT stub's level on screen until they next
+            // disconnect.
             *registered_for = None;
-            return Ok(true);
+            return Ok(false);
         };
         if registered_for.as_ref() != Some(&owner) {
             register_providers(connection).await?;

@@ -68,6 +68,36 @@ one causes PipeWire to replace the other sink. It revalidates a choice before
 switching, prefers a compatible profile that retains microphone ports, and
 attempts rollback after a failed switch.
 
+### Bluetooth battery levels
+
+Wayle reads one number for a Bluetooth device's battery: `Percentage` on
+`org.bluez.Battery1`. BlueZ fills that in from whichever source registers first
+on the device's object path, and refuses a second one. For a Logitech HID++
+mouse or keyboard the first source is BlueZ's own `battery` plugin, which
+publishes the GATT Battery Service level — and those devices answer GATT with a
+permanent 0%. Their real level never travels over GATT at all; it travels over
+Logitech's HID++ protocol, which the kernel's `hid-logitech-hidpp` driver
+decodes into `/sys/class/power_supply/hidpp_battery_*`. Nothing carries it from
+there to BlueZ, so the panel showed 0%.
+
+`bt-battery-provider.service` is that carrier. It runs `audio-control
+battery-provider` as root — BlueZ's Battery Provider API is a system-bus
+interface on the adapter — and republishes the kernel's levels as this
+provider's own batteries, keyed by the device address the driver reports as the
+supply's serial. Paired HID++ devices get a percentage-less placeholder object
+before they connect, so the slot is claimed ahead of the GATT stub rather than
+after it, and the placeholder is swapped for a real level as soon as a kernel
+supply appears.
+
+This is not a workaround for something misconfigured in this repository: no
+BlueZ setting prefers a provider over the GATT plugin, and Wayle has no other
+battery source to prefer. Its Bluetooth service reads `Battery1` and nothing
+else; the separate UPower-backed battery service it ships tracks a single
+device for a dashboard tile, which this configuration removes. Reading HID++
+natively would mean teaching Wayle to match a BlueZ device to the kernel supply
+by address, which is upstream work — and it would fix only this panel, where
+the provider also fixes GNOME and anything else reading BlueZ.
+
 ### Commands
 
 ```text
