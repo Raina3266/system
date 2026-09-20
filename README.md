@@ -50,7 +50,7 @@ Left-click asks Wayle to open its native four-tab panel:
 
 | Tab | Native Wayle content |
 | --- | --- |
-| Pair | Bluetooth power, scan, connect, disconnect, and forget |
+| Pair | Bluetooth power, scan, pair, connect, disconnect, and forget |
 | Output | Default volume/mute plus distinct output devices and physical ports |
 | Input | Default volume/mute plus microphones and their ports |
 | Play | Per-application volume and output routing |
@@ -61,17 +61,17 @@ keeping the full description in a tooltip. Plugged headphones remain a
 clickable output instead of being collapsed into Speaker. Application streams
 can be adjusted independently and routed without changing the system default.
 
-Pairing a new device is not in that panel. Wayle's device rows call
-`Device1.Connect`, which opens no bonding request: BlueZ brings the link up and
-reports the device as connected, leaving whatever bond the device then asks for
-to whichever agent holds BlueZ's default-agent role. That is enough for a
-speaker, but a keyboard — which has to be shown a six-digit passkey to type
-back — ends up listed as connected while nothing it types arrives.
-`audio-control bluetooth-pair` calls `Device1.Pair` instead, so the bonding
-request carries this process's own agent and the prompt cannot be diverted to
-another session agent; the passkey is printed zero-padded, and the device is
-trusted before connecting so its later reconnections raise no authorization
-prompt of their own.
+Pairing takes more than the row. Wayle's device rows call `Device1.Connect`,
+which opens no bonding request: BlueZ brings the link up and reports the device
+as connected, leaving whatever bond the device then asks for to whichever agent
+holds BlueZ's default-agent role. That is enough for a speaker, but a keyboard —
+which has to be shown a six-digit passkey to type back — ends up listed as
+connected while nothing it types arrives. `wayle-features.patch` makes an
+unpaired row pair first, so the bonding request carries Wayle's own agent and
+the passkey reaches its pairing card whoever else has registered one, and
+trusts the device before connecting so its later reconnections raise no
+authorization prompt nothing is showing. `audio-control bluetooth-pair` does
+the same from a terminal for pairing without the panel.
 
 Wayle already handles live devices, sliders, Bluetooth, and stream routing. The
 `WAYLE_AUDIO_HELPER` bridge is used only for mutually exclusive ALSA profiles:
@@ -379,7 +379,8 @@ after it and can restyle the panel.
 
 | Source delta | Purpose |
 | --- | --- |
-| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, and inactive-profile switching. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
+| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, inactive-profile switching, and
+pairing an unpaired device with `Device1.Pair` before connecting it. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
 | `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
 ### Verifying changes

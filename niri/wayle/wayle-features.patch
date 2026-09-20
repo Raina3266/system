@@ -2102,6 +2102,50 @@ index a3bebc7..11e7a23 100644
 +            set_orientation: gtk::Orientation::Vertical,
 @@ -66,0 +67 @@ impl Component for BluetoothDropdown {
 +                set_vexpand: true,
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs
+index e42e499..8e88183 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs
+@@ -124,0 +125,12 @@ impl BluetoothDropdown {
++            // Connecting a device that is not paired yet is a pairing, and
++            // `Connect` alone opens no bonding request: BlueZ brings the link
++            // up, reports the device connected, and leaves whatever bond the
++            // peer then asks for to whichever agent holds the default-agent
++            // role. A keyboard ends up listed as connected while nothing it
++            // types arrives. `Pair` opens the bond and carries this process's
++            // own agent, so the passkey reaches the card below whoever else
++            // has registered an agent. Trusting afterwards keeps the device's
++            // own reconnections from raising an authorization prompt nothing
++            // is showing.
++            let pairing = matches!(action, DeviceActionMsg::Connect(_)) && !device.paired.get();
++
+@@ -127 +139,13 @@ impl BluetoothDropdown {
+-                    DeviceActionMsg::Connect(_) => device.connect().await,
++                    DeviceActionMsg::Connect(_) => {
++                        let bond = if pairing { device.pair().await } else { Ok(()) };
++                        match bond {
++                            Err(error) => Err(error),
++                            Ok(()) => {
++                                // Best effort: the bond is what matters here.
++                                if pairing {
++                                    let _ = device.set_trusted(true).await;
++                                }
++                                device.connect().await
++                            }
++                        }
++                    }
+@@ -133 +157,10 @@ impl BluetoothDropdown {
+-            match tokio::time::timeout(ACTION_TIMEOUT, action_fut).await {
++            // Pairing waits on someone reading six digits off the card and
++            // typing them on the device; the ordinary action timeout would
++            // abandon the bond while the prompt is still up.
++            let timeout = if pairing {
++                std::time::Duration::from_secs(180)
++            } else {
++                ACTION_TIMEOUT
++            };
++
++            match tokio::time::timeout(timeout, action_fut).await {
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
 new file mode 100644
 index 0000000..15019e7
