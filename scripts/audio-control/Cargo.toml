@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "audio-control"
-path = "src/bin/audio-control.rs"
+path = "src/main.rs"
 
 [dependencies]
 # BlueZ over D-Bus for the Waybar Bluetooth status/power action.
