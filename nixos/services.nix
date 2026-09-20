@@ -24,6 +24,7 @@ in
     wsdd # Windows SMB discovery; gvfs spawns it on demand for wsdd:// browsing
     v4l-utils # kept beside the root cropped-webcam.service below
     webcamCrop
+    xwayland-satellite # Rootless XWayland for X11 apps
   ];
 
   programs.partition-manager.enable = true;
@@ -265,12 +266,6 @@ in
       };
     };
 
-    # Logitech HID++ devices (the MX Master 3 among them) report 0% over the
-    # standard GATT Battery Service while the real level only travels over
-    # HID++, which the kernel already decodes into
-    # /sys/class/power_supply/hidpp_battery_*. This forwards those levels
-    # into BlueZ's Battery1 via the provider API — which only root may
-    # register, hence a system service rather than a session one.
     bt-battery-provider = {
       description = "Forward kernel HID++ battery levels into BlueZ";
       wantedBy = [ "multi-user.target" ];

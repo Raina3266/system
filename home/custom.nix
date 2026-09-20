@@ -31,33 +31,15 @@ let
   # inside postPatch. The menu entry and icon live in desktop.nix.
   fastflix = portalizeQtPackage (
     pkgs.fastflix.overrideAttrs (old: {
-      # The crop window renders its previews as TIFFs, but Qt's TIFF image
-      # plugin ships in qtimageformats, which the nixpkgs expression does
-      # not depend on. Without it every preview loads as a null pixmap and
-      # the crop UI silently stops working (JPEG thumbnails are unaffected,
-      # as their plugin lives in qtbase). wrapQtAppsHook picks this up and
-      # adds the plugin directory to QT_PLUGIN_PATH.
       buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtimageformats ];
 
       postPatch = (old.postPatch or "") + ''
-        # Default to the system theme instead of upstream's "onyx".
-        substituteInPlace fastflix/models/config.py \
-          --replace-fail 'theme: str = "onyx"' 'theme: str = "system"'
-
         # Upstream passes argv lists through a shell, losing FFmpeg's arguments.
         for previewWindow in fastflix/widgets/windows/{crop_window,large_preview}.py; do
           substituteInPlace "$previewWindow" \
             --replace-fail 'run(thumb_command, shell=True, stderr=PIPE, stdout=PIPE)' \
               'run(thumb_command, stderr=PIPE, stdout=PIPE)'
         done
-
-        # The stylesheet-free system theme still needs dark icons and text.
-        substituteInPlace fastflix/resources.py \
-          --replace-fail 'if theme.lower() in ("dark", "onyx"):' \
-            'if theme.lower() in ("dark", "onyx", "system"):'
-        substituteInPlace fastflix/widgets/main.py \
-          --replace-fail 'self.app.fastflix.config.theme in ("dark", "onyx") else "color: black"' \
-            'self.app.fastflix.config.theme in ("dark", "onyx", "system") else "color: black"'
 
         substituteInPlace fastflix/widgets/status_bar.py \
           --replace-fail '"#StatusBarWidget {  background-color: #f0f0f0;  border-top: 1px solid #cccccc;}"' '""' \

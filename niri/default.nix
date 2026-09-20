@@ -39,7 +39,6 @@ let
       QT_STYLE_OVERRIDE = "kvantum";
       QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
       QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
-      QT_AUTO_SCREEN_SCALE_FACTOR = "1";
     };
 in
 {
@@ -76,7 +75,6 @@ in
     bluez-tools
     wireplumber # PipeWire/WirePlumber control (wpctl for niri audio binds)
     brightnessctl # Screen brightness control
-    xwayland-satellite # Rootless XWayland for X11 apps
     xrandr # Display layout info for X11 apps
     snixembed # System tray bridge for Qt5-xcb apps
     mediactl

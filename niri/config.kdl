@@ -100,65 +100,15 @@ window-rule {
     draw-border-with-background false
 }
 
-// clip-to-geometry cuts Chromium's subsurface bubbles (extension prompts, PWA
-// menus) off at the window edge: niri-wm/niri#4556. Square corners on the
-// browser are the cheaper trade.
-window-rule {
-    match app-id=r#"^(google-)?chrome"#
-    match app-id=r#"^chromium"#
-    clip-to-geometry false
-}
-
 // niri already floats dialogs that announce a parent or fixed size. Catch
 // parentless prompts with recognizable titles regardless of app ID.
 // A titleless window with no dialog hint still needs an application rule.
 window-rule {
-    match title=r#"(?i)^(?:splash screen|(?:confirm|confirmation|warning|error|question|permission|authentication|enable)(?: [^–-]*)?)(?: [–-] .*)?$"#
+    match title=r#"(?i)^(?:splash screen|(?:confirm|confirmation|warning|error|question|permission|authentication|enable|open (?:file|files|folder|directory)|save (?:file|as))(?: [^–-]*)?)(?: [–-] .*)?$"#
 
     open-floating true
-}
-
-// These Qt splash screens keep their own image size instead of filling niri's
-// tile. Match their startup titles (including a titleless initial configure)
-// and both desktop-file and short XWayland app IDs; leave the editors tiled.
-window-rule {
-    match app-id=r#"(?i)(?:^|\.)kdenlive$"# title=r#"^(Splash Screen)?$"#
-
-    open-floating true
-    default-column-width {}
-}
-
-window-rule {
-    match app-id=r#"(?i)(?:^|\.)shotcut$"# title=r#"^(Shotcut)?$"#
-
-    open-floating true
-    default-column-width {}
-}
-
-// FastFlix creates this confirmation as a parentless QDialog. Without a
-// transient-window hint niri tiles it at the full column size; give this one
-// a readable dialog size while keeping the encoder's main window tiled.
-window-rule {
-    match title=r#"^Enable Encoding History(?: [–-] FastFlix)?$"#
-
-    open-floating true
-    default-column-width { fixed 600; }
-    default-window-height { fixed 320; }
-}
-
-// FastFlix scales its entire UI from the window size against a 1200x680
-// reference, so a half-width column leaves its text around 7pt. Open the main
-// window at the size it draws itself for.
-window-rule {
-    match title=r#"^FastFlix$"#
-
-    default-column-width { fixed 1200; }
-}
-
-// WezTerm: empty default width to avoid initial configure bug
-window-rule {
-    match app-id=r#"^org\.wezfurlong\.wezterm$"#
-    default-column-width {}
+    default-column-width { fixed 800; }
+    default-window-height { fixed 600; }
 }
 
 window-rule {
@@ -179,7 +129,6 @@ spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
 spawn-at-startup "sh" "-c" "sleep 3 && snixembed"
-spawn-at-startup "sh" "-c" "sleep 5 && birdtray"
 
 hotkey-overlay {
     // skip-at-startup

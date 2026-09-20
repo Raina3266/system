@@ -97,6 +97,10 @@ in
   xdg.configFile."menus/applications.menu".source =
     "${pkgs.kdePackages.plasma-workspace}/etc/xdg/menus/plasma-applications.menu";
 
+  home.sessionVariables = {
+    QT_QPA_PLATFORM = "wayland;xcb";
+    QT_SCALE_FACTOR_ROUNDING_POLICY = "PassThrough";
+  };
   # ──────────────────────────────────────────────────────────────────────
   # GNOME Shell
   # ──────────────────────────────────────────────────────────────────────
