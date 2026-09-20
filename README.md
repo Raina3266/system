@@ -50,7 +50,7 @@ Left-click asks Wayle to open its native four-tab panel:
 
 | Tab | Native Wayle content |
 | --- | --- |
-| Pair | Bluetooth power, scan, pair, connect, disconnect, and forget |
+| Pair | Bluetooth power, scan, connect, disconnect, and forget |
 | Output | Default volume/mute plus distinct output devices and physical ports |
 | Input | Default volume/mute plus microphones and their ports |
 | Play | Per-application volume and output routing |
@@ -60,6 +60,18 @@ distinguishing label—such as **Speaker**, **Headphones**, or a USB model—whi
 keeping the full description in a tooltip. Plugged headphones remain a
 clickable output instead of being collapsed into Speaker. Application streams
 can be adjusted independently and routed without changing the system default.
+
+Pairing a new device is not in that panel. Wayle's device rows call
+`Device1.Connect`, which opens no bonding request: BlueZ brings the link up and
+reports the device as connected, leaving whatever bond the device then asks for
+to whichever agent holds BlueZ's default-agent role. That is enough for a
+speaker, but a keyboard — which has to be shown a six-digit passkey to type
+back — ends up listed as connected while nothing it types arrives.
+`audio-control bluetooth-pair` calls `Device1.Pair` instead, so the bonding
+request carries this process's own agent and the prompt cannot be diverted to
+another session agent; the passkey is printed zero-padded, and the device is
+trusted before connecting so its later reconnections raise no authorization
+prompt of their own.
 
 Wayle already handles live devices, sliders, Bluetooth, and stream routing. The
 `WAYLE_AUDIO_HELPER` bridge is used only for mutually exclusive ALSA profiles:
@@ -75,10 +87,16 @@ audio-control status
 audio-control bluetooth-power [on|off|toggle]
 audio-control wayle-list <output|input>
 audio-control wayle-set-default <output|input> <key>
+audio-control bluetooth-devices
+audio-control bluetooth-scan
+audio-control bluetooth-pair <address|name>
 ```
 
-The last two commands form a NUL-delimited machine interface for Wayle and are
-not intended as an interactive picker.
+`wayle-list` and `wayle-set-default` form a NUL-delimited machine interface for
+Wayle and are not intended as an interactive picker. `bluetooth-pair` is
+interactive: it prints the passkey to type on the device, or asks on stdin for
+one the device displays, and accepts either an address or a distinctive part of
+a device's name.
 
 ### Development checks
 
@@ -331,7 +349,8 @@ for ordinary text and 35-character limit for CJK-heavy text.
 
 The audio button opens Wayle's native Pair/Output/Input/Play panel described
 under [`audio-control`](#audio-control). The Rust helper remains headless and
-is invoked only for status, Bluetooth power, and profile-aware device choices.
+is invoked only for status, Bluetooth power, pairing, and profile-aware device
+choices.
 
 ### External panel behavior
 

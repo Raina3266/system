@@ -41,6 +41,16 @@ async fn run() -> AppResult<()> {
                 .ok_or_else(|| io::Error::other("wayle-set-default key is missing"))?;
             wayle::set_default(&kind, &key)
         }
+        Some("bluetooth-devices") => bluetooth::print_devices().await,
+        Some("bluetooth-scan") => bluetooth::scan_and_print().await,
+        // Pairing, unlike connecting, has to be driven by whoever answers
+        // BlueZ's passkey prompt; see bluetooth::pair.
+        Some("bluetooth-pair") => {
+            let target = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("bluetooth-pair device is missing"))?;
+            bluetooth::pair(&target).await
+        }
         // Daemon mode for bt-battery-provider.service; never returns.
         Some("battery-provider") => bluetooth::battery_provider::run().await,
         None | Some("help" | "--help" | "-h") => {
@@ -51,6 +61,9 @@ async fn run() -> AppResult<()> {
                  audio-control bluetooth-power [on|off|toggle]\n  \
                  audio-control wayle-list <output|input>\n  \
                  audio-control wayle-set-default <output|input> <key>\n  \
+                 audio-control bluetooth-devices\n  \
+                 audio-control bluetooth-scan\n  \
+                 audio-control bluetooth-pair <address|name>\n  \
                  audio-control battery-provider (bt-battery-provider.service)\n"
             );
             Ok(())

@@ -124,9 +124,15 @@ impl Backend {
     /// Pairs when needed, then connects. Registering our own agent on this
     /// D-Bus connection makes BlueZ route this pairing's PIN and passkey
     /// requests to us instead of to the session-wide default agent.
-    pub async fn pair_and_connect(&self, device: &Device) -> AppResult<()> {
+    ///
+    /// `Pair` is also what opens the bonding request that carries that agent.
+    /// `Connect` alone opens no bond: BlueZ brings the link up, reports the
+    /// device as connected, and leaves any bonding the peer then asks for to
+    /// whichever agent holds the default role. That is how an unpaired
+    /// keyboard ends up listed as connected while nothing it types arrives.
+    pub async fn pair_and_connect(&self, device: &Device, frontend: Frontend) -> AppResult<()> {
         if !device.is_paired().await? {
-            let _agent = self.session.register_agent(pairing_agent()).await?;
+            let _agent = self.session.register_agent(pairing_agent(frontend)).await?;
             match device.pair().await {
                 Ok(()) => {}
                 // BlueZ reports an already-known device as AlreadyExists; that
@@ -144,6 +150,33 @@ impl Backend {
                 ..
             }) => Ok(()),
             Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Finds one device by address, or by a case-insensitive part of its name
+    /// so a keyboard can be paired by the label printed on it.
+    pub async fn find(&self, target: &str) -> AppResult<Option<BluetoothEntry>> {
+        let mut entries = self.snapshot().await?;
+        if let Some(index) = entries
+            .iter()
+            .position(|entry| entry.address.eq_ignore_ascii_case(target))
+        {
+            return Ok(Some(entries.swap_remove(index)));
+        }
+        let wanted = target.to_lowercase();
+        let named: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.named && entry.name.to_lowercase().contains(&wanted))
+            .map(|(index, _)| index)
+            .collect();
+        match named.as_slice() {
+            [index] => Ok(Some(entries.swap_remove(*index))),
+            [] => Ok(None),
+            _ => Err(io::Error::other(format!(
+                "{target:?} matches several devices; pass an address instead"
+            ))
+            .into()),
         }
     }
 
@@ -191,6 +224,79 @@ impl Backend {
         connected.sort();
         Ok((powered, connected))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pairing
+//
+// Wayle's panel owns the everyday Bluetooth rows, but the action behind them is
+// `Device1.Connect`, which opens no bonding request. A device that negotiates a
+// passkey — a keyboard above all — has to be paired with `Device1.Pair`, so
+// that lives here, where the agent BlueZ calls back belongs to the same process
+// that asked for the bond and cannot be displaced by another session agent.
+// ---------------------------------------------------------------------------
+
+/// Pairs, trusts, and connects one device, prompting on the terminal.
+pub async fn pair(target: &str) -> AppResult<()> {
+    let backend = Backend::new().await?;
+    backend.power_on().await?;
+    let entry = match backend.find(target).await? {
+        Some(entry) => entry,
+        // Unknown so far: a device in pairing mode only exists for BlueZ once
+        // discovery has seen it advertise.
+        None => {
+            eprintln!("Looking for {target}…");
+            backend.scan().await?;
+            backend.find(target).await?.ok_or_else(|| {
+                io::Error::other(format!(
+                    "no Bluetooth device matches {target:?}; put it in pairing mode and try again"
+                ))
+            })?
+        }
+    };
+    let device = backend.device(&entry.address)?;
+    eprintln!("Pairing with {} ({})…", entry.name, entry.address);
+    backend
+        .pair_and_connect(&device, Frontend::Terminal)
+        .await
+        .map_err(|error| io::Error::other(error_message(&entry.name, error.as_ref())))?;
+    println!(
+        "{} ({}) is paired and connected.",
+        entry.name, entry.address
+    );
+    Ok(())
+}
+
+/// Lists what BlueZ knows about, for picking something to pair.
+pub async fn print_devices() -> AppResult<()> {
+    print_entries(&Backend::new().await?).await
+}
+
+/// Runs one discovery window, then lists what it turned up.
+pub async fn scan_and_print() -> AppResult<()> {
+    let backend = Backend::new().await?;
+    backend.power_on().await?;
+    eprintln!("Scanning…");
+    backend.scan().await?;
+    print_entries(&backend).await
+}
+
+async fn print_entries(backend: &Backend) -> AppResult<()> {
+    for entry in backend.snapshot().await? {
+        let state = if entry.connected {
+            "connected"
+        } else if entry.paired {
+            "paired"
+        } else {
+            "available"
+        };
+        let battery = entry
+            .battery
+            .map(|level| format!(" ({level}%)"))
+            .unwrap_or_default();
+        println!("{}  {state:<9}  {}{battery}", entry.address, entry.name);
+    }
+    Ok(())
 }
 
 async fn read_entry(device: &Device, address: Address) -> AppResult<BluetoothEntry> {
@@ -261,6 +367,15 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 // $XDG_RUNTIME_DIR: the agent writes a request, the front end writes the answer.
 // ---------------------------------------------------------------------------
 
+/// Where the agent's prompts go while a device pairs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Frontend {
+    /// Prompt files in `$XDG_RUNTIME_DIR`, for a graphical front end.
+    Files,
+    /// Messages on stderr, answers on stdin.
+    Terminal,
+}
+
 /// A prompt raised by the agent while pairing.
 pub struct PairRequest {
     /// `None` for informational prompts that need no answer, such as a passkey
@@ -270,48 +385,53 @@ pub struct PairRequest {
     pub message: String,
 }
 
-fn pairing_agent() -> Agent {
+fn pairing_agent(frontend: Frontend) -> Agent {
     Agent {
         // Not the default agent: this one only handles pairings that this
         // process starts, leaving incoming pairings to the session agent.
         request_default: false,
-        request_pin_code: Some(Box::new(|request| {
-            Box::pin(async move { ask(CodeKind::Pin, request.device.to_string()).await })
+        request_pin_code: Some(Box::new(move |request| {
+            Box::pin(async move { ask(CodeKind::Pin, request.device.to_string(), frontend).await })
         })),
-        request_passkey: Some(Box::new(|request| {
+        request_passkey: Some(Box::new(move |request| {
             Box::pin(async move {
-                let code = ask(CodeKind::Passkey, request.device.to_string()).await?;
+                let code = ask(CodeKind::Passkey, request.device.to_string(), frontend).await?;
                 code.trim().parse::<u32>().map_err(|_| ReqError::Rejected)
             })
         })),
-        display_pin_code: Some(Box::new(|request| {
+        display_pin_code: Some(Box::new(move |request| {
             Box::pin(async move {
                 announce(
                     &request.device.to_string(),
                     format!("Type {} on the device to finish pairing.", request.pincode),
+                    frontend,
                 );
                 Ok(())
             })
         })),
-        display_passkey: Some(Box::new(|request| {
+        // Zero-padded: BlueZ passes the passkey as a number, and a keyboard
+        // waiting on six digits rejects the five that 042311 would print as.
+        display_passkey: Some(Box::new(move |request| {
             Box::pin(async move {
                 announce(
                     &request.device.to_string(),
                     format!(
-                        "Type {:06} on the device to finish pairing.",
+                        "Type {:06} on the device and press Enter to finish pairing.",
                         request.passkey
                     ),
+                    frontend,
                 );
                 Ok(())
             })
         })),
         // Numeric comparison and plain authorization are confirmed for the
         // user: they started this pairing from the menu a moment ago.
-        request_confirmation: Some(Box::new(|request| {
+        request_confirmation: Some(Box::new(move |request| {
             Box::pin(async move {
                 announce(
                     &request.device.to_string(),
                     format!("Confirming passkey {:06}…", request.passkey),
+                    frontend,
                 );
                 Ok(())
             })
@@ -322,8 +442,37 @@ fn pairing_agent() -> Agent {
     }
 }
 
+/// Raises a prompt the pairing cannot continue without, and waits for it to be
+/// answered.
+async fn ask(kind: CodeKind, address: String, frontend: Frontend) -> ReqResult<String> {
+    match frontend {
+        Frontend::Files => ask_through_files(kind, address).await,
+        Frontend::Terminal => ask_on_terminal(kind, address).await,
+    }
+}
+
+/// Reads the answer from stdin. BlueZ times the pairing out on its own, so the
+/// read is left to block for as long as the daemon is still waiting.
+async fn ask_on_terminal(kind: CodeKind, address: String) -> ReqResult<String> {
+    let prompt = kind.prompt(&address);
+    tokio::task::spawn_blocking(move || {
+        eprintln!("{prompt}");
+        let mut answer = String::new();
+        io::stdin()
+            .read_line(&mut answer)
+            .map_err(|_| ReqError::Canceled)?;
+        let answer = answer.trim().to_owned();
+        if answer.is_empty() {
+            return Err(ReqError::Rejected);
+        }
+        Ok(answer)
+    })
+    .await
+    .map_err(|_| ReqError::Canceled)?
+}
+
 /// Publishes a prompt and waits for the front end to answer it.
-async fn ask(kind: CodeKind, address: String) -> ReqResult<String> {
+async fn ask_through_files(kind: CodeKind, address: String) -> ReqResult<String> {
     let _ = fs::remove_file(response_path().ok_or(ReqError::Canceled)?);
     write_request(&PairRequest {
         kind: Some(kind),
@@ -343,13 +492,19 @@ async fn ask(kind: CodeKind, address: String) -> ReqResult<String> {
     Err(ReqError::Canceled)
 }
 
-/// Publishes a prompt that needs no answer; the script shows it as a message.
-fn announce(address: &str, message: String) {
-    let _ = write_request(&PairRequest {
-        kind: None,
-        address: address.to_owned(),
-        message,
-    });
+/// Raises a prompt that needs no answer here, such as a passkey to be typed on
+/// the device itself.
+fn announce(address: &str, message: String, frontend: Frontend) {
+    match frontend {
+        Frontend::Files => {
+            let _ = write_request(&PairRequest {
+                kind: None,
+                address: address.to_owned(),
+                message,
+            });
+        }
+        Frontend::Terminal => eprintln!("{message}"),
+    }
 }
 
 fn runtime_path(filename: &str) -> Option<PathBuf> {

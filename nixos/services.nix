@@ -151,7 +151,14 @@ in
   services.gvfs.enable = true;
   services.fprintd.enable = true;
   services.fwupd.enable = true;
-  services.blueman.enable = true;
+  # Deliberately no blueman. Its applet registers a second BlueZ agent and then
+  # calls RequestDefaultAgent, which moves the default-agent role — and with it
+  # the adapter's IO capability — away from /com/wayle/BluetoothAgent. BlueZ
+  # sends every passkey and authorization prompt either to the agent that owns
+  # the bonding request or, failing that, to the default agent, so with blueman
+  # installed the prompts land in its dialog and Wayle's pairing card stays
+  # empty: the panel reports the device connecting and never asks for the six
+  # digits. Same failure the bt-agent service used to cause.
 
   # KDE System Monitor needs its sensor backend in non-Plasma sessions too.
   # Register D-Bus activation so the monitor can start ksystemstats on demand.
@@ -272,10 +279,19 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "bluetooth.service" ];
       wants = [ "bluetooth.service" ];
+      # A provider battery only claims a device's Battery1 slot while the GATT
+      # stub has not taken it, and a restarting bluetoothd forgets every
+      # registration, so the claim has to be re-entered as the daemon comes
+      # back rather than at the provider's own polling pace. PartOf restarts
+      # this service with bluetoothd; without it a rebuild that bounces
+      # bluetooth.service can leave the stub holding the slot — and a Logitech
+      # device answers the GATT battery with a flat 0% — until the device next
+      # disconnects.
+      partOf = [ "bluetooth.service" ];
       serviceConfig = {
         ExecStart = "${repoPackages.audioControl}/bin/audio-control battery-provider";
         Restart = "on-failure";
-        RestartSec = "5s";
+        RestartSec = "2s";
         ProtectSystem = "strict";
         ProtectHome = true;
         PrivateTmp = true;
