@@ -2,7 +2,7 @@
 // ~/.config/wayle/styles/index.scss (linked here by themes/default.nix) and
 // recompiles on every valid save, so no rebuild is needed.
 //
-// The media panel is not here — it is styled by media-panel/src/style.css.
+// The media panel is not here — it is styled by themes/media-panel.css.
 @import "shared";
 @import "dashboard";
 @import "network";

@@ -24,11 +24,11 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | What to edit | When it takes effect |
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
-| `niri/rofi/config.rasi`, `themes/rofi-*.rasi` | Next Rofi launch |
+| `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
-| `themes/preview-panel.css` | Preview panel hot-reloads |
-| `scripts/media-panel/src/style.css` | Open media panel hot-reloads |
+| `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
+| `themes/media-panel.css` | Open media panel hot-reloads |
 | `themes/wayle/*.scss` | Wayle recompiles the override on save |
 
 Rust, Nix module, package, service, and kernel changes still require a rebuild.
@@ -206,7 +206,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
 
 Default panel placement, size, and GTK styling come from
-`themes/preview-panel.css`. Home Manager links that file to
+`themes/rofi/preview-panel.css`. Home Manager links that file to
 `~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
 rebuilding. The `preview-panel-settings` comment at the top controls `width`,
 `height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal

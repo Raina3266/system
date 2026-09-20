@@ -14,10 +14,10 @@ let
 
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
-    "preview-panel/preview-panel.css" = "themes/preview-panel.css";
-    "media-panel/style.css" = "scripts/media-panel/src/style.css";
-    "rofi/rofi-clipboard.rasi" = "themes/rofi-clipboard.rasi";
-    "rofi/rofi-finder.rasi" = "themes/rofi-finder.rasi";
+    "media-panel/style.css" = "themes/media-panel.css";
+    "preview-panel/preview-panel.css" = "themes/rofi/preview-panel.css";
+    "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
+    "rofi/rofi-finder.rasi" = "themes/rofi/rofi-finder.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
     # Wayle's style entry point is hardcoded at styles/index.scss and it
     # watches that whole directory. themes/wayle/index.scss imports the
