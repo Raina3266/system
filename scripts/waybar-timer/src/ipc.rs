@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::model::Timer;
-use crate::waybar::status_json;
+use crate::status_json;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 

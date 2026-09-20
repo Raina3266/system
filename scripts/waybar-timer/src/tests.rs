@@ -89,7 +89,7 @@ mod waybar {
     use std::time::{Duration, Instant};
 
     use crate::model::Timer;
-    use crate::waybar::{ICON, status_json};
+    use crate::{ICON, status_json};
 
     fn timer(remaining: Duration, running: bool) -> Timer {
         Timer {
