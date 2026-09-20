@@ -125,8 +125,8 @@ in
       "org.freedesktop.impl.portal.Secret" = [
         "gnome-keyring"
       ];
-      "org.freedesktop.impl.portal.Settings" = [ 
-        "kde" 
+      "org.freedesktop.impl.portal.Settings" = [
+        "kde"
       ];
     };
   };
@@ -151,6 +151,7 @@ in
   services.gvfs.enable = true;
   services.fprintd.enable = true;
   services.fwupd.enable = true;
+  services.blueman.enable = true;
 
   # KDE System Monitor needs its sensor backend in non-Plasma sessions too.
   # Register D-Bus activation so the monitor can start ksystemstats on demand.

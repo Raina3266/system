@@ -187,6 +187,8 @@ in
       LIBVA_DRIVER_NAME = "iHD";
       TERMINAL = "ghostty";
       ELECTRON_OZONE_PLATFORM_HINT = "wayland";
+      QT_QPA_PLATFORM = "wayland;xcb";
+      QT_SCALE_FACTOR_ROUNDING_POLICY = "PassThrough";
     };
 
     # Fonts

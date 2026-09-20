@@ -12,7 +12,7 @@ let
     path:
     builtins.path {
       inherit path;
-      name = builtins.baseNameOf path;
+      name = baseNameOf path;
       recursive = false;
     };
 in
