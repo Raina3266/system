@@ -112,17 +112,25 @@ window-rule {
 }
 
 window-rule {
-    match app-id=r#"^com\.mitchellh\.ghostty$"#
+    match app-id="com.mitchellh.ghostty"
     open-floating true
     default-column-width { fixed 500; }
     default-window-height { fixed 700; }
 }
 
 window-rule {
-    match app-id=r#"^(org\.kde\.)?dolphin$"#
+    match app-id="org.kde.dolphin"
     open-floating true
-    default-column-width { fixed 800; }
+    default-column-width { fixed 1000; }
     default-window-height { fixed 600; }
+}
+
+window-rule {
+    match app-id="io.github.waylyrics.Waylyrics"
+    open-floating true
+    default-column-width { fixed 1000; }
+    default-window-height { fixed 50; }
+    default-floating-position relative-to="bottom" x=0 y=0
 }
 
 spawn-at-startup "xwayland-satellite"
