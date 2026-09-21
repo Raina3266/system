@@ -266,6 +266,11 @@ in
       };
     };
 
+    bluetooth.serviceConfig.ExecStart = lib.mkForce [
+      ""
+      "${config.hardware.bluetooth.package}/libexec/bluetooth/bluetoothd -f /etc/bluetooth/main.conf --noplugin=battery"
+    ];
+
     bt-battery-provider = {
       description = "Forward kernel HID++ battery levels into BlueZ";
       wantedBy = [ "multi-user.target" ];
