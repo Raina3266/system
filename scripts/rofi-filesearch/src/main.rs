@@ -4,7 +4,6 @@ use std::path::Path;
 
 mod desktop;
 mod model;
-mod preview;
 mod rofi;
 mod search;
 
@@ -38,11 +37,13 @@ fn run() -> AppResult<()> {
                 .next()
                 .and_then(|value| value.to_str().and_then(|value| value.parse::<u32>().ok()))
                 .ok_or_else(|| std::io::Error::other("thumbnail size is missing or invalid"))?;
-            preview::thumbnail_pdf(
+            rofi_preview_shared::file_preview::render_pdf_thumbnail(
                 Path::new(input.as_os_str()),
                 Path::new(output.as_os_str()),
                 size,
+                rofi::pdftoppm_binary().as_os_str(),
             )
+            .map_err(Into::into)
         }
         Some("--help" | "-h") => {
             println!(

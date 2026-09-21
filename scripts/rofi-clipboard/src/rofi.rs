@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Result, bail};
 use rofi_preview_shared::launcher::{
@@ -6,8 +6,8 @@ use rofi_preview_shared::launcher::{
 };
 
 use crate::clipboard::copy_item;
+use crate::editor::ClipboardEditor;
 use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
-use crate::preview;
 use crate::store::ClipboardStore;
 
 const ACTION_PIN: &str = "pin";
@@ -64,21 +64,19 @@ pub fn launch(mode: Mode, selected_id: Option<u64>) -> Result<()> {
 
 struct ClipboardUi {
     store: ClipboardStore,
+    editor: ClipboardEditor,
     mode: Mode,
     selected_id: Option<u64>,
-    socket: PathBuf,
 }
 
 impl ClipboardUi {
     fn new(mode: Mode, selected_id: Option<u64>) -> Result<Self> {
         let store = ClipboardStore::discover()?;
-        let socket = preview::session_socket_path()?;
-        preview::cleanup_session(&socket)?;
         Ok(Self {
             store,
+            editor: ClipboardEditor::new()?,
             mode,
             selected_id,
-            socket,
         })
     }
 
@@ -166,7 +164,8 @@ impl Controller for ClipboardUi {
                 let replacement =
                     selection_after_delete(&self.store, self.mode, id).map_err(display_error)?;
                 if self.store.delete(id).map_err(display_error)? {
-                    preview::refresh_after_delete_at(&self.store, replacement, &self.socket)
+                    self.editor
+                        .refresh_after_delete(&self.store, replacement)
                         .map_err(display_error)?;
                     self.selected_id = replacement;
                 }
@@ -176,7 +175,9 @@ impl Controller for ClipboardUi {
                 self.selected_id = Some(id);
             }
             ACTION_EDIT => {
-                self.selected_id = preview::toggle_edit_at(&self.store, Some(id), &self.socket)
+                self.selected_id = self
+                    .editor
+                    .toggle(&self.store, Some(id))
                     .map_err(display_error)?
                     .or(Some(id));
             }
@@ -192,15 +193,17 @@ impl Controller for ClipboardUi {
             return Ok(());
         };
         self.selected_id = Some(id);
-        preview::selection_changed_at(&self.store, id, serial, &self.socket).map_err(display_error)
+        self.editor
+            .selection_changed(&self.store, id, serial)
+            .map_err(display_error)
     }
 
     fn close(&mut self) -> UiResult<()> {
-        if let Err(error) = preview::save_and_close(&self.store, &self.socket) {
-            preview::close(&self.socket);
+        if let Err(error) = self.editor.save_and_close(&self.store) {
+            self.editor.close_silently();
             return Err(display_error(error));
         }
-        preview::cleanup_socket(&self.socket).map_err(display_error)
+        Ok(())
     }
 }
 

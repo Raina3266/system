@@ -351,11 +351,13 @@ mod model {
     }
 }
 
-mod preview {
+mod editor {
     use std::path::PathBuf;
 
+    use rofi_preview_shared::panel_client::PanelContent;
+
+    use crate::editor::*;
     use crate::model::{ClipboardItem, ItemKind};
-    use crate::preview::*;
 
     fn item(kind: ItemKind, text: Option<&str>, name: Option<&str>) -> ClipboardItem {
         ClipboardItem {
@@ -380,7 +382,7 @@ mod preview {
         let original = "heading\r\n\t  repeated    spaces\n中文 👩🏽‍💻  \n";
         assert_eq!(
             panel_content(&item(ItemKind::Text, Some(original), None), None,),
-            Some(PanelContent::Text(original.to_owned()))
+            Some(PanelContent::EditableText(original.to_owned()))
         );
     }
 
@@ -388,7 +390,7 @@ mod preview {
     fn memo_content_uses_the_editable_text_panel() {
         assert_eq!(
             panel_content(&item(ItemKind::Memo, Some("draft memo"), None), None),
-            Some(PanelContent::Text("draft memo".to_owned()))
+            Some(PanelContent::EditableText("draft memo".to_owned()))
         );
     }
 
@@ -426,72 +428,10 @@ mod preview {
     }
 
     #[test]
-    fn close_frame_has_no_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, CLOSE, 0, &[]).unwrap();
-        assert_eq!(
-            frame,
-            [CLOSE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        );
-    }
-
-    #[test]
-    fn save_request_has_no_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, SAVE_AND_CLOSE, 0, &[]).unwrap();
-        assert_eq!(frame[0], SAVE_AND_CLOSE);
-        assert_eq!(u64::from_be_bytes(frame[9..17].try_into().unwrap()), 0);
-    }
-
-    #[test]
-    fn panel_response_preserves_item_ownership_and_complete_buffer() {
-        let text = "first line\n\tsecond  line\n中文 👩🏽‍💻\n";
-        let mut payload = vec![SWITCH_READY, CONTENT_TEXT];
-        payload.extend_from_slice(&73_u64.to_be_bytes());
-        payload.extend_from_slice(text.as_bytes());
-        let mut frame = Vec::new();
-        write_frame(&mut frame, PANEL_STATE, 29, &payload).unwrap();
-
-        assert_eq!(
-            read_switch_reply(frame.as_slice(), 29).unwrap(),
-            SwitchReply::Ready(Some(PanelSnapshot::Text {
-                id: 73,
-                text: text.to_owned(),
-            }))
-        );
-    }
-
-    #[test]
-    fn rejected_and_same_item_responses_are_distinct() {
-        for (disposition, expected) in [
-            (SWITCH_REJECTED, SwitchReply::Rejected),
-            (SWITCH_SAME_ITEM, SwitchReply::SameItem),
-        ] {
-            let mut payload = vec![disposition, CONTENT_NONE];
-            payload.extend_from_slice(&0_u64.to_be_bytes());
-            let mut frame = Vec::new();
-            write_frame(&mut frame, PANEL_STATE, 7, &payload).unwrap();
-            assert_eq!(read_switch_reply(frame.as_slice(), 7).unwrap(), expected);
-        }
-    }
-
-    #[test]
     fn unchanged_text_does_not_need_a_database_rewrite() {
         let item = item(ItemKind::Text, Some("typed text"), None);
         assert!(!text_is_changed(&item, "typed text").unwrap());
         assert!(text_is_changed(&item, "modified text").unwrap());
-    }
-
-    #[test]
-    fn text_editor_is_editable_and_soft_wraps() {
-        assert!(!TEXT_EDITOR_ARGUMENTS.contains(&"--read-only"));
-        assert!(!TEXT_EDITOR_ARGUMENTS.contains(&"--no-wrap"));
-    }
-
-    #[test]
-    fn image_preview_is_read_only() {
-        assert!(IMAGE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
-        assert!(FILE_PREVIEW_ARGUMENTS.contains(&"--read-only"));
     }
 }
 

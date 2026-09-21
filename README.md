@@ -13,6 +13,11 @@ This repository contains ten Rust packages used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
+`rofi-preview-shared` is the one library-plus-binary package in this workspace:
+its library gives both Rofi-named applications the same launcher, panel client,
+IPC, and file-preview implementation, while its binary renders the companion
+panel. The other packages remain binary-only because no sibling imports them.
+
 The Niri configuration applies one structure-and-behavior Wayle v0.7.0 delta
 to supply the native [dashboard, network, and audio panels](#wayle-dashboard).
 

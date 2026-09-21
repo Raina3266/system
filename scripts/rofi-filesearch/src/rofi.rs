@@ -1,14 +1,18 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use rofi_preview_shared::file_preview::FilePreviewer;
 use rofi_preview_shared::launcher::{
     Action, Controller, Icon, Mode as SharedMode, Outcome, Row, UiResult, View,
 };
+use rofi_preview_shared::panel_client::PanelClient;
 
 use crate::model::{Entry, Mode, path_from_key, path_key};
-use crate::{AppResult, preview, search};
+use crate::{AppResult, search};
 
 const ACTION_PREVIEW: &str = "preview";
 const ACTION_REVEAL: &str = "reveal";
@@ -23,19 +27,30 @@ struct FileSearch {
     mode: Mode,
     home: PathBuf,
     folder: PathBuf,
-    socket: PathBuf,
+    panel: PanelClient,
+    previewer: FilePreviewer,
 }
 
 impl FileSearch {
     fn new() -> AppResult<Self> {
         let home = search::home_directory()?;
-        let socket = preview::session_socket_path()?;
-        preview::cleanup(&socket)?;
+        let panel = PanelClient::new(
+            "rofi-filesearch",
+            binary("ROFI_FILESEARCH_ROFI_PREVIEW_SHARED", "rofi-preview-shared"),
+            "ROFI_FILESEARCH",
+        )?;
+        panel.cleanup()?;
         Ok(Self {
             mode: Mode::App,
             folder: home.clone(),
             home,
-            socket,
+            panel,
+            previewer: FilePreviewer::new(
+                "rofi-filesearch",
+                file_binary(),
+                pdftoppm_binary(),
+                ffmpegthumbnailer_binary(),
+            ),
         })
     }
 
@@ -98,6 +113,41 @@ impl FileSearch {
         spawn_background(xdg_open_binary(), [path.as_os_str()])?;
         Ok(Outcome::Close)
     }
+
+    fn toggle_preview(&self, key: &str) -> AppResult<()> {
+        if self.panel.is_open() {
+            self.panel.close()?;
+            return Ok(());
+        }
+        let Some(file) = preview_file_from_key(key) else {
+            return Ok(());
+        };
+        let content = self.previewer.preview(&file)?;
+        self.panel
+            .open(preview_id(&file), "File preview", &content)?;
+        Ok(())
+    }
+
+    fn update_preview(&self, key: &str, serial: u64) -> AppResult<()> {
+        let Some(file) = preview_file_from_key(key) else {
+            if self.panel.is_open() {
+                self.panel.close()?;
+            }
+            return Ok(());
+        };
+        if !self.panel.is_open() {
+            return Ok(());
+        }
+        let content = self.previewer.preview(&file)?;
+        if self.panel.update(preview_id(&file), serial, &content)? {
+            Ok(())
+        } else {
+            Err(
+                std::io::Error::other("rofi-preview-shared closed before the update arrived")
+                    .into(),
+            )
+        }
+    }
 }
 
 impl Controller for FileSearch {
@@ -151,7 +201,7 @@ impl Controller for FileSearch {
         };
         match action {
             ACTION_PREVIEW if matches!(self.mode, Mode::File | Mode::Folder) => {
-                preview::toggle_at(selected, &self.socket).map_err(display_error)?;
+                self.toggle_preview(selected).map_err(display_error)?;
             }
             ACTION_REVEAL if self.mode == Mode::File => {
                 if let Some(path) = path_from_key(selected, Mode::File) {
@@ -165,13 +215,26 @@ impl Controller for FileSearch {
     }
 
     fn selection_changed(&mut self, selected: &str, serial: u64) -> UiResult<()> {
-        preview::selection_changed_at(selected, serial, &self.socket).map_err(display_error)
+        self.update_preview(selected, serial).map_err(display_error)
     }
 
     fn close(&mut self) -> UiResult<()> {
-        preview::close_at(&self.socket);
-        preview::cleanup(&self.socket).map_err(display_error)
+        self.panel.close().map_err(display_error)
     }
+}
+
+pub(crate) fn preview_file_from_key(key: &str) -> Option<PathBuf> {
+    let mode = crate::model::mode_from_key(key)?;
+    if !matches!(mode, Mode::File | Mode::Folder) {
+        return None;
+    }
+    path_from_key(key, mode).filter(|path| path.is_file())
+}
+
+fn preview_id(path: &std::path::Path) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    path.as_os_str().as_bytes().hash(&mut hasher);
+    hasher.finish()
 }
 
 fn spawn_background<I, S>(program: OsString, arguments: I) -> AppResult<()>
@@ -206,4 +269,16 @@ fn xdg_open_binary() -> OsString {
 
 fn dolphin_binary() -> OsString {
     binary("ROFI_FILESEARCH_DOLPHIN", "dolphin")
+}
+
+fn file_binary() -> OsString {
+    binary("ROFI_FILESEARCH_FILE", "file")
+}
+
+pub(crate) fn pdftoppm_binary() -> OsString {
+    binary("ROFI_FILESEARCH_PDFTOPPM", "pdftoppm")
+}
+
+fn ffmpegthumbnailer_binary() -> OsString {
+    binary("ROFI_FILESEARCH_FFMPEGTHUMBNAILER", "ffmpegthumbnailer")
 }

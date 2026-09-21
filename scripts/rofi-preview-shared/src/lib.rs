@@ -1,4 +1,6 @@
+pub mod file_preview;
 pub mod launcher;
+pub mod panel_client;
 
 pub mod panel {
     pub use crate::cli::{Action, HELP, Options, Side, WindowOverrides, parse_from};

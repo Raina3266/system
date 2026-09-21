@@ -1,6 +1,6 @@
 mod clipboard;
+mod editor;
 mod model;
-mod preview;
 mod rofi;
 mod store;
 mod waybar;

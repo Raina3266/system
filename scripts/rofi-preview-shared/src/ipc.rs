@@ -16,18 +16,18 @@ pub(crate) const SAVE_AND_CLOSE: u8 = 4;
 pub(crate) const PANEL_STATE: u8 = 5;
 pub(crate) const PREPARE_SWITCH: u8 = 6;
 pub(crate) const UPDATE_NETWORK: u8 = 7;
-const HEADER_SIZE: usize = 17;
+pub(crate) const HEADER_SIZE: usize = 17;
 const ITEM_ID_SIZE: usize = 8;
 const NETWORK_PREFIX_SIZE: usize = ITEM_ID_SIZE * 2;
-const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const SAVE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
-const SWITCH_REJECTED: u8 = 0;
-const SWITCH_SAME_ITEM: u8 = 1;
+pub(crate) const SWITCH_REJECTED: u8 = 0;
+pub(crate) const SWITCH_SAME_ITEM: u8 = 1;
 pub(crate) const SWITCH_READY: u8 = 2;
-const CONTENT_NONE: u8 = 0;
+pub(crate) const CONTENT_NONE: u8 = 0;
 pub(crate) const CONTENT_TEXT: u8 = 1;
-const CONTENT_IMAGE: u8 = 2;
+pub(crate) const CONTENT_IMAGE: u8 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentSnapshot {

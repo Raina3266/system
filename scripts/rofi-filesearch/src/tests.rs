@@ -54,25 +54,7 @@ mod preview {
     use std::fs;
 
     use crate::model::{Mode, path_key};
-    use crate::preview::*;
-
-    #[test]
-    fn only_requested_preview_families_are_supported() {
-        assert_eq!(preview_kind("text/plain"), PreviewKind::Text);
-        assert_eq!(preview_kind("application/json"), PreviewKind::Text);
-        assert_eq!(preview_kind("image/webp"), PreviewKind::Image);
-        assert_eq!(preview_kind("application/pdf"), PreviewKind::Pdf);
-        assert_eq!(preview_kind("video/mp4"), PreviewKind::Video);
-        assert_eq!(preview_kind("audio/mpeg"), PreviewKind::Unsupported);
-    }
-
-    #[test]
-    fn close_frame_has_no_item_payload() {
-        let mut frame = Vec::new();
-        write_frame(&mut frame, CLOSE, 0, &[]).unwrap();
-        assert_eq!(frame.len(), 17);
-        assert_eq!(frame[0], CLOSE);
-    }
+    use crate::rofi::preview_file_from_key;
 
     #[test]
     fn file_and_folder_mode_keys_can_preview_files_but_not_directories() {
