@@ -5,7 +5,7 @@ members = [
   "media-panel",
   "network-manager",
   "ocr-screenshot",
-  "preview-panel",
+  "rofi-preview-shared",
   "rofi-clipboard",
   "rofi-filesearch",
   "waybar-timer",
@@ -19,6 +19,6 @@ edition = "2024"
 
 # These crates sit blocked on a subprocess or a D-Bus round trip, so LTO buys
 # nothing at runtime and costs plenty at build time — 27s against 9s on
-# rofi-clipboard, worse on preview-panel and audio-control. Keep strip.
+# rofi-clipboard, worse on rofi-preview-shared and audio-control. Keep strip.
 [profile.release]
 strip = true

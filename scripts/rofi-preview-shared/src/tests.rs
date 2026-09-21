@@ -115,7 +115,7 @@ mod config {
     use crate::cli::{Side, WindowOverrides};
     use crate::config::*;
 
-    const THEME: &str = r#"/* preview-panel-settings
+    const THEME: &str = r#"/* rofi-preview-shared-settings
 width: 480px;
 height: 615px;
 companion_width: 400px;
@@ -125,7 +125,7 @@ x: 35px;
 y: -20px;
 */
 
-window.preview-panel { color: #cbe3e7; }
+window.rofi-preview-shared { color: #cbe3e7; }
 "#;
 
     #[test]
@@ -189,7 +189,7 @@ window.preview-panel { color: #cbe3e7; }
 
     #[test]
     fn parses_partial_rasi_layout_and_ignores_missing_block() {
-        let rasi = r#"/* preview-panel-layout
+        let rasi = r#"/* rofi-preview-shared-layout
 height: 400px;
 companion-width: 375px;
 x: -25px;
@@ -230,7 +230,7 @@ window { width: 375px; }
 
     #[test]
     fn rejects_invalid_rasi_layout_without_affecting_css_parser() {
-        let invalid = "/* preview-panel-layout\nwidth: 100px;\n*/";
+        let invalid = "/* rofi-preview-shared-layout\nwidth: 100px;\n*/";
         assert!(
             parse_layout(invalid)
                 .unwrap_err()
@@ -303,12 +303,14 @@ window { width: 375px; }
     fn css_path_uses_xdg_then_home_fallback() {
         assert_eq!(
             theme_path_from(None, Some(OsStr::new("/tmp/config")), None),
-            Some(PathBuf::from("/tmp/config/preview-panel/preview-panel.css"))
+            Some(PathBuf::from(
+                "/tmp/config/rofi-preview-shared/rofi-preview-shared.css"
+            ))
         );
         assert_eq!(
             theme_path_from(None, None, Some(OsStr::new("/home/raina"))),
             Some(PathBuf::from(
-                "/home/raina/.config/preview-panel/preview-panel.css"
+                "/home/raina/.config/rofi-preview-shared/rofi-preview-shared.css"
             ))
         );
     }

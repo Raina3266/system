@@ -10,10 +10,10 @@ mod tests;
 
 use std::env;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::clipboard::{capture_clipboard, store_stdin};
-use crate::rofi::{Mode, launch_rofi, run_script};
+use crate::rofi::{Mode, launch};
 
 fn main() {
     if let Err(error) = run() {
@@ -26,27 +26,10 @@ fn main() {
 pub fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
-        None | Some("run") => launch_rofi(Mode::Memo, None),
-        Some("script") => {
-            let mode = Mode::parse(args.next().as_deref().unwrap_or("memo"))?;
-            run_script(mode, args.next())
-        }
+        None | Some("run") => launch(Mode::Memo, None),
         Some("capture") => capture_clipboard(),
         Some("status") => waybar::run_status(),
         Some("clear") => waybar::clear_selection(),
-        Some("preview-selection") => {
-            let id = args
-                .next()
-                .context("preview-selection requires a clipboard item ID")?
-                .parse::<u64>()
-                .context("preview-selection ID must be a positive integer")?;
-            let serial = args
-                .next()
-                .context("preview-selection requires a selection serial")?
-                .parse::<u64>()
-                .context("preview-selection serial must be a positive integer")?;
-            preview::selection_changed(id, serial)
-        }
         Some("store") => {
             let mime = parse_mime_argument(args)?;
             store_stdin(&mime)

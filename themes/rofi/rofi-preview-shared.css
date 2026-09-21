@@ -1,0 +1,130 @@
+/*
+ * Do not delete the comments below
+ */
+
+/* rofi-preview-shared-settings
+width: 400px;
+height: 550px;
+companion_width: 400px;
+side: left;
+gap: 10px;
+x: 770px;
+y: -500px;
+*/
+
+window.rofi-preview-shared {
+    background: rgba(24, 10, 16, 0.95);
+    border: 1px solid rgba(214, 86, 199, 0.55);
+    border-radius: 15px;
+    padding: 10px;
+}
+
+window.rofi-preview-shared-window {
+    background: rgba(14, 6, 22, 0.95);
+    border: 1px solid rgba(255, 126, 219, 0.55);
+    border-radius: 15px;
+    padding: 12px;
+    color: #CBE3E7;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 13pt;
+}
+
+.rofi-preview-shared-root {
+    background: transparent;
+}
+
+.rofi-preview-shared-input {
+    background: rgba(20, 20, 40, 0.85);
+    border: 1px solid rgba(255, 126, 219, 0.25);
+    border-radius: 7px;
+    padding: 6px 10px;
+}
+
+.rofi-preview-shared-prompt {
+    color: #FF7EDB;
+}
+
+.rofi-preview-shared-search,
+.rofi-preview-shared-search text {
+    background: transparent;
+    color: #CBE3E7;
+    caret-color: #FF7EDB;
+    border: 0;
+    box-shadow: none;
+}
+
+button.rofi-preview-shared-mode,
+button.rofi-preview-shared-action {
+    background: rgba(122, 252, 255, 0.06);
+    color: #7AFCFF;
+    border: 1px solid rgba(122, 252, 255, 0.28);
+    border-radius: 7px;
+    padding: 5px 8px;
+}
+
+button.rofi-preview-shared-mode.active,
+button.rofi-preview-shared-mode:hover,
+button.rofi-preview-shared-action:hover {
+    color: #FF7EDB;
+    border-color: #FF7EDB;
+    background: rgba(255, 126, 219, 0.16);
+}
+
+list.rofi-preview-shared-list {
+    background: transparent;
+}
+
+row.rofi-preview-shared-row {
+    background: transparent;
+    color: #CBE3E7;
+    border: 1px solid rgba(122, 252, 255, 0.10);
+    border-radius: 7px;
+    margin: 2px 0;
+}
+
+row.rofi-preview-shared-row:selected {
+    background: rgba(255, 126, 219, 0.10);
+    color: #FF7EDB;
+    border-color: #FF7EDB;
+}
+
+row.rofi-preview-shared-row.active {
+    border-color: #FF3333;
+}
+
+.rofi-preview-shared-subtitle,
+.rofi-preview-shared-empty {
+    color: #5C6776;
+    font-size: 80%;
+}
+
+.rofi-preview-shared-error {
+    color: #FF3333;
+}
+
+textview.preview-text,
+textview.preview-text text,
+textview.network-details,
+textview.network-details text {
+    background: transparent;
+    color: #5DF4FE;
+    caret-color: #D656C7;
+    font-family: "JetBrains Mono Nerd Font", monospace;
+    font-size: 12pt;
+}
+
+picture.preview-image {
+    background: transparent;
+}
+
+image.network-qr {
+    min-width: 200px;
+    min-height: 200px;
+    background: #0E0616;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    background: #D52C35;
+    border-radius: 4px;
+}

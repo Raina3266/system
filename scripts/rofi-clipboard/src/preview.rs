@@ -13,7 +13,6 @@ use anyhow::{Context, Result, bail};
 use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::store::ClipboardStore;
 
-pub const SOCKET_ENV: &str = "ROFI_CLIPBOARD_PREVIEW_SOCKET";
 const UPDATE_TEXT: u8 = 1;
 const UPDATE_IMAGE: u8 = 3;
 pub(crate) const CLOSE: u8 = 2;
@@ -98,20 +97,21 @@ pub fn close(path: &Path) {
     }
 }
 
-pub fn save_and_close(path: &Path) -> Result<()> {
-    let store = ClipboardStore::discover()?;
-    let _ = save_open_panel(&store, path)?;
+pub fn save_and_close(store: &ClipboardStore, path: &Path) -> Result<()> {
+    let _ = save_open_panel(store, path)?;
     Ok(())
 }
 
-pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<Option<u64>> {
-    let path = socket_from_environment()?;
-
-    match save_open_panel(store, &path)? {
+pub fn toggle_edit_at(
+    store: &ClipboardStore,
+    selected_id: Option<u64>,
+    path: &Path,
+) -> Result<Option<u64>> {
+    match save_open_panel(store, path)? {
         SaveOutcome::Saved(saved_id) => return Ok(saved_id),
         SaveOutcome::NoPanel | SaveOutcome::NoSnapshot => {}
     }
-    cleanup_socket(&path)?;
+    cleanup_socket(path)?;
 
     let Some(selected_id) = selected_id else {
         return Ok(None);
@@ -120,7 +120,7 @@ pub fn toggle_edit(store: &ClipboardStore, selected_id: Option<u64>) -> Result<O
         return Ok(None);
     };
 
-    launch_content(&path, selected_id, &content)?;
+    launch_content(path, selected_id, &content)?;
 
     Ok(Some(selected_id))
 }
@@ -140,16 +140,19 @@ fn save_open_panel(store: &ClipboardStore, path: &Path) -> Result<SaveOutcome> {
     }
 }
 
-pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
-    let Some(path) = active_socket_from_environment() else {
+pub fn selection_changed_at(
+    store: &ClipboardStore,
+    id: u64,
+    serial: u64,
+    path: &Path,
+) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let Some(content) = item_content(store, id)? else {
         return Ok(());
     };
-
-    let store = ClipboardStore::discover()?;
-    let Some(content) = item_content(&store, id)? else {
-        return Ok(());
-    };
-    let Some(reply) = request(&path, PREPARE_SWITCH, serial, &id.to_be_bytes())? else {
+    let Some(reply) = request(path, PREPARE_SWITCH, serial, &id.to_be_bytes())? else {
         return Ok(());
     };
     let SwitchReply::Ready(snapshot) = reply else {
@@ -157,25 +160,29 @@ pub fn selection_changed(id: u64, serial: u64) -> Result<()> {
     };
 
     if let Some(snapshot) = snapshot {
-        let _ = save_snapshot(&store, snapshot)?;
+        let _ = save_snapshot(store, snapshot)?;
     }
-    let _ = send_content(&path, serial, id, &content)?;
+    let _ = send_content(path, serial, id, &content)?;
     Ok(())
 }
 
-pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) -> Result<()> {
-    let Some(path) = active_socket_from_environment() else {
+pub fn refresh_after_delete_at(
+    store: &ClipboardStore,
+    selected_id: Option<u64>,
+    path: &Path,
+) -> Result<()> {
+    if !path.exists() {
         return Ok(());
-    };
+    }
 
     // Rofi keeps the same row index after a deletion and does not emit its
     // selection callback. Recreate only an already-open panel on that row.
-    if !send(&path, CLOSE, 0, &[])? {
-        cleanup_socket(&path)?;
+    if !send(path, CLOSE, 0, &[])? {
+        cleanup_socket(path)?;
         return Ok(());
     }
-    wait_for_socket_removal(&path)?;
-    cleanup_socket(&path)?;
+    wait_for_socket_removal(path)?;
+    cleanup_socket(path)?;
 
     let Some(selected_id) = selected_id else {
         return Ok(());
@@ -184,13 +191,7 @@ pub fn refresh_after_delete(store: &ClipboardStore, selected_id: Option<u64>) ->
         return Ok(());
     };
 
-    launch_content(&path, selected_id, &content)
-}
-
-fn active_socket_from_environment() -> Option<PathBuf> {
-    env::var_os(SOCKET_ENV)
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
+    launch_content(path, selected_id, &content)
 }
 
 fn launch_content(path: &Path, id: u64, content: &PanelContent) -> Result<()> {
@@ -231,12 +232,11 @@ fn launch_panel(
 ) -> Result<()> {
     let mut command = Command::new(preview_panel_binary());
     command.args(arguments);
-    command.arg("--layout-file").arg(crate::rofi::theme_path()?);
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_WIDTH", "--width");
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_HEIGHT", "--height");
     append_preview_override(
         &mut command,
-        "ROFI_CLIPBOARD_ROFI_WIDTH",
+        "ROFI_CLIPBOARD_LAUNCHER_WIDTH",
         "--companion-width",
     );
     append_preview_override(&mut command, "ROFI_CLIPBOARD_PREVIEW_SIDE", "--side");
@@ -246,20 +246,20 @@ fn launch_panel(
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
-    let mut child = command.spawn().context("launch preview-panel")?;
+    let mut child = command.spawn().context("launch rofi-preview-shared")?;
 
     let mut input = child
         .stdin
         .take()
-        .context("open preview-panel standard input")?;
+        .context("open rofi-preview-shared standard input")?;
     input
         .write_all(initial_text.as_bytes())
-        .context("send initial preview-panel content")?;
+        .context("send initial rofi-preview-shared content")?;
     drop(input);
 
     wait_for_socket(&mut child, path)?;
     if !send_content(path, 0, id, content)? {
-        bail!("preview-panel closed before displaying the selected item");
+        bail!("rofi-preview-shared closed before displaying the selected item");
     }
     drop(child);
     Ok(())
@@ -276,8 +276,11 @@ fn wait_for_socket(child: &mut Child, path: &Path) -> Result<()> {
         if path.exists() {
             return Ok(());
         }
-        if let Some(status) = child.try_wait().context("check preview-panel startup")? {
-            bail!("preview-panel exited before opening its socket ({status})");
+        if let Some(status) = child
+            .try_wait()
+            .context("check rofi-preview-shared startup")?
+        {
+            bail!("rofi-preview-shared exited before opening its socket ({status})");
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -285,7 +288,7 @@ fn wait_for_socket(child: &mut Child, path: &Path) -> Result<()> {
     let _ = child.kill();
     let _ = child.wait();
     bail!(
-        "preview-panel did not open socket {} within one second",
+        "rofi-preview-shared did not open socket {} within one second",
         path.display()
     )
 }
@@ -298,15 +301,9 @@ fn wait_for_socket_removal(path: &Path) -> Result<()> {
         thread::sleep(Duration::from_millis(10));
     }
     bail!(
-        "preview-panel did not close socket {} within two seconds",
+        "rofi-preview-shared did not close socket {} within two seconds",
         path.display()
     )
-}
-
-fn socket_from_environment() -> Result<PathBuf> {
-    env::var_os(SOCKET_ENV)
-        .map(PathBuf::from)
-        .context("preview panel is only available inside rofi-clipboard")
 }
 
 fn item_content(store: &ClipboardStore, id: u64) -> Result<Option<PanelContent>> {
@@ -512,7 +509,7 @@ pub(crate) fn write_frame(
 }
 
 fn preview_panel_binary() -> PathBuf {
-    env::var_os("ROFI_CLIPBOARD_PREVIEW_PANEL")
+    env::var_os("ROFI_CLIPBOARD_ROFI_PREVIEW_SHARED")
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new("preview-panel").to_path_buf())
+        .unwrap_or_else(|| Path::new("rofi-preview-shared").to_path_buf())
 }

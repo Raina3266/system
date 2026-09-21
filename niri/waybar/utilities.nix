@@ -5,7 +5,7 @@
 {
   homeConfig = {
     home.packages = [
-      packages.previewPanel
+      packages.rofiPreviewShared
       packages.rofiClipboard
     ];
 

@@ -49,6 +49,14 @@ let
   # that member's Cargo sources. Passing all of scripts/ put all ten crates in
   # every derivation's input hash, so touching one rebuilt all ten. Sibling
   # manifests still count, but only change when a crate gains a dependency.
+  sourceMembers =
+    pname:
+    [ pname ]
+    ++ lib.optional (builtins.elem pname [
+      "rofi-clipboard"
+      "rofi-filesearch"
+    ]) "rofi-preview-shared";
+
   memberSrc =
     pname:
     lib.fileset.toSource {
@@ -57,7 +65,11 @@ let
         (craneLib.fileset.cargoTomlAndLock ./.)
         # Exclude UI/runtime assets (CSS, docs, screenshots) from the compiled
         # package input. They are live-linked separately by Home Manager.
-        (craneLib.fileset.commonCargoSources (./. + "/${pname}"))
+        (lib.fileset.unions (
+          map (member: craneLib.fileset.commonCargoSources (./. + "/${member}")) (
+            sourceMembers pname
+          )
+        ))
       ];
     };
 
@@ -69,7 +81,7 @@ let
     lib.concatMapStrings (m: ''
       mkdir -p ${m}/src
       : > ${m}/src/main.rs
-    '') (lib.remove pname workspaceMembers);
+    '') (lib.subtractLists (sourceMembers pname) workspaceMembers);
 
   # `pname` is normally also Cargo's package id and the installed binary.
   # network-manager is the exception: directory and binary were renamed, but
@@ -159,34 +171,32 @@ rec {
     '';
   };
 
-  # gtk4 and the hook that wraps it live in commonArgs now, so there is nothing
-  # left for this crate to add.
-  previewPanel = mkWorkspacePackage "preview-panel" { };
+  # Shared GTK launcher and companion-preview process used by both Rofi-named
+  # applications. gtk4 and its wrapper hook already live in commonArgs.
+  rofiPreviewShared = mkWorkspacePackage "rofi-preview-shared" { };
 
   rofiFilesearch = mkWorkspacePackage "rofi-filesearch" {
-    dontWrapGApps = true;
-    postInstall = ''
-      wrapProgram "$out/bin/rofi-filesearch" \
-        --set ROFI_FILESEARCH_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_FILESEARCH_FD "${pkgs.lib.getExe pkgs.fd}" \
-        --set ROFI_FILESEARCH_GIO "${pkgs.lib.getExe' pkgs.glib "gio"}" \
-        --set ROFI_FILESEARCH_XDG_OPEN "${pkgs.lib.getExe' pkgs.xdg-utils "xdg-open"}" \
-        --set ROFI_FILESEARCH_DOLPHIN "${pkgs.lib.getExe pkgs.kdePackages.dolphin}" \
-        --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}" \
-        --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}" \
-        --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}" \
-        --set ROFI_FILESEARCH_PREVIEW_PANEL "${previewPanel}/bin/preview-panel"
+    preFixup = ''
+      gappsWrapperArgs+=(
+        --set ROFI_FILESEARCH_FD "${pkgs.lib.getExe pkgs.fd}"
+        --set ROFI_FILESEARCH_GIO "${pkgs.lib.getExe' pkgs.glib "gio"}"
+        --set ROFI_FILESEARCH_XDG_OPEN "${pkgs.lib.getExe' pkgs.xdg-utils "xdg-open"}"
+        --set ROFI_FILESEARCH_DOLPHIN "${pkgs.lib.getExe pkgs.kdePackages.dolphin}"
+        --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}"
+        --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}"
+        --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}"
+        --set ROFI_FILESEARCH_ROFI_PREVIEW_SHARED "${rofiPreviewShared}/bin/rofi-preview-shared"
+      )
     '';
   };
 
   rofiClipboard = mkWorkspacePackage "rofi-clipboard" {
-    dontWrapGApps = true;
-    postInstall = ''
-      wrapProgram "$out/bin/rofi-clipboard" \
-        --set ROFI_CLIPBOARD_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_CLIPBOARD_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
-        --set ROFI_CLIPBOARD_WL_COPY "${pkgs.lib.getExe' pkgs.wl-clipboard "wl-copy"}" \
+    preFixup = ''
+      gappsWrapperArgs+=(
+        --set ROFI_CLIPBOARD_ROFI_PREVIEW_SHARED "${rofiPreviewShared}/bin/rofi-preview-shared"
+        --set ROFI_CLIPBOARD_WL_COPY "${pkgs.lib.getExe' pkgs.wl-clipboard "wl-copy"}"
         --set ROFI_CLIPBOARD_WL_PASTE "${pkgs.lib.getExe' pkgs.wl-clipboard "wl-paste"}"
+      )
     '';
   };
 
@@ -196,7 +206,6 @@ rec {
     postInstall = ''
       wrapProgram "$out/bin/network-manager" \
         --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
         --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
         --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
         --set NETWORK_MANAGER_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \

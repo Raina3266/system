@@ -58,7 +58,7 @@ pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) 
     // NON_UNIQUE is important for launchers: every Edit action gets its own
     // item rather than activating an older panel and losing the new content.
     let application = Application::builder()
-        .application_id("io.github.raina.PreviewPanel")
+        .application_id("io.github.raina.RofiPreviewShared")
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
     let options = Rc::new(options);
@@ -75,7 +75,7 @@ pub fn run(options: Options, text: String, receiver: Option<Receiver<Message>>) 
     });
     // main.rs has already parsed our CLI. Supplying a clean argv prevents
     // GApplication from trying to interpret --stdin, --title, or a file path.
-    application.run_with_args(&["preview-panel"]);
+    application.run_with_args(&["rofi-preview-shared"]);
 }
 
 fn build_window(
@@ -195,7 +195,7 @@ fn build_window(
         .default_width(window_width)
         .title(&options.title)
         .build();
-    window.add_css_class("preview-panel");
+    window.add_css_class("rofi-preview-shared");
     window.set_decorated(!options.panel);
     window.set_child(Some(&stack));
 
@@ -244,7 +244,7 @@ fn connect_persistent_clipboard(text_view: &TextView) {
         let (start, end) = buffer.selection_bounds()?;
         let text = buffer.text(&start, &end, true);
         if let Err(error) = copy_text_to_wayland(&text) {
-            eprintln!("preview-panel: copy selection to Wayland clipboard: {error}");
+            eprintln!("rofi-preview-shared: copy selection to Wayland clipboard: {error}");
         }
         None
     });
@@ -285,7 +285,7 @@ fn load_initial_theme(path: Option<&Path>) -> (Option<String>, Config) {
             Ok(config) => (Some(source), config),
             Err(error) => {
                 eprintln!(
-                    "preview-panel: ignoring invalid CSS theme {}: {error}",
+                    "rofi-preview-shared: ignoring invalid CSS theme {}: {error}",
                     path.display()
                 );
                 (Some(source), config::embedded())
@@ -294,7 +294,7 @@ fn load_initial_theme(path: Option<&Path>) -> (Option<String>, Config) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, config::embedded()),
         Err(error) => {
             eprintln!(
-                "preview-panel: cannot read CSS theme {}: {error}",
+                "rofi-preview-shared: cannot read CSS theme {}: {error}",
                 path.display()
             );
             (None, config::embedded())
@@ -312,7 +312,7 @@ fn load_layout_overrides(path: Option<&Path>) -> WindowOverrides {
             Ok(overrides) => overrides,
             Err(error) => {
                 eprintln!(
-                    "preview-panel: ignoring invalid Rasi layout {}: {error}",
+                    "rofi-preview-shared: ignoring invalid Rasi layout {}: {error}",
                     path.display()
                 );
                 WindowOverrides::default()
@@ -320,7 +320,7 @@ fn load_layout_overrides(path: Option<&Path>) -> WindowOverrides {
         },
         Err(error) => {
             eprintln!(
-                "preview-panel: cannot read Rasi layout {}: {error}",
+                "rofi-preview-shared: cannot read Rasi layout {}: {error}",
                 path.display()
             );
             WindowOverrides::default()
@@ -370,7 +370,7 @@ fn watch_theme(
                 }
             }
             Err(error) => eprintln!(
-                "preview-panel: ignoring invalid CSS theme {}: {error}",
+                "rofi-preview-shared: ignoring invalid CSS theme {}: {error}",
                 theme_path.display()
             ),
         }
@@ -384,7 +384,7 @@ fn configure_companion_panel(
 ) -> Rc<RefCell<PanelGeometry>> {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
-    window.set_namespace(Some("rofi-preview-panel"));
+    window.set_namespace(Some("rofi-preview-shared-preview"));
     // Rofi keeps keyboard focus while the pointer is in the list. The editor
     // becomes focusable just before its first click instead of stealing focus
     // as soon as the companion panel is mapped.
@@ -571,7 +571,7 @@ fn connect_live_updates(widgets: LiveWidgets, receiver: Receiver<Message>) {
                                 network_picture.set_visible(true);
                             }
                             Err(error) => {
-                                eprintln!("preview-panel: decode network QR code: {error}");
+                                eprintln!("rofi-preview-shared: decode network QR code: {error}");
                                 network_picture.clear();
                                 network_picture.set_visible(false);
                             }

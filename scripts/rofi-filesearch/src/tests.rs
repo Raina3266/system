@@ -37,14 +37,6 @@ mod model {
     }
 
     #[test]
-    fn markup_from_file_and_application_names_is_escaped() {
-        assert_eq!(
-            escape_markup("A&B <Preview> \"Raina's\""),
-            "A&amp;B &lt;Preview&gt; &quot;Raina&apos;s&quot;"
-        );
-    }
-
-    #[test]
     fn hostile_row_text_is_flattened_to_one_visual_line() {
         assert_eq!(single_line("one\n two\tthree"), "one two three");
     }
@@ -107,39 +99,14 @@ mod preview {
 }
 
 mod rofi {
-    use crate::model::{Entry, Mode};
-    use crate::rofi::*;
+    use crate::model::Mode;
 
     #[test]
-    fn only_file_rows_request_two_lines() {
-        assert!(mode_theme(Mode::App).contains("eh: 1;"));
-        assert!(mode_theme(Mode::Folder).contains("eh: 1;"));
-        assert!(mode_theme(Mode::File).contains("eh: 2;"));
-    }
-
-    #[test]
-    fn folder_mode_enables_preview_but_not_reveal() {
-        let theme = mode_theme(Mode::Folder);
-        assert!(theme.contains("button-preview { text-color: @cyan;"));
-        assert!(theme.contains("button-reveal { text-color: @dim;"));
-    }
-
-    #[test]
-    fn paths_with_quotes_are_safe_in_the_selection_callback() {
-        assert_eq!(shell_quote("/tmp/Raina's app"), "'/tmp/Raina'\\''s app'");
-    }
-
-    #[test]
-    fn row_options_share_one_nul_metadata_marker() {
-        let entry = Entry {
-            key: "file:4141".to_owned(),
-            display: "Visible".to_owned(),
-            meta: "Searchable".to_owned(),
-            icon: "text-x-generic".to_owned(),
-        };
-        let mut output = Vec::new();
-        write_row(&mut output, &entry).unwrap();
-        assert_eq!(output.iter().filter(|byte| **byte == 0).count(), 1);
+    fn all_three_modes_are_exposed_by_the_shared_controller() {
+        let modes = [Mode::App, Mode::File, Mode::Folder]
+            .map(|mode| mode.name())
+            .to_vec();
+        assert_eq!(modes, ["app", "file", "folder"]);
     }
 }
 
@@ -165,7 +132,8 @@ mod search {
         let home = Path::new("/home/raina");
         let relative = PathBuf::from("Documents/notes.txt");
         let file = file_entry(home, relative).unwrap();
-        assert!(file.display.contains('\u{2029}'));
+        assert_eq!(file.title, "notes.txt");
+        assert_eq!(file.subtitle.as_deref(), Some("~/Documents/"));
     }
 
     #[test]
@@ -177,7 +145,7 @@ mod search {
 
         let entries = folder_entries(&home, &home).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].display, "Documents");
+        assert_eq!(entries[0].title, "Documents");
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -191,14 +159,10 @@ mod search {
         let entries = folder_entries(&home, &current).unwrap();
         let displays = entries
             .iter()
-            .map(|entry| entry.display.as_str())
+            .map(|entry| entry.title.as_str())
             .collect::<Vec<_>>();
         assert_eq!(displays, ["󰁞  ..", "Projects", "notes.txt"]);
-        assert!(
-            entries
-                .iter()
-                .all(|entry| !entry.display.contains('\u{2029}'))
-        );
+        assert!(entries.iter().all(|entry| entry.subtitle.is_none()));
         fs::remove_dir_all(home).unwrap();
     }
 

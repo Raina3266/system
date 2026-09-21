@@ -3,10 +3,10 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 
-pub const HELP: &str = r#"preview-panel - reusable GTK4 text preview window
+pub const HELP: &str = r#"rofi-preview-shared - reusable GTK4 text preview window
 
 USAGE:
-    preview-panel [OPTIONS] [FILE]
+    rofi-preview-shared [OPTIONS] [FILE]
 
 INPUT:
     With FILE, the file is read as UTF-8.
@@ -30,12 +30,12 @@ OPTIONS:
     -V, --version       Show the version
 
 CONFIGURATION:
-    CSS is loaded from $PREVIEW_PANEL_CSS when set, otherwise from
-    $XDG_CONFIG_HOME/preview-panel/preview-panel.css (or the matching path under
-    ~/.config). Its /* preview-panel-settings ... */ comment controls width,
+    CSS is loaded from $ROFI_PREVIEW_SHARED_CSS when set, otherwise from
+    $XDG_CONFIG_HOME/rofi-preview-shared/rofi-preview-shared.css (or the matching path under
+    ~/.config). Its /* rofi-preview-shared-settings ... */ comment controls width,
     height, companion_width, side, gap, x, and y. The rest is normal GTK4 CSS.
     Saving valid CSS reloads appearance and geometry in every open panel.
-    A Rasi /* preview-panel-layout ... */ block may override any geometry field.
+    A Rasi /* rofi-preview-shared-layout ... */ block may override any geometry field.
     Explicit window options above override both Rasi and CSS settings.
 
 BUILT-IN GTK CONTROLS:
@@ -46,9 +46,9 @@ BUILT-IN GTK CONTROLS:
     Arrow keys          Move the text cursor and scroll as needed
 
 EXAMPLES:
-    printf 'first line\n\tindented line\n' | preview-panel --title Clipboard
-    preview-panel --read-only --no-wrap ./source.rs
-    printf 'initial text' | preview-panel --listen /run/user/1000/preview.sock \
+    printf 'first line\n\tindented line\n' | rofi-preview-shared --title Clipboard
+    rofi-preview-shared --read-only --no-wrap ./source.rs
+    printf 'initial text' | rofi-preview-shared --listen /run/user/1000/preview.sock \
         --panel --width 300 --height 615
 "#;
 

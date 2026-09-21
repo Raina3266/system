@@ -1,10 +1,4 @@
-/* ROFI: Rust-backed App / File / Folder finder.
-   App and Folder use one-line rows. File uses two lines so its dimmed parent
-   path remains visible. rofi-filesearch supplies the per-mode row height. */
-
-/* preview-panel-layout
-companion-width: 400px;
-*/
+/* Stock Rofi theme. Rust clipboard and file modes use rofi-preview-shared.css. */
 
 * {
     font: "JetBrains Mono Nerd Font 13";

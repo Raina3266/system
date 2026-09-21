@@ -8,7 +8,7 @@ use std::process::Command;
 
 use crate::AppResult;
 use crate::desktop;
-use crate::model::{Entry, Mode, escape_markup, lossy, single_line};
+use crate::model::{Entry, Mode, lossy, single_line};
 
 pub fn entries(mode: Mode) -> AppResult<Vec<Entry>> {
     match mode {
@@ -52,17 +52,13 @@ pub(crate) fn file_entry(home: &Path, relative: PathBuf) -> AppResult<Entry> {
     let abbreviated = abbreviate_home(path.parent().unwrap_or(home), home);
     let visible_name = single_line(&name);
     let visible_path = single_line(&abbreviated);
-    let display = format!(
-        "{}\u{2029}<span size=\"80%\" alpha=\"50%\">{}/</span>",
-        escape_markup(&visible_name),
-        escape_markup(&visible_path)
-    );
     Ok(Entry::for_path(
         Mode::File,
         &path,
-        display,
+        visible_name,
+        Some(format!("{visible_path}/")),
         format!("{abbreviated}/{name}"),
-        format!("thumbnail://{},text-x-generic", path.display()),
+        "text-x-generic".to_owned(),
     ))
 }
 
@@ -77,6 +73,7 @@ pub fn folder_entries(home: &Path, current: &Path) -> AppResult<Vec<Entry>> {
             Mode::Folder,
             parent,
             "󰁞  ..".to_owned(),
+            None,
             abbreviate_home(parent, home),
             "folder,inode-directory".to_owned(),
         ));
@@ -117,7 +114,8 @@ pub fn folder_entries(home: &Path, current: &Path) -> AppResult<Vec<Entry>> {
         entries.push(Entry::for_path(
             Mode::Folder,
             &path,
-            escape_markup(&single_line(&name)),
+            single_line(&name),
+            None,
             abbreviate_home(&path, home),
             icon,
         ));

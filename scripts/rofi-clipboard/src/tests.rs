@@ -496,8 +496,6 @@ mod preview {
 }
 
 mod rofi {
-    use std::process::Command;
-
     use crate::model::{ClipboardItem, ItemKind};
     use crate::rofi::*;
 
@@ -620,26 +618,6 @@ mod rofi {
     }
 
     #[test]
-    fn clipboard_rofi_enables_companion_focus_and_stable_filter_selection() {
-        let mut command = Command::new("rofi");
-        configure_rofi_environment(&mut command);
-
-        let keyboard_mode = command
-            .get_envs()
-            .find(|(name, _)| *name == std::ffi::OsStr::new(WAYLAND_KEYBOARD_MODE_ENV))
-            .and_then(|(_, value)| value)
-            .and_then(std::ffi::OsStr::to_str);
-        assert_eq!(keyboard_mode, Some(WAYLAND_KEYBOARD_MODE_ON_DEMAND));
-
-        let preserve_selection = command
-            .get_envs()
-            .find(|(name, _)| *name == std::ffi::OsStr::new(PRESERVE_FILTER_SELECTION_ENV))
-            .and_then(|(_, value)| value)
-            .and_then(std::ffi::OsStr::to_str);
-        assert_eq!(preserve_selection, Some(PRESERVE_FILTER_SELECTION_ENABLED));
-    }
-
-    #[test]
     fn text_row_preview_collapses_whitespace_to_one_line() {
         let item = textual_item(2, ItemKind::Text, "first line\nsecond\tline   third", false);
 
@@ -653,15 +631,6 @@ mod rofi {
         let item = textual_item(3, ItemKind::Text, &text, false);
 
         assert_eq!(row_preview(&item), format!("{}…", "x".repeat(110)));
-    }
-
-    #[test]
-    fn selection_callback_executable_is_shell_quoted() {
-        assert_eq!(
-            shell_quote("/nix/store/example/bin/tool"),
-            "'/nix/store/example/bin/tool'"
-        );
-        assert_eq!(shell_quote("/tmp/raina's tool"), "'/tmp/raina'\\''s tool'");
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::AppResult;
-use crate::model::{Entry, Mode, escape_markup, lossy, single_line};
+use crate::model::{Entry, Mode, lossy, single_line};
 
 pub fn entries() -> AppResult<Vec<Entry>> {
     let mut entries = Vec::new();
@@ -23,7 +23,7 @@ pub fn entries() -> AppResult<Vec<Entry>> {
             }
         }
     }
-    entries.sort_by_key(|entry| entry.display.to_lowercase());
+    entries.sort_by_key(|entry| entry.title.to_lowercase());
     Ok(entries)
 }
 
@@ -99,7 +99,8 @@ fn parse_entry(path: &Path) -> AppResult<Option<Entry>> {
     Ok(Some(Entry::for_path(
         Mode::App,
         path,
-        escape_markup(&single_line(&name)),
+        single_line(&name),
+        None,
         meta,
         icon,
     )))

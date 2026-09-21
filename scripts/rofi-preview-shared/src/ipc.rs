@@ -107,7 +107,7 @@ impl Drop for SocketGuard {
             && error.kind() != io::ErrorKind::NotFound
         {
             eprintln!(
-                "preview-panel: failed to remove socket {}: {error}",
+                "rofi-preview-shared: failed to remove socket {}: {error}",
                 self.path.display()
             );
         }
@@ -124,20 +124,20 @@ pub fn bind(path: &Path) -> io::Result<(Receiver<Message>, SocketGuard)> {
     let socket_path = path.to_path_buf();
 
     if let Err(error) = thread::Builder::new()
-        .name("preview-panel-ipc".to_owned())
+        .name("rofi-preview-shared-ipc".to_owned())
         .spawn(move || {
             for connection in listener.incoming() {
                 let mut connection = match connection {
                     Ok(connection) => connection,
                     Err(error) => {
-                        eprintln!("preview-panel: accept live update: {error}");
+                        eprintln!("rofi-preview-shared: accept live update: {error}");
                         continue;
                     }
                 };
                 match handle_connection(&mut connection, &sender) {
                     Ok(true) => break,
                     Ok(false) => {}
-                    Err(error) => eprintln!("preview-panel: handle live update: {error}"),
+                    Err(error) => eprintln!("rofi-preview-shared: handle live update: {error}"),
                 }
             }
         })

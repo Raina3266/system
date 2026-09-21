@@ -14,7 +14,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use crate::AppResult;
 use crate::model::{Mode, mode_from_key, path_from_key};
 
-pub const SOCKET_ENV: &str = "ROFI_FILESEARCH_PREVIEW_SOCKET";
 const UPDATE_TEXT: u8 = 1;
 pub(crate) const CLOSE: u8 = 2;
 const UPDATE_IMAGE: u8 = 3;
@@ -64,31 +63,27 @@ pub fn close_at(path: &Path) {
     let _ = cleanup(path);
 }
 
-pub fn toggle(key: &str) -> AppResult<()> {
-    let path = required_socket_from_environment()?;
+pub fn toggle_at(key: &str, path: &Path) -> AppResult<()> {
     if path.exists() {
-        close_at(&path);
+        close_at(path);
         return Ok(());
     }
     let Some(file) = preview_file_from_key(key) else {
         return Ok(());
     };
     let content = preview_content(&file)?;
-    cleanup(&path)?;
-    if let Err(error) = launch_panel(&path, &file, &content) {
-        close_at(&path);
+    cleanup(path)?;
+    if let Err(error) = launch_panel(path, &file, &content) {
+        close_at(path);
         return Err(error);
     }
     Ok(())
 }
 
-pub fn selection_changed(key: &str, serial: u64) -> AppResult<()> {
-    let Some(socket) = socket_from_environment() else {
-        return Ok(());
-    };
+pub fn selection_changed_at(key: &str, serial: u64, socket: &Path) -> AppResult<()> {
     let Some(file) = preview_file_from_key(key) else {
         if socket.exists() {
-            close_at(&socket);
+            close_at(socket);
         }
         return Ok(());
     };
@@ -96,7 +91,7 @@ pub fn selection_changed(key: &str, serial: u64) -> AppResult<()> {
         return Ok(());
     }
     let content = preview_content(&file)?;
-    update_at(&socket, &file, &content, serial)
+    update_at(socket, &file, &content, serial)
 }
 
 pub(crate) fn preview_file_from_key(key: &str) -> Option<PathBuf> {
@@ -297,10 +292,9 @@ fn launch_panel(path: &Path, file: &Path, content: &PanelContent) -> AppResult<(
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null());
-    command.arg("--layout-file").arg(crate::rofi::theme_path()?);
     append_override(
         &mut command,
-        "ROFI_FILESEARCH_ROFI_WIDTH",
+        "ROFI_FILESEARCH_LAUNCHER_WIDTH",
         "--companion-width",
     );
     append_override(&mut command, "ROFI_FILESEARCH_PREVIEW_WIDTH", "--width");
@@ -311,7 +305,7 @@ fn launch_panel(path: &Path, file: &Path, content: &PanelContent) -> AppResult<(
     let mut input = child
         .stdin
         .take()
-        .ok_or_else(|| io::Error::other("preview-panel standard input is unavailable"))?;
+        .ok_or_else(|| io::Error::other("rofi-preview-shared standard input is unavailable"))?;
     if let PanelContent::Text(text) = content {
         input.write_all(text.as_bytes())?;
     }
@@ -333,7 +327,7 @@ fn wait_for_socket(child: &mut Child, path: &Path) -> AppResult<()> {
         }
         if let Some(status) = child.try_wait()? {
             return Err(io::Error::other(format!(
-                "preview-panel exited before opening its socket ({status})"
+                "rofi-preview-shared exited before opening its socket ({status})"
             ))
             .into());
         }
@@ -341,7 +335,7 @@ fn wait_for_socket(child: &mut Child, path: &Path) -> AppResult<()> {
     }
     let _ = child.kill();
     let _ = child.wait();
-    Err(io::Error::other("preview-panel did not open its socket within one second").into())
+    Err(io::Error::other("rofi-preview-shared did not open its socket within one second").into())
 }
 
 fn update_at(path: &Path, file: &Path, content: &PanelContent, serial: u64) -> AppResult<()> {
@@ -355,7 +349,7 @@ fn update_at(path: &Path, file: &Path, content: &PanelContent, serial: u64) -> A
     if sent {
         Ok(())
     } else {
-        Err(io::Error::other("preview-panel closed before the update arrived").into())
+        Err(io::Error::other("rofi-preview-shared closed before the update arrived").into())
     }
 }
 
@@ -399,23 +393,12 @@ pub(crate) fn write_frame(
     writer.write_all(payload)
 }
 
-fn socket_from_environment() -> Option<PathBuf> {
-    env::var_os(SOCKET_ENV).map(PathBuf::from)
-}
-
-fn required_socket_from_environment() -> AppResult<PathBuf> {
-    match socket_from_environment() {
-        Some(path) => Ok(path),
-        None => Err(io::Error::other("preview is only available inside File Search").into()),
-    }
-}
-
 fn binary(environment: &str, fallback: &str) -> OsString {
     env::var_os(environment).unwrap_or_else(|| OsString::from(fallback))
 }
 
 fn preview_panel_binary() -> OsString {
-    binary("ROFI_FILESEARCH_PREVIEW_PANEL", "preview-panel")
+    binary("ROFI_FILESEARCH_ROFI_PREVIEW_SHARED", "rofi-preview-shared")
 }
 
 fn file_binary() -> OsString {

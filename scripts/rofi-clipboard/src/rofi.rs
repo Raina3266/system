@@ -1,22 +1,18 @@
-use std::env;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use rofi_preview_shared::launcher::{
+    Action, Controller, Icon, Mode as SharedMode, Outcome, Row, UiResult, View,
+};
 
 use crate::clipboard::copy_item;
 use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::preview;
 use crate::store::ClipboardStore;
 
-pub(crate) const WAYLAND_KEYBOARD_MODE_ENV: &str = "ROFI_WAYLAND_KEYBOARD_MODE";
-pub(crate) const WAYLAND_KEYBOARD_MODE_ON_DEMAND: &str = "on-demand";
-pub(crate) const PRESERVE_FILTER_SELECTION_ENV: &str = "ROFI_PRESERVE_SELECTION_ON_FILTER";
-pub(crate) const PRESERVE_FILTER_SELECTION_ENABLED: &str = "true";
-
-const RECORD_SEPARATOR: u8 = 0x1e;
-const UNIT_SEPARATOR: u8 = 0x1f;
+const ACTION_PIN: &str = "pin";
+const ACTION_DELETE: &str = "delete";
+const ACTION_EDIT: &str = "edit";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -60,109 +56,152 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct UiState {
-    initialized: bool,
-}
-
-impl UiState {
-    fn parse(value: Option<String>) -> Self {
-        let Some(value) = value else {
-            return Self::default();
-        };
-        let mut state = Self::default();
-        for part in value.split(';') {
-            if part == "init=1" {
-                state.initialized = true;
-            }
-        }
-        state
-    }
-
-    fn encode(self) -> String {
-        format!("init={}", u8::from(self.initialized))
-    }
-}
-
-pub(crate) fn configure_rofi_environment(command: &mut Command) {
-    // The companion editor is another overlay layer surface. On-demand focus
-    // lets Niri transfer keyboard input between Rofi and that panel when
-    // either one is clicked.
-    command.env(WAYLAND_KEYBOARD_MODE_ENV, WAYLAND_KEYBOARD_MODE_ON_DEMAND);
-    // Rofi normally keeps the same visible row number while refiltering. The
-    // patched opt-in behavior instead follows the selected clipboard item.
-    command.env(
-        PRESERVE_FILTER_SELECTION_ENV,
-        PRESERVE_FILTER_SELECTION_ENABLED,
-    );
-}
-
-pub fn launch_rofi(mode: Mode, selected_id: Option<u64>) -> Result<()> {
-    let executable = env::current_exe().context("locate rofi-clipboard executable")?;
-    let executable = executable.to_string_lossy();
-    let preview_socket = preview::session_socket_path()?;
-    preview::cleanup_session(&preview_socket)?;
-    let modes = format!(
-        "memo:{executable} script memo,text:{executable} script text,files:{executable} script files"
-    );
-    let selection_command = format!(
-        "{} preview-selection {{completion}} {{selection-serial}}",
-        shell_quote(&executable)
-    );
-    let theme = theme_path()?;
-    let mut command = Command::new(rofi_binary());
-    configure_rofi_environment(&mut command);
-    command
-        .env(preview::SOCKET_ENV, &preview_socket)
-        .args([
-            "-show",
-            mode.name(),
-            "-show-icons",
-            "-modes",
-            &modes,
-            "-display-memo",
-            "󰍩 Memo",
-            "-display-text",
-            "󰦨 Text",
-            "-display-files",
-            "󰈔 Files",
-            "-kb-custom-1",
-            "Alt+p",
-            "-kb-custom-2",
-            "Alt+d",
-            "-kb-custom-3",
-            "Alt+e",
-            "-on-selection-changed",
-            &selection_command,
-            "-theme",
-        ])
-        .arg(theme);
-
-    if let Some(row) = selected_row(mode, selected_id)? {
-        command.arg("-selected-row").arg(row.to_string());
-    }
-
-    let status = command.status();
-    if let Err(error) = preview::save_and_close(&preview_socket) {
-        eprintln!("rofi-clipboard: save preview before closing: {error:#}");
-        preview::close(&preview_socket);
-    }
-    if let Err(error) = preview::cleanup_socket(&preview_socket) {
-        eprintln!("rofi-clipboard: {error:#}");
-    }
-    let status = status.context("launch rofi")?;
-    if !status.success() && status.code() != Some(1) {
-        bail!("rofi exited with {status}");
-    }
+pub fn launch(mode: Mode, selected_id: Option<u64>) -> Result<()> {
+    let controller = ClipboardUi::new(mode, selected_id)?;
+    rofi_preview_shared::launcher::run(controller);
     Ok(())
 }
 
-fn selected_row(mode: Mode, selected_id: Option<u64>) -> Result<Option<usize>> {
-    let store = ClipboardStore::discover()?;
-    prepare_mode(&store, mode)?;
-    let history = store.load()?;
-    let items = mode_items(&history.items, mode);
-    Ok(preferred_selection(&items, selected_id))
+struct ClipboardUi {
+    store: ClipboardStore,
+    mode: Mode,
+    selected_id: Option<u64>,
+    socket: PathBuf,
+}
+
+impl ClipboardUi {
+    fn new(mode: Mode, selected_id: Option<u64>) -> Result<Self> {
+        let store = ClipboardStore::discover()?;
+        let socket = preview::session_socket_path()?;
+        preview::cleanup_session(&socket)?;
+        Ok(Self {
+            store,
+            mode,
+            selected_id,
+            socket,
+        })
+    }
+
+    fn build_view(&mut self) -> Result<View> {
+        prepare_mode(&self.store, self.mode)?;
+        let history = self.store.load()?;
+        let items = mode_items(&history.items, self.mode);
+        let selected = preferred_selection(&items, self.selected_id)
+            .and_then(|index| items.get(index))
+            .map(|item| item.id.to_string());
+        let rows = items
+            .into_iter()
+            .map(|item| Row {
+                id: item.id.to_string(),
+                title: row_preview(item),
+                subtitle: None,
+                search_text: row_value(item),
+                icon: item_icon(&self.store, item),
+                active: item.pinned,
+                permanent: item.is_empty_memo(),
+            })
+            .collect();
+        Ok(View {
+            prompt: self.mode.prompt().to_owned(),
+            rows,
+            actions: vec![
+                Action::new(ACTION_PIN, "󰐃 Pin", Some('p')),
+                Action::new(ACTION_EDIT, "󰏫 Edit", Some('e')),
+                Action::new(ACTION_DELETE, "󰆴 Delete", Some('d')),
+            ],
+            selected,
+            empty_message: Some("Nothing here yet".to_owned()),
+        })
+    }
+
+    fn selected_id(value: Option<&str>) -> Option<u64> {
+        value.and_then(|value| value.parse().ok())
+    }
+}
+
+impl Controller for ClipboardUi {
+    fn application_id(&self) -> &'static str {
+        "io.github.raina.RofiClipboard"
+    }
+
+    fn namespace(&self) -> &'static str {
+        "rofi-clipboard"
+    }
+
+    fn modes(&self) -> Vec<SharedMode> {
+        [Mode::Memo, Mode::Text, Mode::Files]
+            .into_iter()
+            .map(|mode| SharedMode::new(mode.name(), mode.prompt()))
+            .collect()
+    }
+
+    fn active_mode(&self) -> &str {
+        self.mode.name()
+    }
+
+    fn switch_mode(&mut self, mode: &str) -> UiResult<View> {
+        self.mode = Mode::parse(mode).map_err(display_error)?;
+        self.selected_id = None;
+        self.build_view().map_err(display_error)
+    }
+
+    fn view(&mut self) -> UiResult<View> {
+        self.build_view().map_err(display_error)
+    }
+
+    fn activate(&mut self, row: &str) -> UiResult<Outcome> {
+        let Some(id) = Self::selected_id(Some(row)) else {
+            return Ok(Outcome::None);
+        };
+        copy_item(&self.store, id).map_err(display_error)?;
+        Ok(Outcome::Close)
+    }
+
+    fn action(&mut self, action: &str, selected: Option<&str>) -> UiResult<Outcome> {
+        let Some(id) = Self::selected_id(selected) else {
+            return Ok(Outcome::None);
+        };
+        match action {
+            ACTION_DELETE => {
+                let replacement =
+                    selection_after_delete(&self.store, self.mode, id).map_err(display_error)?;
+                if self.store.delete(id).map_err(display_error)? {
+                    preview::refresh_after_delete_at(&self.store, replacement, &self.socket)
+                        .map_err(display_error)?;
+                    self.selected_id = replacement;
+                }
+            }
+            ACTION_PIN => {
+                self.store.pin(id).map_err(display_error)?;
+                self.selected_id = Some(id);
+            }
+            ACTION_EDIT => {
+                self.selected_id = preview::toggle_edit_at(&self.store, Some(id), &self.socket)
+                    .map_err(display_error)?
+                    .or(Some(id));
+            }
+            _ => return Ok(Outcome::None),
+        }
+        Ok(Outcome::Refresh {
+            selected: self.selected_id.map(|id| id.to_string()),
+        })
+    }
+
+    fn selection_changed(&mut self, selected: &str, serial: u64) -> UiResult<()> {
+        let Some(id) = Self::selected_id(Some(selected)) else {
+            return Ok(());
+        };
+        self.selected_id = Some(id);
+        preview::selection_changed_at(&self.store, id, serial, &self.socket).map_err(display_error)
+    }
+
+    fn close(&mut self) -> UiResult<()> {
+        if let Err(error) = preview::save_and_close(&self.store, &self.socket) {
+            preview::close(&self.socket);
+            return Err(display_error(error));
+        }
+        preview::cleanup_socket(&self.socket).map_err(display_error)
+    }
 }
 
 fn prepare_mode(store: &ClipboardStore, mode: Mode) -> Result<()> {
@@ -176,8 +215,6 @@ fn prepare_mode(store: &ClipboardStore, mode: Mode) -> Result<()> {
 pub(crate) fn mode_items(items: &[ClipboardItem], mode: Mode) -> Vec<&ClipboardItem> {
     let mut items: Vec<_> = items.iter().filter(|item| mode.includes(item)).collect();
     if mode == Mode::Memo {
-        // The draft is stored near the newest entries so history trimming can
-        // never discard it, but it is presented as the final Memo row.
         items.sort_by_key(|item| item.is_empty_memo());
     }
     items
@@ -191,79 +228,6 @@ pub(crate) fn preferred_selection(
         .and_then(|id| items.iter().position(|item| item.id == id))
         .or_else(|| items.iter().position(|item| !item.pinned))
         .or_else(|| (!items.is_empty()).then_some(0))
-}
-
-pub(crate) fn theme_path() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("ROFI_CLIPBOARD_THEME") {
-        return Ok(PathBuf::from(path));
-    }
-    if let Some(config) = env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(config)
-            .join("rofi")
-            .join("rofi-clipboard.rasi"));
-    }
-    let home = env::var_os("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home)
-        .join(".config")
-        .join("rofi")
-        .join("rofi-clipboard.rasi"))
-}
-
-pub fn run_script(mode: Mode, _script_argument: Option<String>) -> Result<()> {
-    let store = ClipboardStore::discover()?;
-    let retv = env::var("ROFI_RETV")
-        .ok()
-        .and_then(|value| value.parse::<u8>().ok())
-        .unwrap_or(0);
-    let selected_id = env::var("ROFI_INFO")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
-    let state = UiState::parse(env::var("ROFI_DATA").ok());
-
-    match retv {
-        // Pre-arm keep-selection on the initial response so the first button
-        // action preserves the highlighted row.
-        0 => render_history(&store, mode, state, None),
-        // Copies the selected item to the clipboard, then closes Rofi.
-        1 => {
-            if let Some(id) = selected_id {
-                copy_item(&store, id)?;
-            }
-            Ok(())
-        }
-        // Deletes the selected item. Rofi's native delete action reports 3;
-        // the Delete button uses custom action 2 and reports 11.
-        3 | 11 => {
-            let selected_id = if let Some(id) = selected_id {
-                let replacement = selection_after_delete(&store, mode, id)?;
-                if store.delete(id)? {
-                    if let Err(error) = preview::refresh_after_delete(&store, replacement) {
-                        eprintln!("rofi-clipboard: refresh preview after delete: {error:#}");
-                    }
-                    replacement
-                } else {
-                    Some(id)
-                }
-            } else {
-                None
-            };
-            render_history(&store, mode, state, selected_id)
-        }
-        // Pins or unpins the selected item.
-        10 => {
-            if let Some(id) = selected_id {
-                store.pin(id)?;
-            }
-            render_history(&store, mode, state, selected_id)
-        }
-        // The first click opens the selected text editor or image preview. The
-        // next Edit click saves text or closes the image panel.
-        12 => {
-            let selected_id = preview::toggle_edit(&store, selected_id)?.or(selected_id);
-            render_history(&store, mode, state, selected_id)
-        }
-        _ => render_history(&store, mode, state, selected_id),
-    }
 }
 
 fn selection_after_delete(
@@ -284,110 +248,14 @@ pub(crate) fn replacement_selection(items: &[&ClipboardItem], selected_id: u64) 
         .map(|item| item.id)
 }
 
-fn render_history(
-    store: &ClipboardStore,
-    mode: Mode,
-    state: UiState,
-    selected_id: Option<u64>,
-) -> Result<()> {
-    prepare_mode(store, mode)?;
-    let history = store.load()?;
-    let items = mode_items(&history.items, mode);
-    let new_selection = preferred_selection(&items, selected_id);
-
-    let mut output = Vec::new();
-    write_common_headers(&mut output, mode.prompt(), state, true, true, new_selection);
-
-    if items.is_empty() {
-        write!(&mut output, "Nothing here yet")?;
-        let mut first_option = true;
-        write_row_option(&mut output, &mut first_option, "nonselectable", "true");
-        write_row_option(&mut output, &mut first_option, "permanent", "true");
-        output.push(RECORD_SEPARATOR);
-    }
-
-    for item in items {
-        write!(&mut output, "{}", item.id)?;
-        let mut first_option = true;
-        write_row_option(
-            &mut output,
-            &mut first_option,
-            "display",
-            &row_preview(item),
-        );
-        write_row_option(&mut output, &mut first_option, "info", &item.id.to_string());
-        write_row_option(&mut output, &mut first_option, "meta", &row_value(item));
-        if item.is_empty_memo() {
-            // Keep the creation row available even while Rofi is filtering.
-            write_row_option(&mut output, &mut first_option, "permanent", "true");
-        }
-        if let Some(path) = store.image_path(item) {
-            write_row_option(
-                &mut output,
-                &mut first_option,
-                "icon",
-                &path.to_string_lossy(),
-            );
-        }
-        if item.pinned {
-            write_row_option(&mut output, &mut first_option, "active", "true");
-        }
-        output.push(RECORD_SEPARATOR);
-    }
-    io::stdout().write_all(&output).context("write rofi rows")
-}
-
-fn write_common_headers(
-    output: &mut Vec<u8>,
-    prompt: &str,
-    mut state: UiState,
-    no_custom: bool,
-    keep_selection: bool,
-    new_selection: Option<usize>,
-) {
-    if !state.initialized {
-        // The first delimiter header must itself end with Rofi's initial '\n'
-        // delimiter. Every later record and invocation uses RS.
-        output.push(0);
-        output.extend_from_slice(b"delim");
-        output.push(UNIT_SEPARATOR);
-        output.push(RECORD_SEPARATOR);
-        output.push(b'\n');
-        state.initialized = true;
-    }
-    write_header(output, "prompt", prompt);
-    write_header(
-        output,
-        "no-custom",
-        if no_custom { "true" } else { "false" },
-    );
-    write_header(output, "use-hot-keys", "true");
-    write_header(output, "data", &state.encode());
-
-    if keep_selection {
-        write_header(output, "keep-selection", "true");
-        if let Some(index) = new_selection {
-            write_header(output, "new-selection", &index.to_string());
-        }
-    }
-}
-
-fn write_header(output: &mut Vec<u8>, key: &str, value: &str) {
-    output.push(0);
-    output.extend_from_slice(key.as_bytes());
-    output.push(UNIT_SEPARATOR);
-    output.extend_from_slice(sanitize_record_value(value).as_bytes());
-    output.push(RECORD_SEPARATOR);
-}
-
-fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &str) {
-    // A row has one NUL before all metadata. Individual key/value pairs are
-    // separated by US. A second NUL would make Rofi ignore every later option.
-    output.push(if *first { 0 } else { UNIT_SEPARATOR });
-    *first = false;
-    output.extend_from_slice(key.as_bytes());
-    output.push(UNIT_SEPARATOR);
-    output.extend_from_slice(sanitize_option_value(value).as_bytes());
+fn item_icon(store: &ClipboardStore, item: &ClipboardItem) -> Option<Icon> {
+    store.image_path(item).map(Icon::Image).or_else(|| {
+        item.name
+            .as_deref()
+            .map(Path::new)
+            .filter(|path| path.exists())
+            .map(|path| Icon::File(path.to_path_buf()))
+    })
 }
 
 pub(crate) fn row_value(item: &ClipboardItem) -> String {
@@ -451,16 +319,6 @@ fn short_mime(mime: &str) -> &str {
         .unwrap_or(mime)
 }
 
-fn sanitize_record_value(value: &str) -> String {
-    value
-        .replace('\0', "␀")
-        .replace(char::from(RECORD_SEPARATOR), "\n")
-}
-
-fn sanitize_option_value(value: &str) -> String {
-    sanitize_record_value(value).replace(char::from(UNIT_SEPARATOR), " ")
-}
-
 fn truncate_chars(value: &str, maximum: usize) -> String {
     let mut chars = value.chars();
     let mut result: String = chars.by_ref().take(maximum).collect();
@@ -470,12 +328,6 @@ fn truncate_chars(value: &str, maximum: usize) -> String {
     result
 }
 
-fn rofi_binary() -> PathBuf {
-    env::var_os("ROFI_CLIPBOARD_ROFI")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new("rofi").to_path_buf())
-}
-
-pub(crate) fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+fn display_error(error: impl std::fmt::Display) -> String {
+    error.to_string()
 }

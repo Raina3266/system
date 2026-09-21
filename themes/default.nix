@@ -15,8 +15,7 @@ let
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
     "media-panel/style.css" = "themes/media-panel.css";
-    "preview-panel/preview-panel.css" = "themes/rofi/preview-panel.css";
-    "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
+    "rofi-preview-shared/rofi-preview-shared.css" = "themes/rofi/rofi-preview-shared.css";
     "rofi/rofi-finder.rasi" = "themes/rofi/rofi-finder.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
     # Wayle's style entry point is hardcoded at styles/index.scss and it

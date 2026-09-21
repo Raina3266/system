@@ -30,13 +30,6 @@ impl Mode {
             Self::Folder => " Folder",
         }
     }
-
-    pub fn row_height(self) -> u8 {
-        match self {
-            Self::App | Self::Folder => 1,
-            Self::File => 2,
-        }
-    }
 }
 
 impl FromStr for Mode {
@@ -61,16 +54,25 @@ impl fmt::Display for Mode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry {
     pub key: String,
-    pub display: String,
+    pub title: String,
+    pub subtitle: Option<String>,
     pub meta: String,
     pub icon: String,
 }
 
 impl Entry {
-    pub fn for_path(mode: Mode, path: &Path, display: String, meta: String, icon: String) -> Self {
+    pub fn for_path(
+        mode: Mode,
+        path: &Path,
+        title: String,
+        subtitle: Option<String>,
+        meta: String,
+        icon: String,
+    ) -> Self {
         Self {
             key: path_key(mode, path),
-            display,
+            title,
+            subtitle,
             meta,
             icon,
         }
@@ -112,7 +114,9 @@ fn hex_decode(value: &str) -> Option<Vec<u8>> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| Some((hex_digit(pair[0])? << 4) | hex_digit(pair[1])?))
         .collect()
 }
@@ -124,15 +128,6 @@ fn hex_digit(value: u8) -> Option<u8> {
         b'A'..=b'F' => Some(value - b'A' + 10),
         _ => None,
     }
-}
-
-pub fn escape_markup(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 pub fn single_line(value: &str) -> String {

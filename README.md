@@ -7,7 +7,7 @@ This repository contains ten Rust packages used by the desktop configuration:
 - `media-panel` — the multi-player MPRIS panel opened from Waybar's centre
 - `network-manager` — the NetworkManager info and Wi-Fi QR bridge used by Wayle
 - `ocr-screenshot` — screenshot OCR and clipboard integration
-- `preview-panel` — the shared GTK4 preview surface
+- `rofi-preview-shared` — the shared GTK4 mode, filtering, selection, and preview layer
 - [`rofi-clipboard`](#rofi-clipboard) — clipboard history and memos
 - `rofi-filesearch` — searchable file launcher with previews
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
@@ -27,7 +27,7 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
-| `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
+| `themes/rofi/rofi-preview-shared.css` | Clipboard, file-search, and preview UI hot-reload |
 | `themes/media-panel.css` | Open media panel hot-reloads |
 | `themes/wayle/*.scss` | Wayle recompiles the override on save |
 
@@ -116,23 +116,25 @@ targets, server rejection, and rollback.
 
 ## rofi-clipboard
 
-`scripts/rofi-clipboard` is a clipboard history manager for Wayland and Rofi. It watches the clipboard with `wl-paste`, stores text, file references, and images locally, and presents the history through custom Rofi modes.
+`scripts/rofi-clipboard` is a Wayland clipboard history manager. It watches the
+clipboard with `wl-paste`, stores text, file references, and images locally,
+and presents them through the shared Rust/GTK mode interface.
 
 ### Features
 
 - Separate modes for memos, captured text, and files
 - Editable memos with selection-change autosave
-- Text, file-reference, and image previews inside Rofi
+- Text, file-reference, and image previews in the shared GTK interface
 - Pin and delete actions
 - One Edit action for soft-wrapped text editing and full image preview in a companion panel
-- The open panel follows Rofi selection changes and saves modified text before switching items
+- The open panel follows shared-launcher selection changes and saves modified text before switching items
 - Keeps the highlighted clipboard item selected when search text is shortened or cleared
 - Restores text, URL, and image MIME types; local files copy back as standard URI lists that Dolphin can paste
 - Detects local files copied from a file manager and keeps them in File mode
 - Detects standalone web URLs and keeps them in File mode
 - Shortens paths inside the home directory from `/home/raina/...` to `~/...`
 - Shows the saved file path for Niri screenshots
-- Removes missing linked local files and any cached image previews when Rofi next renders
+- Removes missing linked local files and cached image previews when the launcher next renders
 - Deduplicates repeated clipboard entries
 - Ignores empty and sensitive clipboard values
 - Keeps up to 2,000 history entries
@@ -154,7 +156,7 @@ The interface contains three modes:
 - **Text** — captured text entries
 - **Files** — copied local files, web URLs, and captured images with previews
 
-Rofi opens in Memo mode with an empty **New memo** row at the bottom. Clicking
+The launcher opens in Memo mode with an empty **New memo** row at the bottom. Clicking
 **Edit** opens the currently selected memo in the companion editor. Saving text
 in the empty row turns it into a regular memo and immediately creates a new
 empty row at the bottom. While the editor is open, moving through the Memo list
@@ -169,7 +171,6 @@ rofi-clipboard status
 rofi-clipboard clear
 rofi-clipboard capture
 rofi-clipboard store --mime MIME
-rofi-clipboard script <memo|text|files>
 ```
 
 `status` is the Waybar `custom/clipboard` backend: a long-running process that keeps a `wl-paste --watch rofi-clipboard capture` child for event-driven capture and emits a JSON status line whenever the history changes. `clear` clears the current Wayland selection (stored history is untouched). `capture` receives clipboard data from `wl-paste --watch` and is what `status` drives internally. The `store` command reads an item from standard input and stores it with the supplied MIME type.
@@ -192,39 +193,38 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | Variable | Purpose |
 | --- | --- |
 | `ROFI_CLIPBOARD_DATA_DIR` | Override the history and image data directory |
-| `ROFI_CLIPBOARD_THEME` | Override the Rofi theme path |
-| `ROFI_CLIPBOARD_ROFI` | Override the `rofi` executable |
 | `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
 | `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
-| `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
-| `PREVIEW_PANEL_CSS` | Override the preview panel CSS/configuration path |
+| `ROFI_CLIPBOARD_ROFI_PREVIEW_SHARED` | Override the `rofi-preview-shared` executable used for companion previews |
+| `ROFI_PREVIEW_SHARED_CSS` | Override the shared launcher and preview CSS/configuration path |
 | `ROFI_CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify and label saved screenshots (default: `~/Pictures/Screenshots`) |
 | `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
 | `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
-| `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of Rofi (default: `left`) |
-| `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
-| `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
+| `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of the launcher (default: `left`) |
+| `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and launcher in pixels (default: `10`) |
+| `ROFI_CLIPBOARD_LAUNCHER_WIDTH` | Launcher width used for companion placement (default: `400`) |
 
 Default panel placement, size, and GTK styling come from
-`themes/rofi/preview-panel.css`. Home Manager links that file to
-`~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
-rebuilding. The `preview-panel-settings` comment at the top controls `width`,
+`themes/rofi/rofi-preview-shared.css`. Home Manager links that file to
+`~/.config/rofi-preview-shared/rofi-preview-shared.css`, so valid saves
+hot-reload without rebuilding. The `rofi-preview-shared-settings` comment at
+the top controls `width`,
 `height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal
 GTK4 CSS. Positive `x` moves right and positive `y` moves down.
 
-Each launcher's Rasi file can override any subset of those geometry settings
-with a `preview-panel-layout` comment. For example:
+The `rofi-preview-shared` preview command can override any subset of those
+geometry settings with a `rofi-preview-shared-layout` comment. For example:
 
 ```css
-/* preview-panel-layout
+/* rofi-preview-shared-layout
 width: 300px;
 height: 400px;
 companion-width: 375px;
 */
 ```
 
-Omitted fields inherit from `preview-panel.css`. The effective priority is
-environment/command-line override, then launcher Rasi, then the global CSS.
+Omitted fields inherit from `rofi-preview-shared.css`. The effective priority
+is command-line override, then an optional layout file, then the global CSS.
 
 For a session-wide environment override, set values such as:
 

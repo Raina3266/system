@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use crate::cli::{Side, WindowOverrides};
 
-const SETTINGS_START: &str = "/* preview-panel-settings";
-const LAYOUT_START: &str = "/* preview-panel-layout";
+const SETTINGS_START: &str = "/* rofi-preview-shared-settings";
+const LAYOUT_START: &str = "/* rofi-preview-shared-layout";
 
-const EMBEDDED_THEME: &str = r#"/* preview-panel-settings
+const EMBEDDED_THEME: &str = r#"/* rofi-preview-shared-settings
 width: 400px;
 height: 616px;
 companion_width: 400px;
@@ -19,7 +19,7 @@ x: 770px;
 y: -850px;
 */
 
-window.preview-panel {
+window.rofi-preview-shared {
     background: rgba(24, 10, 16, 0.95);
     border: 1px solid rgba(214, 86, 199, 0.55);
     border-radius: 15px;
@@ -96,7 +96,7 @@ impl fmt::Display for ConfigError {
 impl Error for ConfigError {}
 
 pub fn embedded() -> Config {
-    parse(EMBEDDED_THEME).expect("the embedded preview-panel theme must be valid")
+    parse(EMBEDDED_THEME).expect("the embedded rofi-preview-shared theme must be valid")
 }
 
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
@@ -139,7 +139,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             "y" => set_once(&mut y, offset(value, "y")?, "y")?,
             _ => {
                 return Err(ConfigError::new(format!(
-                    "unknown preview-panel setting {key:?}"
+                    "unknown rofi-preview-shared setting {key:?}"
                 )));
             }
         }
@@ -195,7 +195,7 @@ pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
             "y" => set_once(&mut overrides.y, offset(value, "y")?, "y")?,
             _ => {
                 return Err(ConfigError::new(format!(
-                    "unknown preview-panel layout setting {key:?}"
+                    "unknown rofi-preview-shared layout setting {key:?}"
                 )));
             }
         }
@@ -206,7 +206,7 @@ pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
 
 pub fn configured_path() -> Option<PathBuf> {
     theme_path_from(
-        env::var_os("PREVIEW_PANEL_CSS").as_deref(),
+        env::var_os("ROFI_PREVIEW_SHARED_CSS").as_deref(),
         env::var_os("XDG_CONFIG_HOME").as_deref(),
         env::var_os("HOME").as_deref(),
     )
@@ -228,16 +228,16 @@ pub(crate) fn theme_path_from(
             home.filter(|path| !path.is_empty())
                 .map(|path| PathBuf::from(path).join(".config"))
         })?;
-    Some(config_home.join("preview-panel/preview-panel.css"))
+    Some(config_home.join("rofi-preview-shared/rofi-preview-shared.css"))
 }
 
 fn settings_block(source: &str) -> Result<&str, ConfigError> {
-    let marker = source
-        .find(SETTINGS_START)
-        .ok_or_else(|| ConfigError::new("missing /* preview-panel-settings configuration block"))?;
+    let marker = source.find(SETTINGS_START).ok_or_else(|| {
+        ConfigError::new("missing /* rofi-preview-shared-settings configuration block")
+    })?;
     let settings = &source[marker + SETTINGS_START.len()..];
     let end = settings.find("*/").ok_or_else(|| {
-        ConfigError::new("preview-panel-settings configuration block is not closed")
+        ConfigError::new("rofi-preview-shared-settings configuration block is not closed")
     })?;
     Ok(&settings[..end])
 }
@@ -251,7 +251,7 @@ fn optional_settings_block<'a>(
     };
     let settings = &source[start + marker.len()..];
     let end = settings.find("*/").ok_or_else(|| {
-        ConfigError::new("preview-panel-layout configuration block is not closed")
+        ConfigError::new("rofi-preview-shared-layout configuration block is not closed")
     })?;
     Ok(Some(&settings[..end]))
 }
@@ -259,14 +259,14 @@ fn optional_settings_block<'a>(
 fn set_once<T>(slot: &mut Option<T>, value: T, key: &str) -> Result<(), ConfigError> {
     if slot.replace(value).is_some() {
         return Err(ConfigError::new(format!(
-            "preview-panel setting {key:?} is repeated"
+            "rofi-preview-shared setting {key:?} is repeated"
         )));
     }
     Ok(())
 }
 
 fn required<T>(value: Option<T>, key: &str) -> Result<T, ConfigError> {
-    value.ok_or_else(|| ConfigError::new(format!("missing preview-panel setting {key:?}")))
+    value.ok_or_else(|| ConfigError::new(format!("missing rofi-preview-shared setting {key:?}")))
 }
 
 fn pixels(value: &str, key: &str) -> Result<i64, ConfigError> {
