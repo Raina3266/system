@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 
 use rofi_preview_shared::file_preview::FilePreviewer;
 use rofi_preview_shared::launcher::{
-    Action, Controller, Icon, Mode as SharedMode, Outcome, Row, UiResult, View,
+    Action, Controller, Controls, Icon, Layout, Mode as SharedMode, Outcome, Row, UiResult, View,
 };
 use rofi_preview_shared::panel_client::PanelClient;
 
@@ -23,6 +23,7 @@ pub fn launch() -> AppResult<()> {
     Ok(())
 }
 
+#[derive(Clone)]
 struct FileSearch {
     mode: Mode,
     home: PathBuf,
@@ -36,7 +37,9 @@ impl FileSearch {
         let home = search::home_directory()?;
         let panel = PanelClient::new(
             "rofi-filesearch",
-            binary("ROFI_FILESEARCH_ROFI_PREVIEW_SHARED", "rofi-preview-shared"),
+            env::var_os("ROFI_FILESEARCH_ROFI_PREVIEW_SHARED")
+                .or_else(|| env::var_os("ROFI_FILESEARCH_PREVIEW_PANEL"))
+                .unwrap_or_else(|| OsString::from("rofi-preview-shared")),
             "ROFI_FILESEARCH",
         )?;
         panel.cleanup()?;
@@ -83,9 +86,9 @@ impl FileSearch {
                 }
             })
             .collect();
-        let mut preview = Action::new(ACTION_PREVIEW, "󰈈 Preview", Some('p'));
+        let mut preview = Action::new(ACTION_PREVIEW, "󰈈", Some('p'));
         preview.enabled = matches!(self.mode, Mode::File | Mode::Folder);
-        let mut reveal = Action::new(ACTION_REVEAL, " Reveal", Some('o'));
+        let mut reveal = Action::new(ACTION_REVEAL, "", Some('o'));
         reveal.enabled = self.mode == Mode::File;
         Ok(View {
             prompt: if self.mode == Mode::Folder {
@@ -97,6 +100,7 @@ impl FileSearch {
             actions: vec![preview, reveal],
             selected: None,
             empty_message: Some(format!("No {}s found", self.mode.name())),
+            layout: filesearch_layout(self.mode),
         })
     }
 
@@ -147,6 +151,18 @@ impl FileSearch {
                     .into(),
             )
         }
+    }
+}
+
+pub(crate) fn filesearch_layout(mode: Mode) -> Layout {
+    Layout {
+        controls: Controls::ModesBottom,
+        show_prompt: true,
+        search_placeholder: String::new(),
+        mode_buttons_expand: false,
+        action_buttons_expand: false,
+        show_icons: true,
+        icon_size: if mode == Mode::File { 48 } else { 32 },
     }
 }
 
@@ -208,6 +224,7 @@ impl Controller for FileSearch {
                     spawn_background(dolphin_binary(), [OsStr::new("--select"), path.as_os_str()])
                         .map_err(display_error)?;
                 }
+                return Ok(Outcome::Close);
             }
             _ => {}
         }
@@ -215,7 +232,14 @@ impl Controller for FileSearch {
     }
 
     fn selection_changed(&mut self, selected: &str, serial: u64) -> UiResult<()> {
-        self.update_preview(selected, serial).map_err(display_error)
+        let search = self.clone();
+        let selected = selected.to_owned();
+        std::thread::spawn(move || {
+            if let Err(error) = search.update_preview(&selected, serial) {
+                eprintln!("rofi-filesearch: update preview selection: {error}");
+            }
+        });
+        Ok(())
     }
 
     fn close(&mut self) -> UiResult<()> {

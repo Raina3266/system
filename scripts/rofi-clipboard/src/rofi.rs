@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use rofi_preview_shared::launcher::{
-    Action, Controller, Icon, Mode as SharedMode, Outcome, Row, UiResult, View,
+    Action, Controller, Controls, Icon, Layout, Mode as SharedMode, Outcome, Row, UiResult, View,
 };
 
 use crate::clipboard::copy_item;
@@ -109,11 +109,24 @@ impl ClipboardUi {
             ],
             selected,
             empty_message: Some("Nothing here yet".to_owned()),
+            layout: clipboard_layout(),
         })
     }
 
     fn selected_id(value: Option<&str>) -> Option<u64> {
         value.and_then(|value| value.parse().ok())
+    }
+}
+
+pub(crate) fn clipboard_layout() -> Layout {
+    Layout {
+        controls: Controls::ModesTop,
+        show_prompt: false,
+        search_placeholder: "Search clipboard".to_owned(),
+        mode_buttons_expand: true,
+        action_buttons_expand: true,
+        show_icons: false,
+        icon_size: 32,
     }
 }
 
@@ -193,9 +206,14 @@ impl Controller for ClipboardUi {
             return Ok(());
         };
         self.selected_id = Some(id);
-        self.editor
-            .selection_changed(&self.store, id, serial)
-            .map_err(display_error)
+        let editor = self.editor.clone();
+        let store = self.store.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = editor.selection_changed(&store, id, serial) {
+                eprintln!("rofi-clipboard: update preview selection: {error:#}");
+            }
+        });
+        Ok(())
     }
 
     fn close(&mut self) -> UiResult<()> {

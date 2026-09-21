@@ -29,7 +29,17 @@ window.rofi-preview-shared-window {
     font-size: 13pt;
 }
 
+window.rofi-preview-shared-backdrop {
+    background: transparent;
+}
+
 .rofi-preview-shared-root {
+    background: transparent;
+}
+
+.rofi-preview-shared-modes,
+.rofi-preview-shared-actions,
+.rofi-preview-shared-bottom {
     background: transparent;
 }
 
@@ -70,6 +80,13 @@ button.rofi-preview-shared-action:hover {
     background: rgba(255, 126, 219, 0.16);
 }
 
+button.rofi-preview-shared-mode:disabled,
+button.rofi-preview-shared-action:disabled {
+    color: #5C6776;
+    border-color: #5C6776;
+    background: transparent;
+}
+
 list.rofi-preview-shared-list {
     background: transparent;
 }
@@ -90,6 +107,44 @@ row.rofi-preview-shared-row:selected {
 
 row.rofi-preview-shared-row.active {
     border-color: #FF3333;
+}
+
+window.rofi-clipboard,
+window.rofi-clipboard .rofi-preview-shared-search,
+window.rofi-clipboard .rofi-preview-shared-search text,
+window.rofi-clipboard row.rofi-preview-shared-row {
+    color: #bd93f9;
+}
+
+window.rofi-clipboard row.rofi-preview-shared-row.active {
+    color: #7AFCFF;
+    background: rgba(122, 252, 255, 0.07);
+}
+
+window.rofi-clipboard row.rofi-preview-shared-row:selected {
+    color: #FF7EDB;
+    background: rgba(255, 126, 219, 0.10);
+}
+
+window.rofi-clipboard row.rofi-preview-shared-row.active:selected {
+    color: #7AFCFF;
+}
+
+window.rofi-filesearch .rofi-preview-shared-bottom {
+    margin-top: 5px;
+}
+
+window.rofi-filesearch .rofi-preview-shared-modes {
+    margin: 4px 2px;
+}
+
+window.rofi-filesearch button.rofi-preview-shared-mode {
+    padding: 2px 18px;
+}
+
+window.rofi-filesearch button.rofi-preview-shared-action {
+    padding: 2px;
+    min-width: 24px;
 }
 
 .rofi-preview-shared-subtitle,

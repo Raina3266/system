@@ -436,8 +436,21 @@ mod editor {
 }
 
 mod rofi {
+    use rofi_preview_shared::launcher::Controls;
+
     use crate::model::{ClipboardItem, ItemKind};
     use crate::rofi::*;
+
+    #[test]
+    fn clipboard_keeps_its_original_text_only_top_bar_layout() {
+        let layout = clipboard_layout();
+        assert_eq!(layout.controls, Controls::ModesTop);
+        assert!(!layout.show_prompt);
+        assert_eq!(layout.search_placeholder, "Search clipboard");
+        assert!(!layout.show_icons);
+        assert!(layout.mode_buttons_expand);
+        assert!(layout.action_buttons_expand);
+    }
 
     fn textual_item(id: u64, kind: ItemKind, text: &str, pinned: bool) -> ClipboardItem {
         ClipboardItem {

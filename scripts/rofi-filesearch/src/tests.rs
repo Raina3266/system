@@ -81,7 +81,10 @@ mod preview {
 }
 
 mod rofi {
+    use rofi_preview_shared::launcher::Controls;
+
     use crate::model::Mode;
+    use crate::rofi::filesearch_layout;
 
     #[test]
     fn all_three_modes_are_exposed_by_the_shared_controller() {
@@ -89,6 +92,19 @@ mod rofi {
             .map(|mode| mode.name())
             .to_vec();
         assert_eq!(modes, ["app", "file", "folder"]);
+    }
+
+    #[test]
+    fn filesearch_keeps_bottom_controls_and_per_mode_icon_sizes() {
+        let app = filesearch_layout(Mode::App);
+        let file = filesearch_layout(Mode::File);
+        assert_eq!(app.controls, Controls::ModesBottom);
+        assert!(app.show_prompt);
+        assert!(app.show_icons);
+        assert!(!app.mode_buttons_expand);
+        assert!(!app.action_buttons_expand);
+        assert_eq!(app.icon_size, 32);
+        assert_eq!(file.icon_size, 48);
     }
 }
 

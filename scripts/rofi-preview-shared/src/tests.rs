@@ -213,6 +213,18 @@ window { width: 375px; }
     }
 
     #[test]
+    fn accepts_preview_panel_configuration_markers_for_compatibility() {
+        let legacy_theme = THEME.replace(
+            "/* rofi-preview-shared-settings",
+            "/* preview-panel-settings",
+        );
+        assert_eq!(parse(&legacy_theme).unwrap().window.width, 480);
+
+        let legacy_layout = "/* preview-panel-layout\nheight: 400px;\n*/";
+        assert_eq!(parse_layout(legacy_layout).unwrap().height, Some(400));
+    }
+
+    #[test]
     fn higher_priority_overrides_win_over_rasi_layout() {
         let layout = WindowOverrides {
             width: Some(300),

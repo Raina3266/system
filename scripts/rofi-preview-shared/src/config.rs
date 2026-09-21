@@ -8,6 +8,8 @@ use crate::cli::{Side, WindowOverrides};
 
 const SETTINGS_START: &str = "/* rofi-preview-shared-settings";
 const LAYOUT_START: &str = "/* rofi-preview-shared-layout";
+const LEGACY_SETTINGS_START: &str = "/* preview-panel-settings";
+const LEGACY_LAYOUT_START: &str = "/* preview-panel-layout";
 
 const EMBEDDED_THEME: &str = r#"/* rofi-preview-shared-settings
 width: 400px;
@@ -160,7 +162,9 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 }
 
 pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
-    let Some(settings) = optional_settings_block(source, LAYOUT_START)? else {
+    let settings = optional_settings_block(source, LAYOUT_START)?
+        .or(optional_settings_block(source, LEGACY_LAYOUT_START)?);
+    let Some(settings) = settings else {
         return Ok(WindowOverrides::default());
     };
     let mut overrides = WindowOverrides::default();
@@ -206,7 +210,9 @@ pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
 
 pub fn configured_path() -> Option<PathBuf> {
     theme_path_from(
-        env::var_os("ROFI_PREVIEW_SHARED_CSS").as_deref(),
+        env::var_os("ROFI_PREVIEW_SHARED_CSS")
+            .or_else(|| env::var_os("PREVIEW_PANEL_CSS"))
+            .as_deref(),
         env::var_os("XDG_CONFIG_HOME").as_deref(),
         env::var_os("HOME").as_deref(),
     )
@@ -232,10 +238,18 @@ pub(crate) fn theme_path_from(
 }
 
 fn settings_block(source: &str) -> Result<&str, ConfigError> {
-    let marker = source.find(SETTINGS_START).ok_or_else(|| {
-        ConfigError::new("missing /* rofi-preview-shared-settings configuration block")
-    })?;
-    let settings = &source[marker + SETTINGS_START.len()..];
+    let (marker, start) = source
+        .find(SETTINGS_START)
+        .map(|start| (SETTINGS_START, start))
+        .or_else(|| {
+            source
+                .find(LEGACY_SETTINGS_START)
+                .map(|start| (LEGACY_SETTINGS_START, start))
+        })
+        .ok_or_else(|| {
+            ConfigError::new("missing /* rofi-preview-shared-settings configuration block")
+        })?;
+    let settings = &source[start + marker.len()..];
     let end = settings.find("*/").ok_or_else(|| {
         ConfigError::new("rofi-preview-shared-settings configuration block is not closed")
     })?;

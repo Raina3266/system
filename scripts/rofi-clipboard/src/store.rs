@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::model::{ClipboardItem, HISTORY_VERSION, History, ItemKind};
 
+#[derive(Clone)]
 pub struct ClipboardStore {
     root: PathBuf,
     history_path: PathBuf,

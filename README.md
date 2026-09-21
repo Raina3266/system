@@ -204,7 +204,7 @@ If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
 | `ROFI_PREVIEW_SHARED_CSS` | Override the shared launcher and preview CSS/configuration path |
 | `ROFI_CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify and label saved screenshots (default: `~/Pictures/Screenshots`) |
 | `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
-| `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
+| `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `550`) |
 | `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of the launcher (default: `left`) |
 | `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and launcher in pixels (default: `10`) |
 | `ROFI_CLIPBOARD_LAUNCHER_WIDTH` | Launcher width used for companion placement (default: `400`) |

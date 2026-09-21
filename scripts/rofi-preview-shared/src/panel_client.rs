@@ -43,6 +43,7 @@ pub enum SaveResult {
     Closed(Option<PanelSnapshot>),
 }
 
+#[derive(Clone)]
 pub struct PanelClient {
     socket: PathBuf,
     executable: OsString,
@@ -166,14 +167,20 @@ impl PanelClient {
     }
 
     fn append_geometry_overrides(&self, command: &mut Command) {
-        for (suffix, option) in [
-            ("LAUNCHER_WIDTH", "--companion-width"),
-            ("PREVIEW_WIDTH", "--width"),
-            ("PREVIEW_HEIGHT", "--height"),
-            ("PREVIEW_SIDE", "--side"),
-            ("PREVIEW_GAP", "--gap"),
+        for (suffix, legacy_suffix, option) in [
+            ("LAUNCHER_WIDTH", Some("ROFI_WIDTH"), "--companion-width"),
+            ("PREVIEW_WIDTH", None, "--width"),
+            ("PREVIEW_HEIGHT", None, "--height"),
+            ("PREVIEW_SIDE", None, "--side"),
+            ("PREVIEW_GAP", None, "--gap"),
         ] {
-            if let Some(value) = env::var_os(format!("{}_{suffix}", self.environment_prefix)) {
+            let value =
+                env::var_os(format!("{}_{suffix}", self.environment_prefix)).or_else(|| {
+                    legacy_suffix.and_then(|suffix| {
+                        env::var_os(format!("{}_{suffix}", self.environment_prefix))
+                    })
+                });
+            if let Some(value) = value {
                 command.arg(option).arg(value);
             }
         }

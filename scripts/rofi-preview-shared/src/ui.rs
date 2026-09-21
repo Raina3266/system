@@ -196,6 +196,7 @@ fn build_window(
         .title(&options.title)
         .build();
     window.add_css_class("rofi-preview-shared");
+    window.add_css_class("preview-panel");
     window.set_decorated(!options.panel);
     window.set_child(Some(&stack));
 

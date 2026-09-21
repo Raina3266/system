@@ -80,6 +80,38 @@ pub struct Action {
     pub enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Controls {
+    #[default]
+    ModesTop,
+    ModesBottom,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Layout {
+    pub controls: Controls,
+    pub show_prompt: bool,
+    pub search_placeholder: String,
+    pub mode_buttons_expand: bool,
+    pub action_buttons_expand: bool,
+    pub show_icons: bool,
+    pub icon_size: i32,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            controls: Controls::ModesTop,
+            show_prompt: true,
+            search_placeholder: String::new(),
+            mode_buttons_expand: true,
+            action_buttons_expand: true,
+            show_icons: true,
+            icon_size: 32,
+        }
+    }
+}
+
 impl Action {
     pub fn new(id: impl Into<String>, label: impl Into<String>, shortcut: Option<char>) -> Self {
         Self {
@@ -98,6 +130,7 @@ pub struct View {
     pub actions: Vec<Action>,
     pub selected: Option<String>,
     pub empty_message: Option<String>,
+    pub layout: Layout,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -128,11 +161,14 @@ pub trait Controller {
 struct State {
     controller: Box<dyn Controller>,
     window: ApplicationWindow,
+    backdrop: ApplicationWindow,
+    root: GtkBox,
     mode_bar: GtkBox,
     prompt: Label,
     search: Entry,
     list: ListBox,
     action_bar: GtkBox,
+    bottom_bar: GtkBox,
     status: Label,
     rows: Vec<Row>,
     visible_ids: Vec<String>,
@@ -140,6 +176,7 @@ struct State {
     empty_message: String,
     rendering: bool,
     selection_serial: u64,
+    layout: Layout,
 }
 
 pub fn run(controller: impl Controller + 'static) {
@@ -161,6 +198,22 @@ pub fn run(controller: impl Controller + 'static) {
 
 fn build_window(application: &Application, controller: Box<dyn Controller>) {
     let geometry = launcher_geometry();
+    let namespace = controller.namespace();
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_icon_theme_name(Some("WhiteSur-dark"));
+    }
+    let backdrop = ApplicationWindow::builder()
+        .application(application)
+        .decorated(false)
+        .build();
+    backdrop.add_css_class("rofi-preview-shared-backdrop");
+    backdrop.init_layer_shell();
+    backdrop.set_layer(Layer::Overlay);
+    backdrop.set_namespace(Some("rofi-preview-shared-backdrop"));
+    backdrop.set_keyboard_mode(KeyboardMode::None);
+    for edge in [Edge::Top, Edge::Right, Edge::Bottom, Edge::Left] {
+        backdrop.set_anchor(edge, true);
+    }
     let window = ApplicationWindow::builder()
         .application(application)
         .default_height(geometry.height)
@@ -169,9 +222,10 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
         .resizable(false)
         .build();
     window.add_css_class("rofi-preview-shared-window");
+    window.add_css_class(namespace);
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
-    window.set_namespace(Some(controller.namespace()));
+    window.set_namespace(Some(namespace));
     window.set_keyboard_mode(KeyboardMode::OnDemand);
     window.set_anchor(Edge::Top, true);
     window.set_anchor(Edge::Right, true);
@@ -195,7 +249,7 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
     input.append(&search);
 
     let list = ListBox::new();
-    list.set_activate_on_single_click(false);
+    list.set_activate_on_single_click(true);
     list.set_selection_mode(SelectionMode::Single);
     list.add_css_class("rofi-preview-shared-list");
     let scroller = ScrolledWindow::new();
@@ -207,6 +261,10 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
     let action_bar = GtkBox::new(Orientation::Horizontal, 10);
     action_bar.set_halign(Align::Fill);
     action_bar.add_css_class("rofi-preview-shared-actions");
+    let bottom_bar = GtkBox::new(Orientation::Horizontal, 10);
+    bottom_bar.set_halign(Align::Fill);
+    bottom_bar.add_css_class("rofi-preview-shared-bottom");
+    bottom_bar.append(&action_bar);
     let status = Label::new(None);
     status.set_halign(Align::Start);
     status.set_wrap(true);
@@ -216,18 +274,21 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
     root.append(&mode_bar);
     root.append(&input);
     root.append(&scroller);
-    root.append(&action_bar);
+    root.append(&bottom_bar);
     root.append(&status);
     window.set_child(Some(&root));
 
     let state = Rc::new(RefCell::new(State {
         controller,
         window: window.clone(),
+        backdrop: backdrop.clone(),
+        root,
         mode_bar,
         prompt,
         search: search.clone(),
         list: list.clone(),
         action_bar,
+        bottom_bar,
         status,
         rows: Vec::new(),
         visible_ids: Vec::new(),
@@ -235,6 +296,7 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
         empty_message: "Nothing here yet".to_owned(),
         rendering: false,
         selection_serial: 0,
+        layout: Layout::default(),
     }));
 
     rebuild_modes(&state);
@@ -253,14 +315,21 @@ fn build_window(application: &Application, controller: Box<dyn Controller>) {
         {
             eprintln!("rofi-preview-shared: close controller: {error}");
         }
+        state_for_close.borrow().backdrop.close();
         glib::Propagation::Proceed
     });
 
+    backdrop.present();
     window.present();
     search.grab_focus();
 }
 
 fn connect_signals(state: &Rc<RefCell<State>>) {
+    let outside_click = gtk::GestureClick::new();
+    let clicked = Rc::clone(state);
+    outside_click.connect_pressed(move |_, _, _, _| close_window(&clicked));
+    state.borrow().backdrop.add_controller(outside_click);
+
     let changed = Rc::clone(state);
     state.borrow().search.connect_changed(move |_| {
         let rendering = changed.borrow().rendering;
@@ -291,26 +360,57 @@ fn connect_signals(state: &Rc<RefCell<State>>) {
     keys.set_propagation_phase(PropagationPhase::Capture);
     let keyed = Rc::clone(state);
     keys.connect_key_pressed(move |_, key, _, modifiers| {
-        if key == gdk::Key::Escape {
+        let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+        let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+        if key == gdk::Key::Escape || (control && key == gdk::Key::g) {
             close_window(&keyed);
             return glib::Propagation::Stop;
         }
-        if key == gdk::Key::Down {
+        if key == gdk::Key::Down || (control && key == gdk::Key::n) {
             move_selection(&keyed, 1);
             return glib::Propagation::Stop;
         }
-        if key == gdk::Key::Up {
+        if key == gdk::Key::Up
+            || (!control && key == gdk::Key::ISO_Left_Tab)
+            || (control && key == gdk::Key::p)
+        {
             move_selection(&keyed, -1);
             return glib::Propagation::Stop;
         }
-        if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) {
-            let selected = {
-                let state = keyed.borrow();
-                selected_id(&state)
-            };
-            if let Some(id) = selected {
-                invoke(&keyed, |controller| controller.activate(&id));
-            }
+        if key == gdk::Key::Page_Down {
+            move_selection(&keyed, 5);
+            return glib::Propagation::Stop;
+        }
+        if key == gdk::Key::Page_Up {
+            move_selection(&keyed, -5);
+            return glib::Propagation::Stop;
+        }
+        if key == gdk::Key::Home || (control && key == gdk::Key::a) {
+            move_selection_to(&keyed, 0);
+            return glib::Propagation::Stop;
+        }
+        if key == gdk::Key::End || (control && key == gdk::Key::e) {
+            move_selection_to(&keyed, i32::MAX);
+            return glib::Propagation::Stop;
+        }
+        if (control && shift && matches!(key, gdk::Key::Tab | gdk::Key::ISO_Left_Tab))
+            || (shift && key == gdk::Key::Left)
+        {
+            cycle_mode(&keyed, -1);
+            return glib::Propagation::Stop;
+        }
+        if (control && !shift && key == gdk::Key::Tab) || (shift && key == gdk::Key::Right) {
+            cycle_mode(&keyed, 1);
+            return glib::Propagation::Stop;
+        }
+        if shift && key == gdk::Key::Delete {
+            invoke_named_action(&keyed, "delete");
+            return glib::Propagation::Stop;
+        }
+        if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
+            || (control && matches!(key, gdk::Key::j | gdk::Key::m))
+        {
+            activate_selected(&keyed);
             return glib::Propagation::Stop;
         }
         if modifiers.contains(gdk::ModifierType::ALT_MASK)
@@ -333,13 +433,19 @@ fn connect_signals(state: &Rc<RefCell<State>>) {
 }
 
 fn rebuild_modes(state: &Rc<RefCell<State>>) {
-    let modes = state.borrow().controller.modes();
-    let active = state.borrow().controller.active_mode().to_owned();
-    let bar = state.borrow().mode_bar.clone();
+    let (modes, active, bar, expand) = {
+        let state = state.borrow();
+        (
+            state.controller.modes(),
+            state.controller.active_mode().to_owned(),
+            state.mode_bar.clone(),
+            state.layout.mode_buttons_expand,
+        )
+    };
     clear_box(&bar);
     for mode in modes {
         let button = Button::with_label(&mode.label);
-        button.set_hexpand(true);
+        button.set_hexpand(expand);
         button.add_css_class("rofi-preview-shared-mode");
         if mode.id == active {
             button.add_css_class("active");
@@ -354,14 +460,13 @@ fn switch_mode(state: &Rc<RefCell<State>>, mode: &str) {
     let result = state.borrow_mut().controller.switch_mode(mode);
     match result {
         Ok(view) => {
-            let search = {
+            let list = {
                 let mut state = state.borrow_mut();
                 state.rendering = true;
-                state.search.clone()
+                state.list.clone()
             };
-            search.set_text("");
+            list.unselect_all();
             state.borrow_mut().rendering = false;
-            rebuild_modes(state);
             render_view(state, view, None);
         }
         Err(error) => show_error(state, error),
@@ -369,29 +474,63 @@ fn switch_mode(state: &Rc<RefCell<State>>, mode: &str) {
 }
 
 fn render_view(state: &Rc<RefCell<State>>, view: View, requested: Option<String>) {
+    let selected = requested.or(view.selected.clone());
     {
         let mut state = state.borrow_mut();
         state.prompt.set_text(&view.prompt);
+        state.prompt.set_visible(view.layout.show_prompt);
+        state
+            .search
+            .set_placeholder_text(Some(&view.layout.search_placeholder));
         state.rows = view.rows;
         state.actions = view.actions;
         state.empty_message = view
             .empty_message
             .unwrap_or_else(|| "Nothing here yet".to_owned());
+        state.layout = view.layout;
         state.status.set_visible(false);
     }
+    arrange_controls(state);
+    rebuild_modes(state);
     rebuild_actions(state);
-    apply_filter(state, requested.or(view.selected));
+    apply_filter(state, selected);
+}
+
+fn arrange_controls(state: &Rc<RefCell<State>>) {
+    let (root, mode_bar, bottom_bar, controls) = {
+        let state = state.borrow();
+        (
+            state.root.clone(),
+            state.mode_bar.clone(),
+            state.bottom_bar.clone(),
+            state.layout.controls,
+        )
+    };
+    if let Some(parent) = mode_bar.parent()
+        && let Ok(parent) = parent.downcast::<GtkBox>()
+    {
+        parent.remove(&mode_bar);
+    }
+    match controls {
+        Controls::ModesTop => root.prepend(&mode_bar),
+        Controls::ModesBottom => bottom_bar.prepend(&mode_bar),
+    }
 }
 
 fn rebuild_actions(state: &Rc<RefCell<State>>) {
-    let (bar, actions) = {
+    let (bar, bottom_bar, actions, expand) = {
         let state = state.borrow();
-        (state.action_bar.clone(), state.actions.clone())
+        (
+            state.action_bar.clone(),
+            state.bottom_bar.clone(),
+            state.actions.clone(),
+            state.layout.action_buttons_expand,
+        )
     };
     clear_box(&bar);
     for action in actions {
         let button = Button::with_label(&action.label);
-        button.set_hexpand(true);
+        button.set_hexpand(expand);
         button.set_sensitive(action.enabled);
         button.add_css_class("rofi-preview-shared-action");
         let state = Rc::clone(state);
@@ -399,6 +538,7 @@ fn rebuild_actions(state: &Rc<RefCell<State>>) {
         bar.append(&button);
     }
     bar.set_visible(bar.first_child().is_some());
+    bottom_bar.set_visible(bottom_bar.first_child().is_some());
 }
 
 fn invoke_action(state: &Rc<RefCell<State>>, action: &str) {
@@ -428,14 +568,25 @@ fn invoke(state: &Rc<RefCell<State>>, call: impl FnOnce(&mut dyn Controller) -> 
 }
 
 fn apply_filter(state: &Rc<RefCell<State>>, requested: Option<String>) {
-    let previously_selected = requested.or_else(|| selected_id(&state.borrow()));
-    let (list, rows, query, empty_message) = {
+    let (previously_selected, previous_index) = {
+        let state = state.borrow();
+        (
+            requested.or_else(|| selected_id(&state)),
+            state
+                .list
+                .selected_row()
+                .map(|row| row.index().max(0) as usize),
+        )
+    };
+    let (list, rows, query, empty_message, show_icons, icon_size) = {
         let state = state.borrow();
         (
             state.list.clone(),
             state.rows.clone(),
             state.search.text().to_string(),
             state.empty_message.clone(),
+            state.layout.show_icons,
+            state.layout.icon_size,
         )
     };
     let visible = visible_rows(&rows, &query);
@@ -447,10 +598,10 @@ fn apply_filter(state: &Rc<RefCell<State>>, requested: Option<String>) {
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
-        for (index, _) in visible {
+        for index in visible {
             let row = &rows[index];
             state.visible_ids.push(row.id.clone());
-            list.append(&build_row(row));
+            list.append(&build_row(row, show_icons, icon_size));
         }
         if state.visible_ids.is_empty() {
             list.append(&build_empty_row(if query.trim().is_empty() {
@@ -462,7 +613,11 @@ fn apply_filter(state: &Rc<RefCell<State>>, requested: Option<String>) {
             let selected_index = previously_selected
                 .as_ref()
                 .and_then(|id| state.visible_ids.iter().position(|visible| visible == id))
-                .unwrap_or(0);
+                .unwrap_or_else(|| {
+                    previous_index
+                        .unwrap_or(0)
+                        .min(state.visible_ids.len().saturating_sub(1))
+                });
             if let Some(row) = list.row_at_index(selected_index as i32) {
                 list.select_row(Some(&row));
             }
@@ -472,29 +627,27 @@ fn apply_filter(state: &Rc<RefCell<State>>, requested: Option<String>) {
     notify_selection(state);
 }
 
-fn visible_rows(rows: &[Row], query: &str) -> Vec<(usize, i64)> {
-    let mut visible: Vec<_> = rows
-        .iter()
+fn visible_rows(rows: &[Row], query: &str) -> Vec<usize> {
+    rows.iter()
         .enumerate()
         .filter_map(|(index, row)| {
-            if row.permanent {
-                Some((index, i64::MIN))
-            } else {
-                fuzzy_score(&row.search_text, query).map(|score| (index, score))
-            }
+            (row.permanent || token_matches(&row.search_text, query)).then_some(index)
         })
-        .collect();
-    visible.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
-    visible
+        .collect()
 }
 
-fn build_row(row: &Row) -> ListBoxRow {
+fn build_row(row: &Row, show_icons: bool, icon_size: i32) -> ListBoxRow {
     let container = GtkBox::new(Orientation::Horizontal, 10);
     container.set_margin_start(8);
     container.set_margin_end(8);
     container.set_margin_top(6);
     container.set_margin_bottom(6);
-    if let Some(icon) = row.icon.as_ref().and_then(icon_widget) {
+    if show_icons
+        && let Some(icon) = row
+            .icon
+            .as_ref()
+            .and_then(|icon| icon_widget(icon, icon_size))
+    {
         container.append(&icon);
     }
     let labels = GtkBox::new(Orientation::Vertical, 1);
@@ -533,24 +686,48 @@ fn build_empty_row(message: &str) -> ListBoxRow {
     row
 }
 
-fn icon_widget(icon: &Icon) -> Option<Image> {
+fn icon_widget(icon: &Icon, icon_size: i32) -> Option<Image> {
     let image = match icon {
-        Icon::Name(name) => Image::from_icon_name(name),
+        Icon::Name(name) => {
+            let path = Path::new(name);
+            if path.is_absolute() && path.exists() {
+                Image::from_file(path)
+            } else {
+                let display = gdk::Display::default()?;
+                let theme = gtk::IconTheme::for_display(&display);
+                let name = name
+                    .split(',')
+                    .map(str::trim)
+                    .find(|candidate| !candidate.is_empty() && theme.has_icon(candidate))
+                    .unwrap_or(name);
+                Image::from_icon_name(name)
+            }
+        }
         Icon::Image(path) => Image::from_file(path),
         Icon::File(path) => {
             let file = gio::File::for_path(path);
-            let icon = file
+            let info = file
                 .query_info(
-                    "standard::icon",
+                    "standard::icon,standard::content-type,thumbnail::path,thumbnail::is-valid",
                     gio::FileQueryInfoFlags::NONE,
                     None::<&gio::Cancellable>,
                 )
-                .ok()
-                .and_then(|info| info.icon());
-            icon.map(|icon| Image::from_gicon(&icon))?
+                .ok()?;
+            if info.boolean("thumbnail::is-valid")
+                && let Some(thumbnail) = info.attribute_string("thumbnail::path")
+            {
+                Image::from_file(Path::new(thumbnail.as_str()))
+            } else if info
+                .content_type()
+                .is_some_and(|content_type| content_type.starts_with("image/"))
+            {
+                Image::from_file(path)
+            } else {
+                info.icon().map(|icon| Image::from_gicon(&icon))?
+            }
         }
     };
-    image.set_pixel_size(32);
+    image.set_pixel_size(icon_size);
     image.add_css_class("rofi-preview-shared-icon");
     Some(image)
 }
@@ -597,8 +774,67 @@ fn move_selection(state: &Rc<RefCell<State>>, delta: i32) {
     }
 }
 
+fn move_selection_to(state: &Rc<RefCell<State>>, target: i32) {
+    let (list, search, visible_len) = {
+        let state = state.borrow();
+        (
+            state.list.clone(),
+            state.search.clone(),
+            state.visible_ids.len(),
+        )
+    };
+    if visible_len == 0 {
+        return;
+    }
+    let target = target.clamp(0, visible_len as i32 - 1);
+    if let Some(row) = list.row_at_index(target) {
+        list.select_row(Some(&row));
+        row.grab_focus();
+        search.grab_focus();
+    }
+}
+
+fn activate_selected(state: &Rc<RefCell<State>>) {
+    let Some(selected) = selected_id(&state.borrow()) else {
+        return;
+    };
+    invoke(state, |controller| controller.activate(&selected));
+}
+
+fn invoke_named_action(state: &Rc<RefCell<State>>, id: &str) -> bool {
+    let enabled = state
+        .borrow()
+        .actions
+        .iter()
+        .any(|action| action.id == id && action.enabled);
+    if enabled {
+        invoke_action(state, id);
+    }
+    enabled
+}
+
+fn cycle_mode(state: &Rc<RefCell<State>>, delta: isize) {
+    let (modes, active) = {
+        let state = state.borrow();
+        (
+            state.controller.modes(),
+            state.controller.active_mode().to_owned(),
+        )
+    };
+    if modes.is_empty() {
+        return;
+    }
+    let current = modes.iter().position(|mode| mode.id == active).unwrap_or(0) as isize;
+    let target = (current + delta).rem_euclid(modes.len() as isize) as usize;
+    switch_mode(state, &modes[target].id);
+}
+
 fn close_window(state: &Rc<RefCell<State>>) {
-    let window = state.borrow().window.clone();
+    let (window, backdrop) = {
+        let state = state.borrow();
+        (state.window.clone(), state.backdrop.clone())
+    };
+    backdrop.close();
     window.close();
 }
 
@@ -614,23 +850,17 @@ fn clear_box(container: &GtkBox) {
     }
 }
 
-fn fuzzy_score(value: &str, query: &str) -> Option<i64> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
-        return Some(0);
-    }
+fn token_matches(value: &str, query: &str) -> bool {
     let value = value.to_lowercase();
-    if let Some(index) = value.find(&query) {
-        return Some(10_000 - index as i64);
-    }
-    let mut score = 0_i64;
-    let mut position = 0_usize;
-    for needle in query.chars() {
-        let relative = value[position..].find(needle)?;
-        position += relative + needle.len_utf8();
-        score += 100 - relative.min(99) as i64;
-    }
-    Some(score)
+    query.split_whitespace().all(|token| {
+        token
+            .strip_prefix('-')
+            .filter(|token| !token.is_empty())
+            .map_or_else(
+                || value.contains(&token.to_lowercase()),
+                |token| !value.contains(&token.to_lowercase()),
+            )
+    })
 }
 
 fn install_theme() {
@@ -697,13 +927,16 @@ mod launcher_tests {
     use super::*;
 
     #[test]
-    fn fuzzy_matching_prefers_contiguous_matches() {
-        assert!(fuzzy_score("clipboard", "clip") > fuzzy_score("colour picker", "clip"));
+    fn token_matching_requires_each_substring() {
+        assert!(token_matches("Rust clipboard manager", "rust board"));
+        assert!(!token_matches("Rust clipboard manager", "rust missing"));
     }
 
     #[test]
-    fn fuzzy_matching_rejects_missing_characters() {
-        assert_eq!(fuzzy_score("clipboard", "xyz"), None);
+    fn token_matching_supports_exclusions_without_fuzzy_reordering() {
+        assert!(token_matches("clipboard memo", "clip -text"));
+        assert!(!token_matches("clipboard text", "clip -text"));
+        assert!(!token_matches("clipboard", "clp"));
     }
 
     #[test]
@@ -715,9 +948,15 @@ mod launcher_tests {
         draft.permanent = true;
 
         let visible = visible_rows(&[matching, draft], "match");
-        assert_eq!(
-            visible.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
-            [0, 1]
-        );
+        assert_eq!(visible, [0, 1]);
+    }
+
+    #[test]
+    fn filtering_preserves_source_order() {
+        let rows = [
+            Row::new("one", "match at the end"),
+            Row::new("two", "match first"),
+        ];
+        assert_eq!(visible_rows(&rows, "match"), [0, 1]);
     }
 }

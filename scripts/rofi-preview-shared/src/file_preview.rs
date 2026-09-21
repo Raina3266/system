@@ -24,6 +24,7 @@ pub enum PreviewKind {
     Unsupported,
 }
 
+#[derive(Clone)]
 pub struct FilePreviewer {
     cache_namespace: String,
     file: OsString,

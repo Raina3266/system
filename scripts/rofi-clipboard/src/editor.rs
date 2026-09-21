@@ -11,6 +11,7 @@ use rofi_preview_shared::panel_client::{
 use crate::model::{ClipboardItem, ItemKind, abbreviate_home_path};
 use crate::store::ClipboardStore;
 
+#[derive(Clone)]
 pub struct ClipboardEditor {
     panel: PanelClient,
 }
@@ -18,6 +19,7 @@ pub struct ClipboardEditor {
 impl ClipboardEditor {
     pub fn new() -> Result<Self> {
         let executable = env::var_os("ROFI_CLIPBOARD_ROFI_PREVIEW_SHARED")
+            .or_else(|| env::var_os("ROFI_CLIPBOARD_PREVIEW_PANEL"))
             .unwrap_or_else(|| "rofi-preview-shared".into());
         let panel = PanelClient::new("rofi-clipboard", executable, "ROFI_CLIPBOARD")?;
         panel.cleanup()?;
