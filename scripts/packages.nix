@@ -331,6 +331,16 @@ rec {
             "Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 4)\n",
             "Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 4)\n        Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.LEFT, 4)\n",
           )
+          # The popup is a self-styled layer surface that has to match Waybar,
+          # not the desktop GTK theme, so its own sheet has to outrank
+          # gtk-4.0/gtk.css. Upstream registers it at APPLICATION priority,
+          # below the USER priority GTK gives that file, so Daemon's
+          # "button:not(.flat)" frame rule won the cascade and drew a red
+          # outline around every day cell, the month arrows and Add event.
+          s = s.replace(
+            "self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION",
+            "self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1",
+          )
           p.write_text(s)
 
           p = Path('$out/share/waybar-ycal/bar.py')
