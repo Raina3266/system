@@ -10,17 +10,14 @@ index d6a66a6..6bd5de4 100644
 +dropdown-audio-route = Route
 +dropdown-audio-route-tooltip = Choose an output for this stream
 diff --git a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
-index 0b6d5d1..12b1dd8 100644
+index 0b6d5d1..d9659aa 100644
 --- a/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
 +++ b/crates/wayle-shell/locales/en-US/dropdowns/_dashboard.ftl
 @@ -12 +12 @@ dropdown-dashboard-idle-inhibit = Idle Inhibit
 -dropdown-dashboard-power-saver = Power Saver
 +dropdown-dashboard-power-saver = Power Profile
-@@ -22,0 +23,7 @@ dropdown-dashboard-no-media-description = No media playing
-+## Calendar and Notifications
-+dropdown-dashboard-calendar = Calendar
-+dropdown-dashboard-calendar-today = Today
-+dropdown-dashboard-calendar-empty = Nothing scheduled in the next 7 days
+@@ -22,0 +23,4 @@ dropdown-dashboard-no-media-description = No media playing
++## Notifications
 +dropdown-dashboard-notifications = Notifications
 +dropdown-dashboard-notifications-unavailable = Notification service unavailable
 +
@@ -51,17 +48,14 @@ index e8c2ac8..2d9800e 100644
 +dropdown-audio-route = Destination
 +dropdown-audio-route-tooltip = Choisir une sortie pour ce flux
 diff --git a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
-index aa799bc..7f00df0 100644
+index aa799bc..18c562f 100644
 --- a/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
 +++ b/crates/wayle-shell/locales/fr/dropdowns/_dashboard.ftl
 @@ -12 +12 @@ dropdown-dashboard-idle-inhibit = Inhiber la veille
 -dropdown-dashboard-power-saver = Économie d'énergie
 +dropdown-dashboard-power-saver = Profil d’alimentation
-@@ -22,0 +23,7 @@ dropdown-dashboard-no-media-description = Aucun média en cours de lecture
-+## Calendrier et notifications
-+dropdown-dashboard-calendar = Calendrier
-+dropdown-dashboard-calendar-today = Aujourd'hui
-+dropdown-dashboard-calendar-empty = Aucun événement prévu dans les 7 prochains jours
+@@ -22,0 +23,4 @@ dropdown-dashboard-no-media-description = Aucun média en cours de lecture
++## Notifications
 +dropdown-dashboard-notifications = Notifications
 +dropdown-dashboard-notifications-unavailable = Service de notifications indisponible
 +
@@ -2082,26 +2076,6 @@ index db0423e..f55dc9e 100644
 +        popover.set_has_arrow(false);
 +        popover.set_child(Some(controller.widget()));
 +
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
-index a3bebc7..11e7a23 100644
---- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
-@@ -51,0 +52,3 @@ impl Component for BluetoothDropdown {
-+        // A box, not a popover: the audio panel embeds this component as its
-+        // Pair page, and `bluetooth::Factory` puts the standalone dropdown's
-+        // popover around it.
-@@ -53,6 +56,3 @@ impl Component for BluetoothDropdown {
--        gtk::Popover {
--            set_css_classes: &[
--                "dropdown",
--                "bluetooth-dropdown",
--            ],
--            set_has_arrow: false,
-+        gtk::Box {
-+            add_css_class: "bluetooth-section",
-+            set_orientation: gtk::Orientation::Vertical,
-@@ -66,0 +67 @@ impl Component for BluetoothDropdown {
-+                set_vexpand: true,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs
 index e42e499..8e88183 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/methods.rs
@@ -2146,331 +2120,28 @@ index e42e499..8e88183 100644
 +            };
 +
 +            match tokio::time::timeout(timeout, action_fut).await {
-diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
-new file mode 100644
-index 0000000..15019e7
---- /dev/null
-+++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/calendar_section.rs
-@@ -0,0 +1,317 @@
-+use std::{env, fs, path::PathBuf};
-+
-+use chrono::{Duration, Local, NaiveDate};
-+use gtk::prelude::*;
-+use relm4::{gtk, prelude::*};
-+use serde_json::Value;
-+
-+use crate::i18n::t;
-+
-+const DAYS: i64 = 7;
-+const WRAP_CHARS: i32 = 34;
-+
-+#[derive(Clone, Debug, PartialEq, Eq)]
-+struct AgendaEntry {
-+    order: u8,
-+    icon: &'static str,
-+    title: String,
-+    /// `HH:MM-HH:MM`, split off the title so it can be shown above the entry.
-+    /// `None` for all-day events and tasks.
-+    time: Option<String>,
-+}
-+
-+#[derive(Clone, Debug, PartialEq, Eq)]
-+struct AgendaDay {
-+    heading: String,
-+    entries: Vec<AgendaEntry>,
-+}
-+
-+#[derive(Clone, Debug, Default, PartialEq, Eq)]
-+struct Agenda {
-+    range: String,
-+    days: Vec<AgendaDay>,
-+}
-+
-+#[derive(Debug)]
-+pub(crate) enum CalendarSectionInput {
-+    Refresh,
-+}
-+
-+pub(crate) struct CalendarSection {
-+    agenda: Agenda,
-+    body: gtk::Box,
-+}
-+
-+#[relm4::component(pub(crate))]
-+impl Component for CalendarSection {
-+    type Init = ();
-+    type Input = CalendarSectionInput;
-+    type Output = ();
-+    type CommandOutput = ();
-+
-+    view! {
-+        #[root]
+diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+index a3bebc7..11e7a23 100644
+--- a/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
++++ b/crates/wayle-shell/src/shell/bar/dropdowns/bluetooth/mod.rs
+@@ -51,0 +52,3 @@ impl Component for BluetoothDropdown {
++        // A box, not a popover: the audio panel embeds this component as its
++        // Pair page, and `bluetooth::Factory` puts the standalone dropdown's
++        // popover around it.
+@@ -53,6 +56,3 @@ impl Component for BluetoothDropdown {
+-        gtk::Popover {
+-            set_css_classes: &[
+-                "dropdown",
+-                "bluetooth-dropdown",
+-            ],
+-            set_has_arrow: false,
 +        gtk::Box {
-+            set_css_classes: &["card", "dashboard-card", "dashboard-calendar-section"],
++            add_css_class: "bluetooth-section",
 +            set_orientation: gtk::Orientation::Vertical,
-+
-+            gtk::Box {
-+                add_css_class: "card-header",
-+
-+                gtk::Box {
-+                    add_css_class: "card-title",
-+                    set_hexpand: true,
-+
-+                    gtk::Image {
-+                        set_icon_name: Some("tb-calendar-time-symbolic"),
-+                    },
-+
-+                    gtk::Label {
-+                        set_label: &t!("dropdown-dashboard-calendar"),
-+                    },
-+                },
-+
-+                gtk::Label {
-+                    add_css_class: "dashboard-calendar-range",
-+                    set_halign: gtk::Align::End,
-+                    #[watch]
-+                    set_label: &model.agenda.range,
-+                },
-+            },
-+
-+            gtk::Label {
-+                add_css_class: "dashboard-section-empty",
-+                set_halign: gtk::Align::Start,
-+                set_label: &t!("dropdown-dashboard-calendar-empty"),
-+                #[watch]
-+                set_visible: model.agenda.days.is_empty(),
-+            },
-+
-+            gtk::ScrolledWindow {
-+                add_css_class: "dashboard-calendar-scroll",
-+                set_hscrollbar_policy: gtk::PolicyType::Never,
-+                set_vscrollbar_policy: gtk::PolicyType::Automatic,
-+                set_max_content_height: 320,
-+                set_propagate_natural_height: true,
-+                #[watch]
-+                set_visible: !model.agenda.days.is_empty(),
-+
-+                #[local_ref]
-+                body_widget -> gtk::Box {
-+                    add_css_class: "dashboard-calendar-body",
-+                    set_orientation: gtk::Orientation::Vertical,
-+                },
-+            },
-+        }
-+    }
-+
-+    fn init(
-+        _init: Self::Init,
-+        _root: Self::Root,
-+        _sender: ComponentSender<Self>,
-+    ) -> ComponentParts<Self> {
-+        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-+        let model = Self {
-+            agenda: read_agenda(),
-+            body,
-+        };
-+        model.rebuild_body();
-+
-+        let body_widget = &model.body;
-+        let widgets = view_output!();
-+        ComponentParts { model, widgets }
-+    }
-+
-+    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
-+        match msg {
-+            CalendarSectionInput::Refresh => {
-+                self.agenda = read_agenda();
-+                self.rebuild_body();
-+            }
-+        }
-+    }
-+}
-+
-+impl CalendarSection {
-+    fn rebuild_body(&self) {
-+        while let Some(child) = self.body.first_child() {
-+            self.body.remove(&child);
-+        }
-+
-+        for day in &self.agenda.days {
-+            let heading = gtk::Label::new(Some(&day.heading));
-+            heading.add_css_class("dashboard-calendar-day");
-+            heading.set_xalign(0.0);
-+            self.body.append(&heading);
-+
-+            for entry in &day.entries {
-+                if let Some(time) = &entry.time {
-+                    let time_label = gtk::Label::new(Some(time));
-+                    time_label.add_css_class("dashboard-calendar-time");
-+                    time_label.set_xalign(0.0);
-+                    self.body.append(&time_label);
-+                }
-+
-+                let label = gtk::Label::new(Some(&format!("{}  {}", entry.icon, entry.title)));
-+                label.add_css_class("dashboard-calendar-entry");
-+                label.set_xalign(0.0);
-+                label.set_wrap(true);
-+                label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-+                label.set_max_width_chars(WRAP_CHARS);
-+                self.body.append(&label);
-+            }
-+        }
-+    }
-+}
-+
-+fn cache_path() -> PathBuf {
-+    env::var_os("HOME")
-+        .map_or_else(PathBuf::new, PathBuf::from)
-+        .join(".cache/waybar-ycal/events.json")
-+}
-+
-+fn read_agenda() -> Agenda {
-+    let cache = fs::read_to_string(cache_path()).unwrap_or_default();
-+    build_agenda(&cache, Local::now().date_naive())
-+}
-+
-+fn build_agenda(cache: &str, start: NaiveDate) -> Agenda {
-+    let end = start + Duration::days(DAYS - 1);
-+    let range = format!("{} – {}", start.format("%-d %b"), end.format("%-d %b"));
-+    let parsed = serde_json::from_str::<Value>(cache).unwrap_or(Value::Null);
-+
-+    let mut days = Vec::new();
-+    for offset in 0..DAYS {
-+        let date = start + Duration::days(offset);
-+        let entries = entries_for(&parsed, &date.format("%Y-%m-%d").to_string());
-+        if entries.is_empty() {
-+            continue;
-+        }
-+        days.push(AgendaDay {
-+            heading: if offset == 0 {
-+                t!("dropdown-dashboard-calendar-today")
-+            } else {
-+                date.format("%A %-d %b").to_string()
-+            },
-+            entries,
-+        });
-+    }
-+
-+    Agenda { range, days }
-+}
-+
-+fn entries_for(parsed: &Value, date: &str) -> Vec<AgendaEntry> {
-+    let Some(Value::Array(items)) = parsed.get(date) else {
-+        return Vec::new();
-+    };
-+
-+    let mut entries = items
-+        .iter()
-+        .filter_map(|item| match item {
-+            Value::String(label) => {
-+                let (title, time) = split_time(label);
-+                Some(AgendaEntry {
-+                    order: 1,
-+                    icon: "󰃭",
-+                    title,
-+                    time,
-+                })
-+            }
-+            Value::Object(task) => {
-+                let done = task.get("done").and_then(Value::as_bool).unwrap_or(false);
-+                Some(AgendaEntry {
-+                    order: if done { 2 } else { 0 },
-+                    icon: if done { "󰄲" } else { "󰄱" },
-+                    title: task.get("title").and_then(Value::as_str)?.to_owned(),
-+                    time: None,
-+                })
-+            }
-+            _ => None,
-+        })
-+        .collect::<Vec<_>>();
-+    entries.sort_by_key(|entry| entry.order);
-+    entries
-+}
-+
-+/// Splits `waybar-ycal`'s `"<title> HH:MM-HH:MM"` label into its two halves.
-+///
-+/// The cache appends the time range to a timed event's summary and leaves an
-+/// all-day event as the summary alone, so anything that does not end in a time
-+/// range is returned unchanged.
-+fn split_time(label: &str) -> (String, Option<String>) {
-+    let Some((title, tail)) = label.rsplit_once(' ') else {
-+        return (label.to_owned(), None);
-+    };
-+
-+    let Some((start, end)) = tail.split_once('-') else {
-+        return (label.to_owned(), None);
-+    };
-+
-+    if is_clock_time(start) && is_clock_time(end) {
-+        (title.trim_end().to_owned(), Some(tail.to_owned()))
-+    } else {
-+        (label.to_owned(), None)
-+    }
-+}
-+
-+fn is_clock_time(value: &str) -> bool {
-+    let Some((hours, minutes)) = value.split_once(':') else {
-+        return false;
-+    };
-+
-+    hours.len() == 2
-+        && minutes.len() == 2
-+        && hours.chars().all(|digit| digit.is_ascii_digit())
-+        && minutes.chars().all(|digit| digit.is_ascii_digit())
-+}
-+
-+#[cfg(test)]
-+mod tests {
-+    use chrono::NaiveDate;
-+
-+    use super::{build_agenda, split_time};
-+
-+    #[test]
-+    fn timed_events_keep_their_time_apart_from_the_title() {
-+        let (title, time) = split_time("Video appointment with Johns, Brian (Mr) 19:00-19:30");
-+        assert_eq!(title, "Video appointment with Johns, Brian (Mr)");
-+        assert_eq!(time.as_deref(), Some("19:00-19:30"));
-+    }
-+
-+    #[test]
-+    fn all_day_events_have_no_time() {
-+        let (title, time) = split_time("Teachers' Day");
-+        assert_eq!(title, "Teachers' Day");
-+        assert_eq!(time, None);
-+    }
-+
-+    #[test]
-+    fn a_title_ending_in_a_range_that_is_not_a_time_is_left_alone() {
-+        let (title, time) = split_time("Sprint 12-14");
-+        assert_eq!(title, "Sprint 12-14");
-+        assert_eq!(time, None);
-+    }
-+
-+    #[test]
-+    fn a_title_that_is_only_a_time_range_keeps_the_time() {
-+        let (title, time) = split_time("Standup 09:00-09:15");
-+        assert_eq!(title, "Standup");
-+        assert_eq!(time.as_deref(), Some("09:00-09:15"));
-+    }
-+
-+    #[test]
-+    fn agenda_includes_today_and_the_following_six_days_only() {
-+        let cache = r#"{
-+            "2026-09-09": ["Today"],
-+            "2026-09-15": ["Day seven"],
-+            "2026-09-16": ["Too late"]
-+        }"#;
-+        let Some(start) = NaiveDate::from_ymd_opt(2026, 9, 9) else {
-+            panic!("test date must be valid");
-+        };
-+        let agenda = build_agenda(cache, start);
-+        assert_eq!(agenda.days.len(), 2);
-+        assert_eq!(agenda.days[0].entries[0].title, "Today");
-+        assert_eq!(agenda.days[1].entries[0].title, "Day seven");
-+    }
-+}
+@@ -66,0 +67 @@ impl Component for BluetoothDropdown {
++                set_vexpand: true,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
-index 056cffb..c5d2e07 100644
+index 056cffb..5d877df 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/factory.rs
 @@ -14,2 +13,0 @@ impl DropdownFactory for Factory {
@@ -2478,10 +2149,8 @@ index 056cffb..c5d2e07 100644
 -            battery: services.battery.clone(),
 @@ -18 +15,0 @@ impl DropdownFactory for Factory {
 -            media: services.media.clone(),
-@@ -22 +18,0 @@ impl DropdownFactory for Factory {
--            sysinfo: services.sysinfo.clone(),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
-index f31dbd5..40a024f 100644
+index f31dbd5..cb6c383 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/messages.rs
 @@ -3,2 +3 @@ use std::sync::Arc;
@@ -2490,33 +2159,27 @@ index f31dbd5..40a024f 100644
 +use relm4::gtk;
 @@ -8 +6,0 @@ use wayle_core::DeferredService;
 -use wayle_media::MediaService;
-@@ -12 +9,0 @@ use wayle_power_profiles::PowerProfilesService;
--use wayle_sysinfo::SysinfoService;
-@@ -17,2 +13,0 @@ pub(crate) struct DashboardDropdownInit {
+@@ -17,2 +14,0 @@ pub(crate) struct DashboardDropdownInit {
 -    pub audio: Option<Arc<AudioService>>,
 -    pub battery: Option<Arc<BatteryService>>,
-@@ -21 +15,0 @@ pub(crate) struct DashboardDropdownInit {
+@@ -21 +16,0 @@ pub(crate) struct DashboardDropdownInit {
 -    pub media: Option<Arc<MediaService>>,
-@@ -25 +18,0 @@ pub(crate) struct DashboardDropdownInit {
--    pub sysinfo: Arc<SysinfoService>,
-@@ -32 +25 @@ pub(crate) enum DashboardDropdownMsg {
+@@ -32 +27 @@ pub(crate) enum DashboardDropdownMsg {
 -    OpenSettings,
 +    SetExternalHost(gtk::Window),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-index 7e38a69..d2cbab8 100644
+index 7e38a69..7b51b59 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/mod.rs
-@@ -1,2 +1 @@
+@@ -1,2 +0,0 @@
 -mod battery_section;
 -mod controls;
-+mod calendar_section;
-@@ -4 +2,0 @@ mod factory;
+@@ -4 +1,0 @@ mod factory;
 -mod media_section;
-@@ -6 +4 @@ mod messages;
+@@ -6 +3 @@ mod messages;
 -mod network_section;
 +mod notification_section;
-@@ -8,2 +5,0 @@ mod quick_actions;
--mod system_stats;
+@@ -9 +5,0 @@ mod system_stats;
 -mod user_session;
 @@ -12,5 +7,0 @@ mod watchers;
 -use std::{
@@ -2526,17 +2189,15 @@ index 7e38a69..d2cbab8 100644
 -
 @@ -21 +11,0 @@ use wayle_widgets::prelude::*;
 -pub(super) use self::factory::Factory;
-@@ -23,5 +13,3 @@ use self::{
+@@ -23,5 +13,2 @@ use self::{
 -    battery_section::{BatterySection, BatterySectionInit},
 -    controls::{ControlsInit, ControlsSection},
 -    media_section::{MediaSection, MediaSectionInit, MediaSectionInput},
 -    messages::{DashboardDropdownCmd, DashboardDropdownInit, DashboardDropdownMsg},
 -    network_section::{NetworkSection, NetworkSectionInit, NetworkSectionInput},
-+    calendar_section::{CalendarSection, CalendarSectionInput},
 +    messages::{DashboardDropdownCmd, DashboardDropdownInit},
 +    notification_section::{NotificationSection, NotificationSectionInit},
-@@ -29,2 +16,0 @@ use self::{
--    system_stats::{SystemStatsInit, SystemStatsInput, SystemStatsSection},
+@@ -30 +16,0 @@ use self::{
 -    user_session::{UserSessionInit, UserSessionSection},
 @@ -31,0 +18 @@ use self::{
 +pub(super) use self::{factory::Factory, messages::DashboardDropdownMsg};
@@ -2561,14 +2222,13 @@ index 7e38a69..d2cbab8 100644
 -
 @@ -55,0 +25 @@ pub(crate) struct DashboardDropdown {
 +    external_host: Option<gtk::Window>,
-@@ -58,6 +28,2 @@ pub(crate) struct DashboardDropdown {
+@@ -58,4 +27,0 @@ pub(crate) struct DashboardDropdown {
 -    controls: Controller<ControlsSection>,
 -    media: Controller<MediaSection>,
 -    battery: Option<Controller<BatterySection>>,
 -    network: Controller<NetworkSection>,
--    system_stats: Controller<SystemStatsSection>,
+@@ -63 +29 @@ pub(crate) struct DashboardDropdown {
 -    user_session: Controller<UserSessionSection>,
-+    calendar: Controller<CalendarSection>,
 +    notifications: Controller<NotificationSection>,
 @@ -99,10 +64,0 @@ impl Component for DashboardDropdown {
 -                    #[template_child]
@@ -2581,7 +2241,7 @@ index 7e38a69..d2cbab8 100644
 -                            connect_clicked => DashboardDropdownMsg::OpenSettings,
 -                        },
 -                    },
-@@ -111,7 +67,6 @@ impl Component for DashboardDropdown {
+@@ -111,10 +67,6 @@ impl Component for DashboardDropdown {
 -                #[template]
 -                #[name = "content"]
 -                DropdownContent {
@@ -2589,33 +2249,33 @@ index 7e38a69..d2cbab8 100644
 -
 -                    #[local_ref]
 -                    quick_actions_widget -> gtk::Box {},
+-
+-                    #[local_ref]
+-                    controls_widget -> gtk::Box {},
 +                gtk::ScrolledWindow {
 +                    add_css_class: "dashboard-scroll",
 +                    set_hscrollbar_policy: gtk::PolicyType::Never,
 +                    set_vscrollbar_policy: gtk::PolicyType::Automatic,
 +                    set_max_content_height: 900,
 +                    set_propagate_natural_height: true,
-@@ -119,2 +74,4 @@ impl Component for DashboardDropdown {
+@@ -122,2 +74,4 @@ impl Component for DashboardDropdown {
 -                    #[local_ref]
--                    controls_widget -> gtk::Box {},
+-                    media_widget -> gtk::Box {},
 +                    #[template]
 +                    #[name = "content"]
 +                    DropdownContent {
 +                        set_vexpand: true,
-@@ -122,2 +79,2 @@ impl Component for DashboardDropdown {
--                    #[local_ref]
--                    media_widget -> gtk::Box {},
-+                        #[local_ref]
-+                        quick_actions_widget -> gtk::Box {},
-@@ -125,2 +82,2 @@ impl Component for DashboardDropdown {
+@@ -125,2 +79,2 @@ impl Component for DashboardDropdown {
 -                    #[local_ref]
 -                    info_row_widget -> gtk::Box {},
 +                        #[local_ref]
-+                        calendar_widget -> gtk::Box {},
-@@ -128,5 +85,3 @@ impl Component for DashboardDropdown {
++                        quick_actions_widget -> gtk::Box {},
+@@ -128,2 +82,2 @@ impl Component for DashboardDropdown {
 -                    #[local_ref]
 -                    system_stats_widget -> gtk::Box {},
--
++                        #[local_ref]
++                        system_stats_widget -> gtk::Box {},
+@@ -131,2 +85,3 @@ impl Component for DashboardDropdown {
 -                    #[local_ref]
 -                    user_session_widget -> gtk::Box {},
 +                        #[local_ref]
@@ -2623,14 +2283,13 @@ index 7e38a69..d2cbab8 100644
 +                    },
 @@ -147 +101,0 @@ impl Component for DashboardDropdown {
 -                notification: init.notification.clone(),
-@@ -153,5 +107 @@ impl Component for DashboardDropdown {
+@@ -153,33 +106,0 @@ impl Component for DashboardDropdown {
 -        let controls = ControlsSection::builder()
 -            .launch(ControlsInit {
 -                audio: init.audio.clone(),
 -            })
 -            .detach();
-+        let calendar = CalendarSection::builder().launch(()).detach();
-@@ -159,37 +109,3 @@ impl Component for DashboardDropdown {
+-
 -        let media = MediaSection::builder()
 -            .launch(MediaSectionInit {
 -                media: init.media.clone(),
@@ -2658,12 +2317,7 @@ index 7e38a69..d2cbab8 100644
 -            })
 -            .detach();
 -
--        let system_stats = SystemStatsSection::builder()
--            .launch(SystemStatsInit {
--                sysinfo: init.sysinfo.clone(),
--            })
--            .detach();
--
+@@ -192,4 +113,3 @@ impl Component for DashboardDropdown {
 -        let username = std::env::var("USER").unwrap_or_else(|_| String::from("user"));
 -        let user_session = UserSessionSection::builder()
 -            .launch(UserSessionInit {
@@ -2671,34 +2325,30 @@ index 7e38a69..d2cbab8 100644
 +        let notifications = NotificationSection::builder()
 +            .launch(NotificationSectionInit {
 +                notification: init.notification.clone(),
-@@ -205,0 +122 @@ impl Component for DashboardDropdown {
+@@ -205,0 +126 @@ impl Component for DashboardDropdown {
 +            external_host: None,
-@@ -208,6 +125,2 @@ impl Component for DashboardDropdown {
+@@ -208,4 +128,0 @@ impl Component for DashboardDropdown {
 -            controls,
 -            media,
 -            battery,
 -            network,
--            system_stats,
+@@ -213 +130 @@ impl Component for DashboardDropdown {
 -            user_session,
-+            calendar,
 +            notifications,
-@@ -223,9 +136,3 @@ impl Component for DashboardDropdown {
+@@ -223,5 +139,0 @@ impl Component for DashboardDropdown {
 -        let is_visible = root.is_visible();
 -
 -        model
 -            .network
 -            .emit(NetworkSectionInput::SetActive(is_visible));
--        model
--            .system_stats
+@@ -230,2 +142 @@ impl Component for DashboardDropdown {
 -            .emit(SystemStatsInput::SetActive(is_visible));
 -        model.media.emit(MediaSectionInput::SetActive(is_visible));
-+        if root.is_visible() {
-+            model.calendar.emit(CalendarSectionInput::Refresh);
-+        }
-@@ -234,18 +141,2 @@ impl Component for DashboardDropdown {
++            .emit(SystemStatsInput::SetActive(root.is_visible()));
+@@ -234,2 +144,0 @@ impl Component for DashboardDropdown {
 -        let controls_widget = model.controls.widget();
 -        let media_widget = model.media.widget();
--        let system_stats_widget = model.system_stats.widget();
+@@ -237,15 +146 @@ impl Component for DashboardDropdown {
 -        let user_session_widget = model.user_session.widget();
 -
 -        let info_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -2714,19 +2364,15 @@ index 7e38a69..d2cbab8 100644
 -            model.network.widget().set_hexpand(true);
 -        }
 -        let info_row_widget = &info_row;
-+        let calendar_widget = model.calendar.widget();
 +        let notifications_widget = model.notifications.widget();
-@@ -257 +148 @@ impl Component for DashboardDropdown {
+@@ -257 +152 @@ impl Component for DashboardDropdown {
 -    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>, root: &Self::Root) {
 +    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
-@@ -260,3 +151,3 @@ impl Component for DashboardDropdown {
+@@ -260 +154,0 @@ impl Component for DashboardDropdown {
 -                self.network.emit(NetworkSectionInput::SetActive(visible));
--                self.system_stats.emit(SystemStatsInput::SetActive(visible));
+@@ -262 +155,0 @@ impl Component for DashboardDropdown {
 -                self.media.emit(MediaSectionInput::SetActive(visible));
-+                if visible {
-+                    self.calendar.emit(CalendarSectionInput::Refresh);
-+                }
-@@ -264,3 +155,10 @@ impl Component for DashboardDropdown {
+@@ -264,3 +157,9 @@ impl Component for DashboardDropdown {
 -            DashboardDropdownMsg::OpenSettings => {
 -                root.popdown();
 -                spawn_settings_app();
@@ -2737,9 +2383,8 @@ index 7e38a69..d2cbab8 100644
 +                    input_sender.emit(DashboardDropdownMsg::VisibilityChanged(window.is_visible()));
 +                });
 +                self.external_host = Some(window);
-+                if is_visible {
-+                    self.calendar.emit(CalendarSectionInput::Refresh);
-+                }
++                self.system_stats
++                    .emit(SystemStatsInput::SetActive(is_visible));
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs b/crates/wayle-shell/src/shell/bar/dropdowns/dashboard/notification_section.rs
 new file mode 100644
 index 0000000..53791e5
@@ -3421,7 +3066,7 @@ index 5f49901..2356bdc 100644
 +    }
 +
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
-index 633282d..bef004e 100644
+index 633282d..2addee0 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/active_connections/mod.rs
 @@ -0,0 +1 @@
@@ -3712,7 +3357,7 @@ index f0192d5..bf4ce3f 100644
 +    Reset,
 +    SetExternalHost(gtk::Window),
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
-index b8c2483..50e73f6 100644
+index b8c2483..5933c8b 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/network/mod.rs
 @@ -17,0 +18 @@ pub(super) use self::factory::Factory;
@@ -3774,7 +3419,7 @@ index 7fe95af..917e860 100644
 @@ -14,0 +15 @@ pub(crate) enum NotificationItemInput {
 +    ToggleExpanded,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
-index 30897ca..736b501 100644
+index 30897ca..1e2b683 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/methods.rs
 @@ -13,0 +14,12 @@ impl NotificationItem {
@@ -3791,7 +3436,7 @@ index 30897ca..736b501 100644
 +    }
 +
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
-index 0f41547..2746a60 100644
+index 0f41547..2905a66 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/notification/notification_item/mod.rs
 @@ -14,0 +15,11 @@ use crate::shell::notification_popup::helpers::{
@@ -3858,7 +3503,7 @@ index 0f41547..2746a60 100644
 @@ -150,0 +195 @@ impl FactoryComponent for NotificationItem {
 +            NotificationItemInput::ToggleExpanded => self.expanded = !self.expanded,
 diff --git a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
-index 4a0fbdf..3d6bb05 100644
+index 4a0fbdf..f378c84 100644
 --- a/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 +++ b/crates/wayle-shell/src/shell/bar/dropdowns/registry.rs
 @@ -9,2 +9,2 @@ use gtk::prelude::*;
@@ -4219,6 +3864,7 @@ index abe3e41..ee5a650 100644
 +        || app_name.contains("chrome")
 +        || app_name.contains("chromium")
 diff --git a/crates/wayle-styling/scss/main.scss b/crates/wayle-styling/scss/main.scss
+index a4b5734..8a69bdb 100644
 --- a/crates/wayle-styling/scss/main.scss
 +++ b/crates/wayle-styling/scss/main.scss
 @@ -11,0 +12,18 @@

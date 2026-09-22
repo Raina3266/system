@@ -1,8 +1,8 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications and
-# the history, and its dashboard owns the agenda. Waybar stays the visible bar,
-# so Wayle's own is hidden. Dropdowns opened from Waybar use monitor-local
-# layer-shell windows, avoiding GTK popup-grab limits. Audio is Wayle's own;
-# audio-control adds only the profile handling it lacks.
+# the history, and its dashboard pairs that with system stats. Waybar stays the
+# visible bar, so Wayle's own is hidden. Dropdowns opened from Waybar use
+# monitor-local layer-shell windows, avoiding GTK popup-grab limits. Audio is
+# Wayle's own; audio-control adds only the profile handling it lacks.
 { repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an

@@ -293,15 +293,15 @@ with low, warning, and critical classes for Waybar styling.
 The dashboard intentionally contains only:
 
 - airplane mode, idle inhibit, and Power Profile quick actions;
-- the next seven days from `~/.cache/waybar-ycal/events.json`; and
+- Wayle's native system stats: CPU, RAM, disk, and CPU temperature; and
 - Wayle's native notification history, including Do Not Disturb and Clear All.
 
-Wi-Fi, media, audio, battery details, settings, session power actions, and system
-telemetry are omitted because they are either separate Waybar panels or managed
-declaratively. Timed calendar events put their `HH:MM-HH:MM` range above the
-title. The notification viewport fits roughly three rows before it scrolls.
-Titles always show in full; long bodies can expand and collapse instead of
-being permanently ellipsized.
+Wi-Fi, media, audio, battery details, settings, and session power actions are
+omitted because they are either separate Waybar panels or managed
+declaratively. The agenda is not here either: the `custom/ycal` Waybar module
+owns it and opens its own popup. The notification viewport fits roughly three
+rows before it scrolls. Titles always show in full; long bodies can expand and
+collapse instead of being permanently ellipsized.
 
 ### Network panel
 
@@ -379,7 +379,7 @@ after it and can restyle the panel.
 
 | Source delta | Purpose |
 | --- | --- |
-| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, the seven-day agenda, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, inactive-profile switching, and
+| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, a dashboard trimmed to quick actions, system stats and notification history, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, inactive-profile switching, and
 pairing an unpaired device with `Device1.Pair` before connecting it. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
 | `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
