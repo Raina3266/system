@@ -66,6 +66,7 @@
 
     # media
     vlc
+    spotube
     puddletag
     obs-studio
     shotcut

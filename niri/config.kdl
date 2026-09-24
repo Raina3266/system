@@ -104,11 +104,20 @@ window-rule {
 // parentless prompts with recognizable titles regardless of app ID.
 // A titleless window with no dialog hint still needs an application rule.
 window-rule {
-    match title=r#"(?i)^(?:splash screen|(?:confirm|confirmation|warning|error|question|permission|authentication|enable|open (?:file|files|folder|directory)|save (?:file|as))(?: [^–-]*)?)(?: [–-] .*)?$"#
+    match title=r#"(?i)^(?:splash screen|(?:confirm|confirmation|warning|error|question|permission|authentication|enable|choose|select|upload|browse|open (?:file|files|folder|directory)|save (?:file|as))(?: [^–-]*)?)(?: [–-] .*)?$"#
 
     open-floating true
     default-column-width { fixed 800; }
     default-window-height { fixed 600; }
+}
+
+// File dialogs drawn by the portal for other apps (Chrome, Flatpaks, etc.).
+window-rule {
+    match app-id=r#"^org\.freedesktop\.impl\.portal\.desktop\.(?:kde|gtk|gnome)$"#
+
+    open-floating true
+    default-column-width { fixed 900; }
+    default-window-height { fixed 650; }
 }
 
 window-rule {
