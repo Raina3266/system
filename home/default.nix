@@ -28,6 +28,8 @@
   };
 
   home.packages = with pkgs; [
+    inputs.delta.packages.${pkgs.stdenv.hostPlatform.system}.default
+
     # communication
     discord
     wechat
