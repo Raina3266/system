@@ -13,6 +13,10 @@ pub(crate) fn run_ocr(
     let status = Command::new(&tools.tesseract)
         .arg(image_path)
         .arg(output_prefix)
+        // tesseract takes a `+`-separated list; each name needs its
+        // traineddata installed, which the Nix wrapper package provides.
+        .arg("-l")
+        .arg("eng+kor+jpn")
         .status()
         .map_err(|error| format!("could not start tesseract: {error}"))?;
     ensure_success("tesseract", status)
