@@ -22,11 +22,6 @@ in
 
   nixpkgs.overlays = [
     (final: prev: {
-      # Correct browser replay/backward seeks before mprisence publishes them.
-      mprisence = prev.mprisence.overrideAttrs (oldAttrs: {
-        patches = (oldAttrs.patches or [ ]) ++ [ ./mprisence-position.patch ];
-      });
-
       wayle = prev.wayle.overrideAttrs (oldAttrs: {
         # One delta against pristine Wayle replaces the old 17-patch sequence,
         # avoiding dependent hunks. Presentation lives in themes/wayle/ and

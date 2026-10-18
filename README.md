@@ -381,7 +381,6 @@ after it and can restyle the panel.
 | --- | --- |
 | `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, a dashboard trimmed to quick actions, system stats and notification history, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, inactive-profile switching, and
 pairing an unpaired device with `Device1.Pair` before connecting it. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
-| `mprisence-position.patch` | Prevent browser positions from being clamped backward after replay or a backward seek. |
 
 ### Verifying changes
 

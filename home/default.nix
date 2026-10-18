@@ -43,9 +43,11 @@
     wl-clipboard
 
     # productivity
+    anki
     digikam
     obsidian
     exercism
+    pavucontrol
     onlyoffice-desktopeditors
     clash-verge-rev
 
