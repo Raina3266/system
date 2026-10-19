@@ -43,6 +43,7 @@ let
 in
 {
   imports = [
+    ./quickshell
     ./waybar
   ];
 

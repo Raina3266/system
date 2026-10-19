@@ -186,9 +186,13 @@ pub fn streams() -> AppResult<Vec<StreamEntry>> {
                 .filter(|name| !name.is_empty())
                 .or_else(|| app.proplist.get_str("application.process.binary"))
                 .unwrap_or_else(|| "Audio stream".into());
+            let serial = app.proplist.get_str("object.serial").unwrap_or_default();
+            let object_id = app.proplist.get_str("object.id").unwrap_or_default();
             StreamEntry {
                 key: stream_key(app),
                 index: app.index,
+                serial,
+                object_id,
                 application,
                 name: app.name.clone().unwrap_or_default(),
                 device_name: device_entry

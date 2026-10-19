@@ -242,6 +242,12 @@ impl AudioEntry {
 pub struct StreamEntry {
     pub key: String,
     pub index: u32,
+    /// PipeWire `object.serial`: the identity a PipeWire-side client (the
+    /// Quickshell media panel) can pass back to select this stream again.
+    pub serial: String,
+    /// PipeWire `object.id`: the node id, unique per live stream and visible
+    /// to PipeWire clients even when the node is unbound.
+    pub object_id: String,
     pub application: String,
     pub name: String,
     pub device_name: String,

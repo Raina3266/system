@@ -97,9 +97,11 @@ let
     on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
   };
 
-  # Wayle's native media dropdown deliberately selects one MPRIS source. This
-  # desktop needs every playing or paused source in one compact list, which is
-  # the one presentation that stays in the separate media-panel helper.
+  # Wayle's native media dropdown deliberately selects one MPRIS source, and
+  # the old GTK media-panel has been replaced too: the popup is now the
+  # resident Quickshell media panel (themes/quickshell/), toggled over IPC. It lists
+  # every playing or paused source, seeks, and routes each stream through
+  # audio-control's profile-aware move.
   wayleMediaModule = monitor: {
     format = "{}";
     return-type = "json";
@@ -108,11 +110,9 @@ let
     escape = true;
     "restart-interval" = 2;
     "exec-on-event" = false;
-    on-click = "${packages.mediaPanel}/bin/media-panel ${lib.escapeShellArg monitor}";
-    # Right-click stops everything. Not `playerctl --all-players pause`: that
-    # checks `CanPause` and skips players answering no, so a browser bridge that
-    # cannot reach its tab is never asked and keeps playing.
-    on-click-right = "${packages.mediaPanel}/bin/media-panel pause-all";
+    on-click = "${lib.getExe pkgs.quickshell} -c media ipc call media toggle ${lib.escapeShellArg monitor}";
+    on-click-middle = "${lib.getExe pkgs.quickshell} -c media ipc call media togglePauseAll";
+    on-click-right = "${lib.getExe pkgs.quickshell} -c media ipc call media cycleMedia";
   };
 in
 {

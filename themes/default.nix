@@ -38,16 +38,19 @@ let
     url = "https://github.com/MathisP75/daemon-kde-mk2.git";
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
-  daemonRed = "#D52C35";
-  daemonPink = "#D656C7";
-  daemonDimPink = "#5A254D";
-  daemonYellow = "#FCEE0A";
-  daemonTableSeparator = "#6B6670";
-  daemonText = "#5DF4FE";
-  daemonAlternateBackground = "#210E15";
-  daemonBackground = "#180A10";
-  daemonSecondaryBackground = "#0F0C17";
-  daemonChromeBackground = "#170A0F";
+
+  # Canonical values live in ./palette.nix, shared with the Quickshell panel.
+  palette = import ./palette.nix;
+  daemonRed = palette.red;
+  daemonPink = palette.pink;
+  daemonDimPink = palette.dimPink;
+  daemonYellow = palette.yellow;
+  daemonTableSeparator = palette.separator;
+  daemonText = palette.cyan;
+  daemonAlternateBackground = palette.alternateBackground;
+  daemonBackground = palette.background;
+  daemonSecondaryBackground = palette.secondaryBackground;
+  daemonChromeBackground = palette.chromeBackground;
 
   # One palette across KDE, GTK and VS Code: red for destructive controls and
   # button frames, yellow for separators and popup frames, burgundy surfaces.

@@ -7,9 +7,11 @@
 
 use std::error::Error;
 
+pub mod artwork;
 pub mod audio;
 pub mod bluetooth;
 pub mod model;
+pub mod stream;
 pub mod waybar;
 pub mod wayle;
 

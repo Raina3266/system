@@ -1016,10 +1016,10 @@ pub mod battery_provider {
     /// coarse mapping of the level word. Unknown levels stay `None` so the caller
     /// keeps a percentage-less placeholder rather than guessing a number.
     fn supply_percentage(dir: &Path) -> Option<u8> {
-        if let Some(capacity) = read_trimmed(&dir.join("capacity")) {
-            if let Ok(value) = capacity.parse::<u8>() {
-                return Some(value.min(100));
-            }
+        if let Some(capacity) = read_trimmed(&dir.join("capacity"))
+            && let Ok(value) = capacity.parse::<u8>()
+        {
+            return Some(value.min(100));
         }
         let level = read_trimmed(&dir.join("capacity_level"))
             .or_else(|| read_trimmed(&dir.join("status")))?;

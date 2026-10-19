@@ -4,7 +4,7 @@ This repository contains ten Rust packages used by the desktop configuration:
 
 - `audio-control` — the headless Waybar status, Bluetooth-power, and profile-aware Wayle audio bridge
 - `control-centre` — the long-running Waybar media-title stream
-- `media-panel` — the multi-player MPRIS panel opened from Waybar's centre
+- `media-panel` — the former multi-player MPRIS panel, kept in the tree until its Quickshell replacement proves parity
 - `network-manager` — the NetworkManager info and Wi-Fi QR bridge used by Wayle
 - `ocr-screenshot` — screenshot OCR and clipboard integration
 - `preview-panel` — the shared GTK4 preview surface
@@ -25,6 +25,7 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
 | `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
+| `themes/quickshell/*.qml` | Quickshell reloads the media panel on save |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
 | `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
@@ -87,13 +88,22 @@ audio-control status
 audio-control bluetooth-power [on|off|toggle]
 audio-control wayle-list <output|input>
 audio-control wayle-set-default <output|input> <key>
+audio-control stream-move <key|serial> <destination-key>
+audio-control artwork <xesam-url|path>
 audio-control bluetooth-devices
 audio-control bluetooth-scan
 audio-control bluetooth-pair <address|name>
 ```
 
 `wayle-list` and `wayle-set-default` form a NUL-delimited machine interface for
-Wayle and are not intended as an interactive picker. `bluetooth-pair` is
+Wayle and are not intended as an interactive picker. `stream-move` moves one
+playback stream onto a destination `wayle-list output` row names, switching
+ALSA profiles with rollback when the row is an inactive-profile output; the
+move. The Quickshell media panel selects the stream by PipeWire object
+serial or by the player's MPRIS identity. `artwork` resolves a local track's
+cover — a picture beside the file first, then the embedded one, cached under
+`~/.cache/audio-control/artwork/` — for the panel, whose toolkit cannot read
+tags. `bluetooth-pair` is
 interactive: it prints the passkey to type on the device, or asks on stdin for
 one the device displays, and accepts either an address or a distinctive part of
 a device's name.
@@ -318,28 +328,27 @@ unsupported Enterprise or Enhanced Open profiles.
 
 ### Media panel
 
-The centre Waybar button opens `media-panel`. A custom panel is retained here
-because Wayle's native MPRIS dropdown selects one source, while this desktop
-needs every currently playing or paused source at once.
+The centre Waybar button toggles the Quickshell media panel (`themes/quickshell/`), a
+resident QML shell that replaced the Rust GTK `media-panel`. One card shows
+the active source: artwork, title, artist, album, a seekable progress bar,
+transport controls, and the stream's volume. A sources dropdown lists every
+currently playing or paused MPRIS source and retargets the card, and an output
+dropdown routes the active stream through `audio-control stream-move`.
 
-Each compact card shows source, state, artwork, title, artist, album, progress,
-elapsed/total time, transport controls, and the player's own volume when MPRIS
-publishes it. The panel shows up to four cards before scrolling. It occupies a
-transparent monitor-sized layer surface, so Escape, a second button press, or a
-click outside the visible panel closes it.
+All live state comes from Quickshell's native Mpris and Pipewire services:
+players, metadata, artwork, stream volumes, and the link graph that shows
+which device a stream feeds. Duplicate publishers of one playback (an
+mprisence browser bridge and the real player) merge by metadata and position;
+absolute, idempotent commands fan out to every publisher in the merge, while
+Next and Previous go to one. The only spawned processes are one-shot user
+actions: `wayle-list output` for the route choices — the one source of
+inactive-profile Speaker/Headphones rows — and `stream-move` for the
+profile-switching, rollback-guarded move itself. Right-clicking the Waybar
+button pauses every player over the same IPC.
 
-The reader filters stopped players, `playerctld`, and `kdeconnect`. Duplicate
-publishers of the same playback are merged by metadata and position; absolute,
-idempotent commands go to every publisher represented by the card. Next and
-Previous go to one publisher to avoid double-skipping. Seeking uses the typed
-`mpris:trackid` object path and falls back to a relative seek when needed.
-Volume changes are clamped to 0–100% and sent to every merged publisher.
-
-Remote artwork is fetched once and cached. For local files, `media-panel`
-checks nearby cover filenames and embedded pictures through `lofty`.
-`media-panel players` prints the panel's current bus view, and
-`MEDIA_PANEL_TRACE=1` reports command and refresh timing. Right-clicking the
-Waybar button runs `media-panel pause-all`.
+The panel occupies a transparent monitor-sized layer surface, so Escape, a
+second button press, or a click outside the card closes it. Position and
+grouping refresh only while it is open.
 
 The short title displayed directly in Waybar still comes from
 `control-centre media-waybar`, including the configured 50-character limit

@@ -15,7 +15,7 @@ use zbus::proxy::CacheProperties;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(750);
 const RETRY_DELAY: Duration = Duration::from_secs(3);
-const MEDIA_ICON: &str = "\u{f0386}";
+const MEDIA_ICON: &str = "\u{f040a}";
 
 #[zbus::proxy(
     interface = "com.wayle.Media1",

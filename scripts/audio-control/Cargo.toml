@@ -27,5 +27,8 @@ zbus = "=5.18.0"
 # default selection, and the stable helper interface Wayle calls.
 pulsectl-rs = "=0.3.2"
 libpulse-binding = "=2.30.1"
+# Embedded cover extraction for the Quickshell panel (local players publish
+# no mpris:artUrl); same pin as media-panel's proven artwork pipeline.
+lofty = "0.22"
 futures-util = { version = "=0.3.34", default-features = false }
 tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }

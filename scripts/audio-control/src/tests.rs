@@ -1167,3 +1167,90 @@ mod wayle {
         assert!(kind("playback").is_err());
     }
 }
+
+mod artwork {
+    use crate::artwork::{local_path, percent_decode};
+    use std::path::PathBuf;
+
+    #[test]
+    fn file_urls_are_percent_decoded_into_paths() {
+        assert_eq!(
+            percent_decode("MAMAMOO%20%7C%7C%20MEMORY"),
+            Some("MAMAMOO || MEMORY".to_owned())
+        );
+        assert_eq!(
+            local_path("file:///home/raina/Documents/MAMAMOO%20%7C%7C%20MEMORY/track%20one.mp3"),
+            Some(PathBuf::from(
+                "/home/raina/Documents/MAMAMOO || MEMORY/track one.mp3"
+            ))
+        );
+        // Plain absolute paths pass through for terminal use.
+        assert_eq!(
+            local_path("/home/raina/track.mp3"),
+            Some(PathBuf::from("/home/raina/track.mp3"))
+        );
+        // Relative inputs and bad escapes are rejected, never silently wrong.
+        assert_eq!(local_path("relative/track.mp3"), None);
+        assert_eq!(local_path("file:///home/raina/bad%2track.mp3"), None);
+    }
+}
+
+mod stream {
+    use crate::model::StreamEntry;
+    use crate::stream::select_stream;
+    fn entry(serial: &str) -> StreamEntry {
+        StreamEntry {
+            key: format!("playback:42:7:{serial}"),
+            index: 42,
+            serial: serial.to_owned(),
+            object_id: serial.trim_start_matches('1').to_owned(),
+            application: "mpv".to_owned(),
+            name: "media.name \"quoted\"".to_owned(),
+            device_name: "alsa_output.pci".to_owned(),
+            device_label: "Built-in Audio".to_owned(),
+            volume: Some(60),
+            muted: false,
+            corked: false,
+        }
+    }
+
+    #[test]
+    fn a_stream_is_selected_by_serial_or_full_key() {
+        let entries = [entry("1001"), entry("1002")];
+        assert_eq!(select_stream(&entries, "1002").unwrap().serial, "1002");
+        assert_eq!(
+            select_stream(&entries, &entries[0].key).unwrap().serial,
+            "1001"
+        );
+        assert!(select_stream(&entries, "9999").is_err());
+    }
+
+    #[test]
+    fn a_stream_is_selected_by_object_id_even_with_duplicate_names() {
+        // Two same-named browser streams: names are ambiguous, the PipeWire
+        // object id is not. entry("1001") gets object_id "001", entry("1002")
+        // gets "002".
+        let entries = [entry("1001"), entry("1002")];
+        assert!(select_stream(&entries, "mpv").is_err());
+        assert_eq!(select_stream(&entries, "002").unwrap().serial, "1002");
+    }
+
+    #[test]
+    fn a_stream_is_selected_by_application_name_ignoring_case() {
+        let entries = [entry("1001")];
+        assert_eq!(select_stream(&entries, "MPV").unwrap().serial, "1001");
+        assert_eq!(select_stream(&entries, "mpv").unwrap().serial, "1001");
+        assert_eq!(
+            select_stream(&entries, "media.name \"quoted\"")
+                .unwrap()
+                .serial,
+            "1001"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_application_name_is_rejected() {
+        let entries = [entry("1001"), entry("1002")];
+        assert!(select_stream(&entries, "mpv").is_err());
+    }
+}

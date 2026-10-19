@@ -4,7 +4,7 @@
 use std::env;
 use std::io;
 
-use audio_control::{AppResult, bluetooth, waybar, wayle};
+use audio_control::{AppResult, artwork, bluetooth, stream, waybar, wayle};
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +41,21 @@ async fn run() -> AppResult<()> {
                 .ok_or_else(|| io::Error::other("wayle-set-default key is missing"))?;
             wayle::set_default(&kind, &key)
         }
+        Some("stream-move") => {
+            let selector = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("stream-move stream is missing"))?;
+            let key = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("stream-move destination key is missing"))?;
+            stream::move_to(&selector, &key)
+        }
+        Some("artwork") => {
+            let url = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("artwork track URL is missing"))?;
+            artwork::print_path(&url)
+        }
         Some("bluetooth-devices") => bluetooth::print_devices().await,
         Some("bluetooth-scan") => bluetooth::scan_and_print().await,
         // Pairing, unlike connecting, has to be driven by whoever answers
@@ -61,6 +76,8 @@ async fn run() -> AppResult<()> {
                  audio-control bluetooth-power [on|off|toggle]\n  \
                  audio-control wayle-list <output|input>\n  \
                  audio-control wayle-set-default <output|input> <key>\n  \
+                 audio-control stream-move <key|serial|name> <destination-key>\n  \
+                 audio-control artwork <xesam-url|path>\n  \
                  audio-control bluetooth-devices\n  \
                  audio-control bluetooth-scan\n  \
                  audio-control bluetooth-pair <address|name>\n  \
