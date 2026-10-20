@@ -13,7 +13,8 @@ let
   liveLink = path: config.lib.file.mkOutOfStoreSymlink "${repoRoot}/${path}";
   qmlFiles = [
     "shell.qml"
-    "Routing.js"
+    "MediaController.qml"
+    "MediaCredit.qml"
     "Dashboard.qml"
     "DashboardPanel.qml"
     "DashboardSection.qml"
@@ -46,6 +47,7 @@ in
 
   home.packages = [
     pkgs.quickshell
+    repoPackages.mediaControl
     # WebP/JP2/ICO decoders for browser-published cover art (bilibili serves
     # .webp; Qt's base JPEG/PNG plugins already cover YouTube).
     pkgs.qt6.qtimageformats
@@ -81,6 +83,7 @@ in
       # use native FileView readers plus coreutils df for filesystem capacity.
       Environment = [
         "AUDIO_CONTROL=${repoPackages.audioControl}/bin/audio-control"
+        "MEDIA_CONTROL=${repoPackages.mediaControl}/bin/media-control"
         "COREUTILS_DF=${pkgs.coreutils}/bin/df"
         "NOTIFICATION_HISTORY=%S/quickshell/notifications.json"
         "NETWORK_HELPER=${repoPackages.networkManager}/bin/network-manager"

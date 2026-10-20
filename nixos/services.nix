@@ -292,7 +292,13 @@ in
   # The real camera has no zoom, so expose a centre-cropped v4l2loopback device
   # instead. The supervisor keeps a placeholder attached while idle and powers
   # the real camera only while something consumes the virtual one.
-  boot.extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
+  boot.extraModulePackages = [
+    (config.boot.kernelPackages.v4l2loopback.overrideAttrs (old: {
+      # NixOS runs depmod on the combined tree; package-local indexes collide
+      # with the kernel's modules.alias before that merge can finish.
+      installFlags = (old.installFlags or [ ]) ++ [ "DEPMOD=true" ];
+    }))
+  ];
   boot.kernelModules = [ "v4l2loopback" ];
   boot.extraModprobeConfig = ''
     options v4l2loopback devices=1 video_nr=${toString webcamVideoNr} card_label="${webcamCardLabel}" exclusive_caps=1 max_buffers=2

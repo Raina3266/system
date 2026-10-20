@@ -3,7 +3,7 @@ import Quickshell.Io
 import "shared" as Shared
 
 // Shared cover resolver for the card and source rows. Use published MPRIS
-// artwork when available; local players fall back to audio-control, which
+// artwork when available; local players fall back to media-control, which
 // checks beside the track and extracts embedded covers asynchronously.
 Item {
     id: artwork
@@ -19,7 +19,7 @@ Item {
     property bool lookupPending: false
     property bool usingPublishedArt: false
 
-    readonly property string publishedArt: panel.artworkUrlFor(player)
+    property string publishedArt: ""
     readonly property string trackUrl: {
         const meta = player ? (player.metadata || {}) : {}
         return meta["xesam:url"] || ""
@@ -44,7 +44,7 @@ Item {
     }
 
     function queueLocalLookup() {
-        const track = trackUrl.startsWith("file://") ? trackUrl : ""
+        const track = trackUrl
         if (track === "") {
             pendingTrackUrl = ""
             lookupPending = false
@@ -70,7 +70,7 @@ Item {
         activeTrackUrl = pendingTrackUrl
         if (activeTrackUrl === "")
             return
-        artProcess.command = [panel.audioControl, "artwork", activeTrackUrl]
+        artProcess.command = [panel.mediaControl, "artwork", activeTrackUrl]
         artProcess.running = true
     }
 

@@ -2,7 +2,7 @@ import QtQuick
 import "shared" as Shared
 
 // MPRIS volume when published, otherwise the selected PipeWire stream.
-// Clamped to 0-100% like media-panel.
+// Clamped to 0-100%.
 Shared.StyledSlider {
     id: slider
 

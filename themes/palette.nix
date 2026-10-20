@@ -15,9 +15,8 @@
   secondaryBackground = "#0F0C17";
   chromeBackground = "#170A0F";
 
-  # Wayle's styling.palette shades that have no Daemon counterpart: the panel
-  # surface one step above the background, the near-white reading text, and
-  # the success green. The Quickshell media panel reuses the same mapping.
+  # Additional panel shades: an elevated surface, near-white reading text,
+  # and a success green used by the Quickshell media panel.
   elevated = "#0E0616";
   foreground = "#F8F8F2";
   green = "#50FA7B";

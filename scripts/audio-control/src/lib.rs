@@ -7,7 +7,6 @@
 
 use std::error::Error;
 
-pub mod artwork;
 pub mod audio;
 pub mod bluetooth;
 pub mod devices;

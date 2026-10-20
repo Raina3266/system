@@ -1151,34 +1151,6 @@ mod waybar {
     }
 }
 
-
-mod artwork {
-    use crate::artwork::{local_path, percent_decode};
-    use std::path::PathBuf;
-
-    #[test]
-    fn file_urls_are_percent_decoded_into_paths() {
-        assert_eq!(
-            percent_decode("MAMAMOO%20%7C%7C%20MEMORY"),
-            Some("MAMAMOO || MEMORY".to_owned())
-        );
-        assert_eq!(
-            local_path("file:///home/raina/Documents/MAMAMOO%20%7C%7C%20MEMORY/track%20one.mp3"),
-            Some(PathBuf::from(
-                "/home/raina/Documents/MAMAMOO || MEMORY/track one.mp3"
-            ))
-        );
-        // Plain absolute paths pass through for terminal use.
-        assert_eq!(
-            local_path("/home/raina/track.mp3"),
-            Some(PathBuf::from("/home/raina/track.mp3"))
-        );
-        // Relative inputs and bad escapes are rejected, never silently wrong.
-        assert_eq!(local_path("relative/track.mp3"), None);
-        assert_eq!(local_path("file:///home/raina/bad%2track.mp3"), None);
-    }
-}
-
 mod stream {
     use crate::model::StreamEntry;
     use crate::stream::select_stream;

@@ -14,7 +14,7 @@ let
 
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
-    "media-panel/style.css" = "themes/media-panel.css";
+
     "preview-panel/preview-panel.css" = "themes/rofi/preview-panel.css";
     "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
     "rofi/rofi-finder.rasi" = "themes/rofi/rofi-finder.rasi";

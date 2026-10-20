@@ -65,11 +65,7 @@ ColumnLayout {
                 Shared.IconButton {
                     glyph: modelData.primary.isPlaying ? "󰏤" : "󰐊"
                     size: 26
-                    onActivated: {
-                        const playing = modelData.players.some(player => player.isPlaying)
-                        for (const player of modelData.players)
-                            player.isPlaying = !playing
-                    }
+                    onActivated: list.panel.mediaAction("toggle", modelData.primary)
                 }
 
                 // The source's published art (bilibili/YouTube covers); local
@@ -88,6 +84,7 @@ ColumnLayout {
                         anchors.fill: parent
                         panel: list.panel
                         player: modelData.primary
+                        publishedArt: modelData.artUrl
                         glyphSize: 14
                     }
                 }

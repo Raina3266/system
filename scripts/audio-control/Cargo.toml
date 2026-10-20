@@ -20,15 +20,11 @@ bluer = { version = "=0.17.4", default-features = false, features = [
   "bluetoothd",
 ] }
 # System-bus export of HID++ battery levels through BlueZ's provider API
-# (bt-battery-provider.service); same pin as desktop helpers and media-panel
-# so the shared lock stays single-sourced.
+# (bt-battery-provider.service).
 zbus = "=5.18.0"
 # PulseAudio (served by pipewire-pulse): profile-aware physical device discovery,
 # default selection, and the stable helper interface Quickshell calls.
 pulsectl-rs = "=0.3.2"
 libpulse-binding = "=2.30.1"
-# Embedded cover extraction for the Quickshell panel (local players publish
-# no mpris:artUrl); same pin as media-panel's proven artwork pipeline.
-lofty = "0.22"
 futures-util = { version = "=0.3.34", default-features = false }
 tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }

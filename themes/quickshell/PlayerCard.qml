@@ -6,7 +6,7 @@
 // controls keep their own opacity.
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Io
+
 import "shared" as Shared
 
 Item {
@@ -17,16 +17,14 @@ Item {
     readonly property var group: panel.activeGroup
     readonly property var player: group ? group.primary : null
     readonly property bool playing: player !== null && player.isPlaying
-    readonly property string mediaPageUrl: player
-        ? ((player.metadata || {})["xesam:url"] || "")
-        : ""
-    property string videoChannel: ""
-    property var videoChannelCache: ({})
-    property var pendingVideoLookup: null
-    property string pendingVideoPageUrl: ""
-
-    onMediaPageUrlChanged: refreshVideoChannel()
-    Component.onCompleted: refreshVideoChannel()
+    MediaCredit {
+        id: metadataCredit
+        helper: card.panel.mediaControl
+        active: card.panel.openScreen !== "" && card.player !== null
+        url: card.player ? ((card.player.metadata || {})["xesam:url"] || "") : ""
+        artist: card.player ? card.player.trackArtist : ""
+        album: card.player ? card.player.trackAlbum : ""
+    }
 
     implicitHeight: contentColumn.implicitHeight + 32
 
@@ -42,159 +40,6 @@ Item {
         return hours > 0 ? hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + padded : minutes + ":" + padded
     }
 
-    // MPRISence publishes the site name as the album for browser video pages,
-    // not the channel. Fetch the public author metadata once per video ID.
-    function videoLookupFor(url) {
-        const host = ((url.match(/^https?:\/\/([^/?#]+)/i) || [])[1] || "")
-            .toLowerCase().replace(/:\d+$/, "")
-        if (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) {
-            const match = host === "youtu.be"
-                ? url.match(/youtu\.be\/([A-Za-z0-9_-]{11})(?:[/?#]|$)/i)
-                : (url.match(/[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i)
-                    || url.match(/\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{11})(?:[/?#]|$)/i))
-            if (!match)
-                return null
-            const videoId = match[1]
-            const videoUrl = "https://www.youtube.com/watch?v=" + videoId
-            return {
-                key: "youtube:" + videoId,
-                kind: "youtube",
-                endpoint: "https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent(videoUrl)
-            }
-        }
-
-        if (host === "bilibili.com" || host.endsWith(".bilibili.com")) {
-            const match = url.match(/\/video\/(BV[0-9A-Za-z]+|av[0-9]+)(?:[/?#]|$)/)
-            if (!match)
-                return null
-            const videoId = match[1]
-            const isAid = videoId.startsWith("av")
-            const id = isAid ? videoId.slice(2) : videoId
-            const parameter = isAid ? "aid=" : "bvid="
-            return {
-                key: "bilibili:" + videoId,
-                kind: "bilibili",
-                endpoint: "https://api.bilibili.com/x/web-interface/view?" + parameter + encodeURIComponent(id)
-            }
-        }
-        return null
-    }
-
-    function refreshVideoChannel() {
-        const pageUrl = mediaPageUrl
-        const lookup = videoLookupFor(pageUrl)
-        videoChannel = ""
-        pendingVideoLookup = null
-        pendingVideoPageUrl = ""
-        if (!lookup)
-            return
-        if (videoChannelCache[lookup.key] !== undefined) {
-            videoChannel = videoChannelCache[lookup.key]
-            return
-        }
-        if (videoChannelProcess.running) {
-            if (videoChannelProcess.activeKey === lookup.key) {
-                videoChannelProcess.activePageUrl = pageUrl
-                return
-            }
-            pendingVideoLookup = lookup
-            pendingVideoPageUrl = pageUrl
-            return
-        }
-        startVideoChannelLookup(lookup, pageUrl)
-    }
-
-    function startVideoChannelLookup(lookup, pageUrl) {
-        if (videoChannelCache[lookup.key] !== undefined) {
-            if (mediaPageUrl === pageUrl)
-                videoChannel = videoChannelCache[lookup.key]
-            return
-        }
-        videoChannelProcess.activeKey = lookup.key
-        videoChannelProcess.activePageUrl = pageUrl
-        videoChannelProcess.command = [
-            "curl", "--fail", "--silent", "--show-error", "--location",
-            "--max-time", "10", lookup.endpoint
-        ]
-        videoChannelProcess.running = true
-    }
-
-    function acceptVideoChannel(key, pageUrl, text) {
-        let response
-        try {
-            response = JSON.parse(text)
-        } catch (error) {
-            return
-        }
-        const kind = key.startsWith("youtube:") ? "youtube" : "bilibili"
-        const author = kind === "youtube"
-            ? (response.author_name || "")
-            : (response.code === 0 && response.data && response.data.owner
-                ? (response.data.owner.name || "")
-                : "")
-        if (author === "")
-            return
-        videoChannelCache[key] = author
-        if (mediaPageUrl === pageUrl)
-            videoChannel = author
-    }
-
-    function metadataCreditLine() {
-        if (!player)
-            return ""
-        const lookup = videoLookupFor(mediaPageUrl)
-        if (lookup) {
-            if (videoChannel !== "")
-                return videoChannel
-            const artist = player.trackArtist || ""
-            const normalizedArtist = artist.toLowerCase()
-            const isSiteName = lookup.kind === "bilibili"
-                ? normalizedArtist.indexOf("bilibili") !== -1 || artist.indexOf("哔哩哔哩") !== -1
-                : normalizedArtist === "youtube" || normalizedArtist === "youtube music"
-            return isSiteName ? "" : artist
-        }
-
-        const parts = []
-        if (player.trackArtist !== "")
-            parts.push(player.trackArtist)
-        if (player.trackAlbum !== "")
-            parts.push(player.trackAlbum)
-        return parts.join(" · ")
-    }
-
-    // Qt's QML HTTPS requests fail to open SSL sockets in this session; use
-    // curl so the lookup uses the working system TLS/certificate setup.
-    Process {
-        id: videoChannelProcess
-        property string activeKey: ""
-        property string activePageUrl: ""
-
-        stdout: StdioCollector {
-            onStreamFinished: card.acceptVideoChannel(
-                videoChannelProcess.activeKey,
-                videoChannelProcess.activePageUrl,
-                this.text.trim()
-            )
-        }
-        stderr: StdioCollector {
-            onStreamFinished: {
-                const error = this.text.trim()
-                if (error !== "")
-                    console.warn("media panel: video-channel lookup:", error)
-            }
-        }
-        onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0)
-                console.warn("media panel: video-channel lookup exited with", exitCode)
-            if (card.pendingVideoLookup) {
-                const lookup = card.pendingVideoLookup
-                const pageUrl = card.pendingVideoPageUrl
-                card.pendingVideoLookup = null
-                card.pendingVideoPageUrl = ""
-                card.startVideoChannelLookup(lookup, pageUrl)
-            }
-        }
-    }
 
     function currentOutputLabel() {
         if (!panel.streamNode)
@@ -294,6 +139,7 @@ Item {
                     anchors.fill: parent
                     panel: card.panel
                     player: card.player
+                    publishedArt: card.group ? card.group.artUrl : ""
                     glyphSize: 26
                 }
             }
@@ -314,7 +160,7 @@ Item {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: card.metadataCreditLine()
+                    text: metadataCredit.text
                     color: card.colors.metadata
                     font.pixelSize: 13
                     elide: Text.ElideRight
@@ -333,7 +179,7 @@ Item {
             SeekBar {
                 Layout.fillWidth: true
                 player: card.player
-                players: card.group ? card.group.players : []
+                onSeekRequested: position => card.panel.mediaAction("seek", card.player, position)
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -365,30 +211,18 @@ Item {
                 Shared.IconButton {
                     glyph: "󰒮"
                     enabled: card.player && card.player.canGoPrevious
-                    // Next/previous go to one publisher or merged players double-skip.
-                    onActivated: {
-                        if (card.player.canGoPrevious)
-                            card.player.previous()
-                    }
+                    onActivated: card.panel.mediaAction("previous", card.player)
                 }
                 Shared.IconButton {
                     glyph: card.player && card.player.isPlaying ? "󰏤" : "󰐊"
                     accent: true
                     size: 40
-                    onActivated: {
-                        // Idempotent, and fanned out to every publisher of the track.
-                        const playing = card.group.players.some(player => player.isPlaying)
-                        for (const player of card.group.players)
-                            player.isPlaying = !playing
-                    }
+                    onActivated: card.panel.mediaAction("toggle", card.player)
                 }
                 Shared.IconButton {
                     glyph: "󰒭"
                     enabled: card.player && card.player.canGoNext
-                    onActivated: {
-                        if (card.player.canGoNext)
-                            card.player.next()
-                    }
+                    onActivated: card.panel.mediaAction("next", card.player)
                 }
             }
 
@@ -551,7 +385,7 @@ Item {
                 active: card.panel.activeGroup
                 routes: card.panel.routes
                 onSelected: group => {
-                    card.panel.activeGroup = group
+                    card.panel.selectGroup(group)
                     open = false
                 }
             }

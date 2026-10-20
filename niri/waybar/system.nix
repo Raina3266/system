@@ -94,8 +94,7 @@ let
     on-click-middle = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel bluetoothPower";
   };
 
-  # The old GTK media-panel has been replaced: the popup is now the
-  # resident Quickshell media panel (themes/quickshell/), toggled over IPC. It lists
+  # The resident Quickshell media panel (themes/quickshell/), toggled over IPC, lists
   # every playing or paused source, seeks, and routes each stream through
   # audio-control's profile-aware move.
   mediaModule = monitor: {

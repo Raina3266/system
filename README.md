@@ -3,7 +3,7 @@
 This repository contains nine Rust packages used by the desktop configuration:
 
 - `audio-control` — headless Waybar status, Bluetooth pairing agent, and physical audio port/profile bridge
-- `media-panel` — the former multi-player MPRIS panel, kept in the tree until its Quickshell replacement proves parity
+- `media-control` — headless media grouping, stream matching, artwork, and video-author metadata
 - `network-manager` — only the detail/secret/QR and legacy-WEP gaps in Quickshell’s native networking API
 - `ocr-screenshot` — screenshot OCR and clipboard integration
 - `preview-panel` — the shared GTK4 preview surface
@@ -13,8 +13,7 @@ This repository contains nine Rust packages used by the desktop configuration:
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
 The Niri configuration uses Quickshell for the dashboard, network,
-media, audio, and notification popups. Wayle is no longer a dependency: its
-service, module, patches, styles, and D-Bus consumers have been removed.
+media, audio, and notification popups.
 
 ## Live desktop editing
 
@@ -29,7 +28,7 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
 | `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
-| `themes/media-panel.css` | Open media panel hot-reloads |
+
 | `niri/audio-control/*.qml` | Quickshell reloads the audio panel on save |
 
 Rust, Nix module, package, service, and kernel changes still require a rebuild.
@@ -39,7 +38,7 @@ or sibling utility no longer invalidates every desktop helper.
 ## audio-control
 
 `niri/audio-control` uses the same pinned Quickshell package as the resident
-panels, including the compatibility fixes below. `scripts/audio-control` remains headless.
+panels. `scripts/audio-control` remains headless.
 The `audio-control-ui` user service runs only in Niri.
 
 The Waybar audio button uses `audio-control status` for its JSON. Its glyph
@@ -84,7 +83,7 @@ audio-control bluetooth-power [on|off|toggle]
 audio-control devices <output|input>
 audio-control set-default <output|input> <key>
 audio-control stream-move <key|serial:N|node:N|name> <destination-key>
-audio-control artwork <xesam-url|path>
+
 audio-control bluetooth-devices
 audio-control bluetooth-scan
 audio-control bluetooth-pair <address|name>
@@ -357,11 +356,6 @@ The latest 200 entries and DND state are saved through native `FileView` to
 private state directory. History survives QML reloads and process restarts;
 application actions cannot survive a full process restart.
 
-`niri/quickshell/quickshell-compat.patch` fixes three pinned 0.3.1 provider bugs:
-valid saved profiles with omitted infrastructure mode, open profiles without
-a security setting, and replacement action labels. The fixes stay in the
-native provider rather than duplicating network inventory or the notification
-protocol in Rust.
 
 Earlier daemon history can be imported once as archived text before the
 handoff; subsequent notifications go directly to Quickshell.
@@ -411,27 +405,38 @@ UI responses are discarded after connection/selection/visibility changes.
 Secret/QR requests pin the identity obtained by a preceding nonsecret Info
 read and reject a changed profile/AP before querying any secret. Completed
 secret-bearing stdout lines are not retained in a collector after dispatch.
-See `scripts/network-manager/README.md` for its JSON and security contract.
+
 
 ### Media panel
 
 The centre Waybar button toggles the Quickshell media panel (`themes/quickshell/`), a
-resident QML shell that replaced the Rust GTK `media-panel`. One card shows
+resident QML shell. One card shows
 the active source: artwork, title, artist, album, a seekable progress bar,
 transport controls, and the stream's volume. A sources dropdown lists every
 currently playing or paused MPRIS source and retargets the card, and an output
 dropdown routes the active stream through `audio-control stream-move`.
 
-All live state comes from Quickshell's native Mpris and Pipewire services:
-players, metadata, artwork, stream volumes, and the link graph that shows
-which device a stream feeds. Duplicate publishers of one playback (an
-mprisence browser bridge and the real player) merge by metadata and position;
-absolute, idempotent commands fan out to every publisher in the merge, while
-Next and Previous go to one. The only spawned processes are one-shot user
-actions: `devices output` for the route choices — the one source of
-inactive-profile Speaker/Headphones rows — and `stream-move` for the
-profile-switching, rollback-guarded move itself. Middle-clicking the Waybar
-button toggles all playback; right-click cycles the native source selection.
+Quickshell's native MPRIS and PipeWire services own player discovery, metadata,
+transport, seeking, volume, and the native audio graph. QML defines the UI and
+bridges native snapshots to the separate Rust `media-control` helper; it does
+not implement browser filtering, duplicate detection, or stream-ownership rules.
+The headless helper reuses the former Rust panel's conservative duplicate/source
+policy without restoring its GTK UI or duplicating Quickshell's D-Bus backend.
+It returns native action plans: absolute play/pause targets are grouped, while
+Next and Previous address one publisher. Middle-clicking the Waybar button
+toggles all playback; right-click cycles the displayed source selection.
+
+`media-control model` is a resident JSONL snapshot/action planner over stdin/stdout.
+`media-control artwork <xesam-url|path>` reuses local cover discovery and embedded
+art extraction. `media-control credit` accepts JSON track metadata on stdin and
+owns video-ID parsing, YouTube/Bilibili author lookups, fallback credits, and a
+bounded private cache under `$XDG_CACHE_HOME/media-control/`. Lookups use curl
+with a ten-second timeout; opening a supported video sends its video ID to that
+site's public metadata endpoint. No credentials or browser cookies are sent.
+
+`audio-control` stays separate: `devices output` supplies inactive-profile
+Speaker/Headphones choices, and `stream-move` handles profile switching and
+rollback. QML binds stream volume and current output through native PipeWire.
 
 Routing first scopes streams to the application's native identity, then uses
 track titles or URLs where they uniquely distinguish streams. There is no
@@ -447,18 +452,19 @@ moving, reports helper failures in the panel, and does not silently substitute
 another source or the system default. Inactive physical outputs may need an ALSA
 profile switch that affects other playback; the expanded list warns about this.
 
-After changing the routing helper or adding `Routing.js`, run `./switch.sh` so
-the rebuilt helper and Home Manager's live module link are installed together.
+After changing the Rust media helper or its QML bridge, run `./switch.sh` so
+the rebuilt helper and Home Manager's live module links are installed together.
 
 The panel occupies a transparent monitor-sized layer surface, so Escape, a
-second button press, or a click outside the card closes it. Position and
-grouping refresh only while it is open.
+second button press, or a click outside the card closes it. Position animation
+runs only while it is open; native snapshot analysis also runs on Waybar status
+requests while closed.
 
 Waybar requests `media status` over Quickshell IPC once per second. The native
 MPRIS selection is shared with the card, including while it is closed. Full
 tooltips, playing/paused/inactive classes, and the 50-character/35-CJK title
-limits are preserved in `MediaStatus.js`. The Wayle-backed `control-centre`
-crate and the active-player D-Bus bridge are gone.
+limits are preserved in `MediaStatus.js`. The former `control-centre` crate
+and active-player D-Bus bridge have been removed.
 
 ### Shared popup style
 
@@ -513,14 +519,15 @@ data, not the desktop notification owner or real network mutations:
 python3 themes/quickshell/tests/native_notifications.py
 python3 themes/quickshell/tests/network_controller.py
 cargo test --manifest-path scripts/Cargo.toml --locked \
-  -p audio-control -p rofi-network --all-targets
+  -p audio-control -p media-control -p rofi-network --all-targets
 cargo build --manifest-path scripts/Cargo.toml --locked -p rofi-network
-python3 scripts/network-manager/test_protocol.py scripts/target/debug/network-manager
+
 ```
 
-The QML tests in `themes/quickshell/tests/` cover conservative routing,
-media-title/CJK formatting, network ordering/status, notification row sizing,
-and native action controls. UI tests run with the installed shared component
-aliases and palette (or a staged equivalent). Network protocol tests use fake
-nmcli/qrencode commands and test stale identity, credential redaction, active
-UUID selection, WEP stdin, and QR escaping without accessing saved real secrets.
+Rust `media-control` tests cover the reused duplicate policy, conservative
+routing, native action plans, metadata caching, and the JSON bridges. Bridge
+tests run Quickshell against fake native models on a private D-Bus session when
+Quickshell and the repository QML are available; no real media is controlled.
+The QML tests in `themes/quickshell/tests/` cover media-title/CJK formatting,
+network ordering/status, notification row sizing, and native action controls.
+UI tests use the installed shared component aliases and palette (or a staged equivalent).

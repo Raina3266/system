@@ -21,7 +21,7 @@ in
     ./hardware.nix
     ./services.nix
     ../niri/rofi
-    ../niri/quickshell/package.nix
+
   ];
 
   config = {
@@ -49,6 +49,13 @@ in
 
     # Keep successful sudo authentication cached for 10 minutes.
     security.sudo.extraConfig = "Defaults timestamp_timeout=10";
+
+    security.pki.caCertificateBlacklist = [
+      "Comodo AAA Services root"
+      "emSign ECC Root CA - G3"
+      "emSign Root CA - C1"
+      "emSign ECC Root CA - C3"
+    ];
 
     # User account & home-manager
     users.users.raina = {
@@ -145,7 +152,7 @@ in
     # Initrd/recovery console keymap (used for the LUKS passphrase prompt).
     console.keyMap = "uk";
 
-    # Input method (CJK): Chinese (pinyin), Japanese (mozc), Korean (hangul).
+    # Input methods: Chinese (pinyin) and Korean (hangul).
     i18n.inputMethod = {
       enable = true;
       type = "fcitx5";
@@ -154,7 +161,6 @@ in
         addons = with pkgs; [
           fcitx5-gtk
           qt6Packages.fcitx5-chinese-addons
-          fcitx5-mozc
           fcitx5-hangul
         ];
       };

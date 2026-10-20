@@ -2,9 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import "shared" as Shared
 
-// The output-device dropdown: one row per `wayle-list output` choice,
-// including inactive-profile rows (laptop Speaker/Headphones) that have no
-// live sink name yet. Same row structure as the media dropdown: device icon,
+// The output-device dropdown: one row per `audio-control devices output`
+// choice, including inactive-profile rows (laptop Speaker/Headphones) that
+// have no live sink name yet. Same row structure as the media dropdown: device icon,
 // label over description, current row highlighted and bold.
 ColumnLayout {
     id: list

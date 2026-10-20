@@ -158,7 +158,6 @@ dependencies = [
  "bluer",
  "futures-util",
  "libpulse-binding",
- "lofty",
  "pulsectl-rs",
  "tokio",
  "zbus",
@@ -1077,13 +1076,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8"
 
 [[package]]
-name = "media-panel"
+name = "media-control"
 version = "0.1.0"
 dependencies = [
- "gtk4",
- "gtk4-layer-shell",
  "lofty",
- "zbus",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

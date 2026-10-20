@@ -2,9 +2,8 @@
 //!
 //! QML loads a published `mpris:artUrl` itself, but local players such as
 //! Elisa publish none: the cover sits inside the file or beside it, and QML
-//! cannot read embedded tags. This is the same discovery the retired GTK
-//! media-panel did — nearby cover files first, then the embedded picture,
-//! written to a cache so repeat lookups cost nothing.
+//! cannot read embedded tags. Look for nearby cover files first, then the
+//! embedded picture, written to a cache so repeat lookups cost nothing.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
@@ -20,7 +19,7 @@ const COVER_STEMS: &[&str] = &["cover", "folder", "front", "album", "albumart", 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "avif", "bmp", "gif"];
 
 /// Where extracted covers are kept between runs.
-const CACHE_DIR: &str = "audio-control/artwork";
+const CACHE_DIR: &str = "media-control/artwork";
 
 /// Prints the cover's path for a `xesam:url` (or a plain path), or fails with
 /// a message when neither the folder nor the file's tags carry one.
@@ -135,4 +134,29 @@ fn cache_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
     Some(base.join(CACHE_DIR))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_urls_are_percent_decoded_into_paths() {
+        assert_eq!(
+            percent_decode("MAMAMOO%20%7C%7C%20MEMORY"),
+            Some("MAMAMOO || MEMORY".to_owned())
+        );
+        assert_eq!(
+            local_path("file:///home/raina/Documents/MAMAMOO%20%7C%7C%20MEMORY/track%20one.mp3"),
+            Some(PathBuf::from(
+                "/home/raina/Documents/MAMAMOO || MEMORY/track one.mp3"
+            ))
+        );
+        assert_eq!(
+            local_path("/home/raina/track.mp3"),
+            Some(PathBuf::from("/home/raina/track.mp3"))
+        );
+        assert_eq!(local_path("relative/track.mp3"), None);
+        assert_eq!(local_path("file:///home/raina/bad%2track.mp3"), None);
+    }
 }

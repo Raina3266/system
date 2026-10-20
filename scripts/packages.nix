@@ -133,16 +133,6 @@ in
 rec {
   inherit withParentDeath;
 
-  # Retained legacy GTK media panel; the desktop now uses native Quickshell.
-  mediaPanel = mkWorkspacePackage "media-panel" {
-    # curl fetches a remote cover once and caches it. preFixup rather than
-    # postInstall so the argument joins wrapGAppsHook4's own wrapper instead of
-    # being overwritten by it.
-    preFixup = ''
-      gappsWrapperArgs+=(--set MEDIA_PANEL_CURL "${lib.getExe pkgs.curl}")
-    '';
-  };
-
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
     dontWrapGApps = true;
     postInstall = ''
@@ -211,6 +201,15 @@ rec {
   # A headless status/profile helper. Quickshell owns the visible audio UI, so this
   # executable needs no GTK environment wrapper.
   audioControl = mkWorkspacePackage "audio-control" { dontWrapGApps = true; };
+
+  # Custom media policy/metadata only; Quickshell supplies the native services.
+  mediaControl = mkWorkspacePackage "media-control" {
+    dontWrapGApps = true;
+    postInstall = ''
+      wrapProgram "$out/bin/media-control" \
+        --set MEDIA_CONTROL_CURL "${lib.getExe pkgs.curl}"
+    '';
+  };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     dontWrapGApps = true;
