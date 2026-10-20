@@ -95,6 +95,7 @@ impl AudioKind {
 pub enum CodeKind {
     Pin,
     Passkey,
+    Confirmation,
 }
 
 impl CodeKind {
@@ -102,6 +103,7 @@ impl CodeKind {
         match self {
             Self::Pin => "pin",
             Self::Passkey => "passkey",
+            Self::Confirmation => "confirmation",
         }
     }
 
@@ -109,6 +111,7 @@ impl CodeKind {
         match self {
             Self::Pin => format!("Please type in the pairing PIN for {device}."),
             Self::Passkey => format!("Please type in the 6-digit passkey for {device}."),
+            Self::Confirmation => format!("Confirm pairing with {device}? Type yes or no."),
         }
     }
 }
@@ -120,6 +123,7 @@ impl FromStr for CodeKind {
         match value {
             "pin" => Ok(Self::Pin),
             "passkey" => Ok(Self::Passkey),
+            "confirmation" => Ok(Self::Confirmation),
             _ => Err(std::io::Error::other(format!("unknown code kind {value:?}")).into()),
         }
     }

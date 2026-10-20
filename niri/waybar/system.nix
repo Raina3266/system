@@ -1,7 +1,7 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
 # The dashboard button carries the battery reading and opens Wayle's dashboard;
-# network, audio and media all open Wayle-native dropdowns.
+# network uses Wayle; audio and media use unpatched Quickshell.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -83,9 +83,8 @@ let
       "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
   };
 
-  # Left-click opens Wayle's native Bluetooth/audio panel; the rows, sliders and
-  # per-app volume are Wayle's own, audio-control only adds Speaker/Headphones
-  # profile handling. Right-click toggles the adapter.
+  # Quickshell owns Pair/Output/Input; playback stays in media-panel.
+  # The Rust helper retains status and physical port/profile selection only.
   audioModule = monitor: {
     exec = "${packages.audioControl}/bin/audio-control status";
     interval = 5;
@@ -93,8 +92,8 @@ let
     tooltip = true;
     escape = false;
     on-click =
-      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss audio ${lib.escapeShellArg monitor}";
-    on-click-right = "${packages.audioControl}/bin/audio-control bluetooth-power toggle";
+      "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel toggle ${lib.escapeShellArg monitor}";
+    on-click-middle = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel bluetoothPower";
   };
 
   # Wayle's native media dropdown deliberately selects one MPRIS source, and
@@ -149,7 +148,7 @@ in
 
   modules = {
     # Generic fallback for callers that do not create a bar per output. The
-    # actual Niri bars override these with their connector name so Wayle opens
+    # actual Niri bars override these with their connector name so each UI opens
     # each panel on the monitor whose button was clicked.
     "custom/audio" = audioModule "";
     "custom/dashboard" = dashboardModule "";

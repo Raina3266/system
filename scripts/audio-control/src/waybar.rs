@@ -13,10 +13,7 @@ pub async fn print_status() {
     };
     let (powered, connected) = bluetooth.unwrap_or((false, Vec::new()));
 
-    let text = format!(
-        "<span size='large'>{}</span>",
-        glyph(output.as_ref(), powered, !connected.is_empty())
-    );
+    let text = format!("<span size='large'>{}</span>", glyph(output.as_ref()));
 
     let mut tooltip = vec![device_line("Output", output.as_ref())];
     tooltip.push(device_line("Input", input.as_ref()));
@@ -42,17 +39,10 @@ pub async fn print_status() {
     );
 }
 
-/// The module's single glyph.
-///
-/// Bluetooth off shows the sound icon, tracking the default output's level and
-/// mute. Bluetooth on swaps in a Bluetooth glyph that separates an idle adapter
-/// from a connected one. Full state stays in the tooltip and Wayle's panel.
-pub(crate) fn glyph(output: Option<&AudioEntry>, powered: bool, connected: bool) -> &'static str {
-    match (powered, connected) {
-        (true, true) => "󰂱",
-        (true, false) => "󰂯",
-        (false, _) => output.map(AudioEntry::volume_icon).unwrap_or("󰝟"),
-    }
+/// The module's single glyph tracks the default output's volume and mute state.
+/// Bluetooth power and connection state remain in the tooltip and CSS class.
+pub(crate) fn glyph(output: Option<&AudioEntry>) -> &'static str {
+    output.map(AudioEntry::volume_icon).unwrap_or("󰝟")
 }
 
 fn device_line(label: &str, entry: Option<&AudioEntry>) -> String {
@@ -65,7 +55,7 @@ fn device_line(label: &str, entry: Option<&AudioEntry>) -> String {
     }
 }
 
-/// `on-click-right` on the Waybar module. Returns the state it settled on.
+/// The Waybar middle-click action returns the state it settled on.
 pub async fn set_bluetooth_power(argument: &str) -> AppResult<bool> {
     let backend = Backend::new().await?;
     let powered = match argument {

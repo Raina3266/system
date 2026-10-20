@@ -204,7 +204,7 @@ rec {
     '';
   };
 
-  # A headless status/profile helper. Wayle owns the visible audio UI, so this
+  # A headless status/profile helper. Quickshell owns the visible audio UI, so this
   # executable needs no GTK environment wrapper.
   audioControl = mkWorkspacePackage "audio-control" { dontWrapGApps = true; };
 

@@ -243,9 +243,9 @@ in
   '';
 
   systemd.user.services = {
-    # No standalone pairing agent here: Wayle registers its own BlueZ agent
-    # (/com/wayle/BluetoothAgent) and shows pairing confirmations in its UI,
-    # and GNOME Shell does the same inside GNOME sessions. A bt-agent service
+    # No standalone pairing agent here: Quickshell handles BlueZ pairing
+    # requests in the audio panel, and GNOME Shell does the same inside GNOME
+    # sessions. A bt-agent service
     # used to steal the default-agent role and then hang on stdin prompts it
     # could never answer, which is what broke all pairing here.
     kde-baloo = {

@@ -1,10 +1,10 @@
 //! Headless audio helper: Waybar status/Bluetooth power and the small machine
-//! interface used by Wayle's profile-aware device picker.
+//! interface used by Quickshell's profile-aware device picker.
 
 use std::env;
 use std::io;
 
-use audio_control::{AppResult, artwork, bluetooth, stream, waybar, wayle};
+use audio_control::{AppResult, artwork, bluetooth, devices, stream, waybar, wayle};
 
 #[tokio::main]
 async fn main() {
@@ -25,6 +25,21 @@ async fn run() -> AppResult<()> {
             let argument = arguments.next().unwrap_or_else(|| "toggle".to_owned());
             waybar::set_bluetooth_power(&argument).await?;
             Ok(())
+        }
+        Some("devices") => {
+            let kind = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("devices kind is missing"))?;
+            devices::list(&kind)
+        }
+        Some("set-default") => {
+            let kind = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("set-default kind is missing"))?;
+            let key = arguments
+                .next()
+                .ok_or_else(|| io::Error::other("set-default key is missing"))?;
+            devices::set_default(&kind, &key)
         }
         Some("wayle-list") => {
             let kind = arguments
@@ -74,9 +89,11 @@ async fn run() -> AppResult<()> {
                  Usage:\n  \
                  audio-control status\n  \
                  audio-control bluetooth-power [on|off|toggle]\n  \
+                 audio-control devices <output|input>\n  \
+                 audio-control set-default <output|input> <key>\n  \
                  audio-control wayle-list <output|input>\n  \
                  audio-control wayle-set-default <output|input> <key>\n  \
-                 audio-control stream-move <key|serial|name> <destination-key>\n  \
+                 audio-control stream-move <key|serial:N|node:N|name> <destination-key>\n  \
                  audio-control artwork <xesam-url|path>\n  \
                  audio-control bluetooth-devices\n  \
                  audio-control bluetooth-scan\n  \

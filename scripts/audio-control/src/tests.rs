@@ -965,6 +965,41 @@ mod bluetooth {
     use crate::model::CodeKind;
 
     #[test]
+    fn numeric_comparison_requires_explicit_yes() {
+        for answer in ["yes", "YES", " Yes\n"] {
+            assert!(validate_answer(Some(CodeKind::Confirmation), answer).is_ok());
+        }
+        for answer in ["no", "NO", "", " ", "y", "true", "042311", "yes please"] {
+            assert!(validate_answer(Some(CodeKind::Confirmation), answer).is_err());
+        }
+    }
+
+    #[test]
+    fn confirmation_prompts_preserve_six_digits_and_require_an_answer() {
+        for (passkey, digits) in [(0, "000000"), (42311, "042311"), (999999, "999999")] {
+            let request = confirmation_request("AA:BB:CC:DD:EE:FF".to_owned(), passkey);
+            let request = decode_request(&encode_request(&request)).unwrap();
+            assert_eq!(request.kind, Some(CodeKind::Confirmation));
+            assert_eq!(request.address, "AA:BB:CC:DD:EE:FF");
+            assert!(request.message.contains(digits));
+            assert!(request.message.contains("Type yes or no"));
+        }
+    }
+
+    #[test]
+    fn code_answers_remain_unrestricted_nonempty_text() {
+        assert_eq!(
+            validate_answer(Some(CodeKind::Pin), " aB12\n").unwrap(),
+            "aB12"
+        );
+        assert_eq!(
+            validate_answer(Some(CodeKind::Passkey), "042311\n").unwrap(),
+            "042311"
+        );
+        assert!(validate_answer(Some(CodeKind::Pin), "").is_err());
+    }
+
+    #[test]
     fn pair_prompts_round_trip_through_the_wire_format() {
         let encoded = encode_request(&PairRequest {
             kind: Some(CodeKind::Passkey),
@@ -1106,25 +1141,13 @@ mod waybar {
     }
 
     #[test]
-    fn bluetooth_on_and_off_are_different_glyphs() {
-        let off = glyph(Some(&output(60, false)), false, false);
-        let on = glyph(Some(&output(60, false)), true, false);
-        let on_connected = glyph(Some(&output(60, false)), true, true);
-        assert_eq!(off, "󰕾");
-        assert_eq!(on, "󰂯");
-        assert_eq!(on_connected, "󰂱");
-        assert_ne!(off, on);
-        assert_ne!(on, on_connected);
-    }
-
-    #[test]
-    fn with_bluetooth_off_the_glyph_tracks_volume_and_mute() {
-        assert_eq!(glyph(Some(&output(0, false)), false, false), "󰕿");
-        assert_eq!(glyph(Some(&output(30, false)), false, false), "󰖀");
-        assert_eq!(glyph(Some(&output(90, false)), false, false), "󰕾");
-        assert_eq!(glyph(Some(&output(90, true)), false, false), "󰝟");
-        // No default output at all, and Bluetooth off: nothing to report.
-        assert_eq!(glyph(None, false, false), "󰝟");
+    fn waybar_glyph_tracks_default_output_volume_and_mute() {
+        assert_eq!(glyph(Some(&output(0, false))), "󰕿");
+        assert_eq!(glyph(Some(&output(30, false))), "󰖀");
+        assert_eq!(glyph(Some(&output(90, false))), "󰕾");
+        assert_eq!(glyph(Some(&output(90, true))), "󰝟");
+        // No default output: show the muted/ unavailable glyph.
+        assert_eq!(glyph(None), "󰝟");
     }
 }
 
@@ -1252,5 +1275,157 @@ mod stream {
     fn an_ambiguous_application_name_is_rejected() {
         let entries = [entry("1001"), entry("1002")];
         assert!(select_stream(&entries, "mpv").is_err());
+    }
+
+    #[test]
+    fn typed_stream_identifiers_do_not_collide_across_namespaces() {
+        let mut entries = [entry("1001"), entry("42")];
+        entries[0].object_id = "42".to_owned();
+        entries[1].object_id = "1002".to_owned();
+        for _ in 0..2 {
+            assert_eq!(select_stream(&entries, "node:42").unwrap().serial, "1001");
+            assert_eq!(select_stream(&entries, "serial:42").unwrap().serial, "42");
+            assert!(select_stream(&entries, "42").is_err());
+            entries.reverse();
+        }
+    }
+
+    #[test]
+    fn stale_typed_identifiers_never_fall_back_to_names() {
+        let mut entries = [entry("1001")];
+        entries[0].application = "serial:9999".to_owned();
+        entries[0].name = "node:9999".to_owned();
+        assert!(select_stream(&entries, "serial:9999").is_err());
+        assert!(select_stream(&entries, "node:9999").is_err());
+    }
+
+    #[test]
+    fn duplicate_typed_identifiers_are_rejected() {
+        let mut entries = [entry("1001"), entry("1002")];
+        entries[0].object_id = "42".to_owned();
+        entries[1].object_id = "42".to_owned();
+        assert!(select_stream(&entries, "node:42").is_err());
+        entries[1].serial = "1001".to_owned();
+        assert!(select_stream(&entries, "serial:1001").is_err());
+    }
+
+    #[test]
+    fn invalid_typed_and_empty_identifiers_are_rejected() {
+        let mut entries = [entry("")];
+        entries[0].object_id = "".to_owned();
+        for selector in [
+            "",
+            " ",
+            "serial:",
+            "node:",
+            "serial:0",
+            "node:0",
+            "serial:-1",
+            "node:+1",
+            "serial:1x",
+            "node:1 ",
+            "serial:18446744073709551616",
+        ] {
+            assert!(select_stream(&entries, selector).is_err(), "{selector:?}");
+        }
+    }
+
+    #[test]
+    fn stream_names_match_ignoring_ascii_case() {
+        let entries = [entry("1001")];
+        assert_eq!(
+            select_stream(&entries, "MEDIA.NAME \"QUOTED\"")
+                .unwrap()
+                .serial,
+            "1001"
+        );
+    }
+
+    #[test]
+    fn legacy_numeric_names_cannot_silently_resolve_to_another_stream() {
+        let mut entries = [entry("42"), entry("1002")];
+        entries[1].application = "42".to_owned();
+        for _ in 0..2 {
+            assert!(select_stream(&entries, "42").is_err());
+            assert_eq!(select_stream(&entries, "serial:42").unwrap().serial, "42");
+            entries.reverse();
+        }
+    }
+}
+
+mod devices {
+    use crate::devices::*;
+    use crate::model::{AudioEntry, AudioKind};
+
+    fn entry(default: bool) -> AudioEntry {
+        AudioEntry {
+            key: "card-output:01:port:02".into(),
+            kind: AudioKind::Output,
+            name: "alsa_output.pci".into(),
+            card: Some("alsa_card.pci".into()),
+            description: "Alder Lake Controller — Headphones".into(),
+            label: "Headphones".into(),
+            volume: 50,
+            muted: false,
+            default,
+            port: Some("[Out] Headphones".into()),
+        }
+    }
+
+    #[test]
+    fn bridge_rows_are_json_objects_with_boolean_defaults() {
+        let mut bytes = Vec::new();
+        write_entries(&mut bytes, &[entry(true), entry(false)]).unwrap();
+        let object = |default| {
+            format!(
+                "{{\"key\":\"card-output:01:port:02\",\"label\":\"Headphones\",\"description\":\"Alder Lake Controller — Headphones\",\"name\":\"alsa_output.pci\",\"default\":{default},\"port\":true}}"
+            )
+        };
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            format!("[{},{}]\n", object(true), object(false))
+        );
+    }
+
+    #[test]
+    fn device_only_rows_allow_native_selection() {
+        let mut row = entry(false);
+        row.port = None;
+        let mut bytes = Vec::new();
+        write_entries(&mut bytes, &[row]).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().contains("\"port\":false"));
+    }
+
+    #[test]
+    fn empty_list_is_a_json_array() {
+        let mut bytes = Vec::new();
+        write_entries(&mut bytes, &[]).unwrap();
+        assert_eq!(bytes, b"[]\n");
+    }
+
+    #[test]
+    fn every_metadata_field_is_json_escaped() {
+        let mut row = entry(false);
+        let value = "\"\\\n\r\t\0\u{0008}\u{001f}Café 🎧";
+        row.key = value.into();
+        row.label = value.into();
+        row.description = value.into();
+        row.name = value.into();
+        let mut bytes = Vec::new();
+        write_entries(&mut bytes, &[row]).unwrap();
+        let escaped = "\\\"\\\\\\n\\r\\t\\u0000\\u0008\\u001fCafé 🎧";
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            format!(
+                "[{{\"key\":\"{escaped}\",\"label\":\"{escaped}\",\"description\":\"{escaped}\",\"name\":\"{escaped}\",\"default\":false,\"port\":true}}]\n"
+            )
+        );
+    }
+
+    #[test]
+    fn only_device_tabs_are_accepted() {
+        assert_eq!(kind("output").unwrap(), AudioKind::Output);
+        assert_eq!(kind("input").unwrap(), AudioKind::Input);
+        assert!(kind("playback").is_err());
     }
 }

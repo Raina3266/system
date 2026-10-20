@@ -1,12 +1,14 @@
 import QtQuick
 import QtQuick.Layouts
+import "shared" as Shared
 
 // The source switcher: one row per merged player group, playing or paused.
 // Selecting a row only retargets the card; nothing is raised or focused.
 ColumnLayout {
     id: list
 
-    readonly property var colors: Colors {}
+    readonly property var colors: Shared.Colors {}
+    required property color detailColor
     required property var panel
     property var groups: []
     property var active: null
@@ -60,7 +62,7 @@ ColumnLayout {
 
                 // Per-source play/pause without retargeting the card, so
                 // several players can be paused or resumed one after another.
-                IconButton {
+                Shared.IconButton {
                     glyph: modelData.primary.isPlaying ? "󰏤" : "󰐊"
                     size: 26
                     onActivated: {
@@ -102,7 +104,7 @@ ColumnLayout {
                             text: modelData.displayName
                             color: list.colors.accent
                             font.pixelSize: 13
-                            font.bold: parent.parent.parent.current
+                            font.bold: true
                             elide: Text.ElideRight
                             Behavior on color { ColorAnimation { duration: 120 } }
                         }
@@ -111,8 +113,9 @@ ColumnLayout {
                         Text {
                             visible: modelData.sinkName !== ""
                             text: "(" + list.outputLabel(modelData.sinkName) + ")"
-                            color: list.colors.muted
+                            color: list.colors.accent
                             font.pixelSize: 11
+                            font.bold: true
                             elide: Text.ElideRight
                             Layout.maximumWidth: 160
                         }
@@ -120,8 +123,8 @@ ColumnLayout {
                     Text {
                         Layout.fillWidth: true
                         text: modelData.title
-                        color: list.colors.muted
-                        font.pixelSize: 11
+                        color: list.detailColor
+                        font.pixelSize: 13
                         elide: Text.ElideRight
                     }
                 }

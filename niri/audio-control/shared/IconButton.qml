@@ -1,0 +1,1 @@
+/nix/store/k8sfrwfmngczcbr3lbbnmsaa9jhbwpnd-home-manager-files/.config/quickshell/audio-control/shared/IconButton.qml

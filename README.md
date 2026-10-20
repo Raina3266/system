@@ -2,7 +2,7 @@
 
 This repository contains ten Rust packages used by the desktop configuration:
 
-- `audio-control` — the headless Waybar status, Bluetooth-power, and profile-aware Wayle audio bridge
+- `audio-control` — headless Waybar status, Bluetooth pairing agent, and physical audio port/profile bridge
 - `control-centre` — the long-running Waybar media-title stream
 - `media-panel` — the former multi-player MPRIS panel, kept in the tree until its Quickshell replacement proves parity
 - `network-manager` — the NetworkManager info and Wi-Fi QR bridge used by Wayle
@@ -14,7 +14,8 @@ This repository contains ten Rust packages used by the desktop configuration:
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
 The Niri configuration applies one structure-and-behavior Wayle v0.7.0 delta
-to supply the native [dashboard, network, and audio panels](#wayle-dashboard).
+for the [dashboard and network panels](#wayle-dashboard). Audio and media use
+unmodified Quickshell.
 
 ## Live desktop editing
 
@@ -25,12 +26,13 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
 | `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
-| `themes/quickshell/*.qml` | Quickshell reloads the media panel on save |
+| `themes/quickshell/*.qml` | Quickshell reloads live UI components on save; shared controls affect both popups |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
 | `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
 | `themes/media-panel.css` | Open media panel hot-reloads |
 | `themes/wayle/*.scss` | Wayle recompiles the override on save |
+| `niri/audio-control/*.qml` | Quickshell reloads the audio panel on save |
 
 Rust, Nix module, package, service, and kernel changes still require a rebuild.
 Each Rust package now hashes only Cargo sources, so changing one UI stylesheet
@@ -38,75 +40,92 @@ or sibling utility no longer invalidates every desktop helper.
 
 ## audio-control
 
-`scripts/audio-control` has no visible UI. Wayle owns the Bluetooth and audio
-presentation; this helper supplies only behavior that Wayle's services do not
-natively expose.
+`niri/audio-control` is a small Quickshell configuration using the stock Nixpkgs
+package, with no Quickshell patches. `scripts/audio-control` remains headless.
+The `audio-control-ui` user service runs only in Niri.
 
 The Waybar audio button uses `audio-control status` for its JSON. Its glyph
 tracks the default output while Bluetooth is off, changes when the adapter is
 on or connected, and leaves the full output/input/device state in the tooltip.
-Right-click runs `bluetooth-power toggle`.
+Right-click toggles the default adapter through Quickshell's native Bluetooth API.
 
-Left-click asks Wayle to open its native four-tab panel:
+Left-click opens the popup on the clicked monitor. Escape, the close button,
+another click on the same Waybar button, or clicking outside dismisses it.
 
-| Tab | Native Wayle content |
+| Tab | Content |
 | --- | --- |
-| Pair | Bluetooth power, scan, pair, connect, disconnect, and forget |
-| Output | Default volume/mute plus distinct output devices and physical ports |
-| Input | Default volume/mute plus microphones and their ports |
-| Play | Per-application volume and output routing |
+| Pair | Bluetooth power, scan, pair, connect, disconnect, forget, and battery levels |
+| Output | Default volume/mute, output devices, and physical ports |
+| Input | Default volume/mute, microphones, and their ports |
 
-The panel is two-thirds of Wayle's original audio width. Device rows favor the
-distinguishing label—such as **Speaker**, **Headphones**, or a USB model—while
-keeping the full description in a tooltip. Plugged headphones remain a
-clickable output instead of being collapsed into Speaker. Application streams
-can be adjusted independently and routed without changing the system default.
+There is no Play tab; playback stays in the existing media panel. Output volume
+runs from **0 to 150%**, retaining amplification above 100%. Input remains
+0–100%. Volume and mute use Quickshell's native PipeWire API, and live device-only
+choices use its preferred-default API.
 
-Pairing takes more than the row. Wayle's device rows call `Device1.Connect`,
-which opens no bonding request: BlueZ brings the link up and reports the device
-as connected, leaving whatever bond the device then asks for to whichever agent
-holds BlueZ's default-agent role. That is enough for a speaker, but a keyboard —
-which has to be shown a six-digit passkey to type back — ends up listed as
-connected while nothing it types arrives. `wayle-features.patch` makes an
-unpaired row pair first, so the bonding request carries Wayle's own agent and
-the passkey reaches its pairing card whoever else has registered one, and
-trusts the device before connecting so its later reconnections raise no
-authorization prompt nothing is showing. `audio-control bluetooth-pair` does
-the same from a terminal for pairing without the panel.
+Quickshell 0.3.1 provides Bluetooth device discovery and connections, but no
+PIN/passkey pairing agent or physical audio port/profile API. Only those gaps
+use the Rust helper:
 
-Wayle already handles live devices, sliders, Bluetooth, and stream routing. The
-`WAYLE_AUDIO_HELPER` bridge is used only for mutually exclusive ALSA profiles:
-it keeps Speaker and Headphones available as stable choices even when selecting
-one causes PipeWire to replace the other sink. It revalidates a choice before
-switching, prefers a compatible profile that retains microphone ports, and
-attempts rollback after a failed switch.
+- Physical choices preserve compact **Speaker**, **Headphones**, and USB labels
+  with full descriptions in tooltips. The helper retains mutually exclusive
+  ALSA profiles, revalidates stale choices, prefers profiles preserving
+  microphones, and attempts rollback after a failed switch.
+- Pairing starts `Device1.Pair` on the same connection as the existing agent,
+  shows its prompts/passkeys in the Pair tab, accepts PIN/passkey input, then
+  trusts and connects the device. For numeric comparison, compare the displayed
+  six-digit passkey and send `yes` to confirm or `no` to reject. Closing the
+  panel or leaving Pair cancels pending pairing and stops discovery. The helper
+  does not compete for BlueZ's session-wide default-agent role.
 
 ### Commands
 
 ```text
 audio-control status
 audio-control bluetooth-power [on|off|toggle]
+audio-control devices <output|input>
+audio-control set-default <output|input> <key>
 audio-control wayle-list <output|input>
 audio-control wayle-set-default <output|input> <key>
-audio-control stream-move <key|serial> <destination-key>
+audio-control stream-move <key|serial:N|node:N|name> <destination-key>
 audio-control artwork <xesam-url|path>
 audio-control bluetooth-devices
 audio-control bluetooth-scan
 audio-control bluetooth-pair <address|name>
 ```
 
-`wayle-list` and `wayle-set-default` form a NUL-delimited machine interface for
-Wayle and are not intended as an interactive picker. `stream-move` moves one
-playback stream onto a destination `wayle-list output` row names, switching
-ALSA profiles with rollback when the row is an inactive-profile output; the
-move. The Quickshell media panel selects the stream by PipeWire object
-serial or by the player's MPRIS identity. `artwork` resolves a local track's
-cover — a picture beside the file first, then the embedded one, cached under
-`~/.cache/audio-control/artwork/` — for the panel, whose toolkit cannot read
-tags. `bluetooth-pair` is
+`devices` prints JSON rows for the popup; `set-default` applies a stable device
+or physical-port key. `bluetooth-pair` is
 interactive: it prints the passkey to type on the device, or asks on stdin for
 one the device displays, and accepts either an address or a distinctive part of
 a device's name.
+
+The popup can also be controlled directly:
+
+```sh
+quickshell ipc --config audio-control call panel toggle eDP-1
+quickshell ipc --config audio-control call panel close
+quickshell ipc --config audio-control call panel bluetoothPower
+```
+
+After switching the NixOS/Home Manager generation, the service starts with the
+graphical session and Waybar wants it. For development without switching:
+
+```sh
+cargo build --manifest-path scripts/Cargo.toml --package audio-control --locked
+AUDIO_CONTROL_HELPER="$PWD/scripts/target/debug/audio-control" \
+  QT_QUICK_CONTROLS_STYLE=Basic quickshell --path niri/audio-control
+# In another terminal:
+quickshell ipc --path niri/audio-control call panel toggle eDP-1
+```
+
+`wayle-list` and `wayle-set-default` retain their existing NUL-delimited
+protocol for the separate Quickshell media panel. For `stream-move`, prefer
+`serial:N` (a PipeWire object serial) or `node:N` (a PipeWire node ID). These
+namespaces cannot collide, but node IDs can be reused after a stream ends.
+The panel therefore uses stable `serial:N` selectors only. Legacy bare
+identifiers and names still work when unambiguous across all matching fields.
+The `artwork` command is unchanged.
 
 ### Development checks
 
@@ -120,7 +139,9 @@ cargo clippy --manifest-path scripts/Cargo.toml --package audio-control --locked
 
 Tests cover device/port identity, compact labels, volume bounds, stream routing,
 inactive-profile Speaker/Headphones selection, delayed device creation, stale
-targets, server rejection, and rollback.
+targets, server rejection, rollback, and typed stream-identifier collisions.
+The pure QML/JavaScript matching tests in `themes/quickshell/tests/` run with
+Qt Quick Test and cover shared streams, browser aliases, paused sources, and ordering.
 
 ---
 
@@ -346,6 +367,23 @@ inactive-profile Speaker/Headphones rows — and `stream-move` for the
 profile-switching, rollback-guarded move itself. Right-clicking the Waybar
 button pauses every player over the same IPC.
 
+Routing first scopes streams to the application's native identity, then uses
+track titles or URLs where they uniquely distinguish streams. There is no
+fallback that pairs browser entries and unrelated streams by list order.
+Ambiguous/shared matches are disabled with an explanation in the Output section.
+A paused browser source can be routed only when its own stream is identifiable;
+starting playback may make that stream available. Tabs sharing one browser audio
+stream cannot be routed independently through this panel.
+
+The panel binds playback metadata only while open and moves an identified stream
+by stable typed serial. It rechecks the selected source before
+moving, reports helper failures in the panel, and does not silently substitute
+another source or the system default. Inactive physical outputs may need an ALSA
+profile switch that affects other playback; the expanded list warns about this.
+
+After changing the routing helper or adding `Routing.js`, run `./switch.sh` so
+the rebuilt helper and Home Manager's live module link are installed together.
+
 The panel occupies a transparent monitor-sized layer surface, so Escape, a
 second button press, or a click outside the card closes it. Position and
 grouping refresh only while it is open.
@@ -354,26 +392,51 @@ The short title displayed directly in Waybar still comes from
 `control-centre media-waybar`, including the configured 50-character limit
 for ordinary text and 35-character limit for CJK-heavy text.
 
+### Shared popup style
+
+Media and audio use the same components from `themes/quickshell/`.
+`niri/quickshell/style.nix` installs a local `shared/` directory of aliases
+inside each popup's configuration root. All aliases point to the same
+source files and palette; styles are not copied. This keeps imports
+inside Quickshell's configuration sandbox without patching Quickshell:
+
+| Source | Shared behavior |
+| --- | --- |
+| `themes/quickshell/PopupFrame.qml` | Charcoal background, 10% transparency, thin yellow outline, matching corner cuts |
+| `themes/quickshell/ControlButton.qml` | Cyan text/red glyphs, 50%-transparent gray outlines, yellow/thicker outlines only on hover |
+| `themes/quickshell/IconButton.qml` | Circular variant of the shared button; volume buttons can suppress their outlines |
+| `themes/quickshell/StyledSlider.qml` | Shared track and handle presentation; each caller owns its range and backend |
+| `themes/palette.nix` | One palette, including purple metadata text, exported to both shells |
+
+Audio keeps its Pair/Output/Input layout and native services. Output volume
+still spans 0–150%; sharing presentation does not inherit media's 100% range.
+Popup sizes and placement remain specific to their content, not separate themes.
+
+Run `./switch.sh` once to install the shared directory and palette links.
+If an edit is not picked up by Quickshell's live reload, refresh both UIs:
+
+```sh
+systemctl --user restart quickshell-media.service audio-control-ui.service
+```
+
 ### Audio panel
 
-The audio button opens Wayle's native Pair/Output/Input/Play panel described
-under [`audio-control`](#audio-control). The Rust helper remains headless and
-is invoked only for status, Bluetooth power, pairing, and profile-aware device
-choices.
+The audio button opens the unpatched Quickshell Pair/Output/Input popup described
+under [`audio-control`](#audio-control). Playback remains in the media panel.
 
 ### External panel behavior
 
 Wayle dropdowns requested through the external bar use a fullscreen transparent
-host with the visible child positioned under its actual button. Media is
-centered; dashboard, network, and audio follow their slots at the right edge.
+host with the visible child positioned under its actual button. Dashboard and
+network follow their slots at the right edge. The separate media panel is
+centered, and Quickshell's audio popup uses its own transparent layer surface.
 This makes outside-click dismissal work without the cross-client popup grab
-that a GTK popover would require. Closing audio or media also propagates the
-visibility change so background refresh work stops.
+that a GTK popover would require. Audio device refreshes stop while hidden.
 
 ### Local source deltas
 
 Wayle presentation is kept out of source patches. Colours, spacing, card
-shadows, scroll-area sizing, and the dashboard/network/audio appearance live
+shadows, scroll-area sizing, and the dashboard/network appearance live
 in `themes/wayle/`, one partial per panel behind the fixed `index.scss` entry
 file, and Wayle recompiles them on save.
 
@@ -388,8 +451,7 @@ after it and can restyle the panel.
 
 | Source delta | Purpose |
 | --- | --- |
-| `wayle-features.patch` | Behavior that CSS cannot provide, plus the one structural style that must not depend on the live stylesheet (the transparent click-away host): D-Bus panel requests, monitor-local click-away hosting and placement, notification history/expansion, a dashboard trimmed to quick actions, system stats and notification history, network Info/QR actions in a panel narrowed to a 420 px base (Wayle's own is 382; the QR view needed more, 520 was excessive), audio tabs/routing, compact device labels, inactive-profile switching, and
-pairing an unpaired device with `Device1.Pair` before connecting it. This is generated directly against pristine Wayle v0.7.0, with no dependent patch order. |
+| `wayle-features.patch` | Behavior that CSS cannot provide, plus the transparent click-away host: D-Bus panel requests, monitor-local hosting and placement, notification history/expansion, a dashboard trimmed to quick actions, system stats and notification history, and network Info/QR actions in a panel narrowed to a 420 px base. Generated directly against pristine Wayle v0.7.0, with no dependent patch order. Audio and Bluetooth customizations are no longer patched into Wayle. |
 
 ### Verifying changes
 
@@ -402,8 +464,8 @@ cargo test --manifest-path scripts/Cargo.toml --locked \
 
 The media tests cover deduplication, source naming, progress, volume conversion,
 merged volume state, controls, artwork discovery, and cropping. Audio tests
-cover the native picker's profile bridge. The dashboard's seven-day parser and
-the Wayle audio helper functions have focused tests in the source delta.
+cover the physical-port/profile bridge. The dashboard's seven-day parser has
+focused tests in the source delta.
 
 Wayle itself is verified from a clean v0.7.0 checkout after applying
 `niri/wayle/wayle-features.patch`:

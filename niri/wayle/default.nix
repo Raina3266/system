@@ -1,8 +1,8 @@
 # Wayle is the notification daemon: it owns org.freedesktop.Notifications and
 # the history, and its dashboard pairs that with system stats. Waybar stays the
 # visible bar, so Wayle's own is hidden. Dropdowns opened from Waybar use
-# monitor-local layer-shell windows, avoiding GTK popup-grab limits. Audio is
-# Wayle's own; audio-control adds only the profile handling it lacks.
+# monitor-local layer-shell windows, avoiding GTK popup-grab limits. Audio UI
+# lives separately in unpatched Quickshell (Pair/Output/Input).
 { repoPackages, ... }:
 let
   # Flakes are copied into a source store path whose hash changes whenever an
@@ -119,11 +119,10 @@ in
           };
           Service = {
             RestartSec = 3;
-            # Wayle renders both panels. External Rust helpers supply only the
-            # behaviour that is not already implemented by Wayle itself.
+            # Wayle renders the network panel; the helper supplies the network
+            # operations not already implemented by Wayle itself.
             Environment = [
               "WAYLE_NETWORK_MANAGER=${repoPackages.networkManager}/bin/network-manager"
-              "WAYLE_AUDIO_HELPER=${repoPackages.audioControl}/bin/audio-control"
             ];
           };
         };

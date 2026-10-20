@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import "shared" as Shared
 
 // Shared cover resolver for the card and source rows. Use published MPRIS
 // artwork when available; local players fall back to audio-control, which
@@ -9,7 +10,7 @@ Item {
 
     required property var panel
     required property var player
-    readonly property var colors: Colors {}
+    readonly property var colors: Shared.Colors {}
     property int glyphSize: 20
 
     property string sourceUrl: ""

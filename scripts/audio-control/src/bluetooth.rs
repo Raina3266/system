@@ -229,7 +229,7 @@ impl Backend {
 // ---------------------------------------------------------------------------
 // Pairing
 //
-// Wayle's panel owns the everyday Bluetooth rows, but the action behind them is
+// Quickshell's panel owns the everyday Bluetooth rows, but the action behind them is
 // `Device1.Connect`, which opens no bonding request. A device that negotiates a
 // passkey — a keyboard above all — has to be paired with `Device1.Pair`, so
 // that lives here, where the agent BlueZ calls back belongs to the same process
@@ -424,15 +424,15 @@ fn pairing_agent(frontend: Frontend) -> Agent {
                 Ok(())
             })
         })),
-        // Numeric comparison and plain authorization are confirmed for the
-        // user: they started this pairing from the menu a moment ago.
+        // Starting pairing is not consent to a numeric comparison: the user
+        // must verify that both devices display the same passkey.
         request_confirmation: Some(Box::new(move |request| {
             Box::pin(async move {
-                announce(
-                    &request.device.to_string(),
-                    format!("Confirming passkey {:06}…", request.passkey),
+                ask_request(
+                    confirmation_request(request.device.to_string(), request.passkey),
                     frontend,
-                );
+                )
+                .await?;
                 Ok(())
             })
         })),
@@ -445,16 +445,49 @@ fn pairing_agent(frontend: Frontend) -> Agent {
 /// Raises a prompt the pairing cannot continue without, and waits for it to be
 /// answered.
 async fn ask(kind: CodeKind, address: String, frontend: Frontend) -> ReqResult<String> {
-    match frontend {
-        Frontend::Files => ask_through_files(kind, address).await,
-        Frontend::Terminal => ask_on_terminal(kind, address).await,
+    ask_request(
+        PairRequest {
+            kind: Some(kind),
+            message: kind.prompt(&address),
+            address,
+        },
+        frontend,
+    )
+    .await
+}
+
+pub(crate) fn confirmation_request(address: String, passkey: u32) -> PairRequest {
+    PairRequest {
+        kind: Some(CodeKind::Confirmation),
+        message: format!(
+            "Does passkey {passkey:06} match the one shown on {address}? Type yes or no."
+        ),
+        address,
     }
+}
+
+pub(crate) fn validate_answer(kind: Option<CodeKind>, answer: &str) -> ReqResult<String> {
+    let answer = answer.trim();
+    if answer.is_empty()
+        || (kind == Some(CodeKind::Confirmation) && !answer.eq_ignore_ascii_case("yes"))
+    {
+        return Err(ReqError::Rejected);
+    }
+    Ok(answer.to_owned())
+}
+
+async fn ask_request(request: PairRequest, frontend: Frontend) -> ReqResult<String> {
+    let kind = request.kind;
+    let answer = match frontend {
+        Frontend::Files => ask_through_files(request).await?,
+        Frontend::Terminal => ask_on_terminal(request.message).await?,
+    };
+    validate_answer(kind, &answer)
 }
 
 /// Reads the answer from stdin. BlueZ times the pairing out on its own, so the
 /// read is left to block for as long as the daemon is still waiting.
-async fn ask_on_terminal(kind: CodeKind, address: String) -> ReqResult<String> {
-    let prompt = kind.prompt(&address);
+async fn ask_on_terminal(prompt: String) -> ReqResult<String> {
     tokio::task::spawn_blocking(move || {
         eprintln!("{prompt}");
         let mut answer = String::new();
@@ -472,14 +505,9 @@ async fn ask_on_terminal(kind: CodeKind, address: String) -> ReqResult<String> {
 }
 
 /// Publishes a prompt and waits for the front end to answer it.
-async fn ask_through_files(kind: CodeKind, address: String) -> ReqResult<String> {
+async fn ask_through_files(request: PairRequest) -> ReqResult<String> {
     let _ = fs::remove_file(response_path().ok_or(ReqError::Canceled)?);
-    write_request(&PairRequest {
-        kind: Some(kind),
-        message: kind.prompt(&address),
-        address,
-    })
-    .map_err(|_| ReqError::Canceled)?;
+    write_request(&request).map_err(|_| ReqError::Canceled)?;
 
     let deadline = std::time::Instant::now() + CODE_TIMEOUT;
     while std::time::Instant::now() < deadline {
@@ -678,7 +706,7 @@ pub mod battery_provider {
     //! Logitech's proprietary HID++ protocol, which the kernel hid-logitech-hidpp
     //! driver already decodes into `/sys/class/power_supply/hidpp_battery_*`.
     //! BlueZ never learns that value, so everything reading `org.bluez.Battery1`
-    //! (Wayle, GNOME, UPower) shows the flat lie.
+    //! (Quickshell, GNOME, UPower) shows the flat lie.
     //!
     //! This module republishes those levels through BlueZ's Battery Provider
     //! API. Provider batteries and the GATT one compete for the device's

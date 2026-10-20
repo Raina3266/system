@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "shared" as Shared
 
 // The output-device dropdown: one row per `wayle-list output` choice,
 // including inactive-profile rows (laptop Speaker/Headphones) that have no
@@ -8,7 +9,8 @@ import QtQuick.Layouts
 ColumnLayout {
     id: list
 
-    readonly property var colors: Colors {}
+    readonly property var colors: Shared.Colors {}
+    required property color detailColor
     property var routes: []
     property string currentName: ""
     property bool open: false
@@ -71,7 +73,7 @@ ColumnLayout {
                         text: modelData.label
                         color: list.colors.accent
                         font.pixelSize: 13
-                        font.bold: parent.parent.current
+                        font.bold: true
                         elide: Text.ElideRight
                         Behavior on color { ColorAnimation { duration: 120 } }
                     }
@@ -79,7 +81,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                         visible: modelData.description !== modelData.label
                         text: modelData.description
-                        color: list.colors.muted
+                        color: list.detailColor
                         font.pixelSize: 11
                         elide: Text.ElideRight
                     }

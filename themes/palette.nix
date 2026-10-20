@@ -5,6 +5,7 @@
 {
   red = "#D52C35";
   pink = "#D656C7";
+  purple = "#BD93F9";
   dimPink = "#5A254D";
   yellow = "#FCEE0A";
   separator = "#6B6670";

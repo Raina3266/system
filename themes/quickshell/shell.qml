@@ -9,6 +9,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
+import "Routing.js" as Routing
 
 ShellRoot {
     id: root
@@ -25,6 +26,27 @@ ShellRoot {
     property var streamSink: null
     property var routes: []
     readonly property bool moving: moveProcess.running
+    property string routeFailure: ""
+    property var routeFailureSource: null
+    readonly property string routingError: activeGroup && activeGroup.players.indexOf(routeFailureSource) >= 0 ? routeFailure : ""
+    readonly property bool canRoute: activeGroup !== null && Routing.selectorFor(streamNode) !== "" && !moving
+    readonly property string routingStatus: {
+        if (!activeGroup)
+            return ""
+        if (moving)
+            return "Moving this audio stream…"
+        if (!streamNode)
+            return activeGroup.routingReason || "No independently routable audio stream."
+        if (Routing.selectorFor(streamNode) === "")
+            return "Reading audio stream details. Try again in a moment."
+        return ""
+    }
+
+    // Application/track metadata and native volume need bound nodes. Track only
+    // playback streams, and release them when the panel closes.
+    PwObjectTracker {
+        objects: root.openScreen !== "" ? root.playbackStreams() : []
+    }
 
     // ---- Player grouping -----------------------------------------------------
     // Stopped players, playerctld and kdeconnect proxies are dropped; duplicate
@@ -135,34 +157,19 @@ ShellRoot {
             else
                 merged.push({ title: player.trackTitle, artist: player.trackArtist, players: [player] })
         }
-        // Stream matching, two passes: players whose PipeWire node carries
-        // their name match directly; then, since a browser's stream never
-        // carries the tab's identity, a lone browser group gets the lone
-        // unclaimed stream. Two browsers playing at once stay unmatched
-        // rather than risking a wrong route.
-        const streams = playbackStreams()
-        const claimed = {}
         for (const group of merged) {
             group.primary = group.players.find(player => player.isPlaying) || group.players[0]
             group.displayName = displayNameFor(group.primary)
-            group.streamNode = namedStreamFor(group.primary, streams)
-            if (group.streamNode)
-                claimed[group.streamNode.id] = true
         }
-        const leftover = streams.filter(node => !claimed[node.id])
-        const browsers = merged.filter(group => !group.streamNode && isBrowserPlayer(group.primary))
-        // Pair leftovers with browser groups, playing first: a playing tab has
-        // a live stream, a paused one usually has none, so leftovers most
-        // likely belong to the playing sources. More browsers than streams
-        // leaves the rest unmatched rather than risking a wrong route.
-        const playing = browsers.filter(group => group.primary.isPlaying)
-        const candidates = playing.concat(browsers.filter(group => !group.primary.isPlaying))
-        for (let index = 0; index < Math.min(candidates.length, leftover.length); index++)
-            candidates[index].streamNode = leftover[index]
-        for (const group of merged) {
-            const sink = sinkForStream(group.streamNode || null)
+        // Never assign streams by enumeration order. Refuse ambiguous/shared
+        // matches instead of moving audio belonging to another media source.
+        const matches = Routing.matchGroups(merged, playbackStreams())
+        merged.forEach((group, index) => {
+            group.streamNode = matches[index].node
+            group.routingReason = matches[index].reason
+            const sink = sinkForStream(group.streamNode)
             group.sinkName = sink ? sink.name : ""
-        }
+        })
 
         const previous = activeGroup
         groups = merged
@@ -183,10 +190,8 @@ ShellRoot {
     }
 
     // ---- Stream / sink matching ----------------------------------------------
-    // Quickshell binds nodes lazily: `ready` stays false and `properties`
-    // empty until something subscribes, so matching uses node.name/nickname,
-    // which are always populated. Playback streams are the nodes that are
-    // both a stream and a sink; devices are never streams.
+    // Playback streams are both a stream and a sink; output devices are not
+    // streams. The tracker above exposes their native application metadata.
     function playbackStreams() {
         const streams = []
         for (const node of Pipewire.nodes.values) {
@@ -194,22 +199,6 @@ ShellRoot {
                 streams.push(node)
         }
         return streams
-    }
-
-    function namedStreamFor(player, streams) {
-        if (!player)
-            return null
-        const identity = player.identity.toLowerCase()
-        const entry = (player.desktopEntry || "").toLowerCase()
-        for (const node of streams) {
-            const name = (node.name || "").toLowerCase()
-            const nickname = (node.nickname || "").toLowerCase()
-            if (name !== "" && (name === identity || (entry !== "" && name.indexOf(entry) !== -1)))
-                return node
-            if (nickname !== "" && nickname === identity)
-                return node
-        }
-        return null
     }
 
     function sinkForStream(node) {
@@ -231,7 +220,10 @@ ShellRoot {
 
     Connections {
         target: Pipewire.nodes
-        function onValuesChanged() { root.refreshRouting() }
+        function onValuesChanged() {
+            if (root.openScreen !== "") root.refreshGroups()
+            else root.refreshRouting()
+        }
     }
     Connections {
         target: Pipewire.linkGroups
@@ -284,21 +276,41 @@ ShellRoot {
 
     Process {
         id: moveProcess
+        property bool awaitingStart: false
+        stderr: StdioCollector { id: moveErrors }
+        onStarted: awaitingStart = false
+        onRunningChanged: {
+            if (!running && awaitingStart) {
+                awaitingStart = false
+                root.routeFailure = "Could not start audio-control. Rebuild the system or check the routing helper."
+                console.warn("media panel:", root.routeFailure)
+            }
+        }
         onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0)
-                console.warn("media panel: stream-move exited with", exitCode)
+            root.routeFailure = exitCode === 0 && exitStatus === 0 ? ""
+                : (moveErrors.text.trim() || "The audio routing helper failed or stopped unexpectedly.")
+            if (root.routeFailure !== "")
+                console.warn("media panel:", root.routeFailure)
             root.refreshRoutes()
+            root.refreshGroups()
         }
     }
 
     function moveStream(key) {
-        if (!activeGroup)
+        if (!activeGroup || moving)
             return
-        // The matched stream's node name ("Google Chrome") resolves where the
-        // MPRIS identity ("Chromium") cannot; the id form is exact even for
-        // two tabs of one browser once the helper learns object ids.
-        const selector = streamNode && streamNode.name !== "" ? streamNode.name : activeGroup.primary.identity
+        const requestedPlayer = activeGroup.primary
+        // Re-check the selected source immediately before taking its identity.
+        refreshGroups()
+        routeFailureSource = requestedPlayer
+        const selector = Routing.selectorFor(streamNode)
+        if (!activeGroup || activeGroup.players.indexOf(requestedPlayer) < 0 || selector === "") {
+            routeFailure = "The selected media source has no independently routable audio stream."
+            return
+        }
+        routeFailure = ""
         moveProcess.command = [audioControl, "stream-move", selector, key]
+        moveProcess.awaitingStart = true
         moveProcess.running = true
     }
 

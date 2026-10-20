@@ -3,8 +3,8 @@ name = "audio-control"
 version.workspace = true
 edition.workspace = true
 
-# Headless helper used by Waybar and by Wayle's profile-aware device picker.
-# Wayle owns the visible audio UI; this crate only supplies behaviour Wayle
+# Headless helper used by Waybar and by Quickshell's profile-aware device picker.
+# Quickshell owns the visible audio UI; this crate only supplies behaviour Quickshell
 # does not natively expose, such as mutually exclusive ALSA profile switching.
 [lib]
 name = "audio_control"
@@ -24,7 +24,7 @@ bluer = { version = "=0.17.4", default-features = false, features = [
 # so the shared lock stays single-sourced.
 zbus = "=5.18.0"
 # PulseAudio (served by pipewire-pulse): profile-aware physical device discovery,
-# default selection, and the stable helper interface Wayle calls.
+# default selection, and the stable helper interface Quickshell calls.
 pulsectl-rs = "=0.3.2"
 libpulse-binding = "=2.30.1"
 # Embedded cover extraction for the Quickshell panel (local players publish
