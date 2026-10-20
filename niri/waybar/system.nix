@@ -1,7 +1,6 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
-# The dashboard button carries the battery reading and opens Wayle's dashboard;
-# network uses Wayle; audio and media use unpatched Quickshell.
+# Dashboard, network, media, and audio use native Quickshell panels.
 { lib, pkgs, packages }:
 let
   mprisenceNativeHost =
@@ -70,21 +69,20 @@ let
     '';
     tooltip = true;
     on-click =
-      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ${lib.escapeShellArg monitor}";
+      "${lib.getExe pkgs.quickshell} -c media ipc call dashboard toggle ${lib.escapeShellArg monitor}";
   };
 
   networkModule = monitor: {
-    exec = "${packages.networkManager}/bin/network-manager status";
+    exec = "${lib.getExe pkgs.quickshell} ipc --config media call network status";
     interval = 5;
     return-type = "json";
     tooltip = true;
     escape = false;
     on-click =
-      "${pkgs.systemd}/bin/busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss network ${lib.escapeShellArg monitor}";
+      "${lib.getExe pkgs.quickshell} ipc --config media call network toggle ${lib.escapeShellArg monitor}";
   };
 
-  # Quickshell owns Pair/Output/Input; playback stays in media-panel.
-  # The Rust helper retains status and physical port/profile selection only.
+  # Quickshell owns Pair/Output/Input; the helper handles physical profiles.
   audioModule = monitor: {
     exec = "${packages.audioControl}/bin/audio-control status";
     interval = 5;
@@ -96,18 +94,17 @@ let
     on-click-middle = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel bluetoothPower";
   };
 
-  # Wayle's native media dropdown deliberately selects one MPRIS source, and
-  # the old GTK media-panel has been replaced too: the popup is now the
+  # The old GTK media-panel has been replaced: the popup is now the
   # resident Quickshell media panel (themes/quickshell/), toggled over IPC. It lists
   # every playing or paused source, seeks, and routes each stream through
   # audio-control's profile-aware move.
-  wayleMediaModule = monitor: {
+  mediaModule = monitor: {
     format = "{}";
     return-type = "json";
-    exec = "${packages.withParentDeath}/bin/with-parent-death ${packages.controlCentre}/bin/control-centre media-waybar";
+    exec = "${lib.getExe pkgs.quickshell} -c media ipc call media status";
     tooltip = true;
     escape = true;
-    "restart-interval" = 2;
+    interval = 1;
     "exec-on-event" = false;
     on-click = "${lib.getExe pkgs.quickshell} -c media ipc call media toggle ${lib.escapeShellArg monitor}";
     on-click-middle = "${lib.getExe pkgs.quickshell} -c media ipc call media togglePauseAll";
@@ -115,7 +112,7 @@ let
   };
 in
 {
-  inherit audioModule dashboardModule networkModule wayleMediaModule;
+  inherit audioModule dashboardModule networkModule mediaModule;
 
   homeConfig = {
     home.packages = [
@@ -153,7 +150,7 @@ in
     "custom/audio" = audioModule "";
     "custom/dashboard" = dashboardModule "";
     "custom/network" = networkModule "";
-    "custom/wayle-media" = wayleMediaModule "";
+    "custom/media" = mediaModule "";
 
     "custom/lyrics" = {
       hide-empty-text = true;

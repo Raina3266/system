@@ -2,7 +2,7 @@
   "position": "top",
   "expand-center": true,
   "modules-left": ["custom/ycal", "tray"],
-  "modules-center": ["custom/wayle-media", "custom/lyrics"],
+  "modules-center": ["custom/media", "custom/lyrics"],
   "modules-right": [
     "custom/timer",
     "custom/clipboard",

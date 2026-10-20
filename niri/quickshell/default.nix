@@ -1,8 +1,6 @@
-# The media panel: a small resident Quickshell config whose card Waybar's
-# centre button toggles. QML sources link live out of the repository (save to
-# reload, like niri/config.kdl); only Colors.qml comes from the store,
-# rendered from the same themes/palette.nix the Daemon themes are built with,
-# so the panel cannot drift from the desktop's colours.
+# Resident Quickshell config for the media panel and system dashboard.
+# QML sources link live out of the repository; shared popup components and
+# colors come from niri/quickshell/style.nix.
 {
   config,
   lib,
@@ -16,6 +14,24 @@ let
   qmlFiles = [
     "shell.qml"
     "Routing.js"
+    "Dashboard.qml"
+    "DashboardPanel.qml"
+    "DashboardSection.qml"
+    "PowerSection.qml"
+    "SystemSection.qml"
+    "SystemMetrics.qml"
+    "NotificationSection.qml"
+    "NotificationEntry.qml"
+    "Notifications.qml"
+    "NotificationPopups.qml"
+    "NotificationStore.js"
+    "NetworkController.qml"
+    "NetworkFormat.js"
+    "NetworkPanel.qml"
+    "MediaStatus.js"
+    "ActionTile.qml"
+    "MetricBar.qml"
+    "IdleInhibitorWindow.qml"
     "MediaPanel.qml"
     "PlayerCard.qml"
     "Artwork.qml"
@@ -45,19 +61,31 @@ in
 
   systemd.user.services.quickshell-media = {
     Unit = {
-      Description = "Quickshell media panel";
+      Description = "Quickshell panels and notification server";
+      Conflicts = [ "swaync.service" ];
       X-Restart-Triggers = [ config.xdg.configFile."quickshell/media/shared/Colors.qml".source ];
       ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
       PartOf = [ "graphical-session.target" ];
       After = [ "graphical-session.target" ];
     };
     Service = {
+      Type = "dbus";
+      BusName = "org.freedesktop.Notifications";
       ExecStart = "${lib.getExe pkgs.quickshell} -c media";
       Restart = lib.mkForce "on-failure";
       RestartSec = 3;
-      # The panel spawns audio-control for route choices and the profile-aware
-      # stream move; hand it the exact binary rather than relying on PATH.
-      Environment = [ "AUDIO_CONTROL=${repoPackages.audioControl}/bin/audio-control" ];
+      StateDirectory = "quickshell";
+      StateDirectoryMode = "0700";
+      UMask = "0077";
+      # audio-control handles profile-aware media routing. System metrics
+      # use native FileView readers plus coreutils df for filesystem capacity.
+      Environment = [
+        "AUDIO_CONTROL=${repoPackages.audioControl}/bin/audio-control"
+        "COREUTILS_DF=${pkgs.coreutils}/bin/df"
+        "NOTIFICATION_HISTORY=%S/quickshell/notifications.json"
+        "NETWORK_HELPER=${repoPackages.networkManager}/bin/network-manager"
+        "NETWORK_EDITOR=${pkgs.networkmanagerapplet}/bin/nm-connection-editor"
+      ];
     };
     Install.WantedBy = [ "graphical-session.target" ];
   };

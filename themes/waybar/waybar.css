@@ -62,7 +62,7 @@ window#waybar.bottom {
 
 /* ── Borderless modules (lyrics / workspaces) ── */
 
-#custom-wayle-media,
+#custom-media,
 #custom-lyrics {
     color: #7afcff;
     padding-left: 30px;
@@ -187,8 +187,8 @@ tooltip label {
 }
 
 /* Keep the title visible while making non-playing media unobtrusive. */
-#custom-wayle-media.paused,
-#custom-wayle-media.inactive {
+#custom-media.paused,
+#custom-media.inactive {
     color: #5c6776;
 }
 

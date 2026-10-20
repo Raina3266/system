@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "audio-control",
-  "control-centre",
   "media-panel",
   "network-manager",
   "ocr-screenshot",

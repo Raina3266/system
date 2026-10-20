@@ -4,7 +4,7 @@
 use std::env;
 use std::io;
 
-use audio_control::{AppResult, artwork, bluetooth, devices, stream, waybar, wayle};
+use audio_control::{AppResult, artwork, bluetooth, devices, stream, waybar};
 
 #[tokio::main]
 async fn main() {
@@ -41,21 +41,6 @@ async fn run() -> AppResult<()> {
                 .ok_or_else(|| io::Error::other("set-default key is missing"))?;
             devices::set_default(&kind, &key)
         }
-        Some("wayle-list") => {
-            let kind = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("wayle-list kind is missing"))?;
-            wayle::list(&kind)
-        }
-        Some("wayle-set-default") => {
-            let kind = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("wayle-set-default kind is missing"))?;
-            let key = arguments
-                .next()
-                .ok_or_else(|| io::Error::other("wayle-set-default key is missing"))?;
-            wayle::set_default(&kind, &key)
-        }
         Some("stream-move") => {
             let selector = arguments
                 .next()
@@ -91,8 +76,6 @@ async fn run() -> AppResult<()> {
                  audio-control bluetooth-power [on|off|toggle]\n  \
                  audio-control devices <output|input>\n  \
                  audio-control set-default <output|input> <key>\n  \
-                 audio-control wayle-list <output|input>\n  \
-                 audio-control wayle-set-default <output|input> <key>\n  \
                  audio-control stream-move <key|serial:N|node:N|name> <destination-key>\n  \
                  audio-control artwork <xesam-url|path>\n  \
                  audio-control bluetooth-devices\n  \

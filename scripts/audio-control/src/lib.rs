@@ -14,7 +14,6 @@ pub mod devices;
 pub mod model;
 pub mod stream;
 pub mod waybar;
-pub mod wayle;
 
 #[cfg(test)]
 mod tests;

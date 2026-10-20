@@ -1,15 +1,18 @@
-// Quickshell media panel: the popup Waybar's centre button toggles.
+// Resident Quickshell panels: Waybar toggles the media card and dashboard.
 //
-// Everything live is a native Quickshell service binding (Mpris, Pipewire);
-// the only spawned processes are one-shot user actions through audio-control:
-// `wayle-list output` for the route choices (it alone knows inactive-profile
-// Speaker/Headphones rows) and `stream-move` for the profile-aware move.
+// Notifications, MPRIS, PipeWire, power, networking, Bluetooth, and idle
+// inhibition use native Quickshell services. Processes are only needed for
+// profile-aware media routing and filesystem capacity (`df`).
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Bluetooth
+import Quickshell.Networking
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
+import Quickshell.Wayland
 import "Routing.js" as Routing
+import "MediaStatus.js" as MediaStatus
 
 ShellRoot {
     id: root
@@ -19,6 +22,7 @@ ShellRoot {
 
     // Name of the screen whose panel is open; "" when closed.
     property string openScreen: ""
+    property string dashboardOpenScreen: ""
 
     property var groups: []
     property var activeGroup: null
@@ -26,6 +30,13 @@ ShellRoot {
     property var streamSink: null
     property var routes: []
     readonly property bool moving: moveProcess.running
+    readonly property var notifications: notificationCenter.history
+    readonly property bool dndActive: notificationCenter.dnd
+    property bool idleInhibitEnabled: false
+    readonly property bool airplaneMode: {
+        const adapters = Bluetooth.adapters.values
+        return !Networking.wifiEnabled && adapters.every(adapter => !adapter.enabled)
+    }
     property string routeFailure: ""
     property var routeFailureSource: null
     readonly property string routingError: activeGroup && activeGroup.players.indexOf(routeFailureSource) >= 0 ? routeFailure : ""
@@ -230,40 +241,28 @@ ShellRoot {
         function onValuesChanged() { root.refreshRouting() }
     }
 
-    // Waybar's media title follows Wayle's active player, so a selection here
-    // is mirrored there and the bar shows the same source as the card.
-    Process {
-        id: activePlayerProcess
-    }
-
-    onActiveGroupChanged: {
-        refreshRouting()
-        if (activeGroup) {
-            activePlayerProcess.command = ["busctl", "--user", "call", "com.wayle.Media1", "/com/wayle/Media", "com.wayle.Media1", "SetActivePlayer", "s", activeGroup.primary.dbusName]
-            activePlayerProcess.running = true
-        }
-    }
+    onActiveGroupChanged: refreshRouting()
 
     // ---- Route choices ---------------------------------------------------------
-    // `wayle-list output` rows: key, label, description, live node name, default.
+    // Canonical JSON device rows keep physical profile keys stable.
     function parseRoutes(text) {
-        const fields = text.split("\0")
-        const rows = []
-        for (let index = 0; index + 4 < fields.length && fields[index] !== ""; index += 5) {
-            rows.push({
-                key: fields[index],
-                label: fields[index + 1],
-                description: fields[index + 2],
-                name: fields[index + 3],
-                isDefault: fields[index + 4] === "1"
-            })
+        try {
+            return JSON.parse(text).map(row => ({
+                key: row.key,
+                label: row.label,
+                description: row.description,
+                name: row.name,
+                isDefault: row.default
+            }))
+        } catch (error) {
+            console.warn("media panel: invalid device list:", error)
+            return []
         }
-        return rows
     }
 
     Process {
         id: routesProcess
-        command: [root.audioControl, "wayle-list", "output"]
+        command: [root.audioControl, "devices", "output"]
         stdout: StdioCollector {
             onStreamFinished: root.routes = root.parseRoutes(this.text)
         }
@@ -317,6 +316,7 @@ ShellRoot {
     // ---- Panel state -------------------------------------------------------------
 
     function togglePanel(monitor) {
+        networkCenter.close()
         let name = monitor
         if (!name && Quickshell.screens.length > 0)
             name = Quickshell.screens[0].name
@@ -327,6 +327,47 @@ ShellRoot {
 
     function closePanel() {
         openScreen = ""
+    }
+
+    function toggleDashboard(monitor) {
+        networkCenter.close()
+        let name = monitor
+        if (!name && Quickshell.screens.length > 0)
+            name = Quickshell.screens[0].name
+        if (!name)
+            return
+        dashboardOpenScreen = dashboardOpenScreen === name ? "" : name
+    }
+
+    function closeDashboard() {
+        dashboardOpenScreen = ""
+    }
+
+    function toggleAirplaneMode() {
+        const enableRadios = airplaneMode
+        Networking.wifiEnabled = enableRadios
+        for (const adapter of Bluetooth.adapters.values)
+            adapter.enabled = enableRadios
+    }
+
+    function toggleIdleInhibit() {
+        idleInhibitEnabled = !idleInhibitEnabled
+    }
+
+    function toggleDnd() {
+        notificationCenter.toggleDnd()
+    }
+
+    function clearNotifications() {
+        notificationCenter.clearNotifications()
+    }
+
+    function dismissNotification(id) {
+        notificationCenter.dismissNotification(id)
+    }
+
+    function invokeNotificationAction(id, identifier) {
+        notificationCenter.invokeNotificationAction(id, identifier)
     }
 
     onOpenScreenChanged: {
@@ -382,10 +423,44 @@ ShellRoot {
 
     IpcHandler {
         target: "media"
+        // Metadata changes do not change the players model. Refresh on demand
+        // for Waybar even when the card (and its sweep timer) is closed.
+        function status(): string {
+            root.refreshGroups()
+            return JSON.stringify(MediaStatus.badge(root.activeGroup))
+        }
         function toggle(monitor: string): void { root.togglePanel(monitor) }
         function pauseAll(): void { root.pauseAll() }
         function togglePauseAll(): void { root.togglePauseAll() }
         function cycleMedia(): void { root.cycleMedia() }
+    }
+
+    IpcHandler {
+        target: "dashboard"
+        function toggle(monitor: string): void { root.toggleDashboard(monitor) }
+    }
+
+    IpcHandler {
+        target: "network"
+        function toggle(monitor: string): void {
+            root.closePanel()
+            root.closeDashboard()
+            networkCenter.toggle(monitor)
+        }
+        function close(): void { networkCenter.close() }
+        function status(): string { return networkCenter.status() }
+    }
+
+    IpcHandler {
+        target: "notifications"
+        function toggleDnd(): void { notificationCenter.toggleDnd() }
+        function status(): string {
+            return JSON.stringify({
+                historyCount: notificationCenter.history.length,
+                popupCount: notificationCenter.popups.length,
+                dnd: notificationCenter.dnd
+            })
+        }
     }
 
     // Track changes are not model changes, so a slow sweep keeps grouping right
@@ -406,13 +481,40 @@ ShellRoot {
         }
     }
 
+    Notifications {
+        id: notificationCenter
+    }
+
+    NotificationPopups {
+        center: notificationCenter
+    }
+
+    NetworkController {
+        id: networkCenter
+    }
+
+    NetworkPanel {
+        controller: networkCenter
+    }
+
     Variants {
         model: Quickshell.screens
-        // Variants injects each screen as the delegate's `modelData` property;
+        // Variants inject each screen as the delegate's `modelData` property;
         // MediaPanel binds its own window to it.
         MediaPanel {
             panel: root
         }
+    }
+
+    Variants {
+        model: Quickshell.screens
+        DashboardPanel {
+            panel: root
+        }
+    }
+
+    IdleInhibitorWindow {
+        panel: root
     }
 
     // Note: colours come from a Colors instance each visual component creates

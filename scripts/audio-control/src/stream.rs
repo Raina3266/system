@@ -1,9 +1,9 @@
 //! The Quickshell media panel's machine interface: move one playback stream
-//! onto an output picked from `wayle-list output` rows.
+//! onto an output picked from `devices output` rows.
 //!
 //! The move itself is `audio::move_stream`, so an inactive-profile destination
 //! (laptop Speaker/Headphones) switches the ALSA card profile first and rolls
-//! back on failure — the same path the Wayle device picker uses. Listing
+//! back on failure — the same path the Quickshell device picker uses. Listing
 //! streams and their current routes needs no helper: PipeWire clients read
 //! nodes, properties and link groups natively.
 
@@ -11,7 +11,7 @@ use std::io;
 
 use crate::{AppResult, audio, model::StreamEntry};
 
-/// Moves one stream onto the destination a `wayle-list output` row's key names.
+/// Moves one stream onto the destination a `devices output` row's key names.
 /// Prefer `serial:N`: unlike a reusable node ID, a serial identifies one stream
 /// lifetime. `node:N` remains an explicit instantaneous CLI selector.
 pub fn move_to(selector: &str, destination_key: &str) -> AppResult<()> {

@@ -85,7 +85,8 @@ ColumnLayout {
 
     Label {
         Layout.fillWidth: true
-        text: page.node ? (page.node.nickname || page.node.description || page.node.name) : "No " + page.kind + " device"
+        text: (page.kind === "output" ? "Output" : "Input") + " · "
+            + (page.node ? (page.node.nickname || page.node.description || page.node.name) : "No device")
         textFormat: Text.PlainText
         elide: Text.ElideRight
         font.bold: true
@@ -103,23 +104,23 @@ ColumnLayout {
             ToolTip.visible: hovered
             ToolTip.text: page.node?.audio?.muted ? "Unmute" : "Mute"
         }
-        Label {
+        Shared.StyledSlider {
+            id: volume
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            from: 0
+            to: page.maximumVolume
+            stepSize: 0.01
+            enabled: !!page.node?.audio
+            value: page.node?.audio?.volume ?? 0
+            onMoved: page.node.audio.volume = value
+        }
+        Label {
             horizontalAlignment: Text.AlignRight
             text: Math.round((page.node?.audio?.volume ?? 0) * 100) + "%"
             color: page.colors.accent
             font.bold: true
         }
-    }
-    Shared.StyledSlider {
-        id: volume
-        Layout.fillWidth: true
-        from: 0
-        to: page.maximumVolume
-        stepSize: 0.01
-        enabled: !!page.node?.audio
-        value: page.node?.audio?.volume ?? 0
-        onMoved: page.node.audio.volume = value
     }
     Label {
         Layout.fillWidth: true

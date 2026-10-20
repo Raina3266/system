@@ -39,7 +39,7 @@ let
     }
     // modules;
 
-  wayleOutputs = [
+  panelOutputs = [
     "eDP-1"
     "DP-8"
     "DP-7"
@@ -53,9 +53,9 @@ let
         "custom/audio" = system.audioModule output;
         "custom/dashboard" = system.dashboardModule output;
         "custom/network" = system.networkModule output;
-        "custom/wayle-media" = system.wayleMediaModule output;
+        "custom/media" = system.mediaModule output;
       };
-    }) wayleOutputs
+    }) panelOutputs
   );
 
   # ------------ BottomBar -------------

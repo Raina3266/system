@@ -1,72 +1,63 @@
-//! Unit tests, one module per feature source file.
+use super::*;
 
-mod model {
-    use nmrs::SecurityFeatures;
-
-    use crate::model::*;
-
-    #[test]
-    fn security_names_distinguish_wpa2_and_wpa3() {
-        let mut mixed = SecurityFeatures::default();
-        mixed.privacy = true;
-        mixed.psk = true;
-        mixed.sae = true;
-        mixed.ccmp = true;
-        assert_eq!(security_label(&mixed), "WPA2/WPA3");
-
-        let mut enterprise = SecurityFeatures::default();
-        enterprise.privacy = true;
-        enterprise.eap_suite_b_192 = true;
-        enterprise.ccmp = true;
-        assert_eq!(security_label(&enterprise), "WPA3 Enterprise");
-    }
-
-    #[test]
-    fn signal_ordering_ignores_drift_inside_one_bar() {
-        // Two readings that draw the same icon have to compare equal, or the
-        // timed refresh would keep swapping their rows.
-        assert_eq!(signal_bars(77), signal_bars(94));
-        assert_eq!(signal_icon(77), signal_icon(94));
-        assert!(signal_bars(51) > signal_bars(50));
-        assert_eq!(signal_bars(0), 0);
-    }
+#[test]
+fn payload_escapes_wifi_qr_delimiters() {
+    assert_eq!(
+        wifi_qr_payload("Cafe;Guest", "WPA", Some("a:b,c\\d"), false),
+        "WIFI:T:WPA;S:Cafe\\;Guest;P:a\\:b\\,c\\\\d;H:false;;"
+    );
 }
 
-mod network {
-    use crate::network::*;
-
-    #[test]
-    fn waybar_json_escapes_markup_tooltips_safely() {
-        assert_eq!(
-            json_escape("A \"network\"\nline"),
-            "A \\\"network\\\"\\nline"
-        );
-    }
+#[test]
+fn frequency_bands_include_wifi_6e() {
+    assert_eq!(frequency_band(2437), "2.4 GHz");
+    assert_eq!(frequency_band(5180), "5 GHz");
+    assert_eq!(frequency_band(6115), "6 GHz");
 }
 
-mod wayle {
-    use crate::wayle::*;
+#[test]
+fn payload_marks_hidden_open_networks() {
+    assert_eq!(
+        wifi_qr_payload("Hidden", "nopass", None, true),
+        "WIFI:T:nopass;S:Hidden;H:true;;"
+    );
+}
 
-    #[test]
-    fn payload_escapes_wifi_qr_delimiters() {
-        assert_eq!(
-            wifi_qr_payload("Cafe;Guest", "WPA", Some("a:b,c\\d"), false),
-            "WIFI:T:WPA;S:Cafe\\;Guest;P:a\\:b\\,c\\\\d;H:false;;"
-        );
-    }
+#[test]
+fn ap_rows_preserve_ssid_and_bssid_delimiters() {
+    assert_eq!(
+        split_row(r"*:Cafe\:Guest:aa\:bb\:cc:6115 MHz:33:Infra:100 Mbit/s")[1],
+        "Cafe:Guest"
+    );
+}
 
-    #[test]
-    fn frequency_bands_include_wifi_6e() {
-        assert_eq!(frequency_band(2_437), "2.4 GHz");
-        assert_eq!(frequency_band(5_180), "5 GHz");
-        assert_eq!(frequency_band(6_115), "6 GHz");
-    }
-
-    #[test]
-    fn payload_marks_hidden_open_networks() {
-        assert_eq!(
-            wifi_qr_payload("Hidden", "nopass", None, true),
-            "WIFI:T:nopass;S:Hidden;H:true;;"
-        );
+#[test]
+fn identity_includes_interface_profile_and_access_point() {
+    let original = Identity {
+        interface: "wlan0".into(),
+        uuid: "active-not-same-name".into(),
+        ssid: "duplicate".into(),
+        bssid: "first".into(),
+        active_path: "/active/1".into(),
+    };
+    for updated in [
+        Identity {
+            interface: "wlan1".into(),
+            ..original.clone()
+        },
+        Identity {
+            uuid: "other-same-ssid".into(),
+            ..original.clone()
+        },
+        Identity {
+            bssid: "roamed".into(),
+            ..original.clone()
+        },
+        Identity {
+            active_path: "/active/2".into(),
+            ..original.clone()
+        },
+    ] {
+        assert!(original != updated);
     }
 }

@@ -1,0 +1,67 @@
+Fix three native compatibility bugs in Quickshell v0.3.1.
+
+NetworkManager defaults an omitted Wi-Fi mode to infrastructure. Keep explicit
+non-infrastructure modes excluded without changing other profile matching.
+An absent Wi-Fi security group means Open; malformed explicit security remains
+Unknown rather than being treated as an open network.
+Notification action identifiers can be reused with updated display labels.
+
+diff --git a/src/network/nm/wireless.cpp b/src/network/nm/wireless.cpp
+--- a/src/network/nm/wireless.cpp
++++ b/src/network/nm/wireless.cpp
+@@ -123,9 +123,9 @@
+
+-	const auto ssid = map["802-11-wireless"]["ssid"].toString();
+-	const auto mode = map["802-11-wireless"]["mode"].toString();
+-
+-	if (mode == "infrastructure") {
+-		auto* net = this->mNetworks.value(ssid);
+-		if (!net) net = this->registerNetwork(ssid);
+-		net->addSettings(settings);
++	const auto ssid = map["802-11-wireless"]["ssid"].toString();
++	const auto mode = map["802-11-wireless"]["mode"].toString();
++
++	if (mode.isEmpty() || mode == "infrastructure") {
++		auto* net = this->mNetworks.value(ssid);
++		if (!net) net = this->registerNetwork(ssid);
++		net->addSettings(settings);
+
+diff --git a/src/network/nm/utils.cpp b/src/network/nm/utils.cpp
+--- a/src/network/nm/utils.cpp
++++ b/src/network/nm/utils.cpp
+@@ -21,6 +21,6 @@
+ WifiSecurityType::Enum securityFromSettingsMap(const NMSettingsMap& settings) {
+-	const QString mapName = "802-11-wireless-security";
+-	if (!settings.contains(mapName)) return WifiSecurityType::Unknown;
+-	const QVariantMap& security = settings.value(mapName);
+-	if (security.isEmpty()) return WifiSecurityType::Open;
++	const QString mapName = "802-11-wireless-security";
++	if (!settings.contains(mapName)) return WifiSecurityType::Open;
++	const QVariantMap& security = settings.value(mapName);
++	if (security.isEmpty()) return WifiSecurityType::Unknown;
+
+@@ -49,6 +49,6 @@
+-	} else if (keyMgmt == "owe") {
+-		return WifiSecurityType::Owe;
+-	}
+-	return WifiSecurityType::Open;
++	} else if (keyMgmt == "owe") {
++		return WifiSecurityType::Owe;
++	}
++	return WifiSecurityType::Unknown;
+ }
+
+diff --git a/src/services/notifications/notification.cpp b/src/services/notifications/notification.cpp
+--- a/src/services/notifications/notification.cpp
++++ b/src/services/notifications/notification.cpp
+@@ -58,6 +58,6 @@
+ void NotificationAction::setText(const QString& text) {
+-	if (text != this->mText) return;
+-
+-	this->mText = text;
+-	emit this->textChanged();
++	if (text == this->mText) return;
++
++	this->mText = text;
++	emit this->textChanged();
+ }

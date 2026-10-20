@@ -21,11 +21,15 @@ in
     ./hardware.nix
     ./services.nix
     ../niri/rofi
-    ../niri/wayle
+    ../niri/quickshell/package.nix
   ];
 
   config = {
     _module.args.repoPackages = repoPackages;
+
+    # Browser notifications go to the native Quickshell notification server.
+    environment.etc."opt/chrome/policies/managed/desktop-notifications.json".text =
+      builtins.toJSON { AllowSystemNotifications = true; };
 
     nixpkgs.config.allowUnfree = true;
     nixpkgs.overlays = [

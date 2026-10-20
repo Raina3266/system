@@ -165,7 +165,7 @@ binds {
     Mod+Z hotkey-overlay-title="Open Zed" { spawn "zeditor"; }
     Mod+D hotkey-overlay-title="Open Dolphin" { spawn "dolphin"; }
     Mod+P hotkey-overlay-title="Pick a Color: niri" { spawn-sh "niri msg pick-color | wl-copy"; }
-    Mod+N hotkey-overlay-title="Wayle Dashboard" { spawn-sh "busctl --user call com.wayle.Shell1 /com/wayle/Shell com.wayle.Shell1 DropdownToggle ss dashboard ''"; }
+    Mod+N hotkey-overlay-title="System Dashboard" { spawn-sh "quickshell -c media ipc call dashboard toggle ''"; }
 
     // Volume and mic controls (PipeWire/WirePlumber, work when locked)
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
@@ -192,7 +192,7 @@ binds {
     F5 hotkey-overlay-title="Brightness Down" { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
     F6 hotkey-overlay-title="Brightness Up"   { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
     F7 hotkey-overlay-title="Switch Window"   { focus-window-down; }
-    F8 hotkey-overlay-title="Do Not Disturb"   { spawn "wayle" "notify" "dnd"; }
+    F8 hotkey-overlay-title="Do Not Disturb"   { spawn "quickshell" "ipc" "--config" "media" "call" "notifications" "toggleDnd"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }

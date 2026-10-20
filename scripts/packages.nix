@@ -88,7 +88,8 @@ let
       commonArgs
       // packageExtra
       // {
-        inherit pname cargoArtifacts;
+        inherit pname;
+        cargoArtifacts = extra.cargoArtifacts or cargoArtifacts;
         version = "0.1.0";
         src = memberSrc pname;
         # Feeds both the build and the test phase, so tests stay scoped to the
@@ -131,12 +132,8 @@ let
 in
 rec {
   inherit withParentDeath;
-  # The former panel now only streams Wayle's media title to Waybar.
-  controlCentre = mkWorkspacePackage "control-centre" { };
 
-  # The media panel Waybar's centre button opens. It reads MPRIS off the
-  # session bus itself rather than going through Wayle, which is what took it
-  # out of the patch stack.
+  # Retained legacy GTK media panel; the desktop now uses native Quickshell.
   mediaPanel = mkWorkspacePackage "media-panel" {
     # curl fetches a remote cover once and caches it. preFixup rather than
     # postInstall so the argument joins wrapGAppsHook4's own wrapper instead of
@@ -192,13 +189,20 @@ rec {
 
   networkManager = mkWorkspacePackage "network-manager" {
     cargoPackage = "rofi-network";
+    # This small JSON/QR gap bridge no longer depends on the GTK/D-Bus Rust
+    # stack. Build only its dependency graph, not the legacy GUI workspace.
+    cargoArtifacts = craneLib.buildDepsOnly (
+      commonArgs
+      // {
+        pname = "network-manager-deps";
+        version = "0.1.0";
+        src = craneLib.cleanCargoSource ./.;
+        cargoExtraArgs = "--locked --package rofi-network";
+      }
+    );
     dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/network-manager" \
-        --set ROFI_NETWORK_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_NETWORK_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
-        --set ROFI_NETWORK_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
-        --set ROFI_NETWORK_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}" \
         --set NETWORK_MANAGER_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
         --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
     '';

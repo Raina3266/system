@@ -19,10 +19,6 @@ let
     "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
     "rofi/rofi-finder.rasi" = "themes/rofi/rofi-finder.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
-    # Wayle's style entry point is hardcoded at styles/index.scss and it
-    # watches that whole directory. themes/wayle/index.scss imports the
-    # per-panel partials next to it; edit those, not the entry file.
-    "wayle/styles" = "themes/wayle";
   };
 
   # <path under $XDG_DATA_HOME> = <path in this repository>

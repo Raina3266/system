@@ -97,10 +97,10 @@ ShellRoot {
                     id: tabs
                     Layout.fillWidth: true
                     spacing: 0
-                    readonly property real tabWidth: width / 3
+                    readonly property real tabWidth: width / tabRepeater.count
                     Repeater {
                         id: tabRepeater
-                        model: ["Bluetooth", "Output", "Input"]
+                        model: ["Bluetooth", "Audio"]
                         delegate: Shared.ControlButton {
                             required property int index
                             required property string modelData
@@ -168,15 +168,32 @@ ShellRoot {
                             id: bluetooth
                             active: root.opened && root.currentTab === 0
                         }
-                        AudioPage {
-                            kind: "output"
-                            helper: root.helper
-                            active: root.opened && root.currentTab === 1
-                        }
-                        AudioPage {
-                            kind: "input"
-                            helper: root.helper
-                            active: root.opened && root.currentTab === 2
+                        ColumnLayout {
+                            spacing: 12
+                            // Matching size hints keep output and input in equal halves.
+                            AudioPage {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: 0
+                                Layout.preferredHeight: 1
+                                kind: "output"
+                                helper: root.helper
+                                active: root.opened && root.currentTab === 1
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 1
+                                color: panel.colors.muted
+                            }
+                            AudioPage {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: 0
+                                Layout.preferredHeight: 1
+                                kind: "input"
+                                helper: root.helper
+                                active: root.opened && root.currentTab === 1
+                            }
                         }
                     }
                 }
