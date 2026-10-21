@@ -89,7 +89,9 @@ in
         programs.waybar = {
           enable = true;
           systemd.enable = true;
-          settings = topBars // { inherit bottomBar; };
+          settings = topBars // {
+            inherit bottomBar;
+          };
         };
 
         systemd.user.services.waybar = {
@@ -99,11 +101,13 @@ in
               "waybar-timer.service"
               "rofi-clipboard-collector.service"
               "quickshell-media.service"
+              "ags-media.service"
             ];
             After = [
               "waybar-timer.service"
               "rofi-clipboard-collector.service"
               "quickshell-media.service"
+              "ags-media.service"
             ];
           };
           Service = {

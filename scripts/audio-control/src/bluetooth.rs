@@ -1,7 +1,5 @@
 use std::env;
-use std::fs;
 use std::io;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use bluer::agent::{Agent, ReqError, ReqResult};
@@ -9,18 +7,10 @@ use bluer::{Adapter, Address, Device, ErrorKind, Session};
 use futures_util::StreamExt;
 
 use crate::AppResult;
-use crate::model::{BluetoothEntry, CodeKind, hex_decode, hex_encode};
+use crate::model::{BluetoothEntry, CodeKind};
 
-/// Discovery runs detached, so this window is about how long newly powered-on
-/// devices have to show up rather than about how long the menu blocks.
+/// How long newly powered-on devices have to appear during CLI discovery.
 const DEFAULT_SCAN_SECONDS: u64 = 10;
-/// How long the detached `connect-bg` agent waits for the user to type a
-/// pairing code before giving up and letting BlueZ cancel the attempt.
-const CODE_TIMEOUT: Duration = Duration::from_secs(120);
-const CODE_POLL: Duration = Duration::from_millis(100);
-const REQUEST_FILENAME: &str = "audio-control-pair-request";
-const RESPONSE_FILENAME: &str = "audio-control-pair-response";
-const SCANNING_FILENAME: &str = "audio-control-scanning";
 
 pub struct Backend {
     session: Session,
@@ -90,35 +80,19 @@ impl Backend {
 
     /// Runs a bounded discovery window. BlueZ discovers for as long as the
     /// event stream is alive, so the timeout is what stops the scan.
-    ///
-    /// Blocks for the whole window, so only the detached `scan-bg` process
-    /// calls it. A marker file tells short-lived invocations a scan is running.
     pub async fn scan(&self) -> AppResult<()> {
         let seconds = env::var("AUDIO_CONTROL_SCAN_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(DEFAULT_SCAN_SECONDS);
         let events = self.adapter.discover_devices().await?;
-        mark_scanning(Duration::from_secs(seconds));
-        let outcome = tokio::time::timeout(Duration::from_secs(seconds), async move {
+        let _ = tokio::time::timeout(Duration::from_secs(seconds), async move {
             let mut events = std::pin::pin!(events);
             while events.next().await.is_some() {}
         })
         .await;
-        // Expire rather than clear: a second scanner started after this one
-        // owns a later deadline, and wiping it would report "not scanning"
-        // while its discovery is still running.
-        expire_scanning();
-        let _ = outcome;
+
         Ok(())
-    }
-
-    pub async fn disconnect(&self, entry: &BluetoothEntry) -> AppResult<()> {
-        Ok(self.device(&entry.address)?.disconnect().await?)
-    }
-
-    pub async fn forget(&self, entry: &BluetoothEntry) -> AppResult<()> {
-        Ok(self.adapter.remove_device(entry.address.parse()?).await?)
     }
 
     /// Pairs when needed, then connects. Registering our own agent on this
@@ -130,9 +104,9 @@ impl Backend {
     /// device as connected, and leaves any bonding the peer then asks for to
     /// whichever agent holds the default role. That is how an unpaired
     /// keyboard ends up listed as connected while nothing it types arrives.
-    pub async fn pair_and_connect(&self, device: &Device, frontend: Frontend) -> AppResult<()> {
+    pub async fn pair_and_connect(&self, device: &Device) -> AppResult<()> {
         if !device.is_paired().await? {
-            let _agent = self.session.register_agent(pairing_agent(frontend)).await?;
+            let _agent = self.session.register_agent(pairing_agent()).await?;
             match device.pair().await {
                 Ok(()) => {}
                 // BlueZ reports an already-known device as AlreadyExists; that
@@ -177,15 +151,6 @@ impl Backend {
                 "{target:?} matches several devices; pass an address instead"
             ))
             .into()),
-        }
-    }
-
-    pub async fn name_of(&self, address: &str) -> String {
-        match self.device(address) {
-            Ok(device) => device_name(&device, address)
-                .await
-                .unwrap_or_else(|| address.to_owned()),
-            Err(_) => address.to_owned(),
         }
     }
 
@@ -257,7 +222,7 @@ pub async fn pair(target: &str) -> AppResult<()> {
     let device = backend.device(&entry.address)?;
     eprintln!("Pairing with {} ({})…", entry.name, entry.address);
     backend
-        .pair_and_connect(&device, Frontend::Terminal)
+        .pair_and_connect(&device)
         .await
         .map_err(|error| io::Error::other(error_message(&entry.name, error.as_ref())))?;
     println!(
@@ -301,20 +266,16 @@ async fn print_entries(backend: &Backend) -> AppResult<()> {
 
 async fn read_entry(device: &Device, address: Address) -> AppResult<BluetoothEntry> {
     let address = address.to_string();
-    // Concurrent within one device too: six properties, one round trip's worth
-    // of latency instead of six.
-    let (name, icon, connected, paired, battery) = futures_util::join!(
+    // Overlap independent property reads within each device as well.
+    let (name, connected, paired, battery) = futures_util::join!(
         device_name(device, &address),
-        device.icon(),
         device.is_connected(),
         device.is_paired(),
         device.battery_percentage(),
     );
     Ok(BluetoothEntry {
-        key: format!("bt:{}", hex_encode(&address)),
         named: name.is_some(),
         name: name.unwrap_or_else(|| address.clone()),
-        icon: icon.ok().flatten(),
         connected: connected?,
         paired: paired?,
         battery: battery.ok().flatten(),
@@ -363,75 +324,55 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 // Pairing agent
 //
 // BlueZ calls back into an agent while a device pairs, so the agent must
-// outlive the call. It and the front end talk through two files in
-// $XDG_RUNTIME_DIR: the agent writes a request, the front end writes the answer.
+// outlive the call. Prompts go to stderr and answers come from stdin, including
+// when Quickshell connects the process pipes to its pairing card.
 // ---------------------------------------------------------------------------
 
-/// Where the agent's prompts go while a device pairs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Frontend {
-    /// Prompt files in `$XDG_RUNTIME_DIR`, for a graphical front end.
-    Files,
-    /// Messages on stderr, answers on stdin.
-    Terminal,
+/// A prompt requiring an answer while pairing.
+pub(crate) struct PairRequest {
+    pub(crate) kind: CodeKind,
+    pub(crate) message: String,
 }
 
-/// A prompt raised by the agent while pairing.
-pub struct PairRequest {
-    /// `None` for informational prompts that need no answer, such as a passkey
-    /// the user has to type on the *device* rather than here.
-    pub kind: Option<CodeKind>,
-    pub address: String,
-    pub message: String,
-}
-
-fn pairing_agent(frontend: Frontend) -> Agent {
+fn pairing_agent() -> Agent {
     Agent {
         // Not the default agent: this one only handles pairings that this
         // process starts, leaving incoming pairings to the session agent.
         request_default: false,
-        request_pin_code: Some(Box::new(move |request| {
-            Box::pin(async move { ask(CodeKind::Pin, request.device.to_string(), frontend).await })
+        request_pin_code: Some(Box::new(|request| {
+            Box::pin(async move { ask(CodeKind::Pin, request.device.to_string()).await })
         })),
-        request_passkey: Some(Box::new(move |request| {
+        request_passkey: Some(Box::new(|request| {
             Box::pin(async move {
-                let code = ask(CodeKind::Passkey, request.device.to_string(), frontend).await?;
+                let code = ask(CodeKind::Passkey, request.device.to_string()).await?;
                 code.trim().parse::<u32>().map_err(|_| ReqError::Rejected)
             })
         })),
-        display_pin_code: Some(Box::new(move |request| {
+        display_pin_code: Some(Box::new(|request| {
             Box::pin(async move {
-                announce(
-                    &request.device.to_string(),
-                    format!("Type {} on the device to finish pairing.", request.pincode),
-                    frontend,
-                );
+                eprintln!("Type {} on the device to finish pairing.", request.pincode);
                 Ok(())
             })
         })),
         // Zero-padded: BlueZ passes the passkey as a number, and a keyboard
         // waiting on six digits rejects the five that 042311 would print as.
-        display_passkey: Some(Box::new(move |request| {
+        display_passkey: Some(Box::new(|request| {
             Box::pin(async move {
-                announce(
-                    &request.device.to_string(),
-                    format!(
-                        "Type {:06} on the device and press Enter to finish pairing.",
-                        request.passkey
-                    ),
-                    frontend,
+                eprintln!(
+                    "Type {:06} on the device and press Enter to finish pairing.",
+                    request.passkey
                 );
                 Ok(())
             })
         })),
         // Starting pairing is not consent to a numeric comparison: the user
         // must verify that both devices display the same passkey.
-        request_confirmation: Some(Box::new(move |request| {
+        request_confirmation: Some(Box::new(|request| {
             Box::pin(async move {
-                ask_request(
-                    confirmation_request(request.device.to_string(), request.passkey),
-                    frontend,
-                )
+                ask_request(confirmation_request(
+                    request.device.to_string(),
+                    request.passkey,
+                ))
                 .await?;
                 Ok(())
             })
@@ -444,45 +385,35 @@ fn pairing_agent(frontend: Frontend) -> Agent {
 
 /// Raises a prompt the pairing cannot continue without, and waits for it to be
 /// answered.
-async fn ask(kind: CodeKind, address: String, frontend: Frontend) -> ReqResult<String> {
-    ask_request(
-        PairRequest {
-            kind: Some(kind),
-            message: kind.prompt(&address),
-            address,
-        },
-        frontend,
-    )
+async fn ask(kind: CodeKind, address: String) -> ReqResult<String> {
+    ask_request(PairRequest {
+        kind,
+        message: kind.prompt(&address),
+    })
     .await
 }
 
 pub(crate) fn confirmation_request(address: String, passkey: u32) -> PairRequest {
     PairRequest {
-        kind: Some(CodeKind::Confirmation),
+        kind: CodeKind::Confirmation,
         message: format!(
             "Does passkey {passkey:06} match the one shown on {address}? Type yes or no."
         ),
-        address,
     }
 }
 
-pub(crate) fn validate_answer(kind: Option<CodeKind>, answer: &str) -> ReqResult<String> {
+pub(crate) fn validate_answer(kind: CodeKind, answer: &str) -> ReqResult<String> {
     let answer = answer.trim();
-    if answer.is_empty()
-        || (kind == Some(CodeKind::Confirmation) && !answer.eq_ignore_ascii_case("yes"))
+    if answer.is_empty() || (kind == CodeKind::Confirmation && !answer.eq_ignore_ascii_case("yes"))
     {
         return Err(ReqError::Rejected);
     }
     Ok(answer.to_owned())
 }
 
-async fn ask_request(request: PairRequest, frontend: Frontend) -> ReqResult<String> {
-    let kind = request.kind;
-    let answer = match frontend {
-        Frontend::Files => ask_through_files(request).await?,
-        Frontend::Terminal => ask_on_terminal(request.message).await?,
-    };
-    validate_answer(kind, &answer)
+async fn ask_request(request: PairRequest) -> ReqResult<String> {
+    let answer = ask_on_terminal(request.message).await?;
+    validate_answer(request.kind, &answer)
 }
 
 /// Reads the answer from stdin. BlueZ times the pairing out on its own, so the
@@ -502,200 +433,6 @@ async fn ask_on_terminal(prompt: String) -> ReqResult<String> {
     })
     .await
     .map_err(|_| ReqError::Canceled)?
-}
-
-/// Publishes a prompt and waits for the front end to answer it.
-async fn ask_through_files(request: PairRequest) -> ReqResult<String> {
-    let _ = fs::remove_file(response_path().ok_or(ReqError::Canceled)?);
-    write_request(&request).map_err(|_| ReqError::Canceled)?;
-
-    let deadline = std::time::Instant::now() + CODE_TIMEOUT;
-    while std::time::Instant::now() < deadline {
-        if let Some(answer) = take_response() {
-            return answer.ok_or(ReqError::Rejected);
-        }
-        tokio::time::sleep(CODE_POLL).await;
-    }
-    clear_request();
-    Err(ReqError::Canceled)
-}
-
-/// Raises a prompt that needs no answer here, such as a passkey to be typed on
-/// the device itself.
-fn announce(address: &str, message: String, frontend: Frontend) {
-    match frontend {
-        Frontend::Files => {
-            let _ = write_request(&PairRequest {
-                kind: None,
-                address: address.to_owned(),
-                message,
-            });
-        }
-        Frontend::Terminal => eprintln!("{message}"),
-    }
-}
-
-fn runtime_path(filename: &str) -> Option<PathBuf> {
-    Some(PathBuf::from(env::var_os("XDG_RUNTIME_DIR")?).join(filename))
-}
-
-fn request_path() -> Option<PathBuf> {
-    runtime_path(REQUEST_FILENAME)
-}
-
-fn response_path() -> Option<PathBuf> {
-    runtime_path(RESPONSE_FILENAME)
-}
-
-/// Temp file plus rename, so a concurrent reader never sees a partial prompt.
-fn write_atomic(path: &PathBuf, contents: &str) -> io::Result<()> {
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, contents)?;
-    fs::rename(&temporary, path)
-}
-
-/// Wire format: one line for the kind, then the address and the human-readable
-/// message hex-encoded so neither can smuggle a newline into the file.
-pub(crate) fn encode_request(request: &PairRequest) -> String {
-    format!(
-        "{}\n{}\n{}\n",
-        request.kind.map(CodeKind::name).unwrap_or("display"),
-        hex_encode(&request.address),
-        hex_encode(&request.message),
-    )
-}
-
-pub(crate) fn decode_request(contents: &str) -> Option<PairRequest> {
-    let mut lines = contents.lines();
-    let (kind, address, message) = (lines.next()?, lines.next()?, lines.next()?);
-    Some(PairRequest {
-        // Anything that is not a code kind — "display" — is informational.
-        kind: kind.parse::<CodeKind>().ok(),
-        address: hex_decode(address)?,
-        message: hex_decode(message)?,
-    })
-}
-
-pub(crate) fn encode_response(code: Option<&str>) -> String {
-    match code {
-        Some(code) => format!("code\n{}\n", hex_encode(code)),
-        None => "cancel\n\n".to_owned(),
-    }
-}
-
-pub(crate) fn decode_response(contents: &str) -> Option<Option<String>> {
-    let mut lines = contents.lines();
-    match (lines.next()?, lines.next().unwrap_or_default()) {
-        ("code", code) => Some(hex_decode(code)),
-        _ => Some(None),
-    }
-}
-
-fn write_request(request: &PairRequest) -> io::Result<()> {
-    let path = request_path().ok_or_else(|| io::Error::other("XDG_RUNTIME_DIR is not set"))?;
-    write_atomic(&path, &encode_request(request))
-}
-
-pub fn clear_request() {
-    if let Some(path) = request_path() {
-        let _ = fs::remove_file(path);
-    }
-}
-
-/// Reads and consumes a pending prompt. Prompts are single-use: the front end
-/// holds the resulting state from there on.
-pub fn take_request() -> Option<PairRequest> {
-    let path = request_path()?;
-    let contents = fs::read_to_string(&path).ok()?;
-    let _ = fs::remove_file(&path);
-    decode_request(&contents)
-}
-
-/// Answers a prompt. `None` cancels the pairing.
-pub fn answer_request(code: Option<&str>) {
-    let Some(path) = response_path() else {
-        return;
-    };
-    let _ = write_atomic(&path, &encode_response(code));
-}
-
-fn take_response() -> Option<Option<String>> {
-    let path = response_path()?;
-    let contents = fs::read_to_string(&path).ok()?;
-    let _ = fs::remove_file(&path);
-    decode_response(&contents)
-}
-
-/// Drops any prompt, answer, or scan marker left behind by an abandoned
-/// pairing or a killed scanner, so the next launch starts clean.
-pub fn cleanup() {
-    clear_request();
-    clear_scanning();
-    if let Some(path) = response_path() {
-        let _ = fs::remove_file(path);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Scan marker
-//
-// Discovery runs in a detached `scan-bg` process so opening the menu never
-// waits. The marker records when that window ends, so a separate invocation
-// knows to report "Scanning…" and leave a running scan alone. Storing the
-// deadline rather than a flag means a killed scanner expires on its own.
-// ---------------------------------------------------------------------------
-
-fn scanning_path() -> Option<PathBuf> {
-    runtime_path(SCANNING_FILENAME)
-}
-
-fn now_seconds() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|since| since.as_secs())
-        .unwrap_or(0)
-}
-
-fn mark_scanning(window: Duration) {
-    if let Some(path) = scanning_path() {
-        let _ = write_atomic(&path, &format!("{}\n", now_seconds() + window.as_secs()));
-    }
-}
-
-pub fn clear_scanning() {
-    if let Some(path) = scanning_path() {
-        let _ = fs::remove_file(path);
-    }
-}
-
-pub(crate) fn window_is_open(contents: &str, now: u64) -> bool {
-    contents
-        .trim()
-        .parse::<u64>()
-        .is_ok_and(|deadline| deadline > now)
-}
-
-/// True while a `scan-bg` window is still open. Self-cleaning: a marker whose
-/// deadline has passed, or that a killed scanner left unreadable, is removed
-/// here so a dead scanner never reports as running.
-pub fn is_scanning() -> bool {
-    let Some(path) = scanning_path() else {
-        return false;
-    };
-    let Ok(contents) = fs::read_to_string(&path) else {
-        return false;
-    };
-    if window_is_open(&contents, now_seconds()) {
-        return true;
-    }
-    let _ = fs::remove_file(&path);
-    false
-}
-
-/// Drops the marker only if its window has closed, leaving a later scanner's
-/// marker in place.
-pub fn expire_scanning() {
-    let _ = is_scanning();
 }
 
 pub mod battery_provider {

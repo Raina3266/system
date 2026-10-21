@@ -23,7 +23,7 @@ let
 
   # <path under $XDG_DATA_HOME> = <path in this repository>
   dataLinks = {
-    "color-schemes/Cyberpunk.colors" = "themes/Cyberpunk.colors"; # hand-written, edit in place
+
     "fcitx5/themes/cyberpunk/theme.conf" = "themes/fcitx5.conf";
   };
 
@@ -35,7 +35,7 @@ let
     rev = "01bf4df4666e9021ac8013bc2c4eaabc8d312d68";
   };
 
-  # Canonical values live in ./palette.nix, shared with the Quickshell panel.
+  # Canonical values live in ./palette.nix, shared with the desktop panels.
   palette = import ./palette.nix;
   daemonRed = palette.red;
   daemonPink = palette.pink;

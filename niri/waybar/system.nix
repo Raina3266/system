@@ -1,20 +1,26 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
-# Dashboard, network, media, and audio use native Quickshell panels.
-{ lib, pkgs, packages }:
+# Media uses AGS/Astal GTK4; dashboard, network, and audio stay in Quickshell.
+{
+  lib,
+  pkgs,
+  packages,
+}:
 let
   mprisenceNativeHost =
     pkgs.writeTextDir "etc/chromium/native-messaging-hosts/mprisence.web.bridge.json"
-      (builtins.toJSON {
-        name = "mprisence.web.bridge";
-        description = "Publish each browser media tab as an MPRIS player";
-        path = "${pkgs.mprisence}/bin/mprisence";
-        type = "stdio";
-        allowed_origins = [
-          "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
-          "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
-        ];
-      });
+      (
+        builtins.toJSON {
+          name = "mprisence.web.bridge";
+          description = "Publish each browser media tab as an MPRIS player";
+          path = "${pkgs.mprisence}/bin/mprisence";
+          type = "stdio";
+          allowed_origins = [
+            "chrome-extension://pnkkjbdopihogobhhjbgapbpfccinjjo/"
+            "chrome-extension://pphdmbejbipjlocngoefnmjoijcbdejf/"
+          ];
+        }
+      );
 
   dashboardModule = monitor: {
     format = "{}";
@@ -68,8 +74,7 @@ let
         '{text:$text, tooltip:$tooltip, class:$class}'
     '';
     tooltip = true;
-    on-click =
-      "${lib.getExe pkgs.quickshell} -c media ipc call dashboard toggle ${lib.escapeShellArg monitor}";
+    on-click = "${lib.getExe pkgs.quickshell} -c media ipc call dashboard toggle ${lib.escapeShellArg monitor}";
   };
 
   networkModule = monitor: {
@@ -78,8 +83,7 @@ let
     return-type = "json";
     tooltip = true;
     escape = false;
-    on-click =
-      "${lib.getExe pkgs.quickshell} ipc --config media call network toggle ${lib.escapeShellArg monitor}";
+    on-click = "${lib.getExe pkgs.quickshell} ipc --config media call network toggle ${lib.escapeShellArg monitor}";
   };
 
   # Quickshell owns Pair/Output/Input; the helper handles physical profiles.
@@ -89,29 +93,32 @@ let
     return-type = "json";
     tooltip = true;
     escape = false;
-    on-click =
-      "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel toggle ${lib.escapeShellArg monitor}";
+    on-click = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel toggle ${lib.escapeShellArg monitor}";
     on-click-middle = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel bluetoothPower";
   };
 
-  # The resident Quickshell media panel (themes/quickshell/), toggled over IPC, lists
-  # every playing or paused source, seeks, and routes each stream through
-  # audio-control's profile-aware move.
+  # The resident AGS/Astal media panel owns source selection and playback.
+  # Its launcher keeps AGS instance/request details out of Waybar.
   mediaModule = monitor: {
     format = "{}";
     return-type = "json";
-    exec = "${lib.getExe pkgs.quickshell} -c media ipc call media status";
+    exec = "${lib.getExe packages.mediaPanel} status";
     tooltip = true;
     escape = true;
     interval = 1;
     "exec-on-event" = false;
-    on-click = "${lib.getExe pkgs.quickshell} -c media ipc call media toggle ${lib.escapeShellArg monitor}";
-    on-click-middle = "${lib.getExe pkgs.quickshell} -c media ipc call media togglePauseAll";
-    on-click-right = "${lib.getExe pkgs.quickshell} -c media ipc call media cycleMedia";
+    on-click = "${lib.getExe packages.mediaPanel} toggle ${lib.escapeShellArg monitor}";
+    on-click-middle = "${lib.getExe packages.mediaPanel} togglePauseAll";
+    on-click-right = "${lib.getExe packages.mediaPanel} cycleMedia";
   };
 in
 {
-  inherit audioModule dashboardModule networkModule mediaModule;
+  inherit
+    audioModule
+    dashboardModule
+    networkModule
+    mediaModule
+    ;
 
   homeConfig = {
     home.packages = [

@@ -1,9 +1,9 @@
-//! Cover art for the Quickshell media panel's local tracks.
+//! Cover art for the media panel's local tracks.
 //!
-//! QML loads a published `mpris:artUrl` itself, but local players such as
-//! Elisa publish none: the cover sits inside the file or beside it, and QML
-//! cannot read embedded tags. Look for nearby cover files first, then the
-//! embedded picture, written to a cache so repeat lookups cost nothing.
+//! The frontend loads a published `mpris:artUrl` itself, but local players such
+//! as Elisa publish none: the cover sits inside the file or beside it. Look for
+//! nearby cover files first, then the embedded picture, written to a cache so
+//! repeat lookups cost nothing.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
@@ -96,7 +96,7 @@ fn matching(entries: &[String], folder: &Path, stems: &[&str]) -> Option<PathBuf
     })
 }
 
-/// The cover carried inside the file, written out so QML can load it.
+/// The cover carried inside the file, written out so the frontend can load it.
 fn embedded(track: &Path) -> Option<PathBuf> {
     let tagged = Probe::open(track).ok()?.read().ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
@@ -137,26 +137,4 @@ fn cache_dir() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn file_urls_are_percent_decoded_into_paths() {
-        assert_eq!(
-            percent_decode("MAMAMOO%20%7C%7C%20MEMORY"),
-            Some("MAMAMOO || MEMORY".to_owned())
-        );
-        assert_eq!(
-            local_path("file:///home/raina/Documents/MAMAMOO%20%7C%7C%20MEMORY/track%20one.mp3"),
-            Some(PathBuf::from(
-                "/home/raina/Documents/MAMAMOO || MEMORY/track one.mp3"
-            ))
-        );
-        assert_eq!(
-            local_path("/home/raina/track.mp3"),
-            Some(PathBuf::from("/home/raina/track.mp3"))
-        );
-        assert_eq!(local_path("relative/track.mp3"), None);
-        assert_eq!(local_path("file:///home/raina/bad%2track.mp3"), None);
-    }
-}
+media_unit_tests!(artwork);

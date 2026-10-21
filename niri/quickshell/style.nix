@@ -1,4 +1,4 @@
-# Shared presentation for the media and audio shells; no service dependencies.
+# Shared presentation for the desktop and audio shells; no service dependencies.
 {
   config,
   pkgs,
@@ -25,7 +25,7 @@ let
         readonly property color dimPrimary: "${palette.dimPink}"
         readonly property color destructive: "${palette.red}"
         readonly property color warning: "${palette.yellow}"
-        readonly property color ok: "${palette.green}"
+
     }
   '';
   liveLink = path: config.lib.file.mkOutOfStoreSymlink "${repoRoot}/${path}";
@@ -40,18 +40,23 @@ in
   # Quickshell only scans imports within each configuration's root. These
   # aliases all point to the same source files, not separate style copies.
   xdg.configFile = builtins.listToAttrs (
-    builtins.concatMap (
-      shell:
-      map (name: {
-        name = "quickshell/${shell}/shared/${name}";
-        value.source = liveLink "themes/quickshell/${name}";
-      }) qmlFiles
-      ++ [
-        {
-          name = "quickshell/${shell}/shared/Colors.qml";
-          value.source = colorsQml;
-        }
+    builtins.concatMap
+      (
+        shell:
+        map (name: {
+          name = "quickshell/${shell}/shared/${name}";
+          value.source = liveLink "themes/quickshell/${name}";
+        }) qmlFiles
+        ++ [
+          {
+            name = "quickshell/${shell}/shared/Colors.qml";
+            value.source = colorsQml;
+          }
+        ]
+      )
+      [
+        "media"
+        "audio-control"
       ]
-    ) [ "media" "audio-control" ]
   );
 }

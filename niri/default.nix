@@ -44,6 +44,7 @@ in
 {
   imports = [
     ./audio-control
+    ./panels
     ./quickshell
     ./waybar
   ];

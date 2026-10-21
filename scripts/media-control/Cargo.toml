@@ -3,6 +3,10 @@ name = "media-control"
 version.workspace = true
 edition.workspace = true
 
+[[test]]
+name = "tests"
+path = "src/tests.rs"
+
 [dependencies]
 lofty = "0.22"
 serde = { version = "1", features = ["derive"] }

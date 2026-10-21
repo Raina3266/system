@@ -1,0 +1,94 @@
+window.media-panel {
+    background: transparent;
+    color: @mp_cyan;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+}
+
+.media-panel .media-card,
+.media-panel .media-card * {
+    box-shadow: none;
+    text-shadow: none;
+}
+
+.media-panel .media-content { padding: 16px; }
+.media-panel label { background: transparent; }
+.media-panel .title { color: @mp_cyan; font-size: 15px; font-weight: bold; }
+.media-panel .metadata { color: @mp_foreground; font-size: 13px; }
+.media-panel .total-time { color: @mp_separator; }
+.media-panel .elapsed-time { color: @mp_cyan; }
+.media-panel .empty { color: @mp_separator; letter-spacing: 3px; margin: 12px 0; }
+.media-panel .failure { color: @mp_red; font-size: 11px; }
+.media-panel .divider { min-height: 1px; background: alpha(@mp_yellow, 0.15); }
+
+.media-panel .artwork {
+    background: @mp_secondaryBackground;
+    border: 1px solid alpha(@mp_separator, 0.4);
+    border-radius: 3px;
+    padding: 0;
+}
+.media-panel .art-glyph { color: @mp_separator; font-size: 26px; }
+.media-panel .art-glyph-small { color: @mp_separator; font-size: 14px; }
+
+.media-panel button {
+    background: transparent;
+    background-image: none;
+    color: @mp_cyan;
+    border: 0.35px solid alpha(@mp_foreground, 0.5);
+    border-radius: 3px;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    outline: none;
+    transition: background 120ms ease-out, border-color 100ms ease-out;
+}
+.media-panel button:hover, .media-panel button:focus-visible {
+    background: alpha(@mp_pink, 0.333);
+    border-color: @mp_yellow;
+    border-width: 1.5px;
+}
+.media-panel button:active { background: alpha(@mp_pink, 0.45); }
+.media-panel button:disabled { border-color: alpha(@mp_foreground, 0.25); color: @mp_separator; }
+.media-panel .icon-button { border-radius: 999px; min-width: 32px; min-height: 32px; }
+.media-panel .icon-button label { color: @mp_red; font-size: 16px; }
+.media-panel .icon-button:disabled label { color: @mp_separator; }
+.media-panel .play-button { min-width: 40px; min-height: 40px; background: alpha(@mp_dimPink, 0.35); }
+.media-panel .play-button label { font-size: 20px; }
+.media-panel .source-play { min-width: 26px; min-height: 26px; }
+.media-panel .source-play label { font-size: 13px; }
+.media-panel .volume-button { border: none; padding: 0 4px; border-radius: 16px; }
+.media-panel .volume-glyph { color: @mp_red; font-size: 16px; }
+.media-panel .volume-value { color: @mp_cyan; font-weight: bold; font-size: 12px; }
+.media-panel .volume-button:disabled label { color: @mp_separator; }
+
+.media-panel scale { padding: 0; min-height: 16px; margin: 0; }
+.media-panel scale trough { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: @mp_secondaryBackground; border: none; }
+.media-panel scale highlight { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: @mp_dimPink; border: none; }
+.media-panel scale.seek highlight { background: @mp_pink; }
+.media-panel scale slider {
+    min-width: 10px; min-height: 10px; margin: -3px 0;
+    background: @mp_pink; border: none; border-radius: 100%;
+    transition: min-width 120ms ease-out, min-height 120ms ease-out;
+}
+.media-panel scale:hover slider { min-width: 12px; min-height: 12px; margin: -4px 0; }
+.media-panel scale:active slider { min-width: 14px; min-height: 14px; margin: -5px 0; }
+.media-panel scale:disabled slider { background: transparent; }
+
+.media-panel .section-button { border: none; padding: 4px 4px 4px 8px; }
+.media-panel .section-button:hover { background: alpha(@mp_dimPink, 0.35); }
+.media-panel .section-glyph, .media-panel .section-label, .media-panel .chevron { color: @mp_pink; }
+.media-panel .section-label { font-size: 10px; letter-spacing: 2px; font-weight: bold; }
+.media-panel .source-name { color: @mp_cyan; font-size: 12px; font-weight: bold; }
+.media-panel .section-button:disabled .chevron { color: @mp_separator; }
+.media-panel .sources { margin-top: 4px; }
+.media-panel .source-row { border-radius: 4px; min-height: 42px; padding: 0 8px 0 6px; }
+.media-panel .source-row:hover { background: alpha(@mp_dimPink, 0.5); }
+.media-panel .source-row.current { background: @mp_dimPink; }
+.media-panel .source-select { border: none; background: transparent; }
+.media-panel .source-select:hover, .media-panel .source-select:active { background: transparent; }
+.media-panel .source-title { color: @mp_foreground; font-size: 13px; }
+.media-panel .source-row .source-name { font-size: 13px; }
+.media-panel scrolledwindow { background: transparent; border: none; }
+.media-panel scrollbar { background: transparent; }
+.media-panel scrollbar slider { background: alpha(@mp_pink, 0.5); min-width: 3px; border: none; border-radius: 2px; }

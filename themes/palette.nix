@@ -1,7 +1,7 @@
 # The one palette every toolkit shares. themes/default.nix patches Daemon's
-# KDE, GTK and VS Code themes from these values; niri/quickshell/default.nix
-# renders the media panel's Palette.qml from the same attrset, so a colour
-# change here cannot drift between toolkits.
+# KDE, GTK and VS Code themes; niri/quickshell/style.nix renders Colors.qml;
+# niri/panels/media-control/media.nix exports JSON for the AGS media panel's GTK CSS.
+# Generated assets stay outside the live-linked presentation directories.
 {
   red = "#D52C35";
   pink = "#D656C7";
@@ -16,7 +16,7 @@
   chromeBackground = "#170A0F";
 
   # Additional panel shades: an elevated surface, near-white reading text,
-  # and a success green used by the Quickshell media panel.
+  # and a success green used by the desktop panels.
   elevated = "#0E0616";
   foreground = "#F8F8F2";
   green = "#50FA7B";

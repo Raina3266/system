@@ -1,8 +1,14 @@
-//! Custom media policy for the native Quickshell frontend.
+//! Custom media policy for the native media frontend.
 //!
-//! Quickshell supplies MPRIS/PipeWire snapshots and executes native operations.
+//! The frontend supplies MPRIS/audio snapshots and executes native operations.
 //! This helper owns grouping, browser filtering, stream ownership, and metadata
 //! that those native services do not provide. It has no GUI or D-Bus backend.
+
+// The explicit integration target owns all tests; keep library test builds valid.
+#[cfg(test)]
+macro_rules! media_unit_tests {
+    ($module:ident) => {};
+}
 
 pub mod artwork;
 pub mod credit;

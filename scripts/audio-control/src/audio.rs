@@ -4,16 +4,11 @@ use libpulse_binding::context::introspect::Introspector;
 use libpulse_binding::def::PortAvailable;
 use libpulse_binding::operation::Operation;
 use libpulse_binding::volume::{ChannelVolumes, Volume};
-use pulsectl::controllers::types::{ApplicationInfo, DeviceInfo, DevicePortInfo};
-use pulsectl::controllers::{AppControl, DeviceControl, SinkController, SourceController};
+use pulsectl::controllers::types::{DeviceInfo, DevicePortInfo};
+use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 
 use crate::AppResult;
-use crate::model::{
-    AudioEntry, AudioKind, StreamEntry, hex_encode, short_device_name, single_line,
-};
-
-/// Volume step, in percent, for one press of the volume buttons.
-pub const STEP: i16 = 5;
+use crate::model::{AudioEntry, AudioKind, hex_encode, short_device_name, single_line};
 
 /// `SinkController` and `SourceController` implement the same `DeviceControl`
 /// trait but are distinct types, so one small enum lets every operation below
@@ -69,8 +64,7 @@ impl Controller {
         })
     }
 
-    /// Check both transport completion and the server's acknowledgement. The
-    /// convenience volume/mute setters in pulsectl discard operation errors.
+    /// Check both transport completion and the server's acknowledgement.
     fn change(
         &mut self,
         make_operation: impl FnOnce(
@@ -88,78 +82,6 @@ impl Controller {
         }
         Ok(())
     }
-
-    fn check_stream(&mut self, entry: &StreamEntry) -> AppResult<ApplicationInfo> {
-        let Self::Sink(controller) = self else {
-            return Err(io::Error::other("Playback requires an output controller").into());
-        };
-        let app = controller.get_app_by_index(entry.index)?;
-        if stream_key(&app) != entry.key {
-            return Err(io::Error::other("The selected stream has ended").into());
-        }
-        Ok(app)
-    }
-}
-
-pub fn toggle_mute(entry: &AudioEntry) -> AppResult<()> {
-    require_live_output(entry)?;
-    let mut controller = Controller::create(entry.kind)?;
-    let device = controller.device_by_name(&entry.name)?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.set_sink_mute_by_index(device.index, !device.mute, Some(done)),
-        AudioKind::Input => api.set_source_mute_by_index(device.index, !device.mute, Some(done)),
-    })
-}
-
-pub fn toggle_stream_mute(entry: &StreamEntry) -> AppResult<()> {
-    let mut controller = Controller::create(AudioKind::Output)?;
-    let app = controller.check_stream(entry)?;
-    controller.change(|api, done| api.set_sink_input_mute(app.index, !app.mute, Some(done)))
-}
-
-pub fn nudge_stream_volume(entry: &StreamEntry, delta: i16) -> AppResult<()> {
-    let mut controller = Controller::create(AudioKind::Output)?;
-    let app = controller.check_stream(entry)?;
-    if !app.has_volume || !app.volume_writable {
-        return Err(io::Error::other("This stream does not support volume changes").into());
-    }
-    let volumes = adjusted_volume(app.volume, AudioKind::Output, delta)?;
-    controller.change(|api, done| api.set_sink_input_volume(app.index, &volumes, Some(done)))
-}
-
-pub fn move_stream(entry: &StreamEntry, destination_key: &str) -> AppResult<()> {
-    let mut controller = Controller::create(AudioKind::Output)?;
-    controller.check_stream(entry)?;
-    let destination = routing_devices(&entry.device_name)?
-        .into_iter()
-        .find(|device| device.key == destination_key)
-        .ok_or_else(|| io::Error::other("The selected output is no longer available"))?;
-    if let (Some(card), Some(port)) = (destination.card.as_deref(), destination.port.as_deref()) {
-        return profiles::route(&mut controller, card, port, entry);
-    }
-    let device = controller.device_by_name(&destination.name)?;
-    if let Some(port) = destination.port.as_deref() {
-        let port = available_port(&device.ports, port)?;
-        if device.active_port.as_ref().and_then(|p| p.name.as_deref()) != Some(port) {
-            controller.change(|api, done| {
-                api.set_sink_port_by_name(&destination.name, port, Some(done))
-            })?;
-        }
-    }
-    move_stream_to(&mut controller, entry, &destination.name)
-}
-
-fn move_stream_to(
-    controller: &mut Controller,
-    entry: &StreamEntry,
-    device_name: &str,
-) -> AppResult<()> {
-    let app = controller.check_stream(entry)?;
-    let device = controller.device_by_name(device_name)?;
-    if app.connection_id == device.index {
-        return Ok(());
-    }
-    controller.change(|api, done| api.move_sink_input_by_index(app.index, device.index, Some(done)))
 }
 
 pub(crate) fn available_port<'a>(ports: &'a [DevicePortInfo], name: &str) -> AppResult<&'a str> {
@@ -171,85 +93,14 @@ pub(crate) fn available_port<'a>(ports: &'a [DevicePortInfo], name: &str) -> App
         .ok_or_else(|| io::Error::other("The selected port is no longer available").into())
 }
 
-pub fn streams() -> AppResult<Vec<StreamEntry>> {
-    let mut controller = SinkController::create()?;
-    let devices = controller.list_devices()?;
-    let mut entries: Vec<_> = controller
-        .list_applications()?
-        .iter()
-        .map(|app| {
-            let device = devices.iter().find(|d| d.index == app.connection_id);
-            let device_entry = device.and_then(|d| entry(AudioKind::Output, d, None));
-            let application = app
-                .proplist
-                .get_str("application.name")
-                .filter(|name| !name.is_empty())
-                .or_else(|| app.proplist.get_str("application.process.binary"))
-                .unwrap_or_else(|| "Audio stream".into());
-            let serial = app.proplist.get_str("object.serial").unwrap_or_default();
-            let object_id = app.proplist.get_str("object.id").unwrap_or_default();
-            StreamEntry {
-                key: stream_key(app),
-                index: app.index,
-                serial,
-                object_id,
-                application,
-                name: app.name.clone().unwrap_or_default(),
-                device_name: device_entry
-                    .as_ref()
-                    .map(|d| d.name.clone())
-                    .unwrap_or_default(),
-                device_label: device_entry
-                    .map(|d| d.label)
-                    .unwrap_or_else(|| "Unknown device".into()),
-                volume: app.has_volume.then(|| percent(&app.volume)),
-                muted: app.mute,
-                corked: app.corked,
-            }
-        })
-        .collect();
-    entries.sort_by(|a, b| {
-        a.application
-            .to_lowercase()
-            .cmp(&b.application.to_lowercase())
-            .then_with(|| a.name.cmp(&b.name))
-            .then_with(|| a.index.cmp(&b.index))
-    });
-    Ok(entries)
-}
-
-fn stream_key(app: &ApplicationInfo) -> String {
-    stream_identity(
-        app.index,
-        app.client,
-        &app.proplist.get_str("object.serial").unwrap_or_default(),
-    )
-}
-
-pub(crate) fn stream_identity(index: u32, client: Option<u32>, serial: &str) -> String {
-    // The PipeWire object serial protects a picker from stream-index reuse.
-    // Native PulseAudio uses monotonically allocated stream/client indices.
-    format!(
-        "playback:{index}:{}:{}",
-        client.map(|v| v.to_string()).unwrap_or_default(),
-        hex_encode(serial)
-    )
-}
-
 pub fn snapshot(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(kind, DeviceRows::Devices, None)
+    snapshot_with_rows(kind, DeviceRows::Devices)
 }
 
 /// Output/Input rows expose physical ports without inventing independent
 /// devices. Waybar still keeps one row per device.
 pub fn selections(kind: AudioKind) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(kind, DeviceRows::Ports, None)
-}
-
-/// Include ports from compatible inactive profiles, marking the stream's
-/// current port rather than the system default.
-pub fn routing_devices(current_device: &str) -> AppResult<Vec<AudioEntry>> {
-    snapshot_with_rows(AudioKind::Output, DeviceRows::Ports, Some(current_device))
+    snapshot_with_rows(kind, DeviceRows::Ports)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -258,16 +109,9 @@ enum DeviceRows {
     Ports,
 }
 
-fn snapshot_with_rows(
-    kind: AudioKind,
-    rows: DeviceRows,
-    current_device: Option<&str>,
-) -> AppResult<Vec<AudioEntry>> {
+fn snapshot_with_rows(kind: AudioKind, rows: DeviceRows) -> AppResult<Vec<AudioEntry>> {
     let mut controller = Controller::create(kind)?;
-    let default_name = match current_device {
-        Some(name) => Some(name.to_owned()),
-        None => controller.default_name()?,
-    };
+    let default_name = controller.default_name()?;
     let mut device_labels = HashMap::new();
     let devices = controller.list_devices()?;
     let mut entries: Vec<_> = devices
@@ -378,56 +222,6 @@ pub fn set_default(entry: &AudioEntry) -> AppResult<()> {
     Err(io::Error::other("PulseAudio rejected the default device change").into())
 }
 
-/// Applies a relative volume change to one device and returns the new level.
-/// The step is applied to the value read back here rather than to the rendered
-/// row, so repeated presses never drift out of sync with the server.
-pub fn nudge_volume(entry: &AudioEntry, delta: i16) -> AppResult<u8> {
-    require_live_output(entry)?;
-    let mut controller = Controller::create(entry.kind)?;
-    let device = controller.device_by_name(&entry.name)?;
-    let volumes = adjusted_volume(device.volume, entry.kind, delta)?;
-    controller.change(|api, done| match entry.kind {
-        AudioKind::Output => api.set_sink_volume_by_index(device.index, &volumes, Some(done)),
-        AudioKind::Input => api.set_source_volume_by_index(device.index, &volumes, Some(done)),
-    })?;
-    Ok(percent(&volumes))
-}
-
-pub(crate) fn require_live_output(entry: &AudioEntry) -> AppResult<()> {
-    if entry.inactive() {
-        return Err(io::Error::other("Select this output first").into());
-    }
-    Ok(())
-}
-
-pub(crate) fn volume_target(current: u8, kind: AudioKind, delta: i16) -> u8 {
-    (i16::from(current) + delta).clamp(0, kind.maximum()) as u8
-}
-
-pub(crate) fn adjusted_volume(
-    mut volume: ChannelVolumes,
-    kind: AudioKind,
-    delta: i16,
-) -> AppResult<ChannelVolumes> {
-    if volume.len() == 0 {
-        return Err(io::Error::other("This device has no volume channels").into());
-    }
-    let target = from_percent(volume_target(percent(&volume), kind, delta));
-    let average = volume.avg().0;
-    // Preserve an existing balance set in another mixer. Also cap the loudest
-    // channel so an uneven channel layout cannot bypass the volume ceiling.
-    let peak = if average == 0 {
-        target.0
-    } else {
-        ((f64::from(target.0) * f64::from(volume.max().0) / f64::from(average)).round() as u32)
-            .min(from_percent(kind.maximum() as u8).0)
-    };
-    volume
-        .scale(Volume(peak))
-        .ok_or_else(|| io::Error::other("Invalid channel volume"))?;
-    Ok(volume)
-}
-
 /// The default output and input, for the Waybar module.
 pub fn defaults() -> (Option<AudioEntry>, Option<AudioEntry>) {
     (default_of(AudioKind::Output), default_of(AudioKind::Input))
@@ -504,11 +298,6 @@ pub(crate) fn percent(volumes: &ChannelVolumes) -> u8 {
     let normal = f64::from(Volume::NORMAL.0);
     let average = f64::from(volumes.avg().0);
     ((average / normal) * 100.0).round().clamp(0.0, 255.0) as u8
-}
-
-pub(crate) fn from_percent(percent: u8) -> Volume {
-    let normal = f64::from(Volume::NORMAL.0);
-    Volume((normal * f64::from(percent) / 100.0).round() as u32)
 }
 
 pub(crate) mod profiles {
@@ -908,38 +697,16 @@ pub(crate) mod profiles {
         activate_with(controller, card, port)
     }
 
-    pub(crate) fn route(
-        controller: &mut Controller,
-        card: &str,
-        port: &str,
-        stream: &StreamEntry,
-    ) -> AppResult<()> {
-        activate_with_action(controller, card, port, |controller, output| {
-            move_stream_to(controller, stream, output)
-        })
-    }
-
     pub(crate) fn activate_with(
         backend: &mut impl Backend,
         card_name: &str,
         port_name: &str,
     ) -> AppResult<()> {
-        activate_with_action(backend, card_name, port_name, |backend, output| {
-            backend.set_default(output)
-        })
-    }
-
-    pub(crate) fn activate_with_action<B: Backend>(
-        backend: &mut B,
-        card_name: &str,
-        port_name: &str,
-        finish: impl FnOnce(&mut B, &str) -> AppResult<()>,
-    ) -> AppResult<()> {
         let card = backend.card(card_name)?;
         let port = card.output_port(port_name)?;
         if let Some(output) = find_output(backend.outputs()?, card.index, port_name)? {
             backend.set_port(&output, port_name)?;
-            return finish(backend, &output.name);
+            return backend.set_default(&output.name);
         }
         let profile = profile_for(&card, port)
             .ok_or_else(|| io::Error::other("No compatible profile for the selected output"))?;
@@ -951,7 +718,7 @@ pub(crate) mod profiles {
         let result = (|| {
             let output = wait_for_output(backend, &card, port_name, profile)?;
             backend.set_port(&output, port_name)?;
-            finish(backend, &output.name)
+            backend.set_default(&output.name)
         })();
         if let Err(error) = result {
             if switched {

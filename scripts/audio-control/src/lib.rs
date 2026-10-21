@@ -11,11 +11,7 @@ pub mod audio;
 pub mod bluetooth;
 pub mod devices;
 pub mod model;
-pub mod stream;
 pub mod waybar;
-
-#[cfg(test)]
-mod tests;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;

@@ -1,71 +1,3 @@
-use std::fmt;
-use std::str::FromStr;
-
-use crate::{AppError, AppResult};
-
-/// The four tabs. `name` is the stable identifier used on the command line;
-/// `prompt` is what the tab itself is labelled with.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Mode {
-    Bluetooth,
-    Output,
-    Input,
-    Playback,
-}
-
-impl Mode {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Bluetooth => "bluetooth",
-            Self::Output => "output",
-            Self::Input => "input",
-            Self::Playback => "playback",
-        }
-    }
-
-    /// The tab's label, glyph included.
-    pub fn prompt(self) -> &'static str {
-        match self {
-            Self::Bluetooth => "󰂯 Pair",
-            Self::Output => "󰕾 Output",
-            Self::Input => "󰍬 Input",
-            Self::Playback => "󰐊 Play",
-        }
-    }
-
-    pub fn audio_kind(self) -> Option<AudioKind> {
-        match self {
-            Self::Bluetooth => None,
-            Self::Output | Self::Playback => Some(AudioKind::Output),
-            Self::Input => Some(AudioKind::Input),
-        }
-    }
-
-    pub fn is_stream(self) -> bool {
-        matches!(self, Self::Playback)
-    }
-}
-
-impl FromStr for Mode {
-    type Err = AppError;
-
-    fn from_str(value: &str) -> AppResult<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "bluetooth" | "bt" => Ok(Self::Bluetooth),
-            "output" | "sink" | "outputs" => Ok(Self::Output),
-            "input" | "source" | "inputs" => Ok(Self::Input),
-            "playback" => Ok(Self::Playback),
-            _ => Err(std::io::Error::other(format!("unknown mode {value:?}")).into()),
-        }
-    }
-}
-
-impl fmt::Display for Mode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AudioKind {
     Output,
@@ -73,13 +5,6 @@ pub enum AudioKind {
 }
 
 impl AudioKind {
-    pub fn maximum(self) -> i16 {
-        match self {
-            Self::Output => 150,
-            Self::Input => 100,
-        }
-    }
-
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::Output => "sink",
@@ -99,14 +24,6 @@ pub enum CodeKind {
 }
 
 impl CodeKind {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Pin => "pin",
-            Self::Passkey => "passkey",
-            Self::Confirmation => "confirmation",
-        }
-    }
-
     pub fn prompt(self, device: &str) -> String {
         match self {
             Self::Pin => format!("Please type in the pairing PIN for {device}."),
@@ -116,59 +33,20 @@ impl CodeKind {
     }
 }
 
-impl FromStr for CodeKind {
-    type Err = AppError;
-
-    fn from_str(value: &str) -> AppResult<Self> {
-        match value {
-            "pin" => Ok(Self::Pin),
-            "passkey" => Ok(Self::Passkey),
-            "confirmation" => Ok(Self::Confirmation),
-            _ => Err(std::io::Error::other(format!("unknown code kind {value:?}")).into()),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct BluetoothEntry {
-    pub key: String,
     /// Colon-separated upper-case address, as BlueZ renders it.
     pub address: String,
     pub name: String,
     /// False when BlueZ has resolved no name and `name` is just the address.
     pub named: bool,
-    /// BlueZ `Icon` property, used to pick the row glyph.
-    pub icon: Option<String>,
+
     pub connected: bool,
     pub paired: bool,
     pub battery: Option<u8>,
 }
 
 impl BluetoothEntry {
-    pub fn row_label(&self) -> String {
-        let mut label = format!(
-            "{}  {}",
-            device_icon(self.icon.as_deref()),
-            truncate(&self.name, 24)
-        );
-        if let Some(battery) = self.battery {
-            label.push_str(&format!("  {} {battery}%", battery_icon(battery)));
-        }
-        label
-    }
-
-    pub fn message_label(&self) -> String {
-        let state = if self.connected {
-            "connected"
-        } else if self.paired {
-            "paired"
-        } else {
-            "available"
-        };
-        // The renderer flattens this text and wraps it in no-break markup.
-        format!("{} · {} · {state}", self.name, self.address)
-    }
-
     /// Connected first, then paired, then everything discovery turned up.
     pub fn rank(&self) -> u8 {
         if self.connected {
@@ -190,46 +68,18 @@ pub struct AudioEntry {
     /// Stable ALSA card name for Output ports, including inactive-profile rows.
     /// Together with `port` it survives sink replacement during a profile switch.
     pub card: Option<String>,
-    /// Full PulseAudio description. Kept for the row's `meta`, so filtering
-    /// still matches the long name even though the row shows the short one.
+    /// Full PulseAudio description for the device tooltip.
     pub description: String,
     /// What the row displays: `description` with the boilerplate stripped.
     pub label: String,
     pub volume: u8,
     pub muted: bool,
     pub default: bool,
-    /// A physical port selected by this row. None for device-only rows used
-    /// by Waybar and the per-app routing list.
+    /// A physical port selected by this row. None for device-only Waybar rows.
     pub port: Option<String>,
 }
 
 impl AudioEntry {
-    pub fn inactive(&self) -> bool {
-        self.card.is_some() && self.name.is_empty()
-    }
-
-    pub fn row_label(&self) -> String {
-        // Keep every device on one compact line: icon, volume, then name.
-        if self.inactive() {
-            return format!("󰕾   —   {}", single_line(&self.label, 48));
-        }
-        format!(
-            "{} {:>3}%  {}",
-            self.volume_icon(),
-            self.volume,
-            single_line(&self.label, 48)
-        )
-    }
-
-    pub fn message_label(&self) -> String {
-        if self.inactive() {
-            return format!("{} · select to enable", self.label);
-        }
-        let state = if self.default { "default" } else { "available" };
-        let mute = if self.muted { " · muted" } else { "" };
-        format!("{} · {}%{mute} · {state}", self.label, self.volume)
-    }
-
     pub fn volume_icon(&self) -> &'static str {
         match (self.kind, self.muted) {
             (AudioKind::Input, true) => "󰍭",
@@ -237,110 +87,6 @@ impl AudioEntry {
             (AudioKind::Output, true) => "󰝟",
             (AudioKind::Output, false) => output_icon(self.volume),
         }
-    }
-}
-
-/// One live playback stream, not an MPRIS player. Several streams
-/// from the same application remain separate and are identified by `key`.
-#[derive(Clone, Debug)]
-pub struct StreamEntry {
-    pub key: String,
-    pub index: u32,
-    /// PipeWire `object.serial`: the identity a PipeWire-side client (the
-    /// Quickshell media panel) can pass back to select this stream again.
-    pub serial: String,
-    /// PipeWire `object.id`: the node id, unique per live stream and visible
-    /// to PipeWire clients even when the node is unbound.
-    pub object_id: String,
-    pub application: String,
-    pub name: String,
-    pub device_name: String,
-    pub device_label: String,
-    pub volume: Option<u8>,
-    pub muted: bool,
-    pub corked: bool,
-}
-
-impl StreamEntry {
-    pub fn row_label(&self) -> String {
-        let icon = match (self.muted, self.corked) {
-            (true, _) => "󰝟",
-            (false, true) => "󰏤",
-            (false, false) => "󰐊",
-        };
-        let volume = self
-            .volume
-            .map(|v| format!("{v:>3}%"))
-            .unwrap_or_else(|| "  — ".into());
-        let name = self.name.trim();
-        let title = if name.is_empty()
-            || name.eq_ignore_ascii_case(&self.application)
-            || name.eq_ignore_ascii_case("Playback")
-        {
-            self.application.clone()
-        } else {
-            format!("{}: {name}", self.application)
-        };
-        // The destination remains in search metadata and the route picker.
-        // Spend the row's space on the application and meaningful stream title.
-        format!("{icon} {volume}  {}", single_line(&title, 48))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ChoiceEntry {
-    pub key: String,
-    pub label: String,
-    /// Full device description for filtering, separate from the compact label.
-    pub description: String,
-    pub active: bool,
-    pub enabled: bool,
-}
-
-impl ChoiceEntry {
-    pub fn route(device: AudioEntry) -> Self {
-        Self {
-            active: device.default,
-            key: device.key,
-            label: device.label,
-            description: device.description,
-            enabled: true,
-        }
-    }
-}
-
-pub fn device_icon(icon: Option<&str>) -> &'static str {
-    match icon.unwrap_or_default() {
-        "audio-headset" | "audio-headphones" => "󰋋",
-        "audio-speakers" | "audio-card" => "󰓃",
-        "input-keyboard" => "󰌌",
-        "input-mouse" | "input-tablet" => "󰍽",
-        "input-gaming" => "󰊴",
-        "phone" => "󰄜",
-        "computer" => "󰟀",
-        "camera-photo" | "camera-video" => "󰄀",
-        "printer" => "󰐪",
-        "video-display" => "󰍹",
-        _ => "󰂯",
-    }
-}
-
-pub fn battery_icon(percentage: u8) -> &'static str {
-    // 10% buckets so the glyph tracks the number beside it; the old 20% buckets
-    // drew, e.g., the fully-solid `mdi-battery` for all of 90..=100 and
-    // `mdi-battery-70` for 70..=89, so 90% looked full and 89% looked 70%.
-    match percentage {
-        100 => "󰁹",
-        90..=99 => "󰂂",
-        80..=89 => "󰂁",
-        70..=79 => "󰂀",
-        60..=69 => "󰁿",
-        50..=59 => "󰁾",
-        40..=49 => "󰁽",
-        30..=39 => "󰁼",
-        20..=29 => "󰁻",
-        10..=19 => "󰁺",
-        _ => "󰂎",
     }
 }
 
@@ -449,23 +195,6 @@ pub fn hex_encode(value: &str) -> String {
         encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     encoded
-}
-
-pub fn hex_decode(value: &str) -> Option<String> {
-    if !value.len().is_multiple_of(2) {
-        return None;
-    }
-    let bytes = value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).ok()?;
-            u8::from_str_radix(pair, 16).ok()
-        })
-        .collect::<Option<Vec<_>>>()?;
-    String::from_utf8(bytes).ok()
 }
 
 pub fn truncate(value: &str, maximum: usize) -> String {

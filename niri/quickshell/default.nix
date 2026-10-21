@@ -1,4 +1,5 @@
-# Resident Quickshell config for the media panel and system dashboard.
+# Resident Quickshell dashboard, network panel, and notification server.
+# Keep the legacy config/service name "media"; only media UI moved to AGS.
 # QML sources link live out of the repository; shared popup components and
 # colors come from niri/quickshell/style.nix.
 {
@@ -13,8 +14,6 @@ let
   liveLink = path: config.lib.file.mkOutOfStoreSymlink "${repoRoot}/${path}";
   qmlFiles = [
     "shell.qml"
-    "MediaController.qml"
-    "MediaCredit.qml"
     "Dashboard.qml"
     "DashboardPanel.qml"
     "DashboardSection.qml"
@@ -29,17 +28,9 @@ let
     "NetworkController.qml"
     "NetworkFormat.js"
     "NetworkPanel.qml"
-    "MediaStatus.js"
     "ActionTile.qml"
     "MetricBar.qml"
     "IdleInhibitorWindow.qml"
-    "MediaPanel.qml"
-    "PlayerCard.qml"
-    "Artwork.qml"
-    "SeekBar.qml"
-    "VolumeSlider.qml"
-    "OutputList.qml"
-    "SourcesList.qml"
   ];
 in
 {
@@ -47,9 +38,7 @@ in
 
   home.packages = [
     pkgs.quickshell
-    repoPackages.mediaControl
-    # WebP/JP2/ICO decoders for browser-published cover art (bilibili serves
-    # .webp; Qt's base JPEG/PNG plugins already cover YouTube).
+    # Retain extra decoders for notification images after media moves to GTK.
     pkgs.qt6.qtimageformats
   ];
 
@@ -79,11 +68,10 @@ in
       StateDirectory = "quickshell";
       StateDirectoryMode = "0700";
       UMask = "0077";
-      # audio-control handles profile-aware media routing. System metrics
-      # use native FileView readers plus coreutils df for filesystem capacity.
+      # System metrics use native FileView readers plus coreutils df.
+      # The launcher is invoked only when opening network, never for status.
       Environment = [
-        "AUDIO_CONTROL=${repoPackages.audioControl}/bin/audio-control"
-        "MEDIA_CONTROL=${repoPackages.mediaControl}/bin/media-control"
+        "MEDIA_PANEL=${lib.getExe repoPackages.mediaPanel}"
         "COREUTILS_DF=${pkgs.coreutils}/bin/df"
         "NOTIFICATION_HISTORY=%S/quickshell/notifications.json"
         "NETWORK_HELPER=${repoPackages.networkManager}/bin/network-manager"

@@ -3,7 +3,7 @@
 This repository contains nine Rust packages used by the desktop configuration:
 
 - `audio-control` — headless Waybar status, Bluetooth pairing agent, and physical audio port/profile bridge
-- `media-control` — headless media grouping, stream matching, artwork, and video-author metadata
+- `media-control` — headless media grouping, conservative stream matching, artwork, and video-author metadata
 - `network-manager` — only the detail/secret/QR and legacy-WEP gaps in Quickshell’s native networking API
 - `ocr-screenshot` — screenshot OCR and clipboard integration
 - `preview-panel` — the shared GTK4 preview surface
@@ -12,8 +12,9 @@ This repository contains nine Rust packages used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
-The Niri configuration uses Quickshell for the dashboard, network,
-media, audio, and notification popups.
+The Niri configuration uses **AGS 2.3/Astal GTK4 only for media**. The dashboard,
+network, audio, and notification popups remain in Quickshell. `media-panel` is a
+Nix-packaged launcher, not another Rust GUI.
 
 ## Live desktop editing
 
@@ -24,11 +25,11 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
 | `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
-| `themes/quickshell/*.qml` | Quickshell reloads the resident panels on save; shared controls affect the popups |
+| `themes/quickshell/*.qml` | Quickshell reloads dashboard, network, and notifications on save; shared controls also affect audio |
+| `niri/panels/media-control/*.js`, `style.css` | Live-linked AGS media sources; restart `ags-media.service` to apply edits |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
 | `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
-
 | `niri/audio-control/*.qml` | Quickshell reloads the audio panel on save |
 
 Rust, Nix module, package, service, and kernel changes still require a rebuild.
@@ -82,7 +83,6 @@ audio-control status
 audio-control bluetooth-power [on|off|toggle]
 audio-control devices <output|input>
 audio-control set-default <output|input> <key>
-audio-control stream-move <key|serial:N|node:N|name> <destination-key>
 
 audio-control bluetooth-devices
 audio-control bluetooth-scan
@@ -104,22 +104,27 @@ quickshell ipc --config audio-control call panel bluetoothPower
 ```
 
 After switching the NixOS/Home Manager generation, the service starts with the
-graphical session and Waybar wants it. For development without switching:
+graphical session and Waybar wants it. For development, stop the resident UI
+first and run the installed configuration with a locally built helper:
 
 ```sh
 cargo build --manifest-path scripts/Cargo.toml --package audio-control --locked
+systemctl --user stop audio-control-ui.service
 AUDIO_CONTROL_HELPER="$PWD/scripts/target/debug/audio-control" \
-  QT_QUICK_CONTROLS_STYLE=Basic quickshell --path niri/audio-control
+  QT_QUICK_CONTROLS_STYLE=Basic quickshell --config audio-control
 # In another terminal:
-quickshell ipc --path niri/audio-control call panel toggle eDP-1
+quickshell ipc --config audio-control call panel toggle eDP-1
 ```
 
-The audio and media panels share the canonical `devices` JSON protocol;
-the old NUL-delimited adapter and its CLI aliases are gone. For `stream-move`,
-prefer `serial:N` (a PipeWire object serial) or `node:N` (a node ID). The media
-panel uses stable `serial:N` selectors only; legacy names are accepted only
-when unambiguous. Physical port/profile switching remains in the helper because
-Quickshell 0.3.1 does not expose it.
+After stopping the manual instance, restart `audio-control-ui.service`. Shared
+QML aliases and generated colors belong to the installed configuration, not
+inside `niri/audio-control/` in the repository.
+
+The audio panel uses the canonical `devices` JSON protocol; the old
+NUL-delimited adapter and its CLI aliases are gone. Physical port/profile
+switching through `set-default` remains in the helper because Quickshell 0.3.1
+does not expose it. The separate media panel has no output selector or
+per-stream routing command.
 
 ### Development checks
 
@@ -131,11 +136,11 @@ cargo test --manifest-path scripts/Cargo.toml --package audio-control --locked
 cargo clippy --manifest-path scripts/Cargo.toml --package audio-control --locked -- -D warnings
 ```
 
-Tests cover device/port identity, compact labels, volume bounds, stream routing,
-inactive-profile Speaker/Headphones selection, delayed device creation, stale
-targets, server rejection, rollback, and typed stream-identifier collisions.
-The pure QML/JavaScript matching tests in `themes/quickshell/tests/` run with
-Qt Quick Test and cover shared streams, browser aliases, paused sources, and ordering.
+Tests cover device/port identity, compact labels, status percentages, pairing
+validation, inactive-profile Speaker/Headphones selection, delayed device
+creation, stale targets, server rejection, and rollback. Media grouping and conservative
+stream matching are tested separately in `scripts/media-control/` and
+`niri/panels/media-control/`.
 
 ---
 
@@ -308,14 +313,16 @@ A minimal custom module configuration looks like this:
 
 ---
 
-## Quickshell dashboard
+## Desktop panels
+
+### Quickshell dashboard
 
 `Mod+N` and the right-most Waybar battery button open the Quickshell dashboard
 in a monitor-local layer-shell window near the top-right of the screen. The
 button continues to show battery level and charging state, with low, warning,
 and critical classes for Waybar styling.
 
-The dashboard uses the media panel's shared frame, palette, and buttons. Its
+The dashboard uses Quickshell's shared frame, palette, and buttons. Its
 three sections are:
 
 - **Power:** battery state and power profiles through Quickshell's native
@@ -407,24 +414,38 @@ read and reject a changed profile/AP before querying any secret. Completed
 secret-bearing stdout lines are not retained in a collector after dispatch.
 
 
-### Media panel
+### Media panel (AGS/Astal GTK4)
 
-The centre Waybar button toggles the Quickshell media panel (`themes/quickshell/`), a
-resident QML shell. One card shows
-the active source: artwork, title, artist, album, a seekable progress bar,
-transport controls, and the stream's volume. A sources dropdown lists every
-currently playing or paused MPRIS source and retargets the card, and an output
-dropdown routes the active stream through `audio-control stream-move`.
+The centre Waybar button toggles the resident AGS media panel in
+`niri/panels/media-control/`. Its JavaScript is organized into three files:
 
-Quickshell's native MPRIS and PipeWire services own player discovery, metadata,
-transport, seeking, volume, and the native audio graph. QML defines the UI and
-bridges native snapshots to the separate Rust `media-control` helper; it does
-not implement browser filtering, duplicate detection, or stream-ownership rules.
-The headless helper reuses the former Rust panel's conservative duplicate/source
-policy without restoring its GTK UI or duplicating Quickshell's D-Bus backend.
-It returns native action plans: absolute play/pause targets are grouped, while
-Next and Previous address one publisher. Middle-clicking the Waybar button
-toggles all playback; right-click cycles the displayed source selection.
+- `frontend.js`: application entry, GTK window/widgets, theme, artwork, and credits.
+- `backend.js`: native Astal services, Rust helper transport, and model coordination.
+- `logic.js`: GTK-independent timelines, request validation/queues, and formatting.
+
+Custom media policy and metadata discovery remain in Rust; `backend.js` is the
+integration layer, not a second implementation of that policy.
+
+The 460px card retains artwork, title, artist/author, album,
+seekable progress, transport controls, volume, and the playing/paused source
+selector. **There is no Output section or per-stream routing.** Physical output
+selection remains in the separate Quickshell audio panel and
+`audio-control set-default`.
+
+Astal MPRIS owns player discovery, metadata, transport, and seeking. Volume is
+**0–100%, MPRIS-first**: use the selected player's writable volume when available,
+otherwise use Astal WirePlumber only for a conservatively identified stream.
+Ambiguous/shared streams are not guessed, and the system default output is never
+used as a media-volume fallback. Global audio output volume still allows 150%.
+
+The separate Rust `media-control` helper owns duplicate/source policy,
+conservative stream matching, native action plans, artwork, and author metadata;
+JavaScript bridges native snapshots and executes the returned plans. Absolute
+play/pause targets are grouped; Next and Previous address one publisher.
+Middle-clicking Waybar toggles all playback, and right-click cycles the selected
+source. Waybar requests status once per second, sharing selection with the card
+even while closed. Playing/paused/inactive classes, full tooltips, and the
+50-character/35-CJK title limits are preserved by the AGS formatter.
 
 `media-control model` is a resident JSONL snapshot/action planner over stdin/stdout.
 `media-control artwork <xesam-url|path>` reuses local cover discovery and embedded
@@ -434,41 +455,62 @@ bounded private cache under `$XDG_CACHE_HOME/media-control/`. Lookups use curl
 with a ten-second timeout; opening a supported video sends its video ID to that
 site's public metadata endpoint. No credentials or browser cookies are sent.
 
-`audio-control` stays separate: `devices output` supplies inactive-profile
-Speaker/Headphones choices, and `stream-move` handles profile switching and
-rollback. QML binds stream volume and current output through native PipeWire.
+`niri/panels/default.nix` links `niri/panels/media-control/` to
+`~/.config/ags/media`, including `frontend.js`, `backend.js`, `logic.js`, and `style.css`.
+It does not install generated children into that live link. The palette is
+serialized from `themes/palette.nix` to the separate
+`~/.config/ags/media-palette.json`; the frontend generates GTK `@define-color`
+rules programmatically from this JSON without writing generated CSS under the
+live link. Quickshell still gets its generated `Colors.qml` from the same palette.
 
-Routing first scopes streams to the application's native identity, then uses
-track titles or URLs where they uniquely distinguish streams. There is no
-fallback that pairs browser entries and unrelated streams by list order.
-Ambiguous/shared matches are disabled with an explanation in the Output section.
-A paused browser source can be routed only when its own stream is identifiable;
-starting playback may make that stream available. Tabs sharing one browser audio
-stream cannot be routed independently through this panel.
+The Niri-only `ags-media.service` runs `media-panel run`, restarts on failure,
+and is wanted by Waybar and the graphical session. The launcher uses the pinned
+AGS 2.3 CLI: `ags run --gtk4 -- <entry>`. Its overridden AGS package includes GTK4,
+Graphene, GTK4 layer-shell, Astal MPRIS, and Astal WirePlumber in the generated
+runtime wrapper; no manual `GI_TYPELIB_PATH` supplement is needed.
+`niri/panels/media-control/media.nix` also builds a combined native GdkPixbuf loader cache for
+standard formats, librsvg, and `webp-pixbuf-loader`, preserving PNG/JPEG/SVG while
+adding WebP artwork support. AGS's wrapper sets `GDK_PIXBUF_MODULE_FILE` to this
+cache rather than the default librsvg cache that omits WebP; no JavaScript
+decoder or user environment override is needed. The frontend must call `App.start` with
+`instanceName: "media-panel"`; this CLI has no `run --instance` flag. Requests use
+`ags request --instance media-panel -- <JSON>` with this wire format:
 
-The panel binds playback metadata only while open and moves an identified stream
-by stable typed serial. It rechecks the selected source before
-moving, reports helper failures in the panel, and does not silently substitute
-another source or the system default. Inactive physical outputs may need an ALSA
-profile switch that affects other playback; the expanded list warns about this.
+```json
+{"command":"toggle","monitor":"eDP-1"}
+```
 
-After changing the Rust media helper or its QML bridge, run `./switch.sh` so
-the rebuilt helper and Home Manager's live module links are installed together.
+`command` is one of `status`, `toggle`, `togglePauseAll`, `cycleMedia`, `pauseAll`,
+or `close`; `monitor` is optional. `status` returns Waybar JSON on stdout. The
+launcher builds requests with `jq --arg`, never shell-evaluated JSON.
 
-The panel occupies a transparent monitor-sized layer surface, so Escape, a
-second button press, or a click outside the card closes it. Position animation
-runs only while it is open; native snapshot analysis also runs on Waybar status
-requests while closed.
+```sh
+media-panel status
+media-panel toggle eDP-1
+media-panel togglePauseAll
+media-panel cycleMedia
+media-panel pauseAll
+media-panel close
+systemctl --user restart ags-media.service  # Apply live JS/CSS edits
+```
 
-Waybar requests `media status` over Quickshell IPC once per second. The native
-MPRIS selection is shared with the card, including while it is closed. Full
-tooltips, playing/paused/inactive classes, and the 50-character/35-CJK title
-limits are preserved in `MediaStatus.js`. The former `control-centre` crate
-and active-player D-Bus bridge have been removed.
+`MEDIA_PANEL_CONFIG` selects the entry file, defaulting to
+`$XDG_CONFIG_HOME/ags/media/frontend.js` (or `~/.config/ags/media/frontend.js`).
+`MEDIA_PANEL_PALETTE` is a JSON file path; `MEDIA_CONTROL` and `QUICKSHELL`
+are executable paths, not shell commands. The launcher supplies store-backed
+defaults, and the service explicitly supplies these values plus
+`GDK_BACKEND=wayland`. Graphical-session Wayland and D-Bus variables are inherited.
+
+Rebuild after changing Nix/service wiring or the Rust helper; JS/CSS changes
+only require restarting the media service. The legacy `quickshell-media.service`
+and `quickshell --config media` names are intentionally retained for the
+**non-media** desktop panels. Quickshell no longer exports a `media` IPC target.
 
 ### Shared popup style
 
-The dashboard, network, media, audio, and notification popups share components from `themes/quickshell/`.
+The dashboard, network, audio, and notification popups share QML components from
+`themes/quickshell/`. The AGS media card recreates the same presentation in GTK4
+rather than loading QML; only palette values are shared across toolkits.
 `niri/quickshell/style.nix` installs a local `shared/` directory of aliases
 inside each popup's configuration root. All aliases point to the same
 source files and palette; styles are not copied. This keeps imports
@@ -480,14 +522,14 @@ inside Quickshell's configuration sandbox without patching Quickshell:
 | `themes/quickshell/ControlButton.qml` | Cyan text/red glyphs, 50%-transparent gray outlines, yellow/thicker outlines only on hover |
 | `themes/quickshell/IconButton.qml` | Circular variant of the shared button; volume buttons can suppress their outlines |
 | `themes/quickshell/StyledSlider.qml` | Shared track and handle presentation; each caller owns its range and backend |
-| `themes/palette.nix` | One palette, including purple metadata text, exported to both shells |
+| `themes/palette.nix` | One palette exported as Quickshell colors and AGS media JSON |
 
 Audio uses Bluetooth/Audio tabs and native services. Output volume
-still spans 0–150%; sharing presentation does not inherit media's 100% range.
+still spans 0–150%; the separate media panel is limited to 100%.
 Popup sizes and placement remain specific to their content, not separate themes.
 
-Run `./switch.sh` once to install the shared directory and palette links.
-If an edit is not picked up by Quickshell's live reload, refresh both UIs:
+After installing the shared directory and palette links through Home Manager,
+if an edit is not picked up by Quickshell's live reload, refresh its UIs:
 
 ```sh
 systemctl --user restart quickshell-media.service audio-control-ui.service
@@ -501,10 +543,13 @@ under [`audio-control`](#audio-control). Playback remains in the media panel.
 ### External panel behavior
 
 Dashboard, network, media, and audio use transparent monitor-sized layer
-surfaces with a visible shared card. The backdrop consumes outside clicks;
+surfaces with a visible card. The backdrop consumes outside clicks;
 Escape and a second button press dismiss the card. Opening network closes the
-other resident cards. Native notifications use a small non-focus-taking layer
-surface instead, so toasts do not grab keyboard input.
+dashboard and invokes `media-panel close` once through a Quickshell `Process`;
+network status polling never spawns a media command. Opening media closes network
+through `QUICKSHELL ipc --config media call network close`. The audio popup stays
+independent. Native notifications use a small non-focus-taking layer surface
+instead, so toasts do not grab keyboard input.
 
 Network scanning, dashboard metrics, and audio device refreshes stop while
 the corresponding panel is hidden. Notifications remain event-driven, and the
@@ -518,16 +563,35 @@ data, not the desktop notification owner or real network mutations:
 ```sh
 python3 themes/quickshell/tests/native_notifications.py
 python3 themes/quickshell/tests/network_controller.py
+python3 themes/quickshell/tests/panel_handoff.py
 cargo test --manifest-path scripts/Cargo.toml --locked \
   -p audio-control -p media-control -p rofi-network --all-targets
-cargo build --manifest-path scripts/Cargo.toml --locked -p rofi-network
+cargo build --manifest-path scripts/Cargo.toml --locked -p rofi-network -p media-control
+
 
 ```
 
-Rust `media-control` tests cover the reused duplicate policy, conservative
-routing, native action plans, metadata caching, and the JSON bridges. Bridge
-tests run Quickshell against fake native models on a private D-Bus session when
-Quickshell and the repository QML are available; no real media is controlled.
-The QML tests in `themes/quickshell/tests/` cover media-title/CJK formatting,
-network ordering/status, notification row sizing, and native action controls.
-UI tests use the installed shared component aliases and palette (or a staged equivalent).
+The Rust tests for `audio-control` and `media-control` each live in that
+crate's `src/tests.rs`, registered as the Cargo test target `tests`. This keeps
+unit and real-binary CLI/protocol coverage together. The commands above run
+both suites; use `--test tests` to select only the consolidated target.
+
+The focused media frontend tests cover action queues and stale requests,
+sampled playback timelines, seeking, and badge formatting in `logic.js`. They use Node.js,
+need no npm dependencies, and do not load GTK/GI:
+
+```sh
+node --test niri/panels/media-control/tests/*.test.js
+```
+
+Rust `media-control` tests cover duplicate/source policy, conservative stream
+matching, native action plans, metadata caching, and the JSON bridges. Media
+frontend tests live with the JavaScript modules in `niri/panels/media-control/`, not
+under Quickshell. `themes/quickshell/tests/panel_handoff.py` loads the real shell with fake panel
+components on a private D-Bus, proving network-open cross-close without media
+subprocesses during status polling.
+
+The Qt Quick tests in `themes/quickshell/tests/` cover network ordering/status,
+notification row sizing, and native action controls. They use installed shared
+component aliases and palette (or a staged equivalent). Do not activate a new
+generation or send real playback/network commands just to run isolated checks.

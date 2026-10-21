@@ -7,8 +7,7 @@
     "custom/gkeep",
     "custom/gphotos",
     "custom/whatsapp",
-    "custom/elisa",
-    "custom/email",
+    "custom/anki",
     "cffi/niri_window_buttons"
   ],
   "niri/workspaces": {
@@ -23,17 +22,11 @@
     "tooltip-format": "Obsidian",
     "on-click": "obsidian &"
   },
-  "custom/elisa": {
-    "format": "🎵",
+  "custom/anki": {
+    "format": "🧠",
     "tooltip": true,
-    "tooltip-format": "Elisa",
-    "on-click": "elisa &"
-  },
-  "custom/email": {
-    "format": "📧",
-    "tooltip": true,
-    "tooltip-format": "Thunderbird",
-    "on-click": "thunderbird &"
+    "tooltip-format": "Anki",
+    "on-click": "anki &"
   },
   "custom/whatsapp": {
     "format": "💬",

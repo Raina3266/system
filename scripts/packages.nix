@@ -45,10 +45,8 @@ let
     }
   );
 
-  # The source one member is built from: every manifest in the workspace, plus
-  # that member's Cargo sources. Passing all of scripts/ put all ten crates in
-  # every derivation's input hash, so touching one rebuilt all ten. Sibling
-  # manifests still count, but only change when a crate gains a dependency.
+  # Each member's source includes every workspace manifest but only that
+  # member's Cargo sources, so unrelated source edits do not rebuild it.
   memberSrc =
     pname:
     lib.fileset.toSource {
@@ -101,34 +99,39 @@ let
         postPatch = stubSiblings pname + (packageExtra.postPatch or "");
         # Say which executable lib.getExe should resolve rather than making it
         # guess from the derivation name.
-        meta = (packageExtra.meta or { }) // { inherit mainProgram; };
+        meta = (packageExtra.meta or { }) // {
+          inherit mainProgram;
+        };
       }
     );
 
-  withParentDeath = pkgs.runCommandCC "with-parent-death" {
-    src = pkgs.writeText "with-parent-death.c" ''
-      #include <sys/prctl.h>
-      #include <unistd.h>
-      #include <signal.h>
-      #include <stdlib.h>
-      #include <stdio.h>
+  withParentDeath =
+    pkgs.runCommandCC "with-parent-death"
+      {
+        src = pkgs.writeText "with-parent-death.c" ''
+          #include <sys/prctl.h>
+          #include <unistd.h>
+          #include <signal.h>
+          #include <stdlib.h>
+          #include <stdio.h>
 
-      int main(int argc, char *argv[]) {
-        if (argc < 2) {
-          fprintf(stderr, "usage: with-parent-death PROGRAM [ARGS...]\n");
-          return 2;
-        }
-        prctl(PR_SET_PDEATHSIG, SIGKILL);
-        if (getppid() == 1) _exit(0);
-        execvp(argv[1], &argv[1]);
-        perror("with-parent-death: execvp");
-        return 127;
+          int main(int argc, char *argv[]) {
+            if (argc < 2) {
+              fprintf(stderr, "usage: with-parent-death PROGRAM [ARGS...]\n");
+              return 2;
+            }
+            prctl(PR_SET_PDEATHSIG, SIGKILL);
+            if (getppid() == 1) _exit(0);
+            execvp(argv[1], &argv[1]);
+            perror("with-parent-death: execvp");
+            return 127;
+          }
+        '';
       }
-    '';
-  } ''
-    install -d $out/bin
-    cc -O2 -s -o $out/bin/with-parent-death $src
-  '';
+      ''
+        install -d $out/bin
+        cc -O2 -s -o $out/bin/with-parent-death $src
+      '';
 in
 rec {
   inherit withParentDeath;
@@ -179,8 +182,8 @@ rec {
 
   networkManager = mkWorkspacePackage "network-manager" {
     cargoPackage = "rofi-network";
-    # This small JSON/QR gap bridge no longer depends on the GTK/D-Bus Rust
-    # stack. Build only its dependency graph, not the legacy GUI workspace.
+    # Build only this small JSON/QR helper's dependency graph, not the full
+    # desktop workspace's GTK/D-Bus dependencies.
     cargoArtifacts = craneLib.buildDepsOnly (
       commonArgs
       // {
@@ -202,13 +205,17 @@ rec {
   # executable needs no GTK environment wrapper.
   audioControl = mkWorkspacePackage "audio-control" { dontWrapGApps = true; };
 
-  # Custom media policy/metadata only; Quickshell supplies the native services.
+  # Custom media policy/metadata only; AGS/Astal supplies the native services.
   mediaControl = mkWorkspacePackage "media-control" {
     dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/media-control" \
         --set MEDIA_CONTROL_CURL "${lib.getExe pkgs.curl}"
     '';
+  };
+
+  mediaPanel = import ../niri/panels/media-control/media.nix {
+    inherit pkgs mediaControl;
   };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {

@@ -47,8 +47,7 @@ in
       "@wheel"
     ];
 
-    # Keep successful sudo authentication cached for 10 minutes.
-    security.sudo.extraConfig = "Defaults timestamp_timeout=10";
+    security.sudo.extraConfig = "Defaults timestamp_timeout=20";
 
     security.pki.caCertificateBlacklist = [
       "Comodo AAA Services root"

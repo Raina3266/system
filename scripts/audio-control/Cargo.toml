@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "audio-control"
 path = "src/main.rs"
 
+[[test]]
+name = "tests"
+path = "src/tests.rs"
+
 [dependencies]
 # BlueZ over D-Bus for the Waybar Bluetooth status/power action.
 bluer = { version = "=0.17.4", default-features = false, features = [
