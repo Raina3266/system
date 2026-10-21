@@ -1,302 +1,53 @@
-use std::env;
 use std::io;
-use std::time::Duration;
 
 use bluer::agent::{Agent, ReqError, ReqResult};
-use bluer::{Adapter, Address, Device, ErrorKind, Session};
-use futures_util::StreamExt;
+use bluer::{Address, ErrorKind, Session};
 
 use crate::AppResult;
-use crate::model::{BluetoothEntry, CodeKind};
+use crate::model::CodeKind;
 
-/// How long newly powered-on devices have to appear during CLI discovery.
-const DEFAULT_SCAN_SECONDS: u64 = 10;
-
-pub struct Backend {
-    session: Session,
-    adapter: Adapter,
-}
-
-impl Backend {
-    pub async fn new() -> AppResult<Self> {
-        let session = Session::new().await?;
-        let adapter = session.default_adapter().await?;
-        Ok(Self { session, adapter })
-    }
-
-    pub fn device(&self, address: &str) -> AppResult<Device> {
-        Ok(self.adapter.device(address.parse::<Address>()?)?)
-    }
-
-    pub async fn is_powered(&self) -> AppResult<bool> {
-        Ok(self.adapter.is_powered().await?)
-    }
-
-    /// Every action in the Bluetooth tab implies the radio should be on, so
-    /// scanning or connecting powers the adapter up instead of refusing.
-    pub async fn power_on(&self) -> AppResult<bool> {
-        if self.adapter.is_powered().await? {
-            return Ok(false);
-        }
-        self.adapter.set_powered(true).await?;
-        Ok(true)
-    }
-
-    pub async fn set_powered(&self, powered: bool) -> AppResult<()> {
-        Ok(self.adapter.set_powered(powered).await?)
-    }
-
-    pub async fn snapshot(&self) -> AppResult<Vec<BluetoothEntry>> {
-        // Every property is its own round trip and a scan can leave fifty
-        // devices behind, which is what stalled the menu. The connection
-        // multiplexes, so issue all the reads at once.
-        let reads = self
-            .adapter
-            .device_addresses()
-            .await?
-            .into_iter()
-            .filter_map(|address| {
-                let device = self.adapter.device(address).ok()?;
-                Some(async move { read_entry(&device, address).await })
-            });
-        let mut entries: Vec<_> = futures_util::future::join_all(reads)
-            .await
-            .into_iter()
-            // A device can disappear between the address listing and the
-            // property reads; skip it rather than failing the whole render.
-            .flatten()
-            // Discovery turns up a long tail of unnamed devices — beacons,
-            // cars, neighbours. Nothing to pick, so keep them only once paired.
-            .filter(|entry| entry.named || entry.paired || entry.connected)
-            .collect();
-        entries.sort_by(|left, right| {
-            left.rank()
-                .cmp(&right.rank())
-                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-                .then_with(|| left.address.cmp(&right.address))
-        });
-        Ok(entries)
-    }
-
-    /// Runs a bounded discovery window. BlueZ discovers for as long as the
-    /// event stream is alive, so the timeout is what stops the scan.
-    pub async fn scan(&self) -> AppResult<()> {
-        let seconds = env::var("AUDIO_CONTROL_SCAN_SECONDS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_SCAN_SECONDS);
-        let events = self.adapter.discover_devices().await?;
-        let _ = tokio::time::timeout(Duration::from_secs(seconds), async move {
-            let mut events = std::pin::pin!(events);
-            while events.next().await.is_some() {}
-        })
-        .await;
-
-        Ok(())
-    }
-
-    /// Pairs when needed, then connects. Registering our own agent on this
-    /// D-Bus connection makes BlueZ route this pairing's PIN and passkey
-    /// requests to us instead of to the session-wide default agent.
-    ///
-    /// `Pair` is also what opens the bonding request that carries that agent.
-    /// `Connect` alone opens no bond: BlueZ brings the link up, reports the
-    /// device as connected, and leaves any bonding the peer then asks for to
-    /// whichever agent holds the default role. That is how an unpaired
-    /// keyboard ends up listed as connected while nothing it types arrives.
-    pub async fn pair_and_connect(&self, device: &Device) -> AppResult<()> {
-        if !device.is_paired().await? {
-            let _agent = self.session.register_agent(pairing_agent()).await?;
-            match device.pair().await {
-                Ok(()) => {}
-                // BlueZ reports an already-known device as AlreadyExists; that
-                // is the state we wanted, so fall through to Connect.
-                Err(error) if error.kind == ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error.into()),
-            }
-            // Trusting lets the device reconnect on its own afterwards.
-            let _ = device.set_trusted(true).await;
-        }
-        match device.connect().await {
-            Ok(())
-            | Err(bluer::Error {
-                kind: ErrorKind::AlreadyConnected,
-                ..
-            }) => Ok(()),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    /// Finds one device by address, or by a case-insensitive part of its name
-    /// so a keyboard can be paired by the label printed on it.
-    pub async fn find(&self, target: &str) -> AppResult<Option<BluetoothEntry>> {
-        let mut entries = self.snapshot().await?;
-        if let Some(index) = entries
-            .iter()
-            .position(|entry| entry.address.eq_ignore_ascii_case(target))
-        {
-            return Ok(Some(entries.swap_remove(index)));
-        }
-        let wanted = target.to_lowercase();
-        let named: Vec<usize> = entries
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.named && entry.name.to_lowercase().contains(&wanted))
-            .map(|(index, _)| index)
-            .collect();
-        match named.as_slice() {
-            [index] => Ok(Some(entries.swap_remove(*index))),
-            [] => Ok(None),
-            _ => Err(io::Error::other(format!(
-                "{target:?} matches several devices; pass an address instead"
-            ))
-            .into()),
-        }
-    }
-
-    /// Powered state plus the names of everything currently connected, for the
-    /// Waybar tooltip.
-    pub async fn status(&self) -> AppResult<(bool, Vec<String>)> {
-        let powered = self.adapter.is_powered().await?;
-        if !powered {
-            return Ok((false, Vec::new()));
-        }
-        let checks = self
-            .adapter
-            .device_addresses()
-            .await?
-            .into_iter()
-            .filter_map(|address| {
-                let device = self.adapter.device(address).ok()?;
-                Some(async move {
-                    if device.is_connected().await.unwrap_or(false) {
-                        let address = address.to_string();
-                        Some(
-                            device_name(&device, &address)
-                                .await
-                                .unwrap_or_else(|| address.clone()),
-                        )
-                    } else {
-                        None
-                    }
-                })
-            });
-        let mut connected: Vec<_> = futures_util::future::join_all(checks)
-            .await
-            .into_iter()
-            .flatten()
-            .collect();
-        connected.sort();
-        Ok((powered, connected))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Pairing
-//
-// Quickshell's panel owns the everyday Bluetooth rows, but the action behind them is
-// `Device1.Connect`, which opens no bonding request. A device that negotiates a
-// passkey — a keyboard above all — has to be paired with `Device1.Pair`, so
-// that lives here, where the agent BlueZ calls back belongs to the same process
-// that asked for the bond and cannot be displaced by another session agent.
-// ---------------------------------------------------------------------------
-
-/// Pairs, trusts, and connects one device, prompting on the terminal.
-pub async fn pair(target: &str) -> AppResult<()> {
-    let backend = Backend::new().await?;
-    backend.power_on().await?;
-    let entry = match backend.find(target).await? {
-        Some(entry) => entry,
-        // Unknown so far: a device in pairing mode only exists for BlueZ once
-        // discovery has seen it advertise.
-        None => {
-            eprintln!("Looking for {target}…");
-            backend.scan().await?;
-            backend.find(target).await?.ok_or_else(|| {
-                io::Error::other(format!(
-                    "no Bluetooth device matches {target:?}; put it in pairing mode and try again"
-                ))
-            })?
-        }
-    };
-    let device = backend.device(&entry.address)?;
-    eprintln!("Pairing with {} ({})…", entry.name, entry.address);
-    backend
-        .pair_and_connect(&device)
-        .await
-        .map_err(|error| io::Error::other(error_message(&entry.name, error.as_ref())))?;
-    println!(
-        "{} ({}) is paired and connected.",
-        entry.name, entry.address
-    );
-    Ok(())
-}
-
-/// Lists what BlueZ knows about, for picking something to pair.
-pub async fn print_devices() -> AppResult<()> {
-    print_entries(&Backend::new().await?).await
-}
-
-/// Runs one discovery window, then lists what it turned up.
-pub async fn scan_and_print() -> AppResult<()> {
-    let backend = Backend::new().await?;
-    backend.power_on().await?;
-    eprintln!("Scanning…");
-    backend.scan().await?;
-    print_entries(&backend).await
-}
-
-async fn print_entries(backend: &Backend) -> AppResult<()> {
-    for entry in backend.snapshot().await? {
-        let state = if entry.connected {
-            "connected"
-        } else if entry.paired {
-            "paired"
-        } else {
-            "available"
-        };
-        let battery = entry
-            .battery
-            .map(|level| format!(" ({level}%)"))
-            .unwrap_or_default();
-        println!("{}  {state:<9}  {}{battery}", entry.address, entry.name);
-    }
-    Ok(())
-}
-
-async fn read_entry(device: &Device, address: Address) -> AppResult<BluetoothEntry> {
-    let address = address.to_string();
-    // Overlap independent property reads within each device as well.
-    let (name, connected, paired, battery) = futures_util::join!(
-        device_name(device, &address),
-        device.is_connected(),
-        device.is_paired(),
-        device.battery_percentage(),
-    );
-    Ok(BluetoothEntry {
-        named: name.is_some(),
-        name: name.unwrap_or_else(|| address.clone()),
-        connected: connected?,
-        paired: paired?,
-        battery: battery.ok().flatten(),
-        address,
-    })
-}
-
-/// Alias first (it reflects the user-visible name and falls back to the remote
-/// name), then the remote name. `None` when BlueZ has resolved neither, which
-/// is how `snapshot` recognises a device worth hiding.
-async fn device_name(device: &Device, address: &str) -> Option<String> {
-    if let Ok(alias) = device.alias().await
-        && !alias.is_empty()
-        && alias != address
+/// Validate the explicit native selection before opening a system-bus session.
+pub(crate) fn pairing_target(adapter: &str, address: &str) -> AppResult<Address> {
+    let number = adapter
+        .strip_prefix("hci")
+        .ok_or("Adapter must be an explicit hciN name")?;
+    if number.is_empty()
+        || !number.bytes().all(|byte| byte.is_ascii_digit())
+        || number.parse::<u32>().is_err()
     {
-        return Some(alias);
+        return Err("Adapter must be an explicit hciN name".into());
     }
-    match device.name().await {
-        Ok(Some(name)) if !name.is_empty() && name != address => Some(name),
-        _ => None,
+    if address.len() != 17
+        || !address.bytes().enumerate().all(|(index, byte)| {
+            if index % 3 == 2 {
+                byte == b':'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+    {
+        return Err("Device must be an explicit Bluetooth address (AA:BB:CC:DD:EE:FF)".into());
     }
+    Ok(address.parse()?)
+}
+
+/// The only non-native pairing primitive: Pair and its request-local agent must
+/// share one connection. Astal handles power, discovery, trust, and connection.
+pub async fn pair(adapter: &str, address: &str) -> AppResult<()> {
+    let address = pairing_target(adapter, address)?;
+    let session = Session::new().await?;
+    let device = session.adapter(adapter)?.device(address)?;
+    let _agent = session.register_agent(pairing_agent()).await?;
+    eprintln!("Pairing with {address} on {adapter}…");
+    match device.pair().await {
+        Ok(()) => {}
+        Err(error) if error.kind == ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(io::Error::other(error_message(&address.to_string(), &error)).into());
+        }
+    }
+    println!("{address} is paired.");
+    Ok(())
 }
 
 pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> String {
@@ -314,10 +65,10 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
             }
             ErrorKind::DoesNotExist => format!("{name} is no longer available."),
             ErrorKind::NotReady => "The Bluetooth adapter is not ready.".to_owned(),
-            _ => format!("Cannot connect to {name}: {error}"),
+            _ => format!("Cannot pair with {name}: {error}"),
         };
     }
-    format!("Cannot connect to {name}: {error}")
+    format!("Cannot pair with {name}: {error}")
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +76,7 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 //
 // BlueZ calls back into an agent while a device pairs, so the agent must
 // outlive the call. Prompts go to stderr and answers come from stdin, including
-// when Quickshell connects the process pipes to its pairing card.
+// when AGS/Astal connects the process pipes to its pairing UI.
 // ---------------------------------------------------------------------------
 
 /// A prompt requiring an answer while pairing.
@@ -443,7 +194,7 @@ pub mod battery_provider {
     //! Logitech's proprietary HID++ protocol, which the kernel hid-logitech-hidpp
     //! driver already decodes into `/sys/class/power_supply/hidpp_battery_*`.
     //! BlueZ never learns that value, so everything reading `org.bluez.Battery1`
-    //! (Quickshell, GNOME, UPower) shows the flat lie.
+    //! (AGS/Astal, GNOME, UPower) shows the flat lie.
     //!
     //! This module republishes those levels through BlueZ's Battery Provider
     //! API. Provider batteries and the GATT one compete for the device's

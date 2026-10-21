@@ -1,4 +1,4 @@
-# Shared presentation for the desktop and audio shells; no service dependencies.
+# Shared presentation for the remaining Quickshell panels; no service dependencies.
 {
   config,
   pkgs,
@@ -33,7 +33,6 @@ let
     "ControlButton.qml"
     "IconButton.qml"
     "PopupFrame.qml"
-    "StyledSlider.qml"
   ];
 in
 {
@@ -54,9 +53,6 @@ in
           }
         ]
       )
-      [
-        "media"
-        "audio-control"
-      ]
+      [ "media" ]
   );
 }

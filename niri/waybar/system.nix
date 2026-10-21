@@ -1,6 +1,6 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
-# Media uses AGS/Astal GTK4; dashboard, network, and audio stay in Quickshell.
+# Media and audio use AGS/Astal GTK4; dashboard and network stay in Quickshell.
 {
   lib,
   pkgs,
@@ -86,15 +86,15 @@ let
     on-click = "${lib.getExe pkgs.quickshell} ipc --config media call network toggle ${lib.escapeShellArg monitor}";
   };
 
-  # Quickshell owns Pair/Output/Input; the helper handles physical profiles.
+  # The resident AGS/Astal audio panel owns the badge and Bluetooth/Audio popup.
   audioModule = monitor: {
-    exec = "${packages.audioControl}/bin/audio-control status";
+    exec = "${lib.getExe packages.audioPanel} status";
     interval = 5;
     return-type = "json";
     tooltip = true;
     escape = false;
-    on-click = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel toggle ${lib.escapeShellArg monitor}";
-    on-click-middle = "${pkgs.quickshell}/bin/quickshell ipc --config audio-control call panel bluetoothPower";
+    on-click = "${lib.getExe packages.audioPanel} toggle ${lib.escapeShellArg monitor}";
+    on-click-middle = "${lib.getExe packages.audioPanel} bluetoothPower";
   };
 
   # The resident AGS/Astal media panel owns source selection and playback.

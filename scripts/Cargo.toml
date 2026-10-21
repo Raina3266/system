@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  "audio-control",
-  "media-control",
+  "audio-control/rust-custom",
+  "media-control/rust-custom",
   "network-manager",
   "ocr-screenshot",
   "preview-panel",

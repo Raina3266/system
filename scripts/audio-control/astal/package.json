@@ -1,0 +1,8 @@
+{
+  "name": "desktop-audio-panel",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/audio-control.test.js"
+  }
+}

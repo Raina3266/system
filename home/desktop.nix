@@ -243,9 +243,9 @@ in
   '';
 
   systemd.user.services = {
-    # No standalone pairing agent here: Quickshell handles BlueZ pairing
-    # requests in the audio panel, and GNOME Shell does the same inside GNOME
-    # sessions. A bt-agent service
+    # No standalone pairing agent here: the AGS audio panel uses the Rust helper
+    # for BlueZ PIN/passkey requests, and GNOME Shell handles GNOME sessions.
+    # A bt-agent service
     # used to steal the default-agent role and then hang on stdin prompts it
     # could never answer, which is what broke all pairing here.
     kde-baloo = {

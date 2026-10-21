@@ -29,7 +29,6 @@ let
       pkgs.gtk4
       pkgs.gtk4-layer-shell
       pkgs.dbus
-      pkgs.libpulseaudio
     ];
   };
 
@@ -48,14 +47,14 @@ let
   # Each member's source includes every workspace manifest but only that
   # member's Cargo sources, so unrelated source edits do not rebuild it.
   memberSrc =
-    pname:
+    memberPath:
     lib.fileset.toSource {
       root = ./.;
       fileset = lib.fileset.unions [
         (craneLib.fileset.cargoTomlAndLock ./.)
         # Exclude UI/runtime assets (CSS, docs, screenshots) from the compiled
         # package input. They are live-linked separately by Home Manager.
-        (craneLib.fileset.commonCargoSources (./. + "/${pname}"))
+        (craneLib.fileset.commonCargoSources (./. + "/${memberPath}"))
       ];
     };
 
@@ -63,11 +62,11 @@ let
   # siblings back up as empty binaries. --package only walks the requested
   # member's dependency graph, so the stubs are parsed and never compiled.
   stubSiblings =
-    pname:
+    memberPath:
     lib.concatMapStrings (m: ''
       mkdir -p ${m}/src
       : > ${m}/src/main.rs
-    '') (lib.remove pname workspaceMembers);
+    '') (lib.remove memberPath workspaceMembers);
 
   # `pname` is normally also Cargo's package id and the installed binary.
   # network-manager is the exception: directory and binary were renamed, but
@@ -77,9 +76,11 @@ let
     let
       cargoPackage = extra.cargoPackage or pname;
       mainProgram = extra.mainProgram or pname;
+      workspaceMember = extra.workspaceMember or pname;
       packageExtra = builtins.removeAttrs extra [
         "cargoPackage"
         "mainProgram"
+        "workspaceMember"
       ];
     in
     craneLib.buildPackage (
@@ -89,14 +90,14 @@ let
         inherit pname;
         cargoArtifacts = extra.cargoArtifacts or cargoArtifacts;
         version = "0.1.0";
-        src = memberSrc pname;
+        src = memberSrc workspaceMember;
         # Feeds both the build and the test phase, so tests stay scoped to the
         # one member as well.
         cargoExtraArgs = "--locked --package ${cargoPackage}";
         # The shared environment has to win over anything a crate passes, or
         # that crate stops hitting the artifact cache.
         inherit (commonArgs) strictDeps nativeBuildInputs buildInputs;
-        postPatch = stubSiblings pname + (packageExtra.postPatch or "");
+        postPatch = stubSiblings workspaceMember + (packageExtra.postPatch or "");
         # Say which executable lib.getExe should resolve rather than making it
         # guess from the derivation name.
         meta = (packageExtra.meta or { }) // {
@@ -201,12 +202,24 @@ rec {
     '';
   };
 
-  # A headless status/profile helper. Quickshell owns the visible audio UI, so this
-  # executable needs no GTK environment wrapper.
-  audioControl = mkWorkspacePackage "audio-control" { dontWrapGApps = true; };
+  # Headless audio compatibility, pairing, and HID++ battery publication only;
+  # AGS/Astal owns the visible UI, so this needs no GTK environment wrapper.
+  audioControl = mkWorkspacePackage "audio-control" {
+    workspaceMember = "audio-control/rust-custom";
+    dontWrapGApps = true;
+    postInstall = ''
+      wrapProgram "$out/bin/audio-control" \
+        --set AUDIO_CONTROL_PW_DUMP "${lib.getExe' pkgs.pipewire "pw-dump"}"
+    '';
+  };
+
+  audioPanel = import ../niri/panels/audio.nix {
+    inherit pkgs audioControl;
+  };
 
   # Custom media policy/metadata only; AGS/Astal supplies the native services.
   mediaControl = mkWorkspacePackage "media-control" {
+    workspaceMember = "media-control/rust-custom";
     dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/media-control" \
@@ -214,7 +227,7 @@ rec {
     '';
   };
 
-  mediaPanel = import ../niri/panels/media-control/media.nix {
+  mediaPanel = import ../niri/panels/media.nix {
     inherit pkgs mediaControl;
   };
 

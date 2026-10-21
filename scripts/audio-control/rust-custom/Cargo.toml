@@ -1,0 +1,31 @@
+[package]
+name = "audio-control"
+version.workspace = true
+edition.workspace = true
+
+# Astal supplies canonical state and executes every audio action. Rust supplies
+# missing route/profile relationships, physical-row and transaction policy,
+# same-connection pairing agents, and the HID++ battery provider.
+[lib]
+name = "audio_control"
+path = "src/lib.rs"
+
+[[bin]]
+name = "audio-control"
+path = "src/main.rs"
+
+[[test]]
+name = "tests"
+path = "src/tests.rs"
+
+[dependencies]
+# Pair and its request-local agent must share one BlueZ connection.
+bluer = { version = "=0.17.4", default-features = false, features = [
+  "bluetoothd",
+] }
+# System-bus export of HID++ battery levels through BlueZ's provider API
+# (bt-battery-provider.service).
+zbus = "=5.18.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "time"] }

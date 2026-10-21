@@ -2192,7 +2192,7 @@ mod media_bridge {
     }
 
     #[test]
-    fn grouping_accepts_frontend_effective_positions_and_zero_for_unsupported_timelines() {
+    fn grouping_accepts_native_positions_and_zero_for_unsupported_positions() {
         let mut helper = Helper::start("model");
         let mut request = snapshot(
             vec![
@@ -2307,5 +2307,297 @@ mod media_bridge {
         let error = String::from_utf8(output.stderr).unwrap();
         assert!(error.contains("invalid media credit JSON"));
         assert!(!error.contains("private-token") && !error.contains("secret"));
+    }
+}
+
+mod live_panel_ipc {
+    //! Opt-in, read-only lifecycle check against an already running Linux desktop panel.
+    //!
+    //! Run from the repository root:
+    //! ```text
+    //! cargo test --manifest-path scripts/Cargo.toml --package media-control --locked --test tests live_panel_ipc_lifecycle -- --ignored --nocapture
+    //! ```
+    //! Requires an active `ags-media.service`, readable cgroup v2/procfs data, and
+    //! `media-panel` on PATH. `MEDIA_PANEL_LAUNCHER` can select another launcher
+    //! executable (not a shell command); `MEDIA_PANEL_IPC_REQUESTS` must be a positive
+    //! integer and defaults to 1200. Only `status` is requested, through the launcher's
+    //! native AGS IPC path; no playback/UI commands or service mutations are performed.
+    //! Each subprocess/output read has a shared five-second deadline. Progress is
+    //! printed at least every 100 requests or five seconds between requests.
+    //! PID/start-time changes fail the check. After a one-second settle, connected
+    //! panel socket growth must be at most two and total FD growth at most eight.
+
+    use std::collections::HashSet;
+    use std::env;
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::io::{self, Read};
+    use std::os::unix::fs::MetadataExt;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command, Stdio};
+    use std::sync::mpsc::{self, Receiver};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::AppResult;
+
+    const SERVICE: &str = "ags-media.service";
+    const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+
+    struct CommandChild(Child);
+
+    impl Drop for CommandChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn read_pipe(mut pipe: impl Read + Send + 'static) -> Receiver<io::Result<Vec<u8>>> {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let result = pipe.read_to_end(&mut bytes).map(|_| bytes);
+            let _ = sender.send(result);
+        });
+        receiver
+    }
+
+    fn command(executable: &OsStr, args: &[&str]) -> AppResult<Vec<u8>> {
+        let mut command = Command::new(executable);
+        command.args(args);
+        let label = format!("{command:?}");
+        let deadline = Instant::now() + COMMAND_TIMEOUT;
+        let mut child = CommandChild(
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|error| format!("start {label}: {error}"))?,
+        );
+        let stdout = read_pipe(child.0.stdout.take().unwrap());
+        let stderr = read_pipe(child.0.stderr.take().unwrap());
+        let status = loop {
+            if let Some(status) = child.0.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                return Err(format!("{label} timed out after {COMMAND_TIMEOUT:?}").into());
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        let stdout = stdout
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|error| format!("{label} stdout deadline: {error}"))??;
+        let stderr = stderr
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|error| format!("{label} stderr deadline: {error}"))??;
+        if !status.success() {
+            return Err(format!(
+                "{label} exited with {status}: {}",
+                String::from_utf8_lossy(&stderr)
+            )
+            .into());
+        }
+        Ok(stdout)
+    }
+
+    fn service_cgroup() -> AppResult<PathBuf> {
+        let output = String::from_utf8(command(
+            OsStr::new("systemctl"),
+            &[
+                "--user",
+                "show",
+                SERVICE,
+                "--property=ActiveState",
+                "--property=ControlGroup",
+            ],
+        )?)?;
+        let active = output.lines().any(|line| line == "ActiveState=active");
+        let group = output
+            .lines()
+            .find_map(|line| line.strip_prefix("ControlGroup="))
+            .filter(|group| group.starts_with('/') && *group != "/");
+        match group {
+            Some(group) if active => Ok(PathBuf::from(format!("/sys/fs/cgroup{group}"))),
+            _ => Err(format!("{SERVICE} must be active with a non-root ControlGroup").into()),
+        }
+    }
+
+    fn gjs_pid(cgroup: &Path) -> AppResult<u32> {
+        let mut candidates = Vec::new();
+        for pid in fs::read_to_string(cgroup.join("cgroup.procs"))?.split_whitespace() {
+            let pid: u32 = pid.parse()?;
+            match fs::read_to_string(format!("/proc/{pid}/comm")) {
+                Ok(comm) if matches!(comm.trim(), "gjs" | "gjs-console") => candidates.push(pid),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if candidates.len() != 1 {
+            return Err(format!(
+                "expected one GJS process in {}, found {candidates:?}",
+                cgroup.display()
+            )
+            .into());
+        }
+        Ok(candidates[0])
+    }
+
+    /// Field 22 is starttime; comm may itself contain spaces and parentheses.
+    fn process_start(pid: u32) -> AppResult<u64> {
+        let path = format!("/proc/{pid}/stat");
+        let stat = fs::read_to_string(&path).map_err(|error| format!("read {path}: {error}"))?;
+        let (_, fields) = stat.rsplit_once(')').ok_or("invalid /proc stat comm")?;
+        let mut fields = fields.split_whitespace();
+        let state = fields.next().ok_or("missing /proc process state")?;
+        if matches!(state, "Z" | "X" | "x") {
+            return Err(format!("PID {pid} is no longer alive ({state})").into());
+        }
+        Ok(fields.nth(18).ok_or("missing /proc starttime")?.parse()?)
+    }
+
+    fn same_process(cgroup: &Path, pid: u32, start: u64) -> AppResult<()> {
+        if gjs_pid(cgroup)? != pid || process_start(pid)? != start {
+            return Err(
+                format!("{SERVICE} GJS process (PID {pid}) was replaced during the test").into(),
+            );
+        }
+        Ok(())
+    }
+
+    struct Descriptors {
+        connected: usize,
+        total: usize,
+    }
+
+    fn descriptors(pid: u32, socket_path: &str) -> AppResult<Descriptors> {
+        let mut owned = HashSet::new();
+        let mut total = 0;
+        for entry in fs::read_dir(format!("/proc/{pid}/fd"))? {
+            let entry = entry?;
+            total += 1;
+            match fs::read_link(entry.path()) {
+                Ok(target) => {
+                    if let Some(inode) = target
+                        .to_str()
+                        .and_then(|target| target.strip_prefix("socket:["))
+                        .and_then(|target| target.strip_suffix(']'))
+                    {
+                        owned.insert(inode.parse::<u64>()?);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let mut connected = HashSet::new();
+        for line in fs::read_to_string("/proc/net/unix")?.lines().skip(1) {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            if fields.len() == 8 && fields[5] == "03" && fields[7] == socket_path {
+                let inode = fields[6].parse::<u64>()?;
+                if owned.contains(&inode) {
+                    connected.insert(inode);
+                }
+            }
+        }
+        Ok(Descriptors {
+            connected: connected.len(),
+            total,
+        })
+    }
+
+    #[test]
+    #[ignore = "requires a running desktop and ags-media.service; sends live status requests"]
+    fn live_panel_ipc_lifecycle() -> AppResult<()> {
+        let launcher = env::var_os("MEDIA_PANEL_LAUNCHER").unwrap_or_else(|| "media-panel".into());
+        let requests = match env::var("MEDIA_PANEL_IPC_REQUESTS") {
+            Ok(value) => value
+                .parse::<usize>()
+                .ok()
+                .filter(|count| *count > 0 && value.bytes().all(|byte| byte.is_ascii_digit()))
+                .ok_or("MEDIA_PANEL_IPC_REQUESTS must be a positive integer")?,
+            Err(env::VarError::NotPresent) => 1200,
+            Err(error) => return Err(error.into()),
+        };
+        eprintln!("Checking {SERVICE}: launcher={launcher:?}, status requests={requests}");
+        let cgroup = service_cgroup()?;
+        let pid = gjs_pid(&cgroup)?;
+        let start = process_start(pid)?;
+        let uid = fs::metadata("/proc/self")?.uid();
+        let socket_path = format!("/run/user/{uid}/astal/media-panel.sock");
+        same_process(&cgroup, pid, start)?;
+        let before = descriptors(pid, &socket_path)?;
+        same_process(&cgroup, pid, start)?;
+        eprintln!(
+            "pid={pid} starttime={start} socket={socket_path} connected_before={} fds_before={}",
+            before.connected, before.total
+        );
+
+        let mut completed = 0;
+        let began = Instant::now();
+        let mut progress = began;
+        let result = (|| -> AppResult<()> {
+            for request in 1..=requests {
+                same_process(&cgroup, pid, start)?;
+                let output = command(&launcher, &["status"]).map_err(|error| {
+                    format!("status request {request}/{requests} failed: {error}")
+                })?;
+                let status: serde_json::Value = serde_json::from_slice(&output)
+                    .map_err(|error| format!("status request {request}: invalid JSON: {error}"))?;
+                if !status.is_object()
+                    || ["text", "class", "alt", "tooltip"]
+                        .iter()
+                        .any(|key| !status.get(key).is_some_and(serde_json::Value::is_string))
+                    || status.get("error").is_some()
+                {
+                    return Err(format!(
+                        "status request {request} must return a Waybar badge object, got {status}"
+                    )
+                    .into());
+                }
+                same_process(&cgroup, pid, start)?;
+                completed = request;
+                if completed % 100 == 0
+                    || progress.elapsed() >= Duration::from_secs(5)
+                    || completed == requests
+                {
+                    eprintln!(
+                        "pid={pid} requests={completed}/{requests} elapsed={:.1?}",
+                        began.elapsed()
+                    );
+                    progress = Instant::now();
+                }
+            }
+            Ok(())
+        })();
+
+        eprintln!("Settling for one second after {completed}/{requests} status requests");
+        thread::sleep(Duration::from_secs(1));
+        same_process(&cgroup, pid, start)?;
+        if service_cgroup()? != cgroup {
+            return Err(format!("{SERVICE} ControlGroup changed during the test").into());
+        }
+        let after = descriptors(pid, &socket_path)?;
+        same_process(&cgroup, pid, start)?;
+        let socket_growth = after.connected as i64 - before.connected as i64;
+        let fd_growth = after.total as i64 - before.total as i64;
+        eprintln!(
+            "pid={pid} requests={completed}/{requests} connected_before={} connected_after={} growth={socket_growth:+} fds_before={} fds_after={} growth={fd_growth:+}",
+            before.connected, after.connected, before.total, after.total
+        );
+        result?;
+        if socket_growth > 2 {
+            return Err(
+                format!("connected panel sockets grew by {socket_growth} (maximum 2)").into(),
+            );
+        }
+        if fd_growth > 8 {
+            return Err(format!("open descriptors grew by {fd_growth} (maximum 8)").into());
+        }
+        eprintln!("PASS: IPC connections and file descriptors stayed bounded");
+        Ok(())
     }
 }

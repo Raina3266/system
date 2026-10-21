@@ -37,7 +37,7 @@ let
       '';
     });
   palette = pkgs.writeText "media-panel-palette.json" (
-    builtins.toJSON (import ../../../themes/palette.nix)
+    builtins.toJSON (import ../../themes/palette.nix)
   );
 in
 pkgs.writeShellApplication {
@@ -83,7 +83,7 @@ pkgs.writeShellApplication {
     export QUICKSHELL="''${QUICKSHELL:-${lib.getExe pkgs.quickshell}}"
 
     if [ "$command" = run ]; then
-      # AGS 2.3 has no run --instance flag; App.start owns the instance name.
+      # The native Astal.Application owns the instance name.
       exec ${lib.getExe ags} run --gtk4 -- "$MEDIA_PANEL_CONFIG"
     fi
 

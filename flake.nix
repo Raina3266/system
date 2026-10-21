@@ -60,7 +60,6 @@
           cairo
           gdk-pixbuf
           dbus
-          libpulseaudio
         ];
       };
     };

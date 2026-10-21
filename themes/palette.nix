@@ -1,6 +1,7 @@
 # The one palette every toolkit shares. themes/default.nix patches Daemon's
 # KDE, GTK and VS Code themes; niri/quickshell/style.nix renders Colors.qml;
-# niri/panels/media-control/media.nix exports JSON for the AGS media panel's GTK CSS.
+# niri/panels/{media,audio}.nix export JSON for
+# the AGS media and audio panels' GTK CSS.
 # Generated assets stay outside the live-linked presentation directories.
 {
   red = "#D52C35";

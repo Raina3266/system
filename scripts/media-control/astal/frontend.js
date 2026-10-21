@@ -5,8 +5,10 @@ import Gdk from 'gi://Gdk?version=4.0';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
-import App from 'astal/gtk4/app';
-import { MediaBackend, clock, runHelper } from './backend.js';
+import AstalIO from 'gi://AstalIO';
+import GObject from 'gi://GObject';
+import { exit } from 'system';
+import { MediaBackend } from './backend.js';
 import { formatTime } from './logic.js';
 
 // Theme and metadata presentation.
@@ -37,8 +39,8 @@ function loadTheme(entry, palettePath) {
 }
 
 class Artwork {
-    constructor(helper, size) {
-        this.helper = helper;
+    constructor(backend, size) {
+        this.backend = backend;
         this.size = size;
         this.key = '';
         this.generation = 0;
@@ -67,9 +69,8 @@ class Artwork {
             }
             if (!url) return;
             try {
-                const stdout = await runHelper([this.helper, 'artwork', url], null, cancel);
+                const path = await this.backend.resolveArtwork(url, cancel);
                 if (generation !== this.generation) return;
-                const path = stdout.trim();
                 if (path) await this.load(path, generation);
             } catch (error) {
                 if (generation === this.generation && !cancel.is_cancelled()) console.warn(`Media artwork: ${error.message}`);
@@ -109,8 +110,8 @@ class Artwork {
 }
 
 class Credit {
-    constructor(helper, update) {
-        this.helper = helper;
+    constructor(backend, update) {
+        this.backend = backend;
         this.update = update;
         this.key = '';
         this.generation = 0;
@@ -126,11 +127,8 @@ class Credit {
         this.cancel = new Gio.Cancellable();
         this.update('');
         if (!key) return;
-        runHelper([this.helper, 'credit'], key + '\n', this.cancel).then(stdout => {
-            if (generation !== this.generation) return;
-            const reply = JSON.parse(stdout);
-            if (reply.url === data.url && reply.artist === data.artist && reply.album === data.album
-                && typeof reply.credit === 'string') this.update(reply.credit);
+        this.backend.resolveCredit(data, this.cancel).then(credit => {
+            if (generation === this.generation) this.update(credit);
         }).catch(error => {
             if (generation === this.generation && !this.cancel.is_cancelled()) console.warn(`Media credit: ${error.message}`);
         });
@@ -168,7 +166,7 @@ function scale(upper, classes = []) {
         adjustment: new Gtk.Adjustment({ lower: 0, upper, step_increment: upper / 100, page_increment: upper / 20 }) });
 }
 function trackKey(player) {
-    return player ? JSON.stringify([player.bus, player.instance, player.trackId, player.url, player.title]) : '';
+    return player ? JSON.stringify([player.bus, player.instance, player.trackKey]) : '';
 }
 
 function frame(palette) {
@@ -195,14 +193,13 @@ function frame(palette) {
 class MediaPanel {
     constructor({ app, backend, palette }) {
         this.backend = backend;
-        this.helper = backend.helper;
+
         this.opened = false;
         this.groups = [];
         this.activePlayer = '';
         this.failure = '';
         this.rows = new Map();
-        this.preMute = new Map();
-        this.tick = 0;
+
         this.monitor = null;
         this.window = new Astal.Window({
             application: app, name: 'media-panel', namespace: 'astal:media',
@@ -223,13 +220,18 @@ class MediaPanel {
         this.root.set_child(new Gtk.Box({ hexpand: true, vexpand: true }));
         this.window.set_child(this.root);
         this.card = new Gtk.Overlay({ width_request: 460, halign: Gtk.Align.CENTER, valign: Gtk.Align.START,
-            margin_top: 24, css_classes: ['media-card'] });
+            margin_top: 40, css_classes: ['media-card'] });
         this.card.set_child(frame(palette));
         this.content = box(true, 12);
         this.content.add_css_class('media-content');
         this.card.add_overlay(this.content);
         this.card.set_measure_overlay(this.content, true);
-        this.root.add_overlay(this.card);
+        this.revealer = new Gtk.Revealer({ child: this.card, halign: Gtk.Align.CENTER, valign: Gtk.Align.START,
+            transition_type: Gtk.RevealerTransitionType.CROSSFADE, transition_duration: 220 });
+        this.revealer.connect('notify::child-revealed', () => {
+            if (!this.opened && !this.revealer.child_revealed) this.window.visible = false;
+        });
+        this.root.add_overlay(this.revealer);
         const outside = new Gtk.GestureClick({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
         outside.connect('released', (_, count, x, y) => {
             const [ok, bounds] = this.card.compute_bounds(this.root);
@@ -255,7 +257,7 @@ class MediaPanel {
         this.content.append(this.empty);
         this.details = box(true, 12);
         this.content.append(this.details);
-        this.art = new Artwork(this.helper, 68);
+        this.art = new Artwork(this.backend, 68);
         this.title = label('', ['title'], true);
         this.title.wrap = true;
         this.title.wrap_mode = Pango.WrapMode.WORD_CHAR;
@@ -264,7 +266,7 @@ class MediaPanel {
         this.title.max_width_chars = 20;
         this.title.ellipsize = Pango.EllipsizeMode.END;
         this.creditLabel = ellipsis('', ['metadata']);
-        this.credit = new Credit(this.helper, text => this.creditLabel.set_label(text));
+        this.credit = new Credit(this.backend, text => this.creditLabel.set_label(text));
         const metadata = box(true, 4, [this.title, this.creditLabel]);
         metadata.valign = Gtk.Align.CENTER;
         metadata.hexpand = true;
@@ -292,12 +294,7 @@ class MediaPanel {
         this.volumeButton = new Gtk.Button({ css_classes: ['volume-button'], valign: Gtk.Align.CENTER,
             child: box(false, 4, [this.volumeGlyph, this.volumeValue]) });
         this.volumeButton.connect('clicked', () => {
-            const control = this.volumeControl;
-            if (!control?.enabled) return;
-            if (control.value > 0.01) {
-                this.preMute.set(control.key, control.value);
-                control.set(0);
-            } else control.set(this.preMute.get(control.key) || 0.5);
+            if (!this.volumeControl?.toggleMute()) this.setFailure('Native mute is unavailable or the media source changed.');
         });
         this.volume = scale(1);
         this.volume.width_request = 80;
@@ -378,11 +375,13 @@ class MediaPanel {
         this.seek.adjustment.step_increment = 1;
         this.seek.adjustment.page_increment = Math.max(1, (player?.length || 20) / 20);
         this.volumeControl = this.backend.volume(this.group);
-        this.volume.sensitive = this.volumeButton.sensitive = this.volumeControl.enabled;
-        this.volume.tooltip_text = this.volumeButton.tooltip_text = this.volumeControl.reason;
+        this.volume.sensitive = this.volumeControl.enabled;
+        this.volumeButton.sensitive = this.volumeControl.muteEnabled;
+        this.volume.tooltip_text = this.volumeControl.reason;
+        this.volumeButton.tooltip_text = this.volumeControl.muteReason;
         if (!this.volumeDragging) this.volume.set_value(this.volumeControl.value);
         const volume = this.volumeControl.value;
-        this.volumeGlyph.set_label(volume < 0.01 ? '󰝟' : volume < 0.5 ? '󰖀' : '󰕾');
+        this.volumeGlyph.set_label(this.volumeControl.muted || volume < 0.01 ? '󰝟' : volume < 0.5 ? '󰖀' : '󰕾');
         this.volumeValue.set_label(this.volumeControl.enabled ? `${Math.round(volume * 100)}%` : '—');
         this.sourceName.set_label(this.group?.displayName || '');
         this.section.sensitive = this.groups.length > 1;
@@ -407,7 +406,7 @@ class MediaPanel {
             let row = this.rows.get(bus);
             if (!row) {
                 row = { group };
-                row.art = new Artwork(this.helper, 34);
+                row.art = new Artwork(this.backend, 34);
                 row.name = ellipsis('', ['source-name']);
                 row.title = ellipsis('', ['source-title']);
                 row.play = button('󰐊', 'Play / pause this source', () => this.action('toggle', row.group), ['source-play']);
@@ -455,9 +454,9 @@ class MediaPanel {
         this.opened = true;
         this.window.keymode = Astal.Keymode.EXCLUSIVE;
         this.window.visible = true;
-        this.backend.closeNetwork();
+        closeNetwork();
         this.backend.refresh();
-        this.animate(true);
+        this.revealer.reveal_child = true;
         this.render();
     }
 
@@ -469,33 +468,12 @@ class MediaPanel {
         this.seekTarget = this.volumeTarget = null;
         this.sources.reveal_child = false;
         this.chevron.set_label('󰅃');
-        this.animate(false);
+        this.revealer.reveal_child = false;
         this.render();
     }
 
-    animate(opening) {
-        this.animation = { started: clock(), from: this.card.opacity, to: opening ? 1 : 0 };
-        if (opening && !this.tick) { this.card.opacity = 0; this.animation.from = 0; }
-        if (this.tick) return;
-        this.tick = this.window.add_tick_callback(() => {
-            const progress = Math.min(1, (clock() - this.animation.started) / 0.22);
-            const eased = 1 - (1 - progress) ** 3;
-            const opacity = this.animation.from + (this.animation.to - this.animation.from) * eased;
-            this.card.opacity = opacity;
-            this.card.margin_top = Math.round(24 + 16 * opacity);
-            if (this.opened && this.group?.primary.playing) this.position();
-            if (progress === 1 && !this.opened) {
-                this.window.visible = false;
-                this.tick = 0;
-                return GLib.SOURCE_REMOVE;
-            }
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
 
     dispose() {
-        if (this.tick) this.window.remove_tick_callback(this.tick);
-        this.tick = 0;
         this.credit.dispose();
         this.art.dispose();
         this.rows.forEach(row => row.art.dispose());
@@ -513,48 +491,100 @@ function render() {
 }
 
 function monitorFor(name) {
-    const monitors = Gdk.Display.get_default().get_monitors();
-    for (let index = 0; index < monitors.get_n_items(); index++) {
-        const monitor = monitors.get_item(index);
-        if (!name || monitor.get_connector() === name) return monitor;
-    }
-    return null;
+    return App.get_monitors().find(monitor => !name || monitor.get_connector() === name) || null;
 }
 
-App.start({
-    instanceName: 'media-panel',
-    requestHandler(request, respond) {
+function handleRequest(message) {
+    if (!message || typeof message !== 'object' || Array.isArray(message))
+        throw new Error('A media panel command object is required.');
+    if (!backend || !panel) throw new Error('Media panel is starting.');
+    switch (message.command) {
+    case 'status': return backend.status();
+    case 'toggle': {
+        if (message.monitor !== undefined && typeof message.monitor !== 'string')
+            throw new Error('Monitor must be a connector name.');
+        const monitor = monitorFor(message.monitor);
+        if (!monitor) throw new Error('The requested monitor is no longer connected.');
+        panel.toggle(monitor);
+        break;
+    }
+    case 'close': panel.close(); break;
+    case 'pauseAll': backend.action('pauseAll'); break;
+    case 'togglePauseAll': backend.action('togglePauseAll'); break;
+    case 'cycleMedia': backend.cycle(); break;
+    default: throw new Error('Unknown media panel command.');
+    }
+    return 'ok';
+}
+
+function closeNetwork() {
+    try {
+        AstalIO.Process.exec_asyncv([GLib.getenv('QUICKSHELL') || 'quickshell',
+            'ipc', '--config', 'media', 'call', 'network', 'close'], (_, result) => {
+            try { AstalIO.Process.exec_asyncv_finish(result); }
+            catch (error) { console.warn(`Could not dismiss the network panel: ${error.message}`); }
+        });
+    } catch (error) { console.warn(`Could not dismiss the network panel: ${error.message}`); }
+}
+
+const MediaApplication = GObject.registerClass(class MediaApplication extends Astal.Application {
+    vfunc_request(request, connection) {
+        let response;
+        try { response = handleRequest(JSON.parse(request)); }
+        catch (error) { response = JSON.stringify({ error: error.message }); }
+        const close = () => {
+            try { connection.close(null); }
+            catch (error) { console.warn(`Media request close: ${error.message}`); }
+        };
         try {
-            const message = JSON.parse(request);
-            if (!backend || !panel) throw new Error('Media panel is starting.');
-            switch (message.command) {
-            case 'status': respond(backend.status()); return;
-            case 'toggle': {
-                if (message.monitor !== undefined && typeof message.monitor !== 'string')
-                    throw new Error('Monitor must be a connector name.');
-                const monitor = monitorFor(message.monitor);
-                if (!monitor) throw new Error('The requested monitor is no longer connected.');
-                panel.toggle(monitor);
-                break;
-            }
-            case 'close': panel.close(); break;
-            case 'pauseAll': backend.action('pauseAll'); break;
-            case 'togglePauseAll': backend.action('togglePauseAll'); break;
-            case 'cycleMedia': backend.cycle(); break;
-            default: throw new Error('Unknown media panel command.');
-            }
-            respond('ok');
-        } catch (error) { respond(JSON.stringify({ error: error.message })); }
-    },
-    main() {
+            // Native request API exposes the connection, so its owner can close
+            // it after Astal finishes writing instead of relying on GJS GC.
+            AstalIO.write_sock(connection, response, (_, result) => {
+                try { AstalIO.write_sock_finish(result); }
+                catch (error) { console.warn(`Media request reply: ${error.message}`); }
+                finally { close(); }
+            });
+        } catch (error) {
+            close();
+            console.warn(`Media request reply: ${error.message}`);
+        }
+    }
+});
+
+Gtk.init();
+// AGS preloads GTK4 layer-shell; do not inherit that preload in Rust helpers.
+GLib.unsetenv('LD_PRELOAD');
+const App = new MediaApplication({ instance_name: 'media-panel' });
+let initialized = false, monitorSignal = 0;
+function disposeApplication() {
+    if (monitorSignal) App.disconnect(monitorSignal);
+    monitorSignal = 0;
+    try { panel?.dispose(); }
+    finally {
+        panel = null;
+        backend?.dispose();
+        backend = null;
+    }
+}
+App.connect('shutdown', disposeApplication);
+App.connect('activate', () => {
+    if (initialized) return;
+    try {
         const { palette } = loadTheme(GLib.getenv('MEDIA_PANEL_CONFIG'), GLib.getenv('MEDIA_PANEL_PALETTE'));
         backend = new MediaBackend({ onChange: render });
         panel = new MediaPanel({ app: App, backend, palette });
         backend.start();
-        const monitors = Gdk.Display.get_default().get_monitors();
-        monitors.connect('items-changed', () => {
+        monitorSignal = App.connect('notify::monitors', () => {
             if (panel.monitor && !monitorFor(panel.monitor.get_connector())) panel.close();
         });
-        App.connect('shutdown', () => { panel.dispose(); backend.dispose(); });
-    },
+        initialized = true;
+    } catch (error) {
+        console.error(`Media panel initialization: ${error.message}`);
+        try { disposeApplication(); }
+        finally { try { App.quit(); } finally { exit(1); } }
+    }
 });
+try { App.acquire_socket(); }
+catch (error) { console.error(`Media panel startup: ${error.message}`); exit(1); }
+App.hold();
+await App.runAsync([]);
