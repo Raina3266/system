@@ -10,6 +10,7 @@ let
         pkgs.gdk-pixbuf
         pkgs.librsvg
         pkgs.webp-pixbuf-loader
+        pkgs.libavif
       ]
     }; do
       module_dir="$package/${pkgs.gdk-pixbuf.moduleDir}"

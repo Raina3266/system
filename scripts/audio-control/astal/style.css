@@ -20,7 +20,6 @@ window.audio-panel {
 .audio-panel .device-name { color: @ap_cyan; font-weight: bold; }
 .audio-panel .volume-value { font-size: 13px; }
 .audio-panel .muted { color: @ap_separator; }
-.audio-panel .volume-hint { font-size: 11px; }
 .audio-panel .section-heading { color: @ap_pink; font-weight: bold; }
 .audio-panel .device-status { color: @ap_foreground; font-size: 11px; }
 .audio-panel .failure { color: @ap_red; }
@@ -52,6 +51,7 @@ window.audio-panel {
     padding: 0;
     margin: 0;
 }
+.audio-panel button.device-choice { color: @ap_foreground; }
 .audio-panel button.control-button.selected { background: alpha(@ap_dimPink, 0.35); }
 .audio-panel button.control-button:hover,
 .audio-panel button.control-button:focus-visible {
@@ -90,6 +90,15 @@ window.audio-panel {
 .audio-panel button.forget-button:hover,
 .audio-panel button.forget-button:focus-visible { min-width: 23px; min-height: 23px; }
 .audio-panel button.forget-button label { font-size: 13px; }
+.audio-panel button.pairing-dismiss,
+.audio-panel button.pairing-dismiss:hover,
+.audio-panel button.pairing-dismiss:focus-visible {
+    min-width: 16px;
+    min-height: 16px;
+    padding: 0;
+    border: none;
+}
+.audio-panel button.pairing-dismiss label { font-size: 12px; }
 
 .audio-panel button.tab {
     border: 1px solid alpha(@ap_pink, 0.7);

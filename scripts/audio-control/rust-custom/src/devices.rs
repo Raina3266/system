@@ -116,7 +116,7 @@ impl Metadata {
                         .into(),
                 );
             }
-            cards.insert(card.id, CardData::parse(&object["info"]["params"])?);
+            cards.insert(card.id, CardData::parse(card, &object["info"]["params"])?);
         }
         Ok(Self { cards })
     }
@@ -152,11 +152,18 @@ impl Metadata {
 }
 
 impl CardData {
-    fn parse(params: &Value) -> AppResult<Self> {
+    fn parse(card: &Card, params: &Value) -> AppResult<Self> {
         let mut data = Self::default();
         let mut indexes = HashSet::new();
         let mut names = HashSet::new();
-        for value in array(params, "EnumProfile")? {
+        // Only ALSA profile policy consumes these associations. Other backends,
+        // notably BlueZ, need not expose ACP's counted classes schema.
+        let profiles = if card.name.starts_with("alsa_card.") {
+            array(params, "EnumProfile")?
+        } else {
+            &[]
+        };
+        for value in profiles {
             #[derive(Deserialize)]
             struct RawProfile {
                 index: i32,

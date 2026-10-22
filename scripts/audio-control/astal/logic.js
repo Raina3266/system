@@ -91,7 +91,7 @@ export function selectionPlan(entry, endpoints) {
     return { type: 'native', nodeKey: endpoint.key, route: routes[0].index };
 }
 
-export function deviceChoices(entries, endpoints, cards = []) {
+export function deviceChoices(entries, endpoints, cards = [], resolvedNodes = []) {
     const choices = [];
     for (const endpoint of endpoints) {
         const rows = entries.filter(entry => entry.nodeId === endpoint.id && entry.nodeSerial === endpoint.serial
@@ -100,7 +100,9 @@ export function deviceChoices(entries, endpoints, cards = []) {
                 && route.name === entry.portName && route.available)));
         for (const row of rows) choices.push({ ...row, default: Boolean(endpoint.isDefault
             && (!row.port || (endpoint.routesReliable ? endpoint.routeName === row.portName : row.portActive))) });
-        if (rows.length) continue;
+        // A successful policy response may deliberately omit an unplugged route.
+        // Only fall back for native endpoints the helper has not resolved yet.
+        if (rows.length || resolvedNodes.some(node => node.id === endpoint.id && node.serial === endpoint.serial)) continue;
         choices.push({ key: `native:${endpoint.key}`, label: endpoint.description || endpoint.name,
             description: endpoint.description || endpoint.name, name: endpoint.name, portName: '', card: '',
             port: false, portActive: false, nodeId: endpoint.id, nodeSerial: endpoint.serial,

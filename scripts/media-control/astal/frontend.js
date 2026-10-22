@@ -65,9 +65,13 @@ class Artwork {
         const load = async () => {
             if (cover) {
                 try { await this.load(cover, generation); return; }
-                catch (error) { if (generation !== this.generation) return; }
+                catch (error) {
+                    if (generation !== this.generation || cancel.is_cancelled()) return;
+                    console.warn(`Media artwork ${cover}: ${error.message}`);
+                }
             }
-            if (!url) return;
+            // Remote artwork is cached by Astal; Rust only extracts local covers.
+            if (!url || !(url.startsWith('file://') || url.startsWith('/'))) return;
             try {
                 const path = await this.backend.resolveArtwork(url, cancel);
                 if (generation !== this.generation) return;
@@ -299,11 +303,17 @@ class MediaPanel {
         this.volume = scale(1);
         this.volume.width_request = 80;
         this.volume.connect('change-value', (_, scroll, value) => {
-            const control = this.volumeTarget || this.volumeControl;
-            if (!control?.enabled || !control.set(value)) this.setFailure('The media source changed. Try the volume again.');
+            const control = this.backend.volume(this.group);
+            // Revalidate ownership on each motion without retaining a descriptor
+            // whose metadata stamp can expire during a drag.
+            if ((this.volumeTarget && this.volumeTarget !== control.key)
+                || !control.enabled || !control.set(value)) {
+                this.setFailure('The media source changed. Try the volume again.');
+                return true;
+            }
             return false;
         });
-        this.drag(this.volume, () => { this.volumeDragging = true; this.volumeTarget = this.volumeControl; });
+        this.drag(this.volume, () => { this.volumeDragging = true; this.volumeTarget = this.volumeControl?.key; });
         this.details.append(box(false, 14, [transport, this.volumeButton, this.volume]));
         this.details.append(new Gtk.Separator({ css_classes: ['divider'] }));
         this.sourceName = ellipsis('', ['source-name']);
@@ -352,8 +362,31 @@ class MediaPanel {
         this.errorLabel.visible = Boolean(text);
     }
 
+    reportFailure(text) {
+        this.backend.reportFailure(text);
+        this.setFailure(text);
+    }
+
     action(kind, group = this.group) {
-        if (group && this.modelCurrent()) this.backend.action(kind, group.primary.bus);
+        if (!group) {
+            this.reportFailure('No media source is selected.');
+            return false;
+        }
+        if (!this.modelCurrent()) {
+            this.reportFailure('The media source changed. Refreshing; try the action again.');
+            this.backend.refresh();
+            return false;
+        }
+        if (kind === 'toggle') {
+            const transport = this.backend.transport(group);
+            if (!transport.enabled) {
+                this.reportFailure(transport.reason);
+                return false;
+            }
+        }
+        const queued = this.backend.action(kind, group.primary.bus);
+        if (!queued) this.reportFailure(this.backend.failure || 'The media action was not queued. Try again.');
+        return queued;
     }
 
     render() {
@@ -367,7 +400,9 @@ class MediaPanel {
         this.credit.set(player, this.opened);
         this.art.set(player?.cover || '', player?.url || '', this.opened && Boolean(player));
         this.play.get_child().set_label(player?.playing ? '󰏤' : '󰐊');
-        this.play.sensitive = current && Boolean(player);
+        const transport = this.backend.transport(this.group);
+        this.play.sensitive = current && transport.enabled;
+        this.play.tooltip_text = transport.reason;
         this.previous.sensitive = current && Boolean(player?.canPrevious);
         this.next.sensitive = current && Boolean(player?.canNext);
         this.seek.sensitive = current && Boolean(player?.canSeek && player?.length);
@@ -378,6 +413,7 @@ class MediaPanel {
         this.volume.sensitive = this.volumeControl.enabled;
         this.volumeButton.sensitive = this.volumeControl.muteEnabled;
         this.volume.tooltip_text = this.volumeControl.reason;
+        this.volumeValue.tooltip_text = this.volumeControl.reason;
         this.volumeButton.tooltip_text = this.volumeControl.muteReason;
         if (!this.volumeDragging) this.volume.set_value(this.volumeControl.value);
         const volume = this.volumeControl.value;
@@ -413,8 +449,16 @@ class MediaPanel {
                 const select = new Gtk.Button({ css_classes: ['source-select'], hexpand: true,
                     child: box(false, 8, [row.art.widget, box(true, 1, [row.name, row.title])]) });
                 select.connect('clicked', () => {
-                    if (!this.modelCurrent()) return;
-                    this.backend.select(row.group.primary.bus);
+                    if (!this.modelCurrent()) {
+                        this.reportFailure('The media source changed. Refreshing; select it again.');
+                        this.backend.refresh();
+                        return;
+                    }
+                    if (!this.backend.select(row.group.primary.bus)) {
+                        this.reportFailure(this.backend.failure || 'The media source could not be selected.');
+                        return;
+                    }
+                    this.reportFailure('');
                     this.sources.reveal_child = false;
                     this.chevron.set_label('󰅃');
                 });
@@ -428,7 +472,9 @@ class MediaPanel {
             row.title.set_label(group.title);
             row.widget.tooltip_text = `${group.displayName}\n${group.title}`;
             row.play.get_child().set_label(group.primary.playing ? '󰏤' : '󰐊');
-            row.play.sensitive = current;
+            const transport = this.backend.transport(group);
+            row.play.sensitive = current && transport.enabled;
+            row.play.tooltip_text = transport.reason;
             if (bus === this.activePlayer) row.widget.add_css_class('current');
             else row.widget.remove_css_class('current');
             row.art.set(group.primary.cover, group.primary.url, this.opened && this.sources.reveal_child);
@@ -457,12 +503,18 @@ class MediaPanel {
         closeNetwork();
         this.backend.refresh();
         this.revealer.reveal_child = true;
+        if (!this.positionTimer) this.positionTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            this.position();
+            return GLib.SOURCE_CONTINUE;
+        });
         this.render();
     }
 
     close() {
         if (!this.opened) return;
         this.opened = false;
+        if (this.positionTimer) GLib.source_remove(this.positionTimer);
+        this.positionTimer = 0;
         this.window.keymode = Astal.Keymode.NONE;
         this.seekDragging = this.volumeDragging = false;
         this.seekTarget = this.volumeTarget = null;
@@ -474,6 +526,8 @@ class MediaPanel {
 
 
     dispose() {
+        if (this.positionTimer) GLib.source_remove(this.positionTimer);
+        this.positionTimer = 0;
         this.credit.dispose();
         this.art.dispose();
         this.rows.forEach(row => row.art.dispose());

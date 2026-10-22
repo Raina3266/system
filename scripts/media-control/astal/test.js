@@ -3,6 +3,180 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { badge, truncateTitle, formatTime } from './logic.js';
 
+const viewSource = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+
+test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
+    const runtime = readFileSync(new URL('../../../niri/panels/media.nix', import.meta.url), 'utf8');
+    assert.match(runtime, /pkgs\.libavif/);
+    assert.match(viewSource, /positionTimer = GLib\.timeout_add/);
+    assert.match(viewSource, /GLib\.source_remove\(this\.positionTimer\)/);
+});
+
+test('volume drag refreshes ownership but never switches its captured native target', () => {
+    const start = viewSource.indexOf("this.volume.connect('change-value', ");
+    const body = viewSource.slice(start, viewSource.indexOf('\n        this.drag(this.volume', start));
+    let callback;
+    let writes = 0;
+    let failures = 0;
+    const context = {
+        volume: { connect(name, fn) { callback = fn; } },
+        volumeTarget: 'stream:1', group: {},
+        volumeControl: { enabled: true, set() { throw new Error('Stale descriptor used'); } },
+        backend: { volume() { return { key: 'stream:1', enabled: true, set() { writes++; return true; } }; } },
+        setFailure() { failures++; },
+    };
+    new Function(body).call(context);
+    assert.equal(callback(null, null, 0.4), false);
+    assert.equal(writes, 1);
+    context.volumeTarget = 'stream:2';
+    assert.equal(callback(null, null, 0.5), true);
+    assert.equal(writes, 1);
+    assert.equal(failures, 1);
+});
+
+test('remote page URLs never reach the local artwork extractor after decoding fails', async () => {
+    const Artwork = new Function('Gio', 'console',
+        viewSource.slice(viewSource.indexOf('class Artwork {'), viewSource.indexOf('class Credit {'))
+        + '; return Artwork;')({ Cancellable }, { warn() {} });
+    for (const url of ['https://www.youtube.com/watch?v=test', 'file:///music/track.flac']) {
+        const calls = [];
+        const art = Object.create(Artwork.prototype);
+        Object.assign(art, {
+            key: '', generation: 0, picture: { set_paintable() {} },
+            backend: { async resolveArtwork(value) { calls.push(value); return '/cache/local.png'; } },
+            async load(path) { if (path === '/cache/native.avif') throw new Error('Unsupported format'); },
+        });
+        art.set('/cache/native.avif', url);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(calls, url.startsWith('file:') ? [url] : []);
+    }
+});
+
+describe('Media view transport feedback', () => {
+    const MediaPanel = new Function(
+        viewSource.slice(viewSource.indexOf('class MediaPanel {'), viewSource.indexOf('\nlet backend, panel;'))
+        + '\nreturn MediaPanel;')();
+
+    test('stale, unsupported, and rejected actions explain why nothing was dispatched', () => {
+        let current = false, enabled = true, accepted = true, refreshes = 0;
+        const calls = [], failures = [];
+        const panel = Object.assign(Object.create(MediaPanel.prototype), {
+            group: { primary: { bus: 'browser' } },
+            backend: {
+                current: () => current, refresh() { refreshes++; }, failure: '',
+                reportFailure(text) { this.failure = text; },
+                transport: () => ({ enabled, reason: 'Browser does not expose pause control.' }),
+                action(kind, bus) { calls.push({ kind, bus }); return accepted; },
+            },
+            setFailure(text) { failures.push(text); },
+        });
+        assert.equal(panel.action('toggle'), false);
+        assert.equal(refreshes, 1);
+        assert.match(failures.at(-1), /changed.*try the action again/);
+        assert.deepEqual(calls, []);
+        current = true;
+        enabled = false;
+        assert.equal(panel.action('toggle'), false);
+        assert.match(failures.at(-1), /does not expose pause/);
+        assert.deepEqual(calls, []);
+        enabled = true;
+        accepted = false;
+        panel.backend.failure = 'Media worker is not ready.';
+        assert.equal(panel.action('toggle'), false);
+        assert.equal(failures.at(-1), panel.backend.failure);
+        accepted = true;
+        assert.equal(panel.action('toggle'), true);
+        assert.deepEqual(calls.at(-1), { kind: 'toggle', bus: 'browser' });
+        panel.group = null;
+        assert.equal(panel.action('toggle'), false);
+        assert.match(failures.at(-1), /No media source/);
+    });
+
+    test('recovery model refreshes preserve view-originated stale-action errors', () => {
+        let current = false, refreshes = 0;
+        const backend = { failure: '', current: () => current, refresh() { refreshes++; },
+            reportFailure(text) { this.failure = text; }, resolveGroups: () => [], activePlayer: '' };
+        const panel = Object.assign(Object.create(MediaPanel.prototype), {
+            group: { primary: { bus: 'browser' } }, backend,
+            errorLabel: { set_label(text) { this.text = text; } }, setModel() {},
+        });
+        assert.equal(panel.action('next'), false);
+        assert.equal(refreshes, 1);
+        const failure = panel.failure;
+        assert.match(failure, /try the action again/);
+        current = true;
+        const start = viewSource.indexOf('\nfunction render()');
+        const render = new Function('panel', 'backend',
+            viewSource.slice(start, viewSource.indexOf('\nfunction monitorFor(', start)) + '\nreturn render;')(panel, backend);
+        render();
+        assert.equal(panel.failure, failure);
+        assert.equal(panel.errorLabel.text, failure);
+        assert.equal(panel.errorLabel.visible, true);
+    });
+
+    test('main and source-row controls share capability feedback without hiding volume reasons', () => {
+        const label = () => ({ set_label(text) { this.text = text; } });
+        const button = () => { const child = label(); return { get_child: () => child }; };
+        let enabled = false;
+        const group = { title: 'Track', displayName: 'Spotify', primary: { bus: 'browser', playing: true }, players: ['browser'] };
+        const row = { name: label(), title: label(), play: button(), art: { set() {} },
+            widget: { add_css_class() {}, remove_css_class() {} } };
+        const panel = Object.assign(Object.create(MediaPanel.prototype), {
+            groups: [group], activePlayer: 'browser', rows: new Map([['browser', row]]),
+            backend: {
+                current: () => true,
+                transport: () => ({ enabled, reason: enabled ? 'Pause' : 'Browser bridge does not expose pause control.' }),
+                volume: () => ({ enabled: false, value: 0, reason: 'No uniquely owned audio stream.', muteEnabled: false }),
+            },
+            title: label(), credit: { set() {} }, art: { set() {} }, empty: {}, details: {},
+            play: button(), previous: {}, next: {}, seek: { adjustment: {} }, volume: { set_value() {} },
+            volumeButton: {}, volumeValue: label(), volumeGlyph: label(), sourceName: label(),
+            section: {}, sources: {}, chevron: label(), sourceRows: { reorder_child_after() {} },
+            setFailure() {}, position() {},
+        });
+        panel.render();
+        assert.equal(panel.play.sensitive, false);
+        assert.equal(row.play.sensitive, false);
+        assert.match(panel.play.tooltip_text, /does not expose pause/);
+        assert.equal(row.play.tooltip_text, panel.play.tooltip_text);
+        assert.equal(panel.volumeValue.text, '—');
+        assert.equal(panel.volumeValue.tooltip_text, 'No uniquely owned audio stream.');
+        enabled = true;
+        panel.render();
+        assert.equal(panel.play.sensitive, true);
+        assert.equal(row.play.sensitive, true);
+        assert.equal(panel.play.tooltip_text, 'Pause');
+    });
+
+    test('stale and rejected source selection is not silently discarded', () => {
+        const start = viewSource.indexOf("select.connect('clicked', ");
+        const body = viewSource.slice(start, viewSource.indexOf('\n                row.widget =', start));
+        let callback, current = false, accepted = false, refreshes = 0, selections = 0;
+        const failures = [];
+        const context = {
+            modelCurrent: () => current, sources: { reveal_child: true }, chevron: { set_label() {} },
+            backend: { failure: 'Source unavailable.', refresh() { refreshes++; },
+                select() { selections++; if (!accepted) this.failure = 'Source unavailable.'; return accepted; } },
+            setFailure(text) { failures.push(text); },
+            reportFailure(text) { this.backend.failure = text; this.setFailure(text); },
+        };
+        new Function('select', 'row', body).call(context,
+            { connect(_, fn) { callback = fn; } }, { group: { primary: { bus: 'browser' } } });
+        callback();
+        assert.equal(refreshes, 1);
+        assert.equal(selections, 0);
+        assert.match(failures.at(-1), /changed/);
+        current = true;
+        callback();
+        assert.equal(failures.at(-1), 'Source unavailable.');
+        assert.equal(context.sources.reveal_child, true);
+        accepted = true;
+        callback();
+        assert.equal(context.sources.reveal_child, false);
+        assert.equal(context.backend.failure, '', 'an accepted selection clears the previous selection error');
+    });
+});
+
 // Evaluate the real backend with in-memory GI doubles; never connect to a bus
 // or start a helper. Keep production imports native and dependency-free.
 const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
@@ -55,7 +229,7 @@ class Player extends Signals {
             trackid: '/track/one', identity: 'Test Player', entry: 'test-player',
             title: 'Track', artist: 'Artist', album: 'Album', art_url: '', cover_art: '',
             playback_status: 1, rate: 1, length: 200,
-            can_seek: true, can_go_next: true, can_go_previous: true,
+            can_play: true, can_pause: true, can_seek: true, can_go_next: true, can_go_previous: true,
             _position: 10, _volume: 0.6, metadata: { 'xesam:url': 'file:///music/track.flac' },
             calls: [], ...extra,
         });
@@ -285,6 +459,21 @@ describe('Native service integration', () => {
         }
     });
 
+    test('web bridge placeholder volume uses only a uniquely owned native stream', () => {
+        const player = new Player({ bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.ptest', _volume: 1 });
+        const h = nativeHarness({ player, stream: new Stream() });
+        const control = volume(h);
+        assert.equal(control.enabled, true);
+        assert.equal(control.value, 0.7);
+        assert.equal(control.set(0.3), true);
+        assert.deepEqual(h.player.calls, []);
+        assert.deepEqual(h.stream.calls, [['volume', 0.3], ['mute', false]]);
+        const shared = h.native.volume({ ...h.group(), streamId: null }, h.stamp());
+        assert.equal(shared.enabled, false);
+        assert.equal(shared.set(0.2), false);
+        assert.match(shared.reason, /does not support tab volume/);
+    });
+
     test('WirePlumber mute uses its native flag and retains volume even while muted', () => {
         const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
         let descriptor = volume(h);
@@ -469,6 +658,84 @@ describe('Native service integration', () => {
         assert.deepEqual(h.stream.calls, []);
     });
 
+    test('transport availability uses native capabilities from every current group member', () => {
+        const h = nativeHarness({ player: new Player({
+            bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.pmetadata', can_play: false, can_pause: false,
+        }) });
+        const model = { primary: h.player.bus_name, players: [h.player.bus_name], streamId: null };
+        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
+            native: h.native, modelStamp: h.stamp(), disposed: false,
+            planner: { ready: true }, groups: [model],
+        });
+        assert.equal(h.native.player(h.player.bus_name).canPlay, false);
+        assert.equal(h.native.player(h.player.bus_name).canPause, false);
+        assert.equal(backend.transport(h.group()).enabled, false);
+        assert.match(backend.transport(h.group()).reason, /browser bridge does not expose pause/);
+        assert.deepEqual(h.player.calls, []);
+
+        const real = new Player({ bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.preal' });
+        h.manager.players.push(real);
+        h.manager.emit('notify::players');
+        model.players.push(real.bus_name);
+        backend.modelStamp = h.stamp();
+        assert.equal(backend.transport(h.group()).enabled, true, 'a capable alias can control the group');
+        assert.equal(backend.transport(h.group()).reason, 'Pause');
+        real.publish('can-pause', false);
+        assert.equal(backend.transport(h.group()).enabled, false);
+        assert.match(backend.transport(h.group()).reason, /changed/);
+        backend.modelStamp = h.stamp();
+        assert.match(backend.transport(h.group()).reason, /does not expose pause/);
+
+        h.player.publish('playback-status', 2);
+        real.publish('playback-status', 2);
+        backend.modelStamp = h.stamp();
+        assert.equal(backend.transport(h.group()).reason, 'Play');
+        h.native.apply({ player: h.player.bus_name, operation: 'pause' });
+        assert.deepEqual(h.player.calls, [['pause']], 'native pause-all dispatch still bypasses inaccurate CanPause flags');
+        backend.planner.ready = false;
+        assert.equal(backend.transport(h.group()).enabled, false);
+        backend.planner.ready = true;
+        h.player.available = false;
+        assert.equal(backend.transport(h.group()).enabled, false);
+    });
+
+    test('an unavailable non-primary member cannot leave group transport enabled', () => {
+        const h = nativeHarness();
+        const alias = new Player({ bus_name: 'org.mpris.MediaPlayer2.alias', available: false });
+        h.manager.players.push(alias);
+        h.manager.emit('notify::players');
+        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
+            native: h.native, modelStamp: h.stamp(), disposed: false,
+            planner: { ready: true }, groups: [{ primary: h.player.bus_name, players: [alias.bus_name, h.player.bus_name] }],
+        });
+        assert.equal(backend.current(), true, 'availability can change before native discovery removes an object');
+        assert.equal(backend.transport(h.group()).enabled, false);
+        assert.match(backend.transport(h.group()).reason, /member is unavailable/);
+        assert.deepEqual(h.player.calls, []);
+        alias.available = true;
+        assert.equal(backend.transport(h.group()).enabled, true);
+        backend.disposed = true;
+        assert.equal(backend.transport(h.group()).enabled, false);
+    });
+
+    test('transport rejects replaced representatives and missing Rust group decisions', () => {
+        const h = nativeHarness();
+        const group = h.group();
+        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
+            native: h.native, modelStamp: h.stamp(), disposed: false,
+            planner: { ready: true }, groups: [{ primary: h.player.bus_name, players: [h.player.bus_name] }],
+        });
+        assert.equal(backend.transport(group).enabled, true);
+        h.manager.players = [new Player({ bus_name: h.player.bus_name })];
+        h.manager.emit('notify::players');
+        backend.modelStamp = h.stamp();
+        assert.equal(backend.transport(group).enabled, false);
+        assert.equal(backend.transport(h.group()).enabled, true);
+        backend.groups = [];
+        assert.equal(backend.transport(h.group()).enabled, false);
+        assert.equal(backend.transport(null).enabled, false);
+    });
+
     test('the real native bridge and Planner coalesce seeks without fabricated playback state', async () => {
         const h = nativeHarness({ player: new Player({ playback_status: 2 }) });
         const sent = [];
@@ -592,14 +859,14 @@ describe('Native service integration', () => {
     });
 });
 describe('Planner', () => {
-    const { Planner } = loadBackend();
+    const { Planner, MediaBackend } = loadBackend();
 
     function player(bus = 'a', extra = {}) {
         return {
             bus, identity: `App ${bus}`, desktopEntry: `app-${bus}`, title: `Track ${bus}`,
             artist: 'Artist', album: 'Album', url: '', artUrl: '', browserHint: null,
             playing: true, stopped: false, position: 10, length: 200,
-            canSeek: true, canNext: true, canPrevious: true,
+            canPlay: true, canPause: true, canSeek: true, canNext: true, canPrevious: true,
             trackId: `/track/${bus}`, instance: `${bus}-instance-1`, seekRevision: 0,
             positionSupported: true, rate: 1, volume: 0.5, ...extra,
         };
@@ -672,6 +939,41 @@ describe('Planner', () => {
     function seek(player, value) { return { player, operation: 'seek', value }; }
     function op(player, operation) { return { player, operation }; }
 
+    test('read-only startup races refresh silently without publishing stale models', async () => {
+        const h = harness();
+        h.planner.refresh();
+        await tick();
+        h.state.players[0].title = 'Metadata arrived';
+        assert.equal(h.planner.receive(response(h)), false);
+        assert.deepEqual(h.errors, []);
+        assert.deepEqual(h.models, []);
+        assert.deepEqual(h.applied, []);
+        await tick();
+        assert.equal(h.sent.length, 2);
+        assert.equal(h.sent[1].players[0].title, 'Metadata arrived');
+        assert.equal(h.planner.receive(response(h)), true);
+        assert.deepEqual(h.errors, []);
+        assert.equal(h.models.length, 1);
+    });
+
+    test('view errors survive recovery refreshes and clear after a successful explicit action', async () => {
+        const h = await prime(harness());
+        const backend = Object.assign(Object.create(MediaBackend.prototype), { planner: h.planner });
+        backend.reportFailure('Source changed. Try the action again.');
+        assert.match(h.planner.error, /Try the action again/);
+        h.planner.refresh();
+        await tick();
+        assert.equal(h.planner.receive(response(h)), true);
+        assert.match(h.planner.error, /Try the action again/);
+        assert.deepEqual(h.applied, []);
+        h.planner.action('next', 'a');
+        await tick();
+        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), true);
+        assert.equal(h.planner.error, '');
+        assert.equal(h.errors.at(-1), '');
+        assert.deepEqual(h.applied, [op('a', 'next')]);
+    });
+
     test('refresh coalesces and sends detached JSON OBJECT protocol fields only', async () => {
         const h = harness([player('a', { position: -1, positionSupported: false, length: Infinity })], [stream()]);
         for (let i = 0; i < 20; i++) h.planner.refresh();
@@ -683,6 +985,8 @@ describe('Planner', () => {
         assert.deepEqual(Object.keys(request).sort(), ['players', 'requestId', 'selectedPlayer', 'streams']);
         assert.equal(request.players[0].position, 0);
         assert.equal(request.players[0].length, null);
+        assert.equal(request.players[0].canPlay, true);
+        assert.equal(request.players[0].canPause, true);
         for (const key of ['instance', 'trackId', 'seekRevision', 'positionSupported', 'rate', 'volume'])
             assert.equal(key in request.players[0], false);
         assert.equal('instance' in request.streams[0], false);
@@ -758,6 +1062,8 @@ describe('Planner', () => {
         playing: p => { p.playing = false; },
         stopped: p => { p.stopped = true; },
         length: p => { p.length = 201; },
+        canPlay: p => { p.canPlay = false; },
+        canPause: p => { p.canPause = false; },
         canSeek: p => { p.canSeek = false; },
         canNext: p => { p.canNext = false; },
         canPrevious: p => { p.canPrevious = false; },

@@ -247,46 +247,47 @@ export class AudioPanel {
             return true;
         });
         view.choices = box(true, 6);
-        view.empty = wrapped('No available devices.', ['muted']);
-        view.choices.append(view.empty);
-        const choices = scroll(view.choices, { vexpand: true, min_content_height: 32 });
+        view.devicesHeading = label('Devices', ['section-heading']);
+        view.deviceList = scroll(view.choices, { vexpand: true, min_content_height: 32 });
         view.error = wrapped('', ['failure']);
         view.error.visible = false;
-        const content = box(true, 10, [view.heading, box(false, 6, [view.mute, view.volume, view.percent])]);
-        if (kind === 'output') content.append(wrapped('0–150% · above 100% amplifies audio', ['volume-hint', 'muted']));
-        content.append(label('Devices', ['section-heading']));
-        content.append(choices);
-        content.append(view.error);
+        const controls = box(true, 4, [view.heading,
+            box(false, 6, [view.mute, view.volume, view.percent]), view.devicesHeading]);
+        const content = box(true, 10, [controls, view.deviceList, view.error]);
         // Both outer scrollers have zero size hints, so Gtk.Box assigns equal halves.
         // The inner list normally fills its half; the outer scroll keeps controls reachable on short monitors.
         return scroll(content, { vexpand: true, css_classes: ['audio-section'] });
     }
 
     buildBluetooth() {
-        this.scan = button('Scan', () => this.action('bluetooth', () => this.backend.toggleDiscovery()));
-        this.scan.halign = Gtk.Align.END;
         this.bluetoothState = wrapped('', ['muted']);
-        this.pairingMessages = wrapped('');
-        this.pairingMessages.selectable = true;
-        const log = scroll(this.pairingMessages, { propagate_natural_height: true, max_content_height: 160,
-            css_classes: ['pairing-log'] });
+        this.pairingStatus = wrapped('');
+        this.pairingStatus.selectable = true;
+        this.pairingPrompt = wrapped('');
+        this.pairingPrompt.selectable = true;
+        this.dismissPairing = button('×', () => this.action('bluetooth', () => this.backend.dismissPairingMessage()), ['icon-button', 'pairing-dismiss']);
+        this.dismissPairing.tooltip_text = 'Dismiss pairing message';
+        this.dismissPairing.valign = Gtk.Align.START;
+        const status = box(false, 6, [this.pairingStatus, this.dismissPairing]);
         this.answer = new Gtk.Entry({ placeholder_text: 'PIN/passkey or yes/no', width_chars: 1,
-            max_width_chars: 1, hexpand: true, css_classes: ['pairing-answer'] });
+            max_width_chars: 1, hexpand: true, visible: false, css_classes: ['pairing-answer'] });
         this.send = button('Send', () => this.sendAnswer());
-        this.send.sensitive = false;
+        this.send.visible = this.send.sensitive = false;
         this.cancel = button('Cancel', () => this.action('bluetooth', () => this.backend.cancelPairing()));
-        this.answer.connect('changed', () => { this.send.sensitive = this.pairing && this.answer.text.trim() !== ''; });
+        this.answer.connect('changed', () => { this.send.sensitive = this.pairing && this.answer.visible && this.answer.text.trim() !== ''; });
         this.answer.connect('activate', () => this.sendAnswer());
         this.pairingButtons = box(false, 6, [this.send, this.cancel]);
         this.pairingControls = box(false, 6, [this.answer, this.pairingButtons]);
-        this.pairingCard = box(true, 6, [log, this.pairingControls]);
+        this.pairingCard = box(true, 6, [status, this.pairingPrompt, this.pairingControls]);
         this.pairingCard.add_css_class('pairing-card');
         this.pairingCard.visible = false;
         this.bluetoothRows = box(true, 6);
+        this.bluetoothSeparator = new Gtk.Separator({ css_classes: ['audio-divider'], visible: false });
+        this.bluetoothRows.append(this.bluetoothSeparator);
         const devices = scroll(this.bluetoothRows, { vexpand: true, min_content_height: 32 });
         this.bluetoothError = wrapped('', ['failure']);
         this.bluetoothError.visible = false;
-        const content = box(true, 10, [this.scan, this.bluetoothState, this.pairingCard, devices, this.bluetoothError]);
+        const content = box(true, 10, [this.bluetoothState, this.pairingCard, devices, this.bluetoothError]);
         return scroll(content, { vexpand: true, css_classes: ['bluetooth-page'] });
     }
 
@@ -313,7 +314,7 @@ export class AudioPanel {
 
     sendAnswer() {
         const text = this.answer.text;
-        if (!this.pairing || !text.trim()) return;
+        if (!this.pairing || !this.answer.visible || !text.trim()) return;
         this.action('bluetooth', () => {
             this.backend.sendPairingAnswer(text);
             this.answer.set_text('');
@@ -336,11 +337,13 @@ export class AudioPanel {
         const enabled = Boolean(model.available && view.nodeKey);
         view.mute.sensitive = view.volume.sensitive = enabled;
         view.mute.get_child().set_label(view.kind === 'input' ? (model.muted ? '󰍭' : '󰍬') : (model.muted ? '󰝟' : '󰕾'));
-        view.mute.tooltip_text = model.muted ? 'Unmute' : 'Mute';
+        view.mute.tooltip_text = enabled ? (model.muted ? 'Unmute' : 'Mute') : 'No default audio device is available.';
+        view.volume.tooltip_text = enabled ? 'Volume' : 'No default audio device is available.';
         const value = volumeValue(model.volume, view.maximum);
         if (!view.dragging || view.volumeTarget !== view.nodeKey) view.volume.set_value(value);
-        view.percent.set_label(`${Math.round(view.volume.get_value() * 100)}%`);
+        view.percent.set_label(enabled ? `${Math.round(view.volume.get_value() * 100)}%` : '—');
         const choices = model.choices || [];
+        view.devicesHeading.visible = view.deviceList.visible = choices.some(choice => !choice.default);
         const wanted = new Set(choices.map(choice => choice.key));
         for (const [key, row] of view.rows) {
             if (wanted.has(key)) continue;
@@ -365,34 +368,48 @@ export class AudioPanel {
             view.choices.reorder_child_after(row, previous);
             previous = row;
         }
-        view.choices.reorder_child_after(view.empty, previous);
-        view.empty.visible = choices.length === 0 && !model.loading;
         message(view.error, this.failures[view.kind] || model.error);
     }
 
     renderBluetooth(model) {
-        this.scan.get_child().set_label(model.discovering ? 'Stop scan' : 'Scan');
-        this.scan.sensitive = Boolean(model.available && model.powered);
         message(this.bluetoothState, !model.available ? 'No Bluetooth adapter.' : !model.powered ? 'Bluetooth is off.' : '');
-        const pairing = Boolean(model.pairing);
-        if (pairing !== this.pairing) this.answer.set_text('');
+        const pairing = Boolean(model.pairing), notice = model.pairingMessage;
+        const hasPrompt = Boolean(pairing && notice?.prompt);
+        // Display-only codes are entered on the device, not in this panel.
+        const needsAnswer = hasPrompt && !/^Type .+ on the device(?: and press Enter)? to finish pairing\.$/.test(notice.prompt);
+        if (pairing !== this.pairing || (!needsAnswer && this.answer.text)) this.answer.set_text('');
         this.pairing = pairing;
-        this.pairingMessages.set_label(model.pairingLog || '');
-        this.pairingCard.visible = pairing || Boolean(model.pairingLog);
-        this.pairingControls.visible = pairing;
-        this.send.sensitive = pairing && this.answer.text.trim() !== '';
+        this.answer.visible = this.send.visible = needsAnswer;
+        message(this.pairingStatus, notice?.text || '');
+        message(this.pairingPrompt, notice?.prompt || '');
+        style(this.pairingStatus, 'failure', notice?.state === 'failed');
+        this.pairingCard.visible = Boolean(notice);
+        this.dismissPairing.sensitive = !pairing || !notice?.prompt;
+        this.dismissPairing.tooltip_text = this.dismissPairing.sensitive
+            ? 'Dismiss pairing message' : 'Answer or cancel pairing before dismissing this message';
+        this.pairingControls.visible = hasPrompt;
+        this.send.sensitive = needsAnswer && this.answer.text.trim() !== '';
         const narrow = this.cardWidth < 320;
         this.pairingControls.orientation = narrow ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL;
         this.pairingButtons.halign = narrow ? Gtk.Align.END : Gtk.Align.FILL;
-        const devices = model.devices || [];
+        const allDevices = model.devices || [];
+        const remembered = allDevices.filter(device => device.paired || device.connected);
+        const available = allDevices.filter(device => !device.paired && !device.connected);
+        const devices = [...remembered, ...available];
+        this.bluetoothSeparator.visible = remembered.length > 0 && available.length > 0;
         const wanted = new Set(devices.map(device => device.key));
         for (const [key, row] of this.deviceRows) {
             if (wanted.has(key)) continue;
             this.bluetoothRows.remove(row.widget);
             this.deviceRows.delete(key);
         }
-        let previous = null;
+        let previous = null, separated = false;
         for (const device of devices) {
+            if (this.bluetoothSeparator.visible && !device.paired && !device.connected && !separated) {
+                this.bluetoothRows.reorder_child_after(this.bluetoothSeparator, previous);
+                previous = this.bluetoothSeparator;
+                separated = true;
+            }
             let row = this.deviceRows.get(device.key);
             if (!row) {
                 row = { name: ellipsis('', ['device-name']), status: ellipsis('', ['device-status']) };
@@ -412,7 +429,8 @@ export class AudioPanel {
             row.status.set_label(`${device.connected ? 'Connected' : device.paired ? 'Paired' : 'Available'}${battery}`);
             row.action.get_child().set_label(device.connected ? 'Disconnect' : device.paired ? 'Connect' : 'Pair');
             row.action.sensitive = Boolean(model.available && model.powered && !pairing && !device.busy);
-            row.forget.sensitive = !pairing && !device.busy;
+            row.forget.visible = Boolean(device.paired);
+            row.forget.sensitive = Boolean(device.paired && !pairing && !device.busy);
             row.forget.tooltip_text = `Forget ${device.name || device.address}`;
             row.widget.orientation = narrow ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL;
             row.buttons.halign = narrow ? Gtk.Align.END : Gtk.Align.FILL;

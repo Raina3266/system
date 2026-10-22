@@ -202,6 +202,8 @@ export class AudioBackend {
         this.adapter = null;
         this.adapterSignal = 0;
         this.discoveryAdapter = null;
+        this.stoppingDiscovery = false;
+        this.poweringOffAdapter = null;
         this.serial = 0;
         this.idle = 0;
         this.refreshTimer = 0;
@@ -211,13 +213,13 @@ export class AudioBackend {
         this.opened = false;
         this.tab = 1;
         this.pairing = null;
-        this.pairingLog = '';
+        this.pairingMessage = null;
         this.bluetoothError = '';
         this.metadata = {};
         this.defaults = {};
         this.waiters = new Set();
         for (const kind of KINDS) {
-            this.metadata[kind] = { entries: [], loading: false, error: '', listing: null, selection: null,
+            this.metadata[kind] = { entries: [], resolvedNodes: [], loading: false, error: '', listing: null, selection: null,
                 busy: false, dirty: false, revision: 0 };
             this.defaults[kind] = { object: null, identity: '', key: '' };
         }
@@ -354,7 +356,8 @@ export class AudioBackend {
     }
 
     choices(kind) {
-        return deviceChoices(this.metadata[kind].entries, this.endpointModels(kind), this.nativeSnapshot().cards);
+        const state = this.metadata[kind];
+        return deviceChoices(state.entries, this.endpointModels(kind), this.nativeSnapshot().cards, state.resolvedNodes);
     }
 
     audioModel(kind) {
@@ -368,16 +371,21 @@ export class AudioBackend {
     }
 
     syncBluetooth() {
+        if (this.disposed) return;
         const adapter = this.bluetooth.adapter || null;
         if (adapter !== this.adapter) {
-            if (this.discoveryAdapter) this.stopDiscovery();
-            this.cancelPairing();
             if (this.adapterSignal) this.adapter.disconnect(this.adapterSignal);
             this.adapter = adapter;
-            this.adapterSignal = adapter ? adapter.connect('notify', () => {
-                if (!adapter.powered) { this.cancelPairing(); this.stopDiscovery(); }
-                this.changed();
-            }) : 0;
+            this.adapterSignal = adapter ? adapter.connect('notify', () => this.syncBluetooth()) : 0;
+            this.poweringOffAdapter = null;
+            // Publish the replacement before stopping can synchronously notify.
+            this.stopDiscovery();
+            this.cancelPairing();
+            if (this.disposed || adapter !== this.adapter) return;
+        }
+        if (!adapter?.powered) {
+            this.poweringOffAdapter = null;
+            this.cancelPairing();
         }
         // Astal's internal object-path property is omitted from its GIR, so it
         // cannot be read as adapter.object_path in GJS.
@@ -400,6 +408,7 @@ export class AudioBackend {
             this.bluetoothRecords.set(device, { key: `bluetooth:${++this.serial}:${device.address}`, busy: false,
                 signal: device.connect('notify', () => this.changed()) });
         }
+        this.syncDiscovery();
         this.changed();
     }
 
@@ -412,7 +421,10 @@ export class AudioBackend {
                 connected: device.connected, paired: device.paired, busy: record.busy,
                 battery: Number.isFinite(device.battery_percentage) && device.battery_percentage >= 0
                     ? Math.min(1, device.battery_percentage) : null,
-            }))), pairing: Boolean(this.pairing?.process), pairingLog: this.pairingLog, error: this.bluetoothError,
+            }))), pairing: Boolean(this.pairing?.process),
+            pairingMessage: this.pairingMessage && !this.pairingMessage.dismissed ? {
+                state: this.pairingMessage.state, text: this.pairingMessage.text, prompt: this.pairingMessage.prompt,
+            } : null, error: this.bluetoothError,
         } };
     }
 
@@ -422,7 +434,10 @@ export class AudioBackend {
         if (this.disposed) return;
         this.opened = Boolean(opened);
         this.tab = tab;
-        if (!this.opened || tab !== 0) { this.stopDiscovery(); this.cancelPairing(); }
+        if (!this.opened || tab !== 0) this.poweringOffAdapter = null;
+        this.syncDiscovery();
+        if (!this.opened || tab !== 0) this.cancelPairing();
+        if (this.disposed) return;
         if (this.poll) GLib.source_remove(this.poll);
         this.poll = 0;
         if (this.opened && tab === 1) {
@@ -450,7 +465,8 @@ export class AudioBackend {
             state.loading = true;
             state.dirty = false;
             const revision = state.revision;
-            const listing = new PolicyProcess(this.helper, { command: 'rows', kind, snapshot: this.nativeSnapshot() }, { onExit: (error, result) => {
+            const snapshot = this.nativeSnapshot();
+            const listing = new PolicyProcess(this.helper, { command: 'rows', kind, snapshot }, { onExit: (error, result) => {
                 if (this.disposed || state.listing !== listing) return;
                 state.listing = null;
                 state.loading = false;
@@ -458,6 +474,8 @@ export class AudioBackend {
                     try {
                         if (error) throw error;
                         state.entries = parseChoices(result.rows);
+                        state.resolvedNodes = snapshot.nodes.filter(node => node.kind === kind)
+                            .map(({ id, serial }) => ({ id, serial }));
                         state.error = '';
                     } catch (failure) { state.error = failure.message; }
                 } else state.dirty = true;
@@ -559,6 +577,39 @@ export class AudioBackend {
         validNode();
         node.is_default = true;
         await this.waitFor(() => validNode() && node.is_default);
+        return node;
+    }
+
+    async followDefaultOutput(endpoint) {
+        const key = this.endpointKey(endpoint);
+        const valid = () => {
+            if (this.disposed) throw new Error('The audio panel has stopped.');
+            if (!key || !this.endpoints('output').includes(endpoint) || this.endpointKey(endpoint) !== key)
+                throw new Error('The selected audio output disappeared or was replaced.');
+            this.updateDefaults();
+            if (this.defaults.output.object !== endpoint) throw new Error('The selected output is no longer the default; it changed elsewhere.');
+            return true;
+        };
+        valid();
+        const pending = [], failures = [];
+        for (const stream of this.audio.streams || []) {
+            valid();
+            if (!(this.audio.streams || []).includes(stream)) continue;
+            try {
+                // Native null means follow default, clearing the old per-application device pin.
+                stream.set_target_endpoint(null);
+                pending.push(stream);
+            } catch (error) {
+                failures.push(`${stream.get_pw_property('application.name') || stream.description || 'Playback'}: ${error.message}`);
+            }
+        }
+        try {
+            if (pending.length) await this.waitFor(() => valid() && pending.every(stream =>
+                !(this.audio.streams || []).includes(stream) || stream.target_serial === -1));
+        } catch (error) {
+            throw new Error(`Output changed, but playback could not follow it: ${error.message}`);
+        }
+        if (failures.length) throw new Error(`Output changed, but playback could not follow it: ${failures.join('; ')}`);
     }
 
     select(kind, key) {
@@ -579,14 +630,18 @@ export class AudioBackend {
             if (plan.type === 'policy') {
                 const initial = this.nativeSnapshot();
                 const context = { kind, entry, initial };
+                let endpoint = null;
                 await new Promise((resolve, reject) => {
                     state.selection = new PolicyProcess(this.helper, { command: 'select', kind, key: entry.key, snapshot: initial }, {
                         onSnapshot: () => this.nativeSnapshot(),
-                        onAction: action => this.applyPolicyAction(action, context),
+                        onAction: async action => {
+                            const node = await this.applyPolicyAction(action, context);
+                            if (action.operation === 'default') endpoint = node;
+                        },
                         onExit: error => error ? reject(error) : resolve(),
                     });
                 });
-                return;
+                return endpoint;
             }
             const endpoint = this.endpoints(kind).find(node => this.endpointKey(node) === plan.nodeKey);
             if (!endpoint) throw new Error('The selected audio device disappeared.');
@@ -606,8 +661,11 @@ export class AudioBackend {
             valid();
             endpoint.is_default = true;
             await this.waitFor(() => valid() && endpoint.is_default);
+            return endpoint;
         };
-        apply().catch(error => { if (!this.disposed) state.error = error.message; }).finally(() => {
+        apply().then(endpoint => {
+            if (kind === 'output' && endpoint && !this.disposed) return this.followDefaultOutput(endpoint);
+        }).catch(error => { if (!this.disposed) state.error = error.message; }).finally(() => {
             state.selection = null;
             state.busy = false;
             this.scheduleRefresh();
@@ -618,17 +676,40 @@ export class AudioBackend {
 
     toggleBluetoothPower() {
         if (!this.adapter || this.disposed) return;
+        const adapter = this.adapter;
+        const powered = !adapter.powered;
         this.bluetoothError = '';
-        if (this.adapter.powered) { this.cancelPairing(); this.stopDiscovery(); }
-        this.adapter.powered = !this.adapter.powered;
-        this.changed();
+        if (!powered) {
+            // The native setter may report powered=false only after stop notifies.
+            this.poweringOffAdapter = adapter;
+            this.cancelPairing();
+            this.syncDiscovery();
+        }
+        if (this.disposed || adapter !== this.adapter) return;
+        try { adapter.powered = powered; }
+        catch (error) {
+            if (this.poweringOffAdapter === adapter) this.poweringOffAdapter = null;
+            throw error;
+        }
+        this.syncBluetooth();
     }
 
-    toggleDiscovery() {
-        if (!this.opened || this.tab !== 0 || !this.adapter?.powered || this.disposed) return;
+    syncDiscovery() {
+        if (this.discoveryAdapter && this.discoveryAdapter !== this.adapter) this.stopDiscovery();
+        const adapter = this.adapter;
+        if (this.disposed || !this.opened || this.tab !== 0 || !adapter?.powered || this.poweringOffAdapter === adapter) {
+            this.stopDiscovery();
+            return;
+        }
+        if (this.discoveryAdapter || this.stoppingDiscovery) return;
         this.bluetoothError = '';
-        if (this.discoveryAdapter) this.stopDiscovery();
-        else { this.adapter.start_discovery(); this.discoveryAdapter = this.adapter; }
+        // Discovering is global; acquire our own session even when another client is scanning.
+        this.discoveryAdapter = adapter;
+        try { adapter.start_discovery(); }
+        catch (error) {
+            if (this.discoveryAdapter === adapter) this.discoveryAdapter = null;
+            if (!this.disposed) this.bluetoothError = error.message;
+        }
         this.changed();
     }
 
@@ -636,9 +717,20 @@ export class AudioBackend {
         const adapter = this.discoveryAdapter;
         this.discoveryAdapter = null;
         if (!adapter) return;
+        const currentAdapter = this.adapter;
+        this.stoppingDiscovery = true;
         try { adapter.stop_discovery(); }
-        catch (error) { if (!this.disposed) this.bluetoothError = error.message; }
+        catch (error) {
+            if (!this.disposed) {
+                this.bluetoothError = error.message;
+                // A failed stop may leave our session active; retain it for later cleanup.
+                if (adapter === this.adapter && adapter.powered && !this.discoveryAdapter) this.discoveryAdapter = adapter;
+            }
+        }
+        finally { this.stoppingDiscovery = false; }
         this.changed();
+        // A nested replacement could not acquire its session while stopping was guarded.
+        if (currentAdapter !== this.adapter) this.syncBluetooth();
     }
 
     deviceFor(key) {
@@ -669,7 +761,7 @@ export class AudioBackend {
 
     forget(key) {
         const [device, record] = this.deviceFor(key);
-        if (record.busy || this.pairing || !this.adapter) return;
+        if (!device.paired || record.busy || this.pairing || !this.adapter) return;
         this.bluetoothError = '';
         this.adapter.remove_device(device);
         this.changed();
@@ -677,19 +769,41 @@ export class AudioBackend {
 
     pair(device) {
         if (!this.opened || this.tab !== 0 || this.disposed) return;
-        this.pairingLog = '';
-        const pairing = { device, process: null };
-        this.pairing = pairing;
         const value = new GObject.Value();
         value.init(GObject.TYPE_STRING);
         this.adapter.get_property('object-path', value);
         const adapter = value.get_string().match(/^\/org\/bluez\/(hci\d+)$/)?.[1];
-        if (!adapter) { this.pairing = null; throw new Error('The native Bluetooth adapter is no longer available.'); }
+        if (!adapter) throw new Error('The native Bluetooth adapter is no longer available.');
+        const name = device.name || device.alias;
+        const label = name && name !== device.address ? `${name} (${device.address})` : device.address;
+        const message = { state: 'pairing', text: `Pairing with ${label}…`, prompt: '', dismissed: false };
+        const pairing = { device, process: null, pending: '' };
+        this.pairing = pairing;
+        this.pairingMessage = message;
+        const update = (state, text) => {
+            message.state = state;
+            message.text = text;
+            message.prompt = '';
+            this.changed();
+        };
+        const reason = error => (error.message || String(error)).trim().split('\n').at(-1)
+            .replace(/^audio-control:\s*/, '').replaceAll(device.address, label).slice(0, 2048);
+        const connectionFailure = error => update('failed', `Paired with ${label}, but setup failed: ${reason(error)}`);
         pairing.process = new HelperProcess([this.helper, 'bluetooth-pair', adapter, device.address], {
             interactive: true, timeout: 180000,
             onChunk: text => {
                 if (this.pairing !== pairing) return;
-                this.pairingLog = (this.pairingLog + text).slice(-32768);
+                const lines = (pairing.pending + text).slice(-32768).split('\n');
+                pairing.pending = lines.pop();
+                for (const line of lines) {
+                    const prompt = line.trim();
+                    // Helper progress is replaced by our status; retain only the latest agent prompt.
+                    if (!prompt || prompt.startsWith('Pairing with ') || prompt.startsWith('audio-control:')
+                        || prompt === `${device.address} is paired.`) continue;
+                    message.prompt = prompt.replaceAll(device.address, label);
+                    // A new authentication prompt must remain accessible even after dismissal.
+                    message.dismissed = false;
+                }
                 this.changed();
             },
             onExit: error => {
@@ -697,24 +811,22 @@ export class AudioBackend {
                 pairing.process = null;
                 if (error) {
                     this.pairing = null;
-                    this.bluetoothError = error.message;
-                    this.changed();
+                    const detail = reason(error);
+                    update('failed', detail.includes(label) ? `Pairing failed: ${detail}` : `Failed to pair with ${label}: ${detail}`);
                     return;
                 }
                 const record = this.bluetoothRecords.get(device);
                 if (!record || !this.adapter?.powered) { this.cancelPairing(); return; }
+                update('paired', `Paired with ${label}.`);
                 record.busy = true;
                 // Only the request-local agent and its associated Pair call
                 // belong in Rust. These are existing Astal Bluetooth APIs.
                 try {
                     device.trusted = true;
                     device.connect_device((source, result) => {
-                        try {
-                            source.connect_device_finish(result);
-                            if (this.pairing === pairing)
-                                this.pairingLog += `${device.alias || device.address} (${device.address}) is paired and connected.\n`;
-                        } catch (failure) {
-                            if (this.pairing === pairing) this.bluetoothError = failure.message;
+                        try { source.connect_device_finish(result); }
+                        catch (failure) {
+                            if (this.pairing === pairing) connectionFailure(failure);
                         } finally {
                             record.busy = false;
                             if (this.pairing === pairing) this.pairing = null;
@@ -724,7 +836,7 @@ export class AudioBackend {
                 } catch (failure) {
                     record.busy = false;
                     this.pairing = null;
-                    this.bluetoothError = failure.message;
+                    connectionFailure(failure);
                 }
                 this.changed();
             },
@@ -732,16 +844,25 @@ export class AudioBackend {
         this.changed();
     }
 
+    dismissPairingMessage() {
+        if (!this.pairingMessage || this.disposed || (this.pairing?.process && this.pairingMessage.prompt)) return;
+        this.pairingMessage.dismissed = true;
+        this.changed();
+    }
+
     sendPairingAnswer(text) {
         if (!this.pairing) throw new Error('No pairing request is waiting for an answer.');
         if (!this.pairing.process) throw new Error('Pairing has completed; connecting through Astal.');
         this.pairing.process.send(pairingAnswer(text));
+        this.pairingMessage.prompt = '';
+        this.changed();
     }
 
     cancelPairing() {
         const pairing = this.pairing;
         this.pairing = null;
         if (!pairing) return;
+        this.pairingMessage = null;
         try { pairing.device.cancel_pairing(); }
         catch (_) { /* BlueZ may already have completed or cancelled this request. */ }
         pairing.process?.stop();

@@ -54,6 +54,10 @@ pub struct Player {
     /// Track length in seconds; absent, nonfinite or nonpositive means unknown.
     #[serde(default)]
     pub length: Option<f64>,
+    #[serde(default)]
+    pub can_play: bool,
+    #[serde(default)]
+    pub can_pause: bool,
     pub can_seek: bool,
     pub can_next: bool,
     pub can_previous: bool,
@@ -132,8 +136,9 @@ impl Response {
 ///
 /// Duplicate matching retains the original panel's conservative metadata and
 /// five-second position checks, comparing only against a playing-first keeper.
-/// Cards and their members retain snapshot order; display metadata comes from
-/// the keeper. Volume matching uses trimmed track evidence. Invalid positions
+/// Cards and their members retain snapshot order; only after grouping does a
+/// playing-first, capability/length-ranked representative supply display metadata.
+/// Volume matching uses trimmed track evidence. Invalid positions
 /// are rejected, not replaced with zero or treated as unknown merge evidence.
 /// Next/previous address only the group's primary, gated by its capability.
 pub fn analyze(request: &Request) -> Response {
@@ -328,11 +333,29 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
             });
         }
     }
-    // Keeper selection is playing-first, not the order of cards or commands.
+    // Keep matching seeds fixed until grouping is complete. Snapshot order
+    // breaks representative-quality ties without reordering cards or commands.
     for group in &mut groups {
         group
             .players
             .sort_by_key(|player| order[player.bus.as_str()]);
+        group.primary = group
+            .players
+            .iter()
+            .copied()
+            .min_by_key(|player| {
+                (
+                    !player.playing,
+                    !(player.can_play || player.can_pause),
+                    !player
+                        .length
+                        .is_some_and(|length| length.is_finite() && length > 0.0),
+                    !player.can_seek,
+                )
+            })
+            .expect("groups contain at least one player");
+        group.title = &group.primary.title;
+        group.artist = &group.primary.artist;
     }
     groups.sort_by_key(|group| order[group.players[0].bus.as_str()]);
     groups
@@ -427,6 +450,7 @@ fn browser_media_allowed(url: &str) -> bool {
                 "show",
                 "episode",
                 "collection",
+                "search",
             ],
         ),
     ];

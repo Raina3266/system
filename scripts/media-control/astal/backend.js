@@ -11,7 +11,7 @@ const MAX_ACTION_AGE = 5;
 const KINDS = new Set(['toggle', 'next', 'previous', 'seek', 'pauseAll', 'togglePauseAll']);
 const OPERATIONS = new Set(['play', 'pause', 'next', 'previous', 'seek']);
 const PLAYER_TEXT = ['bus', 'identity', 'desktopEntry', 'title', 'artist', 'album', 'url', 'artUrl'];
-const PLAYER_FLAGS = ['playing', 'stopped', 'canSeek', 'canNext', 'canPrevious'];
+const PLAYER_FLAGS = ['playing', 'stopped', 'canPlay', 'canPause', 'canSeek', 'canNext', 'canPrevious'];
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const fail = message => { throw new Error(message); };
 const message = error => error instanceof Error ? error.message : String(error);
@@ -425,7 +425,13 @@ export class Planner {
         try {
             let state = snapshot(this._capture());
             const reason = this._stale(entry, state, this._time());
-            if (reason) fail(`Stale ${entry.action?.kind ?? 'model'} response: ${reason}; action was not retried.`);
+            if (reason && !entry.action) {
+                // Discovery races with native startup/metadata notifications.
+                // Recompute read-only models; only user mutations need an error.
+                this._refreshPending = true;
+                return false;
+            }
+            if (reason) fail(`Stale ${entry.action.kind} response: ${reason}; action was not retried.`);
             const model = this._validate(response, entry, state);
             const originalGuard = entry.guard;
             let guard = originalGuard;
@@ -608,6 +614,7 @@ class NativeMedia {
             position: positionSupported ? player.position : 0, positionSupported,
             seekRevision: record.seekRevision, rate,
             length: player.length > 0 && Number.isFinite(player.length) ? player.length : null,
+            canPlay: Boolean(player.can_play), canPause: Boolean(player.can_pause),
             canSeek: Boolean(player.can_seek),
             canNext: Boolean(player.can_go_next), canPrevious: Boolean(player.can_go_previous),
             cover: player.cover_art || '',
@@ -663,7 +670,12 @@ class NativeMedia {
         const valid = () => Boolean(allowed() && record && this.players.get(bus) === record
             && record.instance === instance && record.object.available
             && ownershipStamp(this.capture()) === stamp);
-        const mprisVolume = () => record && Number.isFinite(record.object.volume) && record.object.volume >= 0;
+        // mprisence's web bridge advertises a writable constant Volume=1, but
+        // its browser extension has no volume command. Use an owned Astal audio
+        // stream instead; never present that placeholder as working tab volume.
+        const webBridge = bus?.startsWith('org.mpris.MediaPlayer2.mprisence_web.');
+        const mprisVolume = () => !webBridge && record
+            && Number.isFinite(record.object.volume) && record.object.volume >= 0;
         const stream = this.streams.get(streamId);
         const streamReady = () => Boolean(stream && stream.object.id > 0
             && Number.isFinite(stream.object.volume) && stream.object.volume >= 0);
@@ -710,7 +722,8 @@ class NativeMedia {
         }
         return {
             enabled: false, value: 0, key: '',
-            reason: group?.streamReason || 'Independent media volume is unavailable.',
+            reason: (webBridge ? 'This browser bridge does not support tab volume. ' : '')
+                + (group?.streamReason || 'Independent media volume is unavailable.'),
             set: () => false, ...mute,
         };
     }
@@ -993,7 +1006,11 @@ export class MediaBackend {
                 this.modelStamp = ownershipStamp(this.native.capture());
                 onChange();
             },
-            onError: error => { this.failure = error; onChange(); },
+            onError: error => {
+                if (error) console.warn(`Media action: ${error}`);
+                this.failure = error;
+                onChange();
+            },
         });
         this.planner.setReady(false);
         this.worker = new ModelWorker(this.helper, {
@@ -1017,6 +1034,28 @@ export class MediaBackend {
     }
 
     player(bus) { return this.native.player(bus); }
+
+    transport(group) {
+        const primary = group?.primary;
+        const model = this.groups.find(model => model.primary === primary?.bus);
+        if (this.disposed || !this.planner.ready || !model || !this.current()
+            || !this.native.players.get(primary.bus)?.object.available
+            || this.player(primary.bus)?.instance !== primary.instance)
+            return { enabled: false, reason: 'Media source changed or is not ready. Refresh and try again.' };
+        const members = model.players.map(bus => this.player(bus));
+        if (members.some(player => !player || !this.native.players.get(player.bus)?.object.available))
+            return { enabled: false, reason: 'A media group member is unavailable. Refresh and try again.' };
+        const playing = members.some(player => player.playing);
+        const supported = members.some(player => playing ? player.canPause : player.canPlay);
+        const operation = playing ? 'pause' : 'play';
+        return {
+            enabled: supported,
+            reason: supported ? (playing ? 'Pause' : 'Play')
+                : primary.bus.startsWith('org.mpris.MediaPlayer2.mprisence_web.')
+                    ? `The browser bridge does not expose ${operation} control for this source. Use the browser's playback controls.`
+                    : `This media source does not advertise ${operation} support.`,
+        };
+    }
 
     /** Fresh descriptor; setters report guarded dispatch, not remote completion. */
     volume(group) {
@@ -1066,6 +1105,9 @@ export class MediaBackend {
     current() { return this.modelStamp === ownershipStamp(this.native.capture()); }
 
     refresh() { return this.planner.refresh(); }
+
+    // Recovery refreshes preserve view errors; a successful action clears them.
+    reportFailure(error) { this.planner._report(error); }
 
     action(kind, bus = '', position = 0) { return this.planner.action(kind, bus, position); }
 

@@ -99,6 +99,53 @@ mod fixtures {
         }}])
     }
 
+    pub fn mixed_alsa_bluez() -> (Snapshot, Value) {
+        let mut native = snapshot();
+        native.cards.push(
+            serde_json::from_value(json!({
+                "id":8,"serial":"80","name":"bluez_card.test","activeProfile":1,
+                "profiles":[{"index":0},{"index":1},{"index":2}]
+            }))
+            .unwrap(),
+        );
+        for (id, name, kind, device, route) in [
+            (30, "bluez_output.test", "output", 1, 10),
+            (31, "bluez_input.test", "input", 0, 11),
+        ] {
+            let mut endpoint = node(id, name, kind, Some(device));
+            endpoint["cardId"] = 8.into();
+            endpoint["cardSerial"] = "80".into();
+            endpoint["description"] = "Bluetooth Headset".into();
+            endpoint["routes"] = json!([{"index":route,"name":format!("{kind}-headset"),
+                "description":"Headset","available":true}]);
+            native.nodes.push(serde_json::from_value(endpoint).unwrap());
+        }
+        let mut raw = dump();
+        raw.as_array_mut().unwrap().push(json!({
+            "id":8,"type":"PipeWire:Interface:Device","info":{
+                "props":{"object.serial":80,"device.name":"bluez_card.test"},
+                "params":{
+                    // BlueZ omits empty classes and does not prefix active classes with a count.
+                    "EnumProfile":[
+                        {"index":0,"name":"off","available":"yes","priority":0},
+                        {"index":1,"name":"headset-head-unit","available":"yes","priority":20,
+                            "classes":[["Audio/Source",1,"card.profile.devices",[0]],
+                                ["Audio/Sink",1,"card.profile.devices",[1]]]},
+                        {"index":2,"name":"audio-gateway","available":"yes","priority":256}
+                    ],
+                    "EnumRoute":[
+                        {"index":10,"name":"output-headset","description":"Headset",
+                            "direction":"Output","available":"yes","profiles":[1]},
+                        {"index":11,"name":"input-headset","description":"Headset",
+                            "direction":"Input","available":"yes","profiles":[1]}
+                    ],
+                    "Route":[{"index":10,"device":1},{"index":11,"device":0}]
+                }
+            }
+        }));
+        (native, raw)
+    }
+
     pub fn state(snapshot: Snapshot, dump: &Value) -> State {
         snapshot.validate().unwrap();
         let metadata = Metadata::from_dump(&snapshot, AudioKind::Output, dump).unwrap();
@@ -286,7 +333,7 @@ mod labels {
 
 mod metadata {
     use super::fixtures::*;
-    use crate::{devices::Metadata, model::AudioKind};
+    use crate::{audio, devices::Metadata, model::AudioKind};
     use serde_json::json;
     #[test]
     fn parses_actual_spa_classes_and_native_indexes_not_descriptions_or_ordinals() {
@@ -297,6 +344,92 @@ mod metadata {
         assert_eq!(data.profiles[1].sinks, [0, 1, 2, 6]);
         assert_eq!(data.routes[6].profiles, [1]);
         assert_eq!(data.routes[6].devices, [6]);
+    }
+    #[test]
+    fn mixed_alsa_bluez_profiles_preserve_routes_and_native_endpoint_fallback() {
+        for associated in [false, true] {
+            let (native, mut raw) = mixed_alsa_bluez();
+            if associated {
+                for (index, device) in [(0, 1), (1, 0)] {
+                    raw[1]["info"]["params"]["EnumRoute"][index]["devices"] = json!([device]);
+                    raw[1]["info"]["params"]["Route"][index]["profile"] = 1.into();
+                }
+            }
+            for (kind, id, route) in [(AudioKind::Output, 30, 10), (AudioKind::Input, 31, 11)] {
+                native.validate().unwrap();
+                let state = audio::State {
+                    snapshot: native.clone(),
+                    metadata: Metadata::from_dump(&native, kind, &raw).unwrap(),
+                };
+                let card = &state.snapshot.cards[1];
+                let data = &state.metadata.cards[&card.id];
+                assert!(
+                    data.profiles.is_empty(),
+                    "non-ALSA profiles are not policy inputs"
+                );
+                assert_eq!(data.routes.len(), 2);
+                assert_eq!(data.active_routes.len(), if associated { 2 } else { 0 });
+                let endpoint = state
+                    .snapshot
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .unwrap();
+                assert_eq!(
+                    state.metadata.routes_for(card, endpoint).len(),
+                    usize::from(associated)
+                );
+                let raw_route = data.routes.iter().find(|port| port.index == route).unwrap();
+                assert_eq!(raw_route.kind, kind);
+                assert_eq!(raw_route.profiles, [1]);
+                assert!(audio::profile_for(&state, card, raw_route).is_none());
+                let mut rows = audio::rows(&state, kind).unwrap();
+                let row = rows.iter().find(|row| row.node_id == Some(id)).unwrap();
+                assert_eq!(row.card_id, Some(8));
+                assert_eq!(row.card_serial, "80");
+                assert_eq!(row.port, associated);
+                assert_eq!(row.route_id, associated.then_some(route));
+                assert_eq!(row.port_active, associated);
+                assert_eq!(rows.iter().filter(|row| row.card_id == Some(8)).count(), 1);
+                rows.retain(|row| row.card_id != Some(8));
+                assert_eq!(
+                    serde_json::to_value(rows).unwrap(),
+                    serde_json::to_value(audio::rows(&initial(), kind).unwrap()).unwrap(),
+                    "BlueZ metadata must not disrupt ALSA choices"
+                );
+            }
+        }
+    }
+    #[test]
+    fn alsa_profile_classes_remain_required_and_strict_in_mixed_inventory() {
+        for (classes, message) in [
+            (None, "missing field `classes`"),
+            (Some(json!(null)), "Invalid profile classes"),
+            (Some(json!([])), "Missing profile class count"),
+            (Some(json!([9])), "Invalid profile class count"),
+            (
+                Some(json!([1, ["Audio/Sink", 1, "wrong-property", [0]]])),
+                "Missing profile device association",
+            ),
+            (
+                Some(json!([1, ["Audio/Sink", 2, "card.profile.devices", [0]]])),
+                "Invalid profile node count",
+            ),
+        ] {
+            let (native, mut raw) = mixed_alsa_bluez();
+            let profile = raw[0]["info"]["params"]["EnumProfile"][1]
+                .as_object_mut()
+                .unwrap();
+            if let Some(classes) = classes {
+                profile.insert("classes".into(), classes);
+            } else {
+                profile.remove("classes");
+            }
+            for kind in [AudioKind::Output, AudioKind::Input] {
+                let error = Metadata::from_dump(&native, kind, &raw).unwrap_err();
+                assert!(error.to_string().contains(message), "{error}");
+            }
+        }
     }
     #[test]
     fn raw_card_identity_must_match_all_three_canonical_fields() {
@@ -377,11 +510,43 @@ mod metadata {
 mod rows {
     use super::fixtures::*;
     use crate::{
-        audio::{self, physical_key},
-        model::{AudioKind, single_line},
+        audio::{self, Action, physical_key},
+        model::{AudioKind, Snapshot, single_line},
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::HashMap;
+
+    fn card_wide_active_routes() -> (Snapshot, Value) {
+        let mut native = snapshot();
+        for endpoint in &mut native.nodes {
+            endpoint.routes.retain(|route| matches!(route.index, 3 | 5));
+        }
+        // Each endpoint exposes only its direction's card-wide active route.
+        for (id, name, device, kind) in [
+            (30, "hdmi1", 2, AudioKind::Output),
+            (31, "hdmi2", 1, AudioKind::Output),
+            (32, "hdmi3", 0, AudioKind::Output),
+            (33, "mic2", 4, AudioKind::Input),
+        ] {
+            let mut endpoint = native
+                .nodes
+                .iter()
+                .find(|node| node.kind == kind)
+                .unwrap()
+                .clone();
+            endpoint.id = id;
+            endpoint.serial = (id * 10).to_string();
+            endpoint.name = name.into();
+            endpoint.profile_device = Some(device);
+            native.nodes.push(endpoint);
+        }
+        let mut raw = dump();
+        for index in 0..3 {
+            raw[0]["info"]["params"]["EnumRoute"][index]["available"] = "no".into();
+        }
+        (native, raw)
+    }
+
     #[test]
     fn physical_keys_survive_profile_and_endpoint_replacement() {
         let before = audio::rows(&initial(), AudioKind::Output).unwrap();
@@ -499,6 +664,97 @@ mod rows {
                 .iter()
                 .any(|row| row.port_name == SPEAKER || row.port_name == HEADPHONES)
         );
+    }
+    #[test]
+    fn card_wide_active_routes_do_not_resurrect_unavailable_endpoints() {
+        let (native, raw) = card_wide_active_routes();
+        let state = state(native, &raw);
+        let outputs = audio::rows(&state, AudioKind::Output).unwrap();
+        assert!(
+            outputs
+                .iter()
+                .all(|row| !matches!(row.node_id, Some(30..=32)))
+        );
+        assert!(
+            !outputs
+                .iter()
+                .any(|row| row.port_name.starts_with("[Out] HDMI"))
+        );
+        let speaker = outputs.iter().find(|row| row.node_id == Some(10)).unwrap();
+        assert_eq!(speaker.port_name, SPEAKER);
+        assert_eq!(speaker.route_id, Some(3));
+        assert!(speaker.port_active);
+        let inputs = audio::rows(&state, AudioKind::Input).unwrap();
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].node_id, Some(12));
+        assert_eq!(inputs[0].port_name, "[In] Mic1");
+        assert_eq!(inputs[0].route_id, Some(5));
+        assert!(inputs[0].port_active);
+    }
+    #[test]
+    fn available_associations_without_native_routes_allow_default_only_selection() {
+        for (kind, id, index) in [(AudioKind::Output, 30, 2), (AudioKind::Input, 33, 4)] {
+            let (native, mut raw) = card_wide_active_routes();
+            assert!(
+                !audio::rows(&state(native.clone(), &raw), kind)
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.node_id == Some(id))
+            );
+            raw[0]["info"]["params"]["EnumRoute"][index]["available"] = "yes".into();
+            let initial = state(native.clone(), &raw);
+            let rows = audio::rows(&initial, kind).unwrap();
+            let row = rows.iter().find(|row| row.node_id == Some(id)).unwrap();
+            assert!(!row.port);
+            assert!(row.port_name.is_empty());
+            assert_eq!(row.route_id, None);
+            let identity = native
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .unwrap()
+                .identity();
+            let mut fake = Fake {
+                snapshot: native,
+                dump: raw,
+                ..Fake::default()
+            };
+            audio::select(&mut fake, &initial, kind, &row.key).unwrap();
+            assert_eq!(
+                fake.events,
+                [Action::Default {
+                    node: identity.clone()
+                }]
+            );
+            assert_eq!(
+                fake.snapshot.default_node(kind).unwrap().identity(),
+                identity
+            );
+        }
+    }
+    #[test]
+    fn device_only_fallback_prefers_matching_native_availability_on_the_card() {
+        for (kind, id, index) in [(AudioKind::Output, 30, 2), (AudioKind::Input, 33, 4)] {
+            for available in [false, true] {
+                let (mut native, mut raw) = card_wide_active_routes();
+                let associated = &raw[0]["info"]["params"]["EnumRoute"][index];
+                let endpoint = native
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.kind == kind)
+                    .unwrap();
+                let mut route = endpoint.routes[0].clone();
+                route.index = index as i32;
+                route.name = associated["name"].as_str().unwrap().into();
+                route.description = associated["description"].as_str().unwrap().into();
+                route.available = available;
+                endpoint.routes.push(route);
+                raw[0]["info"]["params"]["EnumRoute"][index]["available"] =
+                    if available { "no" } else { "yes" }.into();
+                let rows = audio::rows(&state(native, &raw), kind).unwrap();
+                assert_eq!(rows.iter().any(|row| row.node_id == Some(id)), available);
+            }
+        }
     }
     #[test]
     fn missing_supplemental_routes_yield_native_device_only_choices() {
@@ -1316,6 +1572,35 @@ mod protocol_and_cli {
                 .iter()
                 .any(|row| row["portName"] == HEADPHONES && row["nodeId"].is_null())
         );
+    }
+    #[test]
+    fn mixed_alsa_bluez_rows_succeed_through_the_policy_protocol_for_both_kinds() {
+        let (native, raw) = mixed_alsa_bluez();
+        let fixture = DumpFixture::new(&raw);
+        for (kind, id, alsa_id) in [("output", 30, 10), ("input", 31, 12)] {
+            let mut request = request(native.clone(), None);
+            request["kind"] = kind.into();
+            let mut child = command(&["policy"])
+                .env("AUDIO_CONTROL_PW_DUMP", &fixture.executable)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            writeln!(child.stdin.take().unwrap(), "{request}").unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert!(output.stderr.is_empty(), "{output:?}");
+            let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(result["type"], "result");
+            assert!(result.get("error").is_none(), "{result}");
+            let rows = result["rows"].as_array().unwrap();
+            let row = rows.iter().find(|row| row["nodeId"] == id).unwrap();
+            assert_eq!(row["cardId"], 8);
+            assert_eq!(row["port"], false);
+            assert!(row["routeId"].is_null());
+            assert!(rows.iter().any(|row| row["nodeId"] == alsa_id));
+        }
     }
     fn drive(mut fake: Fake) -> (Value, Vec<Action>) {
         let fixture = DumpFixture::new(&fake.dump);

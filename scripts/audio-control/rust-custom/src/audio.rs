@@ -154,9 +154,13 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
             node.name.clone(),
             short_device_name(&node.description, None),
         );
-        let routes: Vec<_> = card
+        let associated: Vec<_> = card
             .into_iter()
             .flat_map(|card| state.metadata.routes_for(card, node))
+            .collect();
+        let routes: Vec<_> = associated
+            .iter()
+            .copied()
             .filter_map(|route| {
                 node.routes
                     .iter()
@@ -165,6 +169,16 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
             })
             .collect();
         if routes.is_empty() {
+            // Card-wide native routes may omit this endpoint's associations;
+            // known unavailable ports must not become device-only choices.
+            if card.is_some_and(|card| {
+                !associated.is_empty()
+                    && associated
+                        .iter()
+                        .all(|route| !route_available(state, card, route))
+            }) {
+                continue;
+            }
             // Missing associations/native route objects are not an excuse to
             // invent a route action. The native endpoint still supports defaults.
             choices.push(base);

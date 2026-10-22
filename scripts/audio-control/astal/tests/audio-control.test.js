@@ -176,6 +176,24 @@ function endpoint(properties = {}) {
     return node;
 }
 
+function playbackStream(properties = {}) {
+    const stream = new Signals({ id: 40, serial: '400', name: 'Chrome', description: 'Chrome playback',
+        target_serial: 100, acceptTarget: true, targetWrites: [], ...properties });
+    stream.get_pw_property = name => ({ 'object.serial': stream.serial, 'application.name': stream.name })[name] ?? null;
+    stream.set_target_endpoint = (...args) => {
+        assert.equal(args.length, 1, 'set_target_endpoint(endpoint)');
+        assert.equal(args[0], null, 'Astal null clears the saved app target instead of pinning another endpoint');
+        stream.targetWrites.push(args[0]);
+        if (stream.targetError) throw stream.targetError;
+        if (stream.acceptTarget) {
+            stream.target_serial = -1;
+            stream.notify('target-serial');
+        }
+        stream.onTarget?.();
+    };
+    return stream;
+}
+
 function card(properties = {}) {
     const object = new Signals({ id: 7, serial: '70', pwName: 'alsa_card.test',
         active_profile_id: 0, profiles: [{ index: 0 }, { index: 1 }],
@@ -245,7 +263,7 @@ const action = (operation, object, extra = {}) => ({ type: 'action', id: 1, oper
 function fixture(t, {
     outputs = [endpoint()],
     inputs = [endpoint({ id: 20, serial: '200', pwName: 'alsa_input.test', description: 'Microphone', nick: '', volume: 0.7 })],
-    radio = adapter(), devices = [], cards = [],
+    radio = adapter(), devices = [], cards = [], streams = [], recorders = [],
 } = {}) {
     const timers = clock();
     const helpers = [];
@@ -301,7 +319,7 @@ function fixture(t, {
     }
     // Defaults are separate, stable proxy objects, as in AstalWp. Resolve them to
     // live endpoints by id; never accidentally mutate a default proxy's volume.
-    const audio = new Signals({ devices: cards, speakers: outputs, microphones: inputs,
+    const audio = new Signals({ devices: cards, speakers: outputs, microphones: inputs, streams, recorders,
         default_speaker: new Signals({ id: outputs[0]?.id || 0 }),
         default_microphone: new Signals({ id: inputs[0]?.id || 0 }) });
     const bindNode = (node, kind = 'output') => {
@@ -339,17 +357,18 @@ function fixture(t, {
         t.after(() => { if (!process.stopped) process.stop(); });
         return { process, worker: process.worker, exits, actions, snapshots };
     };
-    return { backend, audio, wp, bluetooth, radio, outputs, inputs, cards, helpers, timers, listing, policy, bindNode,
+    return { backend, audio, wp, bluetooth, radio, outputs, inputs, cards, streams, recorders, helpers, timers, listing, policy, bindNode,
         snapshot: () => plain(backend.snapshot()), changes: () => changes,
+        async tick(milliseconds = 100) { timers.advance(milliseconds); await settle(); },
         load(kind, entries) { timers.advance(); listing(kind).rows(entries); } };
 }
 
-function transactionFixture(t) {
+function transactionFixture(t, { streams = [], recorders = [] } = {}) {
     const selectedCard = card();
     const previousCard = card({ id: 8, serial: '80', pwName: 'alsa_card.previous' });
     const previous = endpoint({ card: previousCard });
     const input = endpoint({ id: 20, card: selectedCard, pwName: 'alsa_input.test' });
-    const f = fixture(t, { outputs: [previous], inputs: [input], cards: [selectedCard, previousCard] });
+    const f = fixture(t, { outputs: [previous], inputs: [input], cards: [selectedCard, previousCard], streams, recorders });
     f.backend.start();
     const entry = choice({ nativeCard: selectedCard, name: '', nodeId: null, nodeSerial: '' });
     f.load('output', [entry]);
@@ -812,7 +831,7 @@ test('snapshot represents missing hardware without inventing defaults or doing w
         volume: 0, muted: false, choices: [], busy: false, loading: false, error: '' };
     assert.deepEqual(f.snapshot(), { output: emptyAudio, input: emptyAudio,
         bluetooth: { available: false, powered: false, discovering: false, devices: [],
-            pairing: false, pairingLog: '', error: '' } });
+            pairing: false, pairingMessage: null, error: '' } });
     assert.equal(JSON.parse(f.backend.status()).class, 'unavailable');
     assert.equal(f.helpers.length, 0);
     assert.equal(f.timers.sources.size, 0);
@@ -858,6 +877,46 @@ test('start is idempotent, subscribes to native objects and coalesces change/ref
     timers.advance(150);
     assert.equal(f.helpers.length, 4);
     assert.equal(backend.refreshTimer, 0);
+});
+
+test('resolved unavailable endpoints stay omitted without disabling native default volume', t => {
+    const nativeCard = card();
+    const route = { index: 3, name: 'speaker', available: 0 };
+    const speaker = endpoint({ card: nativeCard, routes: [route], route });
+    const hdmi = endpoint({ id: 11, card: nativeCard, pwName: 'alsa_output.hdmi', routes: [route], route });
+    const f = fixture(t, { outputs: [speaker, hdmi], cards: [nativeCard] });
+    f.backend.start();
+    const before = f.snapshot().output;
+    const hiddenKey = before.choices.find(row => row.nodeId === hdmi.id).key;
+    const row = choice({ node: speaker, key: 'speaker', portName: 'speaker', routeId: 3, portActive: true });
+    f.load('output', [row]);
+    const model = f.snapshot().output;
+    assert.deepEqual(model.choices.map(row => row.key), ['speaker']);
+    assert.equal(model.available, true);
+    assert.equal(model.nodeKey, before.nodeKey);
+    assert.equal(model.volume, 0.4);
+    assert.throws(() => f.backend.select('output', hiddenKey), /no longer available/);
+    f.backend.setVolume('output', 0.55, model.nodeKey);
+    assert.equal(speaker.volume, 0.55);
+    assert.equal(hdmi.volume, 0.4);
+
+    const replacement = endpoint({ id: hdmi.id, serial: '111', pwName: hdmi.pwName });
+    f.audio.speakers = [speaker, replacement];
+    f.audio.notify('speakers');
+    assert.ok(f.snapshot().output.choices.some(row => row.nodeId === replacement.id && row.nodeSerial === '111'),
+        'an unseen native identity still has a fallback while its metadata loads');
+});
+
+test('stale helper omissions cannot suppress current native fallback choices', t => {
+    const f = fixture(t);
+    f.backend.start();
+    f.timers.advance();
+    const listing = f.listing('output');
+    f.outputs[0].notify('description');
+    listing.rows([]);
+    assert.deepEqual(plain(f.backend.metadata.output.resolvedNodes), []);
+    assert.equal(f.snapshot().output.choices.length, 1);
+    assert.match(f.snapshot().output.choices[0].key, /^native:/);
 });
 
 test('default proxy resolution keeps keys stable, but A -> B -> A invalidates old control keys', t => {
@@ -1159,6 +1218,435 @@ test('native-only device selection remains usable while metadata is unavailable'
     assert.equal(f.snapshot().output.error, '');
 });
 
+for (const sameDefault of [false, true]) {
+    test(`output follow-default: ${sameDefault ? 'reselecting the current output' : 'a converged native output choice'} clears existing app pins, never capture`, async t => {
+        const speaker = endpoint();
+        const headphones = endpoint({ id: 11, pwName: 'alsa_output.headphones' });
+        const selected = sameDefault ? speaker : headphones;
+        selected.acceptDefault = false;
+        const streams = [playbackStream(), playbackStream({ id: 41, name: 'Elisa', target_serial: 110 }),
+            playbackStream({ id: 42, name: 'Other player', target_serial: 999 })];
+        const recorder = playbackStream({ id: 50, name: 'Capture', target_serial: 200 });
+        const f = fixture(t, { outputs: [speaker, headphones], streams, recorders: [recorder] });
+        f.backend.start();
+        f.backend.select('output', `native:${f.backend.endpointKey(selected)}`);
+        assert.deepEqual(selected.defaultWrites, [true]);
+        for (const stream of [...streams, recorder]) assert.deepEqual(stream.targetWrites, []);
+        await f.tick();
+        if (!sameDefault) {
+            assert.equal(f.snapshot().output.busy, true);
+            for (const stream of streams) assert.deepEqual(stream.targetWrites, [], 'no reroute before default convergence');
+            selected.defaultValue = true;
+            selected.onDefault(true);
+            selected.notify('is-default');
+            await f.tick();
+        }
+        await f.tick();
+        for (const stream of streams) {
+            assert.deepEqual(stream.targetWrites, [null]);
+            assert.equal(stream.target_serial, -1, 'clear the saved target, not an explicit pin to the chosen endpoint');
+        }
+        assert.deepEqual(recorder.targetWrites, []);
+        assert.equal(recorder.target_serial, 200);
+        assert.equal(f.audio.default_speaker.id, selected.id);
+        assert.equal(f.snapshot().output.busy, false);
+        assert.equal(f.snapshot().output.error, '');
+        assert.equal(f.backend.waiters.size, 0);
+        assert.equal(f.helpers.filter(helper => helper.request?.command === 'select').length, 0);
+    });
+}
+
+test('output follow-default: later output choices retain follow mode and clear pins on newly live playback streams', async t => {
+    const speaker = endpoint();
+    const headphones = endpoint({ id: 11, pwName: 'alsa_output.headphones' });
+    const chrome = playbackStream();
+    const f = fixture(t, { outputs: [speaker, headphones], streams: [chrome] });
+    f.backend.start();
+    f.backend.select('output', `native:${f.backend.endpointKey(headphones)}`);
+    await f.tick();
+    await f.tick();
+    assert.equal(chrome.target_serial, -1);
+    assert.deepEqual(chrome.targetWrites, [null]);
+    const elisa = playbackStream({ id: 41, name: 'Elisa', target_serial: Number(headphones.serial) });
+    f.audio.streams = [chrome, elisa];
+    f.audio.notify('streams');
+    f.backend.select('output', `native:${f.backend.endpointKey(speaker)}`);
+    await f.tick();
+    await f.tick();
+    assert.equal(f.audio.default_speaker.id, speaker.id);
+    assert.equal(chrome.target_serial, -1);
+    assert.ok(chrome.targetWrites.every(target => target === null), 'future choices must not repin an application');
+    assert.deepEqual(elisa.targetWrites, [null]);
+    assert.equal(elisa.target_serial, -1);
+    assert.equal(f.snapshot().output.busy, false);
+    assert.equal(f.snapshot().output.error, '');
+});
+
+for (const policy of [false, true]) {
+    test(`output follow-default: ${policy ? 'policy' : 'native'} input selection does not reroute playback or capture`, async t => {
+        const nativeCard = card();
+        const route = { index: 0, name: 'headphones', available: YES };
+        const initial = endpoint({ id: 20, card: nativeCard, pwName: 'alsa_input.initial', routes: [route] });
+        const selected = endpoint({ id: 21, card: nativeCard, pwName: 'alsa_input.selected', routes: [route] });
+        const chrome = playbackStream(), recorder = playbackStream({ id: 50, target_serial: 200 });
+        const f = fixture(t, { inputs: [initial, selected], streams: [chrome], recorders: [recorder] });
+        f.backend.start();
+        const row = choice({ node: selected, port: policy, portName: policy ? 'headphones' : '', routeId: policy ? 0 : null });
+        f.load('input', [row]);
+        f.backend.select('input', row.key);
+        if (policy) {
+            const worker = f.helpers.at(-1);
+            f.timers.advance();
+            worker.event(action('default', selected));
+            await settle();
+            await f.tick();
+            assert.deepEqual(JSON.parse(worker.answers.at(-1)), { id: 1, ok: true });
+            worker.result({ ok: true });
+            await settle();
+        } else await f.tick();
+        assert.equal(f.audio.default_microphone.id, selected.id);
+        assert.equal(f.snapshot().input.busy, false);
+        assert.equal(f.snapshot().input.error, '');
+        assert.deepEqual(chrome.targetWrites, []);
+        assert.deepEqual(recorder.targetWrites, []);
+        assert.equal(chrome.target_serial, 100);
+        assert.equal(recorder.target_serial, 200);
+    });
+}
+
+test('output follow-default: status, refresh, polling and volume/mute controls never clear app or capture targets', async t => {
+    const chrome = playbackStream(), recorder = playbackStream({ id: 50, target_serial: 200 });
+    const f = fixture(t, { streams: [chrome], recorders: [recorder] });
+    f.backend.start();
+    await f.tick(0);
+    f.backend.status();
+    f.backend.snapshot();
+    f.backend.refresh();
+    for (const kind of ['output', 'input']) {
+        const key = f.snapshot()[kind].nodeKey;
+        f.backend.setVolume(kind, 0.5, key);
+        f.backend.toggleMute(kind, key);
+    }
+    f.backend.setActive(true, 1);
+    await f.tick(2000);
+    f.backend.status();
+    f.backend.setActive(false, 1);
+    assert.deepEqual(chrome.targetWrites, []);
+    assert.deepEqual(recorder.targetWrites, []);
+    assert.equal(chrome.target_serial, 100);
+    assert.equal(recorder.target_serial, 200);
+    for (const node of [...f.outputs, ...f.inputs]) {
+        assert.deepEqual(node.routeWrites, []);
+        assert.deepEqual(node.defaultWrites, []);
+    }
+});
+
+for (const failure of ['route error', 'route timeout', 'default error', 'default timeout']) {
+    test(`output follow-default: native ${failure} leaves app pins untouched`, async t => {
+        const route = { index: 0, name: 'headphones', available: YES };
+        const selected = endpoint({ id: 11, routes: [route] });
+        const chrome = playbackStream(), recorder = playbackStream({ id: 50, target_serial: 200 });
+        const f = fixture(t, { outputs: [endpoint(), selected], streams: [chrome], recorders: [recorder] });
+        f.backend.start();
+        const routed = failure.startsWith('route');
+        const row = choice({ node: selected, port: routed, portName: routed ? 'headphones' : '', routeId: routed ? 0 : null });
+        f.load('output', [row]);
+        if (failure === 'route error') selected.set_route = () => { throw new Error('Native route rejected'); };
+        if (failure === 'route timeout') selected.acceptRoute = false;
+        if (failure === 'default error') selected.defaultError = new Error('Native default rejected');
+        if (failure === 'default timeout') selected.acceptDefault = false;
+        f.backend.select('output', row.key);
+        await settle();
+        await f.tick(3000);
+        assert.match(f.snapshot().output.error, /rejected|did not accept the change/);
+        assert.equal(f.snapshot().output.busy, false);
+        assert.deepEqual(chrome.targetWrites, []);
+        assert.deepEqual(recorder.targetWrites, []);
+        assert.equal(chrome.target_serial, 100);
+        assert.equal(f.backend.waiters.size, 0);
+    });
+}
+
+test('output follow-default: a policy default action returns the canonical endpoint without rerouting by itself', async t => {
+    const chrome = playbackStream();
+    const f = transactionFixture(t, { streams: [chrome] });
+    const selected = f.addOutput();
+    const pending = f.backend.applyPolicyAction(action('default', selected), f.context);
+    await f.tick();
+    assert.equal(await pending, selected, 'forward the live native node, not the stable default proxy or a snapshot');
+    assert.deepEqual(chrome.targetWrites, []);
+});
+
+test('output follow-default: policy success reroutes once, using the last successful default only after the helper exits successfully', async t => {
+    const chrome = playbackStream({ acceptTarget: false });
+    const recorder = playbackStream({ id: 50, target_serial: 200 });
+    const f = transactionFixture(t, { streams: [chrome], recorders: [recorder] });
+    const selected = f.addOutput();
+    const followed = [], follow = f.backend.followDefaultOutput;
+    f.backend.followDefaultOutput = node => { followed.push(node); return follow.call(f.backend, node); };
+    f.backend.select('output', f.entry.key);
+    const worker = f.helpers.at(-1);
+    f.timers.advance();
+    for (const [index, node] of [f.previous, selected].entries()) {
+        worker.event(action('default', node, { id: index + 1 }));
+        await settle();
+        await f.tick();
+        assert.deepEqual(JSON.parse(worker.answers.at(-1)), { id: index + 1, ok: true });
+        assert.deepEqual(followed, []);
+        assert.deepEqual(chrome.targetWrites, []);
+    }
+    f.previous.defaultError = new Error('Later default rejected');
+    worker.event(action('default', f.previous, { id: 3 }));
+    await settle();
+    assert.deepEqual(JSON.parse(worker.answers.at(-1)), { id: 3, ok: false, error: 'Later default rejected' });
+    worker.event({ type: 'result', ok: true });
+    await settle();
+    assert.deepEqual(followed, [], 'a typed result alone does not prove successful process completion');
+    assert.deepEqual(chrome.targetWrites, []);
+    worker.finish();
+    await settle();
+    assert.deepEqual(followed, [selected]);
+    assert.deepEqual(chrome.targetWrites, [null]);
+    assert.equal(f.snapshot().output.busy, true, 'selection stays busy until native playback targets converge');
+    await f.tick();
+    assert.equal(f.snapshot().output.busy, true);
+    chrome.target_serial = -1;
+    chrome.notify('target-serial');
+    await f.tick();
+    assert.equal(f.snapshot().output.busy, false);
+    assert.equal(f.snapshot().output.error, '');
+    assert.deepEqual(followed, [selected]);
+    assert.deepEqual(recorder.targetWrites, []);
+    assert.equal(f.backend.waiters.size, 0);
+});
+
+for (const failure of ['typed failure', 'transport failure', 'rollback']) {
+    test(`output follow-default: policy ${failure} never reroutes even after a successful default action`, async t => {
+        const chrome = playbackStream(), recorder = playbackStream({ id: 50, target_serial: 200 });
+        const f = transactionFixture(t, { streams: [chrome], recorders: [recorder] });
+        const selected = f.addOutput();
+        f.backend.select('output', f.entry.key);
+        const worker = f.helpers.at(-1);
+        f.timers.advance();
+        worker.event(action('default', selected));
+        await settle();
+        await f.tick();
+        assert.deepEqual(JSON.parse(worker.answers.at(-1)), { id: 1, ok: true });
+        assert.deepEqual(chrome.targetWrites, []);
+        if (failure === 'rollback') {
+            worker.event(action('default', f.previous, { id: 2 }));
+            await settle();
+            await f.tick();
+            assert.deepEqual(JSON.parse(worker.answers.at(-1)), { id: 2, ok: true });
+            assert.equal(f.audio.default_speaker.id, f.previous.id);
+            assert.deepEqual(chrome.targetWrites, [], 'recovery defaults must not clear application policy');
+        }
+        if (failure === 'transport failure') {
+            worker.event({ type: 'result', ok: true });
+            worker.finish(new Error('Policy process failed'));
+        } else worker.result({ ok: false, error: failure === 'rollback' ? 'Selection failed; previous default restored' : 'Selection failed' });
+        await settle();
+        assert.match(f.snapshot().output.error, /failed/);
+        assert.equal(f.snapshot().output.busy, false);
+        assert.deepEqual(chrome.targetWrites, []);
+        assert.deepEqual(recorder.targetWrites, []);
+        assert.equal(chrome.target_serial, 100);
+        assert.equal(f.backend.waiters.size, 0);
+    });
+}
+
+test('output follow-default: policy success without an acknowledged default does not invent a playback reroute', async t => {
+    const chrome = playbackStream();
+    const f = transactionFixture(t, { streams: [chrome] });
+    f.backend.select('output', f.entry.key);
+    f.timers.advance();
+    f.helpers.at(-1).result({ ok: true });
+    await settle();
+    assert.deepEqual(chrome.targetWrites, []);
+    assert.equal(f.snapshot().output.busy, false);
+    assert.equal(f.snapshot().output.error, '');
+});
+
+for (const change of ['removal', 'same-identity replacement', 'default replacement', 'disposal']) {
+    test(`output follow-default: ${change} after default convergence prevents stale playback writes`, async t => {
+        const selected = endpoint(), other = endpoint({ id: 11 });
+        const chrome = playbackStream();
+        const f = fixture(t, { outputs: [selected, other], streams: [chrome] });
+        f.backend.start();
+        f.backend.select('output', `native:${f.backend.endpointKey(selected)}`);
+        f.timers.advance(100); // Resolve native convergence, but do not run its async continuation yet.
+        if (change === 'disposal') f.backend.dispose();
+        else if (change === 'default replacement') {
+            f.audio.default_speaker.id = other.id;
+            f.audio.default_speaker.notify('id');
+        } else {
+            f.audio.speakers = change === 'removal' ? [other] : [f.bindNode(endpoint({ id: selected.id, serial: selected.serial })), other];
+            f.audio.notify('speakers');
+        }
+        await settle();
+        await f.tick();
+        assert.deepEqual(chrome.targetWrites, []);
+        assert.equal(chrome.target_serial, 100);
+        assert.equal(f.snapshot().output.busy, false);
+        if (change !== 'disposal') assert.match(f.snapshot().output.error, /disappeared|replaced|changed|no longer/);
+        assert.equal(f.backend.waiters.size, 0);
+    });
+}
+
+for (const change of ['removal', 'same-identity replacement', 'serial change', 'default replacement', 'disposal']) {
+    test(`output follow-default: ${change} during the native target wait rejects stale success`, async t => {
+        const selected = endpoint(), other = endpoint({ id: 11 });
+        const chrome = playbackStream({ acceptTarget: false });
+        const f = fixture(t, { outputs: [selected, other], streams: [chrome] });
+        f.backend.start();
+        const pending = f.backend.followDefaultOutput(selected);
+        const rejected = assert.rejects(pending, /disappeared|replaced|changed|no longer|cancelled|stopped/);
+        assert.deepEqual(chrome.targetWrites, [null]);
+        if (change === 'disposal') f.backend.dispose();
+        else if (change === 'default replacement') {
+            f.audio.default_speaker.id = other.id;
+            f.audio.default_speaker.notify('id');
+        } else if (change === 'serial change') selected.serial = '999';
+        else {
+            f.audio.speakers = change === 'removal' ? [other] : [f.bindNode(endpoint({ id: selected.id, serial: selected.serial })), other];
+            f.audio.notify('speakers');
+        }
+        chrome.target_serial = -1; // Even a late successful native write cannot validate a stale selection.
+        chrome.notify('target-serial');
+        await f.tick();
+        await rejected;
+        assert.deepEqual(chrome.targetWrites, [null]);
+        assert.equal(f.backend.waiters.size, 0);
+        if (change === 'disposal') assert.equal(f.timers.sources.size, 0);
+    });
+}
+
+test('output follow-default: a synchronous default change during a setter prevents writes to later streams', async t => {
+    const selected = endpoint(), other = endpoint({ id: 11 });
+    const first = playbackStream(), later = playbackStream({ id: 41, name: 'Elisa' });
+    const f = fixture(t, { outputs: [selected, other], streams: [first, later] });
+    f.backend.start();
+    first.onTarget = () => {
+        f.audio.default_speaker.id = other.id;
+        f.audio.default_speaker.notify('id');
+    };
+    const rejected = assert.rejects(f.backend.followDefaultOutput(selected), /default.*changed|selected.*changed|no longer/);
+    await f.tick();
+    await rejected;
+    assert.deepEqual(first.targetWrites, [null]);
+    assert.deepEqual(later.targetWrites, []);
+    assert.equal(f.backend.waiters.size, 0);
+});
+
+test('output follow-default: a stream removed before its setter is reached is skipped', async t => {
+    const first = playbackStream(), removed = playbackStream({ id: 41, name: 'Elisa' });
+    const f = fixture(t, { streams: [first, removed] });
+    f.backend.start();
+    first.onTarget = () => { f.audio.streams = [first]; f.audio.notify('streams'); };
+    const pending = f.backend.followDefaultOutput(f.outputs[0]);
+    await f.tick();
+    await pending;
+    assert.deepEqual(first.targetWrites, [null]);
+    assert.deepEqual(removed.targetWrites, []);
+    assert.equal(f.backend.waiters.size, 0);
+});
+
+test('output follow-default: a removed stream does not block the wait for remaining live playback', async t => {
+    const removed = playbackStream({ acceptTarget: false });
+    const live = playbackStream({ id: 41, name: 'Elisa', acceptTarget: false });
+    const f = fixture(t, { streams: [removed, live] });
+    f.backend.start();
+    const pending = f.backend.followDefaultOutput(f.outputs[0]);
+    f.audio.streams = [live];
+    f.audio.notify('streams');
+    await f.tick();
+    assert.deepEqual(live.targetWrites, [null]);
+    assert.equal(f.backend.waiters.size, 1);
+    live.target_serial = -1;
+    live.notify('target-serial');
+    await f.tick();
+    await pending;
+    assert.deepEqual(removed.targetWrites, [null]);
+    assert.equal(f.backend.waiters.size, 0);
+});
+
+test('output follow-default: selection waits for target_serial -1, not a pin to the selected endpoint', async t => {
+    const selected = endpoint();
+    const chrome = playbackStream({ acceptTarget: false, target_serial: Number(selected.serial) });
+    const f = fixture(t, { outputs: [selected], streams: [chrome] });
+    f.backend.start();
+    f.backend.select('output', `native:${f.backend.endpointKey(selected)}`);
+    await f.tick();
+    assert.deepEqual(chrome.targetWrites, [null]);
+    await f.tick();
+    assert.equal(f.snapshot().output.busy, true, 'an explicit target on the selected output is still an app pin');
+    chrome.target_serial = -1;
+    chrome.notify('target-serial');
+    await f.tick();
+    assert.equal(f.snapshot().output.busy, false);
+    assert.equal(f.snapshot().output.error, '');
+    assert.equal(f.backend.waiters.size, 0);
+});
+
+test('output follow-default: a failed setter does not block other playback resets and is reported after their convergence', async t => {
+    const chrome = playbackStream({ targetError: new Error('Native target rejected') });
+    const elisa = playbackStream({ id: 41, name: 'Elisa', acceptTarget: false });
+    const other = playbackStream({ id: 42, name: 'Other player' });
+    const recorder = playbackStream({ id: 50, target_serial: 200 });
+    const f = fixture(t, { streams: [chrome, elisa, other], recorders: [recorder] });
+    f.backend.start();
+    f.backend.select('output', `native:${f.backend.endpointKey(f.outputs[0])}`);
+    await f.tick();
+    for (const stream of [chrome, elisa, other]) assert.deepEqual(stream.targetWrites, [null]);
+    assert.equal(chrome.target_serial, 100);
+    assert.equal(other.target_serial, -1);
+    assert.equal(f.snapshot().output.busy, true);
+    assert.equal(f.snapshot().output.error, '');
+    await f.tick();
+    assert.equal(f.snapshot().output.busy, true, 'a setter error must not abandon other live streams awaiting convergence');
+    assert.equal(f.snapshot().output.error, '');
+    elisa.target_serial = -1;
+    elisa.notify('target-serial');
+    await f.tick();
+    const model = f.snapshot().output;
+    assert.equal(model.busy, false);
+    assert.match(model.error, /Chrome/);
+    assert.match(model.error, /Native target rejected/);
+    assert.equal(elisa.target_serial, -1);
+    for (const stream of [chrome, elisa, other]) assert.deepEqual(stream.targetWrites, [null]);
+    assert.deepEqual(recorder.targetWrites, []);
+    assert.equal(recorder.target_serial, 200);
+    assert.equal(f.backend.waiters.size, 0);
+    assert.equal(f.helpers.filter(helper => helper.request?.command === 'select').length, 0);
+});
+
+for (const failure of ['setter error', 'timeout']) {
+    test(`output follow-default: native target ${failure} is actionable instead of silent selection success`, async t => {
+        const chrome = playbackStream({ acceptTarget: false,
+            ...(failure === 'setter error' ? { targetError: new Error('Astal refused the Chrome playback target') } : {}) });
+        const recorder = playbackStream({ id: 50, target_serial: 200 });
+        const f = fixture(t, { streams: [chrome], recorders: [recorder] });
+        f.backend.start();
+        f.backend.select('output', `native:${f.backend.endpointKey(f.outputs[0])}`);
+        await f.tick();
+        assert.deepEqual(chrome.targetWrites, [null]);
+        if (failure === 'timeout') {
+            assert.equal(f.snapshot().output.busy, true);
+            await f.tick(2900);
+            assert.equal(f.snapshot().output.busy, true, 'native target convergence gets a bounded opportunity to finish');
+            await f.tick();
+        }
+        const model = f.snapshot().output;
+        assert.equal(model.busy, false);
+        assert.match(model.error, /Chrome|playback|stream|application/i);
+        assert.match(model.error, /refused|did not|not.*follow|tim(?:e|ed)[ -]?out|timeout|failed|accept/i);
+        assert.equal(chrome.target_serial, 100);
+        assert.deepEqual(recorder.targetWrites, []);
+        assert.equal(f.backend.waiters.size, 0);
+        assert.equal(f.helpers.filter(helper => helper.request?.command === 'select').length, 0);
+    });
+}
+
 for (const reason of ['stale serial', 'missing node', 'missing route', 'unavailable route', 'ambiguous route']) {
     test(`selection rejects ${reason} without starting a Rust mutation fallback`, t => {
         const route = { index: 0, name: 'headphones', available: YES };
@@ -1329,7 +1817,7 @@ test('metadata failures preserve native controls and last good rows, and recover
 
 test('pairing binds the explicit native hci adapter and address, then trusts and connects only through Astal', t => {
     const radio = adapter({ path: '/org/bluez/hci12' });
-    const headset = device({ adapter: '/org/bluez/hci12', alias: 'Desk headset' });
+    const headset = device({ adapter: '/org/bluez/hci12', name: 'Desk headset' });
     const f = fixture(t, { radio, devices: [headset] });
     f.backend.start();
     f.backend.setActive(true, 0);
@@ -1362,9 +1850,128 @@ test('pairing binds the explicit native hci adapter and address, then trusts and
     assert.equal(f.backend.pairing, null);
     assert.equal(f.snapshot().bluetooth.devices[0].busy, false);
     assert.equal(f.snapshot().bluetooth.error, '');
-    assert.ok(f.snapshot().bluetooth.pairingLog.endsWith(`Desk headset (${headset.address}) is paired and connected.\n`));
+    assert.deepEqual(f.snapshot().bluetooth.pairingMessage,
+        { state: 'paired', text: `Paired with Desk headset (${headset.address}).`, prompt: '' });
     assert.equal(headset.cancellations, 0);
 });
+
+test('pairing replaces progress with one named status, retaining only the latest complete prompt', t => {
+    const headset = device({ name: "Raina's Pixel Buds Pro" });
+    const label = `${headset.name} (${headset.address})`;
+    const f = fixture(t, { devices: [headset] });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
+    const worker = f.helpers.at(-1);
+    const status = () => f.snapshot().bluetooth.pairingMessage;
+    assert.deepEqual(status(), { state: 'pairing', text: `Pairing with ${label}…`, prompt: '' });
+    worker.emit(`Pairing with ${headset.address} on hci0…\n`);
+    assert.equal(status().prompt, '');
+    worker.emit('Does passkey 000');
+    assert.equal(status().prompt, '', 'partial lines are not shown');
+    worker.emit(`007 match the one shown on ${headset.address}? Type yes or no.\n`);
+    assert.equal(status().prompt, `Does passkey 000007 match the one shown on ${label}? Type yes or no.`);
+    worker.emit(`Enter PIN for ${headset.address}:\n\n`);
+    assert.equal(status().prompt, `Enter PIN for ${label}:`);
+    assert.equal(status().prompt.includes('000007'), false, 'new prompts replace old ones');
+    f.backend.sendPairingAnswer('000123');
+    assert.equal(status().prompt, '');
+    worker.emit(`${headset.address} is paired.\n`);
+    assert.equal(status().text, `Pairing with ${label}…`, 'stdout progress is not an extra message');
+    worker.finish();
+    assert.deepEqual(status(), { state: 'paired', text: `Paired with ${label}.`, prompt: '' });
+    headset.operations[0].callback(headset, {});
+    assert.deepEqual(status(), { state: 'paired', text: `Paired with ${label}.`, prompt: '' });
+    assert.doesNotMatch(status().text, /[\r\n]/);
+});
+
+for (const [properties, expected] of [
+    [{ name: '', alias: 'Desk buds' }, 'Desk buds (AA:BB:CC:DD:EE:01)'],
+    [{ name: '', alias: '' }, 'AA:BB:CC:DD:EE:01'],
+    [{ name: 'AA:BB:CC:DD:EE:01' }, 'AA:BB:CC:DD:EE:01'],
+]) {
+    test(`pairing status uses the native name/alias with an address fallback: ${expected}`, t => {
+        const f = fixture(t, { devices: [device(properties)] });
+        f.backend.start();
+        f.backend.setActive(true, 0);
+        f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
+        assert.equal(f.snapshot().bluetooth.pairingMessage.text, `Pairing with ${expected}…`);
+    });
+}
+
+test('pairing failure replaces progress with one named error without a duplicate Bluetooth error or trailing line', t => {
+    const headset = device({ name: "Raina's Pixel Buds Pro" });
+    const label = `${headset.name} (${headset.address})`;
+    const f = fixture(t, { devices: [headset] });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
+    f.helpers.at(-1).finish(new Error(`Pairing with ${headset.address} on hci0…\n`
+        + `audio-control: Incorrect pairing code for ${headset.address}.\n`));
+    assert.deepEqual(f.snapshot().bluetooth.pairingMessage,
+        { state: 'failed', text: `Pairing failed: Incorrect pairing code for ${label}.`, prompt: '' });
+    assert.equal(f.snapshot().bluetooth.error, '');
+    f.backend.dismissPairingMessage();
+    assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+    assert.equal(headset.cancellations, 0);
+});
+
+test('dismissing a pairing notice does not cancel pairing or revive it on completion; new prompts remain accessible', t => {
+    const headset = device();
+    const f = fixture(t, { devices: [headset] });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    const key = f.snapshot().bluetooth.devices[0].key;
+    f.backend.deviceAction(key);
+    const worker = f.helpers.at(-1), session = f.backend.pairing;
+    f.backend.dismissPairingMessage();
+    assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+    assert.equal(f.backend.pairing, session);
+    assert.equal(worker.stops, 0);
+    assert.equal(headset.cancellations, 0);
+    worker.emit(`Pairing with ${headset.address} on hci0…\n`);
+    assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+    worker.emit(`Does passkey 000007 match the one shown on ${headset.address}? Type yes or no.\n`);
+    assert.match(f.snapshot().bluetooth.pairingMessage.prompt, /000007/);
+    f.backend.sendPairingAnswer('yes');
+    f.backend.dismissPairingMessage();
+    worker.finish();
+    headset.operations[0].callback(headset, {});
+    assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+    assert.equal(headset.cancellations, 0);
+    assert.deepEqual(f.radio.scanCalls, ['start']);
+    headset.connected = false;
+    f.backend.deviceAction(key);
+    assert.equal(f.snapshot().bluetooth.pairingMessage.state, 'pairing', 'a new request gets a new visible notice');
+});
+
+for (const response of ['answer', 'cancel']) {
+    test(`an unanswered pairing prompt cannot be dismissed and remains reachable to ${response}`, t => {
+        const headset = device();
+        const f = fixture(t, { devices: [headset] });
+        f.backend.start();
+        f.backend.setActive(true, 0);
+        f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
+        const worker = f.helpers.at(-1);
+        worker.emit(`Enter PIN for ${headset.address}:\n`);
+        const notice = f.snapshot().bluetooth.pairingMessage;
+        f.backend.dismissPairingMessage();
+        assert.deepEqual(f.snapshot().bluetooth.pairingMessage, notice);
+        assert.equal(f.snapshot().bluetooth.pairing, true);
+        assert.equal(worker.stops, 0);
+        if (response === 'answer') {
+            f.backend.sendPairingAnswer('000123');
+            assert.deepEqual(worker.answers, ['000123\n']);
+            f.backend.dismissPairingMessage();
+            assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+        } else {
+            f.backend.cancelPairing();
+            assert.equal(f.snapshot().bluetooth.pairingMessage, null);
+            assert.equal(headset.cancellations, 1);
+            assert.equal(worker.stops, 1);
+        }
+    });
+}
 
 for (const stage of ['agent', 'trust', 'connect start', 'connect finish']) {
     test(`pairing ${stage} failure reports the error and releases native busy/session state`, t => {
@@ -1381,8 +1988,12 @@ for (const stage of ['agent', 'trust', 'connect start', 'connect finish']) {
         if (stage === 'connect finish') headset.operations[0].callback(headset, { error });
         assert.equal(f.backend.pairing, null);
         assert.equal(f.snapshot().bluetooth.devices[0].busy, false);
-        assert.equal(f.snapshot().bluetooth.error, error.message);
-        assert.equal(f.snapshot().bluetooth.pairingLog.includes('paired and connected'), false);
+        assert.equal(f.snapshot().bluetooth.error, '', 'pairing errors appear once in the dismissible status card');
+        const notice = f.snapshot().bluetooth.pairingMessage;
+        assert.equal(notice.state, 'failed');
+        assert.ok(notice.text.includes(error.message));
+        assert.match(notice.text, stage === 'agent' ? /^Failed to pair with Headset/ : /^Paired with Headset.*but setup failed/);
+        assert.equal(notice.prompt, '');
         if (stage === 'agent') {
             assert.equal(headset.trusted, false);
             assert.deepEqual(headset.operations, []);
@@ -1426,19 +2037,20 @@ for (const failure of [false, true]) {
         const newer = f.helpers.at(-1);
         newer.emit('New session PIN?\n');
         const session = f.backend.pairing;
-        const log = f.backend.pairingLog;
+        const message = plain(f.backend.pairingMessage);
         old.operations[0].callback(old, failure ? { error: new Error('Old connect failed') } : {});
         assert.equal(old.finishes.length, 1, 'native async results are always consumed');
         assert.equal(f.backend.pairing, session);
-        assert.equal(f.backend.pairingLog, log);
+        assert.deepEqual(plain(f.backend.pairingMessage), message);
         assert.equal(f.backend.bluetoothError, '');
         assert.equal(f.snapshot().bluetooth.devices.find(row => row.address === old.address).busy, false);
         f.backend.sendPairingAnswer('004200');
         assert.deepEqual(newer.answers, ['004200\n']);
+        message.prompt = '';
         worker.options.onChunk('Old agent prompt');
         worker.options.onExit(new Error('Old helper error'));
         assert.equal(f.backend.pairing, session);
-        assert.equal(f.backend.pairingLog, log);
+        assert.deepEqual(plain(f.backend.pairingMessage), message);
         assert.equal(f.backend.bluetoothError, '');
     });
 }
@@ -1459,7 +2071,7 @@ for (const cause of ['power off', 'device removed', 'dispose']) {
         assert.equal(headset.finishes.length, 1);
         assert.equal(f.backend.pairing, null);
         assert.equal(f.backend.bluetoothError, '');
-        assert.equal(f.backend.pairingLog.includes('paired and connected'), false);
+        assert.equal(f.backend.pairingMessage, null);
     });
 }
 
@@ -1575,7 +2187,6 @@ for (const [label, opened, tab] of [['leaving the Bluetooth tab', true, 1], ['cl
         const f = fixture(t, { devices: [headset] });
         f.backend.start();
         f.backend.setActive(true, 0);
-        f.backend.toggleDiscovery();
         assert.deepEqual(f.radio.scanCalls, ['start']);
         f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
         const pairing = f.helpers.at(-1);
@@ -1583,9 +2194,11 @@ for (const [label, opened, tab] of [['leaving the Bluetooth tab', true, 1], ['cl
         assert.equal(pairing.options.interactive, true);
         assert.equal(pairing.options.timeout, 180000);
         pairing.options.onChunk('x'.repeat(33000));
-        pairing.options.onChunk('PIN?');
-        assert.equal(f.snapshot().bluetooth.pairingLog.length, 32768);
-        assert.ok(f.snapshot().bluetooth.pairingLog.endsWith('PIN?'));
+        assert.equal(f.backend.pairing.pending.length, 32768);
+        pairing.options.onChunk(`\nEnter PIN for ${headset.address}:\n`);
+        const notice = f.snapshot().bluetooth.pairingMessage;
+        assert.equal(notice.text, `Pairing with Headset (${headset.address})…`);
+        assert.equal(notice.prompt, `Enter PIN for Headset (${headset.address}):`);
         f.backend.setActive(opened, tab);
         f.backend.setActive(opened, tab);
         assert.deepEqual(f.radio.scanCalls, ['start', 'stop']);
@@ -1623,7 +2236,7 @@ test('pairing input guards preserve PINs, reject injection, and do not start pai
     f.backend.start();
     const key = f.snapshot().bluetooth.devices[0].key;
     f.backend.deviceAction(key);
-    f.backend.toggleDiscovery();
+    f.backend.syncDiscovery();
     f.backend.setActive(true, 1);
     f.backend.deviceAction(key);
     assert.equal(f.helpers.some(helper => helper.argv[1] === 'bluetooth-pair'), false);
@@ -1660,7 +2273,6 @@ for (const cause of ['adapter replacement', 'adapter powered off', 'device remov
         const f = fixture(t, { devices: [headset] });
         f.backend.start();
         f.backend.setActive(true, 0);
-        f.backend.toggleDiscovery();
         f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
         const pairing = f.helpers.at(-1), oldRadio = f.radio;
         if (cause === 'adapter replacement') {
@@ -1688,29 +2300,302 @@ for (const cause of ['adapter replacement', 'adapter powered off', 'device remov
     });
 }
 
-test('Bluetooth power-off cancels owned work, and scan toggles require an open powered Bluetooth tab', t => {
+test('Bluetooth discovery automatically follows visibility, tab, power, and disposal', t => {
     const headset = device();
     const f = fixture(t, { devices: [headset] });
     f.backend.start();
-    f.backend.toggleDiscovery();
+    f.backend.setActive(false, 0);
     f.backend.setActive(true, 1);
-    f.backend.toggleDiscovery();
+    f.backend.syncDiscovery();
     assert.deepEqual(f.radio.scanCalls, []);
     f.backend.setActive(true, 0);
-    f.backend.toggleDiscovery();
-    f.backend.toggleDiscovery();
-    f.backend.toggleDiscovery();
+    f.backend.setActive(true, 0);
+    f.bluetooth.notify('devices');
+    assert.deepEqual(f.radio.scanCalls, ['start'], 'repeated reconciliation must not toggle scanning');
     f.backend.deviceAction(f.snapshot().bluetooth.devices[0].key);
     f.backend.toggleBluetoothPower();
     assert.equal(f.radio.powered, false);
-    assert.deepEqual(f.radio.scanCalls, ['start', 'stop', 'start', 'stop']);
+    assert.deepEqual(f.radio.scanCalls, ['start', 'stop']);
     assert.equal(headset.cancellations, 1);
-    f.backend.toggleDiscovery();
-    assert.equal(f.radio.scanCalls.length, 4);
+    f.backend.syncDiscovery();
+    assert.equal(f.radio.scanCalls.length, 2);
     f.backend.toggleBluetoothPower();
     assert.equal(f.radio.powered, true);
-    assert.equal(f.radio.scanCalls.length, 4, 'powering on does not start discovery implicitly');
+    assert.deepEqual(f.radio.scanCalls, ['start', 'stop', 'start']);
+    f.backend.setActive(true, 1);
+    f.backend.setActive(true, 1);
+    assert.deepEqual(f.radio.scanCalls, ['start', 'stop', 'start', 'stop']);
+    f.backend.setActive(true, 0);
+    f.backend.setActive(false, 0);
+    f.backend.setActive(false, 0);
+    assert.deepEqual(f.radio.scanCalls.slice(-2), ['start', 'stop']);
+    f.backend.setActive(true, 0);
+    const count = f.radio.scanCalls.length;
+    f.backend.dispose();
+    f.backend.dispose();
+    assert.equal(f.radio.scanCalls.length, count + 1);
+    assert.equal(f.radio.scanCalls.at(-1), 'stop');
 });
+
+test('Bluetooth discovery starts for late adapters and native power-on while the tab is visible', t => {
+    const f = fixture(t, { radio: null });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    const radio = adapter({ powered: false });
+    f.bluetooth.adapter = radio;
+    f.bluetooth.notify('adapter');
+    assert.deepEqual(radio.scanCalls, []);
+    radio.powered = true;
+    radio.notify('powered');
+    assert.deepEqual(radio.scanCalls, ['start']);
+    radio.powered = false;
+    radio.notify('powered');
+    assert.deepEqual(radio.scanCalls, ['start', 'stop']);
+    radio.powered = true;
+    radio.notify('powered');
+    const replacement = adapter({ path: '/org/bluez/hci1' });
+    f.bluetooth.adapter = replacement;
+    f.bluetooth.notify('adapter');
+    assert.deepEqual(radio.scanCalls, ['start', 'stop', 'start', 'stop']);
+    assert.deepEqual(replacement.scanCalls, ['start']);
+    f.bluetooth.adapter = null;
+    f.bluetooth.notify('adapter');
+    assert.deepEqual(replacement.scanCalls, ['start', 'stop']);
+});
+
+test('Bluetooth discovery owns a session without stopping another client scanning', t => {
+    const radio = adapter({ discovering: true });
+    let owned = 0;
+    radio.start_discovery = () => {
+        radio.scanCalls.push('start');
+        owned++;
+        radio.discovering = true;
+        radio.notify('discovering');
+    };
+    radio.stop_discovery = () => {
+        radio.scanCalls.push('stop');
+        assert.equal(owned, 1);
+        owned--;
+        radio.discovering = true; // Another client's discovery reference remains active.
+        radio.notify('discovering');
+    };
+    const f = fixture(t, { radio });
+    f.backend.start();
+    f.backend.setActive(false, 0);
+    assert.deepEqual(radio.scanCalls, []);
+    f.backend.setActive(true, 0);
+    f.backend.setActive(true, 0);
+    assert.equal(owned, 1);
+    assert.deepEqual(radio.scanCalls, ['start']);
+    f.backend.setActive(true, 1);
+    assert.equal(owned, 0);
+    assert.equal(radio.discovering, true);
+    f.backend.dispose();
+    assert.deepEqual(radio.scanCalls, ['start', 'stop']);
+});
+
+test('synchronous discovery notifications cannot restart scanning during a delayed power-off', t => {
+    const radio = adapter();
+    let powered = true, requested = null;
+    Object.defineProperty(radio, 'powered', {
+        get: () => powered,
+        set(value) { requested = value; radio.notify('discoverable'); },
+    });
+    radio.start_discovery = () => {
+        radio.scanCalls.push('start'); radio.discovering = true; radio.notify('discovering');
+    };
+    radio.stop_discovery = () => {
+        radio.scanCalls.push('stop'); radio.discovering = false; radio.notify('discovering');
+    };
+    const f = fixture(t, { radio });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    assert.deepEqual(radio.scanCalls, ['start']);
+    f.backend.toggleBluetoothPower();
+    assert.equal(requested, false);
+    assert.equal(radio.powered, true, 'native powered notification has not arrived yet');
+    radio.notify('discovering');
+    assert.deepEqual(radio.scanCalls, ['start', 'stop']);
+    powered = false;
+    radio.notify('powered');
+    powered = true;
+    radio.notify('powered');
+    assert.deepEqual(radio.scanCalls, ['start', 'stop', 'start']);
+    f.backend.setActive(false, 0);
+    assert.deepEqual(radio.scanCalls, ['start', 'stop', 'start', 'stop']);
+});
+
+test('failed discovery starts report errors without spinning or stopping an unowned session', t => {
+    const radio = adapter();
+    let fail = true;
+    radio.start_discovery = () => {
+        radio.scanCalls.push('start');
+        if (fail) throw new Error('Discovery unavailable');
+        radio.discovering = true;
+    };
+    const f = fixture(t, { radio });
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    assert.equal(f.snapshot().bluetooth.error, 'Discovery unavailable');
+    f.timers.advance();
+    assert.deepEqual(radio.scanCalls, ['start']);
+    f.backend.setActive(false, 0);
+    assert.deepEqual(radio.scanCalls, ['start']);
+    fail = false;
+    f.backend.setActive(true, 0);
+    assert.deepEqual(radio.scanCalls, ['start', 'start']);
+    assert.equal(f.snapshot().bluetooth.error, '');
+    f.backend.setActive(false, 0);
+    assert.deepEqual(radio.scanCalls, ['start', 'start', 'stop']);
+});
+
+for (const leave of ['close', 'Audio tab']) {
+    test(`leaving Bluetooth via ${leave} recovers discovery after a silently failed power-off`, t => {
+        const radio = adapter();
+        const writes = [];
+        Object.defineProperty(radio, 'powered', {
+            get: () => true,
+            set(value) { writes.push(value); radio.notify('powered'); },
+        });
+        const f = fixture(t, { radio });
+        f.backend.start();
+        f.backend.setActive(true, 0);
+        f.backend.toggleBluetoothPower();
+        assert.deepEqual(writes, [false]);
+        radio.notify('discovering');
+        assert.deepEqual(radio.scanCalls, ['start', 'stop']);
+        f.backend.setActive(leave !== 'close', leave === 'close' ? 0 : 1);
+        assert.deepEqual(radio.scanCalls, ['start', 'stop']);
+        f.backend.setActive(true, 0);
+        assert.deepEqual(radio.scanCalls, ['start', 'stop', 'start']);
+    });
+}
+
+test('nested adapter replacement during discovery cleanup starts only the final adapter', t => {
+    const f = fixture(t);
+    const intermediate = adapter({ path: '/org/bluez/hci1' });
+    const final = adapter({ path: '/org/bluez/hci2' });
+    f.radio.stop_discovery = () => {
+        f.radio.scanCalls.push('stop');
+        f.radio.discovering = false;
+        assert.equal(f.radio.handlers.size, 0, 'old adapter notify must be disconnected before stopping');
+        f.radio.notify('discovering');
+        f.bluetooth.adapter = final;
+        f.bluetooth.notify('adapter');
+    };
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    f.bluetooth.adapter = intermediate;
+    f.bluetooth.notify('adapter');
+    assert.equal(f.backend.adapter, final);
+    assert.equal(f.backend.discoveryAdapter, final);
+    assert.deepEqual(f.radio.scanCalls, ['start', 'stop']);
+    assert.deepEqual(intermediate.scanCalls, []);
+    assert.deepEqual(final.scanCalls, ['start']);
+    assert.equal(intermediate.handlers.size, 0);
+    assert.equal(final.handlers.size, 1);
+});
+
+test('disposal during a discovery stop cannot install an Audio poll afterwards', t => {
+    const f = fixture(t);
+    f.radio.stop_discovery = () => {
+        f.radio.scanCalls.push('stop');
+        f.radio.discovering = false;
+        f.radio.notify('discovering');
+    };
+    f.backend.start();
+    f.backend.setActive(true, 0);
+    f.radio.connect('notify', (_, property) => {
+        if (property.name === 'discovering' && !f.radio.discovering) f.backend.dispose();
+    });
+    f.backend.setActive(true, 1);
+    assert.equal(f.backend.disposed, true);
+    assert.equal(f.backend.poll, 0);
+    f.timers.advance(); // Drain stopped policy workers' deferred initial sends.
+    assert.equal(f.timers.sources.size, 0);
+    assert.deepEqual(f.radio.scanCalls, ['start', 'stop']);
+});
+
+for (const cause of ['disposal', 'adapter replacement']) {
+    test(`${cause} during discovery cleanup prevents a stale Bluetooth power write`, t => {
+        const f = fixture(t);
+        const writes = [];
+        const replacement = adapter({ path: '/org/bluez/hci1' });
+        Object.defineProperty(f.radio, 'powered', {
+            get: () => true,
+            set(value) { writes.push(value); },
+        });
+        f.radio.stop_discovery = () => {
+            f.radio.scanCalls.push('stop');
+            f.radio.discovering = false;
+            f.radio.notify('discovering');
+        };
+        f.backend.start();
+        f.backend.setActive(true, 0);
+        f.radio.connect('notify', (_, property) => {
+            if (property.name !== 'discovering' || f.radio.discovering) return;
+            if (cause === 'disposal') f.backend.dispose();
+            else {
+                f.bluetooth.adapter = replacement;
+                f.bluetooth.notify('adapter');
+            }
+        });
+        f.backend.toggleBluetoothPower();
+        assert.deepEqual(writes, []);
+        assert.deepEqual(f.radio.scanCalls, ['start', 'stop']);
+        if (cause === 'disposal') {
+            f.timers.advance();
+            assert.equal(f.timers.sources.size, 0);
+        } else {
+            assert.equal(replacement.powered, true);
+            assert.deepEqual(replacement.scanCalls, ['start']);
+        }
+    });
+}
+
+for (const retry of ['close', 'dispose']) {
+    test(`failed discovery stops retain cleanup ownership until a later ${retry}`, t => {
+        const f = fixture(t);
+        let fail = true;
+        f.radio.stop_discovery = () => {
+            f.radio.scanCalls.push('stop');
+            if (fail) throw new Error('Discovery stop unavailable');
+            f.radio.discovering = false;
+            f.radio.notify('discovering');
+        };
+        f.backend.start();
+        f.backend.setActive(true, 0);
+        f.backend.setActive(false, 0);
+        assert.equal(f.snapshot().bluetooth.error, 'Discovery stop unavailable');
+        assert.equal(f.backend.discoveryAdapter, f.radio);
+        f.timers.advance();
+        assert.deepEqual(f.radio.scanCalls, ['start', 'stop'], 'no background cleanup retry loop');
+        fail = false;
+        if (retry === 'dispose') f.backend.dispose();
+        else f.backend.setActive(false, 0);
+        assert.deepEqual(f.radio.scanCalls, ['start', 'stop', 'stop']);
+        assert.equal(f.backend.discoveryAdapter, null);
+        if (retry === 'close') {
+            f.backend.setActive(true, 0);
+            assert.deepEqual(f.radio.scanCalls, ['start', 'stop', 'stop', 'start']);
+        } else assert.equal(f.timers.sources.size, 0);
+    });
+}
+
+for (const connected of [false, true]) {
+    test(`unpaired ${connected ? 'connected' : 'discovered'} Bluetooth devices cannot be forgotten`, t => {
+        const candidate = device({ connected, paired: false });
+        const f = fixture(t, { devices: [candidate] });
+        f.backend.start();
+        const key = f.snapshot().bluetooth.devices[0].key;
+        f.backend.forget(key);
+        assert.deepEqual(f.radio.removed, []);
+        candidate.paired = true;
+        candidate.notify('paired');
+        f.backend.forget(key);
+        assert.deepEqual(f.radio.removed, [candidate]);
+    });
+}
 
 test('status is read-only: no refresh, polling, discovery, pairing or native writes', t => {
     const headset = device({ connected: true, name: 'Headset' });
@@ -1799,7 +2684,7 @@ test('dispose cancels native waiters, helper selections/listings and every subsc
     backend.setActive(true, 1);
     backend.refresh();
     backend.changed();
-    backend.toggleDiscovery();
+    backend.syncDiscovery();
     backend.toggleBluetoothPower();
     audio.notify('speakers');
     wp.emit('ready');
@@ -1819,7 +2704,6 @@ test('dispose during Bluetooth activity cancels scanning/pairing and ignores lat
     f.backend.setActive(true, 0);
     const keyFor = address => f.snapshot().bluetooth.devices.find(entry => entry.address === address).key;
     f.backend.deviceAction(keyFor(paired.address));
-    f.backend.toggleDiscovery();
     f.backend.deviceAction(keyFor(unpaired.address));
     const pairing = f.helpers.at(-1);
     f.backend.dispose();
@@ -1830,7 +2714,7 @@ test('dispose during Bluetooth activity cancels scanning/pairing and ignores lat
     pairing.options.onChunk('Late PIN');
     pairing.options.onExit(new Error('Late helper failure'), '');
     assert.equal(f.backend.bluetoothError, '');
-    assert.equal(f.backend.pairingLog, '');
+    assert.equal(f.backend.pairingMessage, null);
     assert.equal(f.changes(), changes);
     assert.equal(f.timers.sources.size, 0);
     assert.equal(unpaired.cancellations, 1);
@@ -2349,6 +3233,17 @@ test('deviceChoices removes ghosts and stale native/card bindings, falling back 
     assert.deepEqual(deviceChoices([live], []), []);
 });
 
+test('deviceChoices respects omissions only for identities resolved by the helper snapshot', () => {
+    const node = endpoint({ isDefault: true });
+    const resolved = [{ id: node.id, serial: node.serial }];
+    assert.deepEqual(deviceChoices([], [node], [], resolved), []);
+    const row = choice();
+    assert.equal(deviceChoices([row], [node], [], resolved).length, 1);
+    assert.equal(deviceChoices([], [node], [], [{ id: node.id, serial: 'replaced' }]).length, 1);
+    assert.equal(deviceChoices([], [node], [], [{ id: node.id + 1, serial: node.serial }]).length, 1);
+    assert.equal(deviceChoices([], [node]).length, 1, 'failed/missing metadata retains native fallback');
+});
+
 test('deviceChoices keeps inactive profiles only while the exact native card is live', () => {
     const inactive = choice({ key: 'inactive', nodeId: null, nodeSerial: '', name: '', portActive: true, default: true });
     for (const cards of [[], [{ id: 11, serial: '1000' }], [{ id: 10, serial: '1002' }],
@@ -2587,6 +3482,282 @@ test('waybarStatus serializes quoted, control-character, Unicode, and markup-lik
     assert.ok(raw.includes('\\"'));
     assert.ok(raw.includes('\\\\'));
     assert.ok(raw.includes('\\u0000'));
+});
+}
+
+// Exercise the real renderer with widget doubles, without loading GTK/GI.
+{
+const frontend = readFileSync(new URL('../frontend.js', import.meta.url), 'utf8');
+const labelDouble = () => ({ text: '', set_label(text) { this.text = text; } });
+const buttonDouble = (text, clicked, classes = []) => {
+    const child = labelDouble();
+    child.set_label(text || '');
+    return { classes, get_child: () => child, click: () => clicked?.() };
+};
+const boxDouble = (_vertical, _spacing, children = []) => ({
+    children: [...children],
+    append(child) { this.children.push(child); },
+    remove(child) {
+        const index = this.children.indexOf(child);
+        assert.notEqual(index, -1);
+        this.children.splice(index, 1);
+    },
+    reorder_child_after(child, previous) {
+        this.remove(child);
+        assert.ok(previous === null || this.children.includes(previous));
+        this.children.splice(previous === null ? 0 : this.children.indexOf(previous) + 1, 0, child);
+    },
+    add_css_class() {},
+});
+const AudioPanel = vm.runInNewContext(
+    frontend.slice(frontend.indexOf('function volumeValue('), frontend.indexOf('function frame('))
+    + frontend.slice(frontend.indexOf('class AudioPanel'), frontend.indexOf('\nfunction monitorFor('))
+    + '\nAudioPanel;', {
+        button: buttonDouble, box: boxDouble, ellipsis: labelDouble, wrapped: labelDouble,
+        scroll: (child, properties = {}) => ({ child, ...properties }),
+        Gtk: { Orientation: { VERTICAL: 1, HORIZONTAL: 0 }, Align: { END: 2, FILL: 0, START: 1 },
+            Entry: function(properties) { return { ...properties, text: '', connect() {} }; },
+            Separator: function(properties) { return { ...properties }; } },
+        style: (widget, name, enabled) => { widget[name] = enabled; },
+        message: (widget, text) => { widget.set_label(text || ''); widget.visible = Boolean(text); },
+    });
+function viewHarness() {
+    const view = { kind: 'output', maximum: 1.5, rows: new Map(), heading: labelDouble(),
+        mute: buttonDouble(), percent: labelDouble(), devicesHeading: {}, deviceList: {}, error: labelDouble(),
+        volume: { value: 0, set_value(value) { this.value = value; }, get_value() { return this.value; } },
+        choices: { append() {}, remove() {}, reorder_child_after() {} } };
+    const panel = { failures: {}, backend: {}, action() {} };
+    return { view, render(model = {}) {
+        AudioPanel.prototype.renderAudio.call(panel, view,
+            { available: true, nodeKey: 'current', name: 'Speaker', volume: 0.25, ...model });
+    } };
+}
+
+function bluetoothViewHarness() {
+    const panel = {
+        deviceRows: new Map(), cardWidth: 400, failures: {}, backend: {}, action() {}, pairing: false,
+        answer: { text: '', visible: false, set_text(text) { this.text = text; } },
+        pairingStatus: labelDouble(), pairingPrompt: labelDouble(), dismissPairing: {},
+        pairingCard: {}, pairingControls: {}, pairingButtons: {}, send: { visible: false },
+        bluetoothState: labelDouble(), bluetoothError: labelDouble(),
+        bluetoothRows: boxDouble(), bluetoothSeparator: { visible: false },
+    };
+    panel.bluetoothRows.append(panel.bluetoothSeparator);
+    return { panel, render(devices, model = {}) {
+        AudioPanel.prototype.renderBluetooth.call(panel, { available: true, powered: true, devices, ...model });
+    }, order() {
+        const keys = new Map([...panel.deviceRows].map(([key, row]) => [row.widget, key]));
+        return panel.bluetoothRows.children.filter(child => child !== panel.bluetoothSeparator || child.visible)
+            .map(child => child === panel.bluetoothSeparator ? 'divider' : keys.get(child));
+    } };
+}
+
+test('Bluetooth renderer groups remembered devices before available devices with a divider and paired-only forget', () => {
+    const h = bluetoothViewHarness();
+    const devices = Object.freeze([
+        { key: 'available-z' }, { key: 'paired-z', paired: true },
+        { key: 'connected', connected: true }, { key: 'available-a' }, { key: 'paired-a', paired: true },
+    ].map(Object.freeze));
+    h.render(devices);
+    assert.deepEqual(h.order(), ['paired-z', 'connected', 'paired-a', 'divider', 'available-z', 'available-a']);
+    assert.equal(h.panel.bluetoothSeparator.visible, true);
+    assert.deepEqual(devices.map(device => device.key), ['available-z', 'paired-z', 'connected', 'available-a', 'paired-a']);
+    for (const device of devices) {
+        const row = h.panel.deviceRows.get(device.key);
+        assert.equal(row.forget.visible, Boolean(device.paired));
+        assert.equal(row.forget.sensitive, Boolean(device.paired));
+        assert.equal(row.action.get_child().text, device.connected ? 'Disconnect' : device.paired ? 'Connect' : 'Pair');
+    }
+    h.render(devices, { pairing: true });
+    assert.equal(h.panel.deviceRows.get('paired-z').forget.visible, true);
+    assert.equal(h.panel.deviceRows.get('paired-z').forget.sensitive, false);
+    assert.equal(h.panel.deviceRows.get('connected').forget.visible, false);
+    h.render(devices.map(device => ({ ...device, busy: true })));
+    assert.equal(h.panel.deviceRows.get('paired-z').forget.sensitive, false);
+});
+
+test('Bluetooth renderer updates existing rows and divider placement through pairing changes and removals', () => {
+    const h = bluetoothViewHarness();
+    const devices = [{ key: 'first' }, { key: 'second', paired: true }, { key: 'third' }];
+    h.render(devices);
+    const first = h.panel.deviceRows.get('first'), second = h.panel.deviceRows.get('second');
+    assert.deepEqual(h.order(), ['second', 'divider', 'first', 'third']);
+    devices[0].paired = true;
+    h.render(devices);
+    assert.equal(h.panel.deviceRows.get('first'), first);
+    assert.equal(first.forget.visible, true);
+    assert.deepEqual(h.order(), ['first', 'second', 'divider', 'third']);
+    devices[1].paired = false;
+    h.render(devices);
+    assert.equal(h.panel.deviceRows.get('second'), second);
+    assert.equal(second.forget.visible, false);
+    assert.equal(second.forget.sensitive, false);
+    assert.deepEqual(h.order(), ['first', 'divider', 'second', 'third']);
+    devices[0].paired = false;
+    h.render(devices);
+    assert.equal(h.panel.bluetoothSeparator.visible, false);
+    assert.deepEqual(h.order(), ['first', 'second', 'third']);
+    h.render(devices.map(device => ({ ...device, paired: true })));
+    assert.equal(h.panel.bluetoothSeparator.visible, false);
+    assert.deepEqual(h.order(), ['first', 'second', 'third']);
+    h.render([]);
+    assert.equal(h.panel.deviceRows.size, 0);
+    assert.equal(h.panel.bluetoothSeparator.visible, false);
+    assert.deepEqual(h.panel.bluetoothRows.children, [h.panel.bluetoothSeparator]);
+});
+
+test('Bluetooth status card has a compact dismiss button wired to notice dismissal, not cancellation', () => {
+    let dismissals = 0;
+    const panel = { backend: { dismissPairingMessage() { dismissals++; } }, action(_kind, callback) { callback(); } };
+    AudioPanel.prototype.buildBluetooth.call(panel);
+    assert.equal(panel.dismissPairing.get_child().text, '×');
+    assert.ok(panel.dismissPairing.classes.includes('pairing-dismiss'));
+    assert.equal(panel.dismissPairing.tooltip_text, 'Dismiss pairing message');
+    assert.equal(panel.answer.visible, false, 'entry starts hidden to avoid flashing during automatic pairing');
+    assert.equal(panel.send.visible, false);
+    panel.dismissPairing.click();
+    assert.equal(dismissals, 1);
+    assert.equal(panel.pairingCard.children[0].children[0], panel.pairingStatus, 'status is directly sized, not a log scroller');
+    assert.equal(panel.pairingCard.children[0].children[1], panel.dismissPairing);
+    assert.doesNotMatch(frontend, /pairingLog|pairing-log/);
+});
+
+test('Bluetooth renderer shows one current pairing status and hides prompt controls after completion or dismissal', () => {
+    const h = bluetoothViewHarness();
+    h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing with Headset (AA:01)…', prompt: 'Enter PIN:' } });
+    assert.equal(h.panel.pairingCard.visible, true);
+    assert.equal(h.panel.pairingStatus.text, 'Pairing with Headset (AA:01)…');
+    assert.equal(h.panel.pairingPrompt.text, 'Enter PIN:');
+    assert.equal(h.panel.pairingControls.visible, true);
+    assert.equal(h.panel.answer.visible, true);
+    assert.equal(h.panel.send.visible, true);
+    assert.equal(h.panel.dismissPairing.sensitive, false);
+    assert.match(h.panel.dismissPairing.tooltip_text, /Answer or cancel/);
+    h.render([], { pairingMessage: { state: 'paired', text: 'Paired with Headset (AA:01).', prompt: '' } });
+    assert.equal(h.panel.pairingCard.visible, true);
+    assert.equal(h.panel.pairingStatus.text, 'Paired with Headset (AA:01).');
+    assert.equal(h.panel.dismissPairing.sensitive, true);
+    assert.equal(h.panel.pairingPrompt.visible, false);
+    assert.equal(h.panel.pairingControls.visible, false);
+    h.render([], { pairingMessage: { state: 'failed', text: 'Failed to pair with Headset (AA:01): rejected', prompt: '' } });
+    assert.equal(h.panel.pairingStatus.failure, true);
+    assert.equal(h.panel.pairingPrompt.visible, false);
+    assert.equal(h.panel.bluetoothError.visible, false);
+    h.render([], { pairing: true, pairingMessage: null });
+    assert.equal(h.panel.pairingCard.visible, false);
+    assert.equal(h.panel.pairingControls.visible, false);
+    assert.equal(h.panel.pairingStatus.text, '');
+});
+
+test('automatic pairing never shows an entry field or Send button without an authentication prompt', () => {
+    const h = bluetoothViewHarness();
+    h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing with Headset…', prompt: '' } });
+    assert.equal(h.panel.pairingCard.visible, true);
+    assert.equal(h.panel.pairingControls.visible, false);
+    assert.equal(h.panel.answer.visible, false);
+    assert.equal(h.panel.send.visible, false);
+    assert.equal(h.panel.send.sensitive, false);
+    assert.equal(h.panel.dismissPairing.sensitive, true);
+    h.render([], { pairingMessage: { state: 'paired', text: 'Paired with Headset.', prompt: '' } });
+    assert.equal(h.panel.pairingControls.visible, false);
+    assert.equal(h.panel.answer.visible, false);
+    assert.equal(h.panel.send.visible, false);
+});
+
+for (const prompt of [
+    'Please type in the pairing PIN for AA:01.',
+    'Please type in the 6-digit passkey for AA:01.',
+    'Does passkey 000007 match the one shown on AA:01? Type yes or no.',
+    'Confirm pairing with AA:01? Type yes or no.',
+]) {
+    test(`pairing entry appears only while a real response is requested: ${prompt}`, () => {
+        const h = bluetoothViewHarness();
+        const notice = { state: 'pairing', text: 'Pairing with Headset…', prompt: '' };
+        h.render([], { pairing: true, pairingMessage: notice });
+        h.render([], { pairing: true, pairingMessage: { ...notice, prompt } });
+        assert.equal(h.panel.answer.visible, true);
+        assert.equal(h.panel.send.visible, true);
+        assert.equal(h.panel.pairingControls.visible, true);
+        h.panel.answer.text = '000007';
+        h.render([], { pairing: true, pairingMessage: { ...notice, prompt } });
+        assert.equal(h.panel.answer.text, '000007', 'ordinary renders preserve an answer being typed');
+        assert.equal(h.panel.send.sensitive, true);
+        h.render([], { pairing: true, pairingMessage: notice });
+        assert.equal(h.panel.answer.visible, false);
+        assert.equal(h.panel.send.visible, false);
+        assert.equal(h.panel.send.sensitive, false);
+        assert.equal(h.panel.pairingControls.visible, false);
+        assert.equal(h.panel.answer.text, '', 'a consumed request does not retain its PIN');
+    });
+}
+
+for (const prompt of [
+    'Type 042311 on the device to finish pairing.',
+    'Type 042311 on the device and press Enter to finish pairing.',
+]) {
+    test(`display-only pairing instructions do not show a panel input: ${prompt}`, () => {
+        const h = bluetoothViewHarness();
+        h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing with Keyboard…', prompt: 'Enter PIN:' } });
+        h.panel.answer.text = 'old PIN';
+        h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing with Keyboard…', prompt } });
+        assert.equal(h.panel.pairingPrompt.text, prompt);
+        assert.equal(h.panel.pairingPrompt.visible, true);
+        assert.equal(h.panel.answer.visible, false);
+        assert.equal(h.panel.send.visible, false);
+        assert.equal(h.panel.send.sensitive, false);
+        assert.equal(h.panel.answer.text, '');
+        assert.equal(h.panel.pairingControls.visible, true, 'Cancel remains reachable while entering a code on the device');
+    });
+}
+
+test('hidden pairing input cannot send a response, while an actual request can', () => {
+    const h = bluetoothViewHarness(), answers = [];
+    h.panel.backend.sendPairingAnswer = text => answers.push(text);
+    h.panel.action = (_kind, callback) => callback();
+    h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing…', prompt: '' } });
+    h.panel.answer.text = 'stale PIN';
+    AudioPanel.prototype.sendAnswer.call(h.panel);
+    assert.deepEqual(answers, []);
+    h.render([], { pairing: true, pairingMessage: { state: 'pairing', text: 'Pairing…', prompt: 'Enter PIN:' } });
+    h.panel.answer.text = '000123';
+    AudioPanel.prototype.sendAnswer.call(h.panel);
+    assert.deepEqual(answers, ['000123']);
+    assert.equal(h.panel.answer.text, '');
+});
+
+test('Bluetooth frontend has no manual discovery toggle', () => {
+    assert.doesNotMatch(frontend, /this\.scan\b|toggleDiscovery|Stop scan/);
+});
+
+test('audio renderer hides the complete device selector without an available alternative', () => {
+    const h = viewHarness();
+    h.render({ choices: [] });
+    assert.equal(h.view.devicesHeading.visible, false);
+    assert.equal(h.view.deviceList.visible, false);
+    const selected = { key: 'speaker', label: 'Speaker', default: true };
+    h.render({ choices: [selected] });
+    assert.equal(h.view.deviceList.visible, false);
+    h.render({ choices: [selected, { key: 'headphones', label: 'Headphones', default: false }] });
+    assert.equal(h.view.devicesHeading.visible, true);
+    assert.equal(h.view.deviceList.visible, true);
+    assert.equal(h.view.rows.size, 2);
+    h.render({ choices: [selected] });
+    assert.equal(h.view.deviceList.visible, false);
+    assert.equal(h.view.rows.size, 1);
+});
+
+test('audio renderer distinguishes unavailable defaults from a real adjustable zero volume', () => {
+    const h = viewHarness();
+    h.render({ available: false, nodeKey: '', volume: 0 });
+    assert.equal(h.view.percent.text, '—');
+    assert.equal(h.view.volume.sensitive, false);
+    assert.match(h.view.volume.tooltip_text, /No default audio device/);
+    h.render({ volume: 0 });
+    assert.equal(h.view.percent.text, '0%');
+    assert.equal(h.view.volume.sensitive, true);
+    assert.equal(h.view.mute.sensitive, true);
+    h.render({ volume: 0.4 });
+    assert.equal(h.view.percent.text, '40%');
 });
 }
 

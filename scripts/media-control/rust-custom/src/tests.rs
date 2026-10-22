@@ -523,6 +523,25 @@ macro_rules! media_unit_tests {
                 }
             }
 
+            fn spotify_players() -> [Player; 2] {
+                let mut real = player("real", "Chromium", "Get Up");
+                real.artist = "Far East Movement".to_owned();
+                real.album = "Album".to_owned();
+                real.url = "https://open.spotify.com/search/far%20east%20movement%20get%20up/tracks"
+                    .to_owned();
+                real.length = Some(166.968);
+                real.can_play = true;
+                real.can_pause = true;
+                let mut duplicate = real.clone();
+                duplicate.bus = "duplicate".to_owned();
+                duplicate.url = "https://open.spotify.com/album/id".to_owned();
+                duplicate.length = None;
+                duplicate.can_play = false;
+                duplicate.can_pause = false;
+                duplicate.can_seek = false;
+                [real, duplicate]
+            }
+
             fn node(id: u32, app: &str, title: &str) -> Stream {
                 Stream {
                     id,
@@ -865,6 +884,10 @@ macro_rules! media_unit_tests {
                     "https://spotify.com/episode/id",
                     "https://spotify.com/collection/tracks",
                     "https://open.spotify.com/intl-zh/track/id",
+                    "https://open.spotify.com/search/far%20east%20movement%20get%20up/tracks",
+                    "https://open.spotify.com/intl-zh/search/far%20east%20movement%20get%20up/tracks",
+                    "https://open.spotify.com/intl-en/search/far%20east%20movement%20get%20up/tracks?type=tracks#results",
+                    "https://spotify.com/search/query",
                     "HTTPS://WWW.YOUTUBE.COM/WATCH?v=id",
                     "http://youtube.com:8080/watch?v=id",
                 ] {
@@ -883,6 +906,14 @@ macro_rules! media_unit_tests {
                     "https://live.bilibili.com/",
                     "https://b23.tv/",
                     "https://spotify.com/intl-zh/",
+                    "https://open.spotify.com",
+                    "https://open.spotify.com/",
+                    "https://open.spotify.com/intl-en/",
+                    "https://open.spotify.com/home",
+                    "https://open.spotify.com/?next=/search/query",
+                    "https://open.spotify.com/#search/query",
+                    "https://open.spotify.com/searching/query",
+                    "https://github.com/search/query",
                     "https://github.com/watch/id",
                     "https://docs.example.com/video/id",
                     "file:///watch/id",
@@ -910,6 +941,22 @@ macro_rules! media_unit_tests {
                     "https://youtube..com/watch",
                     "https:// youtube.com/watch",
                     "https://youtube.com/watch\n",
+                    "https://notspotify.com/search/query",
+                    "https://open.spotify.com.evil.test/search/query",
+                    "https://evil.test/open.spotify.com/search/query",
+                    "https://open.spotify.com@evil.test/search/query",
+                    "https://evil.test@open.spotify.com/search/query",
+                    "https://open.spotify.com\\@evil.test/search/query",
+                    "https://open.spotify.com%2eevil.test/search/query",
+                    "https://open.spotify.com:bad/search/query",
+                    "https://open.spotify.com:65536/search/query",
+                    "https://open.spotify.com./search/query",
+                    "https://open..spotify.com/search/query",
+                    "https:// open.spotify.com/search/query",
+                    "https://open.spotify.com/search/far east movement/tracks",
+                    "https://open.spotify.com/search/query\n",
+                    "file://open.spotify.com/search/query",
+                    "ftp://open.spotify.com/search/query",
                 ] {
                     assert!(!browser_media_allowed(url), "should reject {url:?}");
                     let mut p = player("a", "Chromium", "");
@@ -1019,6 +1066,206 @@ macro_rules! media_unit_tests {
             }
 
             #[test]
+            fn spotify_search_and_album_duplicates_keep_the_rich_primary_in_either_order() {
+                for position in [0.0, 63.25] {
+                    for reversed in [false, true] {
+                        let mut players = spotify_players();
+                        players[0].position = position;
+                        if reversed {
+                            players.reverse();
+                        }
+                        let members = players.each_ref().map(|player| player.bus.clone());
+                        let [first, second] = players;
+                        let mut snapshot = request(
+                            vec![first, player("other", "Native", "Other"), second],
+                            vec![node(11, "Chromium", "Get Up")],
+                        );
+                        let groups = analyze(&snapshot).groups;
+                        for selected in ["real", "duplicate"] {
+                            snapshot.selected_player = selected.to_owned();
+                            let response = analyze(&snapshot);
+                            assert!(response.error.is_none());
+                            assert_eq!(response.groups, groups);
+                            assert_eq!(response.groups.len(), 2);
+                            assert_eq!(response.groups[0].players, members);
+                            assert_eq!(response.groups[0].primary, "real");
+                            assert_eq!(response.groups[0].title, "Get Up");
+                            assert_eq!(response.groups[0].artist, "Far East Movement");
+                            assert_eq!(response.groups[0].display_name, "Spotify");
+                            assert_eq!(response.groups[0].stream_id, Some(11));
+                            assert_eq!(response.groups[1].players, ["other"]);
+                            assert_eq!(response.active_player, "real");
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn representative_quality_is_playing_then_transport_then_length_then_seek() {
+                let mut paused = player("paused", "Native", "Track");
+                paused.artist = "Artist".to_owned();
+                paused.playing = false;
+                paused.can_play = true;
+                paused.can_pause = true;
+                let mut bare = paused.clone();
+                bare.bus = "bare".to_owned();
+                bare.playing = true;
+                bare.can_play = false;
+                bare.can_pause = false;
+                bare.length = None;
+                bare.can_seek = false;
+                let mut seeker = bare.clone();
+                seeker.bus = "seeker".to_owned();
+                seeker.can_seek = true;
+                let mut length = bare.clone();
+                length.bus = "length".to_owned();
+                length.length = Some(203.0);
+                let mut transport = bare.clone();
+                transport.bus = "transport".to_owned();
+                transport.title = " TRACK ".to_owned();
+                transport.artist = " ARTIST ".to_owned();
+                let mut players = vec![paused, bare, seeker, length, transport];
+                for (can_play, can_pause) in [(true, false), (false, true), (true, true)] {
+                    players[4].can_play = can_play;
+                    players[4].can_pause = can_pause;
+                    for count in 2..=players.len() {
+                        for reversed in [false, true] {
+                            let mut members = players[..count].to_vec();
+                            if reversed {
+                                members.reverse();
+                            }
+                            let snapshot = request(members, vec![]);
+                            let response = analyze(&snapshot);
+                            let expected = &players[count - 1];
+                            assert_eq!(response.groups.len(), 1);
+                            assert_eq!(response.groups[0].primary, expected.bus);
+                            assert_eq!(response.groups[0].title, expected.title);
+                            assert_eq!(response.groups[0].artist, expected.artist);
+                            assert_eq!(
+                                response.groups[0].players,
+                                snapshot.players.iter().map(|p| p.bus.clone()).collect::<Vec<_>>()
+                            );
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn representative_prefers_usable_length_with_absent_or_false_transport_caps() {
+                for absent_caps in [false, true] {
+                    for length in [
+                        None,
+                        Some(0.0),
+                        Some(-1.0),
+                        Some(f64::NAN),
+                        Some(f64::INFINITY),
+                        Some(f64::NEG_INFINITY),
+                    ] {
+                        for reversed in [false, true] {
+                            let [mut real, mut duplicate] = spotify_players();
+                            real.can_play = false;
+                            real.can_pause = false;
+                            real.can_seek = false;
+                            duplicate.can_seek = true;
+                            duplicate.length = length;
+                            let mut players = vec![real, duplicate];
+                            if reversed {
+                                players.reverse();
+                            }
+                            if absent_caps {
+                                let mut wire = serde_json::to_value(&players).unwrap();
+                                for player in wire.as_array_mut().unwrap() {
+                                    let player = player.as_object_mut().unwrap();
+                                    player.remove("canPlay");
+                                    player.remove("canPause");
+                                }
+                                players = serde_json::from_value(wire).unwrap();
+                            }
+                            assert!(players.iter().all(|p| !p.can_play && !p.can_pause));
+                            let response = analyze(&request(players, vec![]));
+                            assert!(response.error.is_none());
+                            assert_eq!(response.groups.len(), 1);
+                            assert_eq!(response.groups[0].primary, "real");
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn representative_quality_ties_keep_original_order_and_matching_metadata() {
+                let mut first = player("first", "Native", "Track");
+                first.artist = "Artist".to_owned();
+                first.can_play = true;
+                let mut second = first.clone();
+                second.bus = "second".to_owned();
+                second.title = " TRACK ".to_owned();
+                second.artist = " ARTIST ".to_owned();
+                second.length = Some(204.0);
+                second.can_play = false;
+                second.can_pause = true;
+                second.art_url = "https://example.com/cover.jpg".to_owned();
+                for playing in [false, true] {
+                    for reversed in [false, true] {
+                        let mut players = vec![first.clone(), second.clone()];
+                        for player in &mut players {
+                            player.playing = playing;
+                        }
+                        if reversed {
+                            players.reverse();
+                        }
+                        let snapshot = request(players, vec![]);
+                        let response = analyze(&snapshot);
+                        let expected = &snapshot.players[0];
+                        assert_eq!(response.groups.len(), 1);
+                        assert_eq!(response.groups[0].primary, expected.bus);
+                        assert_eq!(response.groups[0].title, expected.title);
+                        assert_eq!(response.groups[0].artist, expected.artist);
+                        assert_eq!(response.groups[0].art_url, expected.art_url);
+                    }
+                }
+            }
+
+            #[test]
+            fn spotify_representative_does_not_reorder_or_gate_native_action_fanout() {
+                for playing in [false, true] {
+                    for reversed in [false, true] {
+                        let mut players = spotify_players();
+                        for player in &mut players {
+                            player.playing = playing;
+                        }
+                        let real = players[0].clone();
+                        if reversed {
+                            players.reverse();
+                        }
+                        let mut snapshot = request(players.to_vec(), vec![]);
+                        for target in ["real", "duplicate"] {
+                            snapshot.selected_player = target.to_owned();
+                            for kind in ["toggle", "pauseAll", "togglePauseAll", "seek", "next", "previous"] {
+                                snapshot.action = Some(Action {
+                                    position: 12.5,
+                                    ..action(kind, target)
+                                });
+                                let response = analyze(&snapshot);
+                                assert!(response.error.is_none());
+                                assert_eq!(response.groups[0].primary, "real");
+                                let expected = match kind {
+                                    "pauseAll" if !playing => vec![],
+                                    "toggle" | "pauseAll" | "togglePauseAll" => snapshot
+                                        .players
+                                        .iter()
+                                        .map(|p| native_action(p, if playing { "pause" } else { "play" }, None))
+                                        .collect(),
+                                    "seek" => vec![native_action(&real, kind, Some(12.5))],
+                                    _ => vec![native_action(&real, kind, None)],
+                                };
+                                assert_eq!(response.actions, expected);
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[test]
             fn grouping_preserves_keeper_metadata_and_five_second_window() {
                 let mut a = player("a", "Native", "Track");
                 a.artist = "Artist".to_owned();
@@ -1069,11 +1316,13 @@ macro_rules! media_unit_tests {
                 ];
                 players[0].position = 10.0;
                 players[1].position = 15.0;
+                players[1].can_play = true;
+                players[1].can_pause = true;
                 players[2].position = 20.0;
                 let response = analyze(&request(players, vec![]));
                 assert_eq!(response.groups.len(), 2);
                 assert_eq!(response.groups[0].players, ["a", "b"]);
-                assert_eq!(response.groups[0].primary, "a");
+                assert_eq!(response.groups[0].primary, "b");
                 assert_eq!(response.groups[1].players, ["c"]);
             }
 
@@ -1392,6 +1641,8 @@ macro_rules! media_unit_tests {
                 assert_eq!(snapshot.selected_player, "");
                 assert!(snapshot.players[0].browser_hint.is_null());
                 assert_eq!(snapshot.players[0].length, None);
+                assert!(!snapshot.players[0].can_play);
+                assert!(!snapshot.players[0].can_pause);
                 assert_eq!(snapshot.action.as_ref().unwrap(), &action("toggle", ""));
                 let value = serde_json::to_value(analyze(&snapshot)).unwrap();
                 assert_eq!(value["requestId"], 123);
@@ -1412,6 +1663,19 @@ macro_rules! media_unit_tests {
                         .get("destination")
                         .is_none()
                 );
+                for (can_play, can_pause) in [(true, false), (false, true), (true, true)] {
+                    let mut with_caps = wire.clone();
+                    with_caps["players"][0]["canPlay"] = json!(can_play);
+                    with_caps["players"][0]["canPause"] = json!(can_pause);
+                    let snapshot: Request = serde_json::from_value(with_caps).unwrap();
+                    assert_eq!(snapshot.players[0].can_play, can_play);
+                    assert_eq!(snapshot.players[0].can_pause, can_pause);
+                    let serialized = serde_json::to_value(&snapshot).unwrap();
+                    assert_eq!(serialized["players"][0]["canPlay"], can_play);
+                    assert_eq!(serialized["players"][0]["canPause"], can_pause);
+                    assert!(serialized["players"][0].get("can_play").is_none());
+                    assert!(serialized["players"][0].get("can_pause").is_none());
+                }
                 let mut with_length = wire.clone();
                 with_length["players"][0]["length"] = json!(203.5);
                 let snapshot: Request = serde_json::from_value(with_length.clone()).unwrap();

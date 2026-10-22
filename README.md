@@ -53,12 +53,39 @@ same Waybar button, or clicking outside dismisses it.
 
 | Tab | Content |
 | --- | --- |
-| Bluetooth | Bluetooth power, scan, pair, connect, disconnect, forget, and battery levels |
+| Bluetooth | Bluetooth power, automatic discovery, pair, connect, disconnect, forget, and battery levels |
 | Audio | Output controls in the upper half; input controls in the lower half, each with volume/mute and device/port selection |
+
+Bluetooth lists remembered/connected devices above ready-to-pair devices, with a
+horizontal divider when both groups are present. Only paired devices show Forget.
+A powered adapter scans automatically while the popup is open on Bluetooth; there
+is no Scan/Stop scan button. Closing the popup, switching to Audio, powering off,
+removing/replacing the adapter, or disposing the UI releases the panel's discovery
+session through Astal. This never powers the adapter on automatically or stops
+another client's discovery session. Pairing shows one current status—pairing,
+paired, or failed—using the device's name and address, not an accumulated helper
+log. The small × dismisses the notice without cancelling the request; a pending
+PIN/passkey prompt must first be answered or cancelled. Authentication prompts
+remain visible when needed, without keeping old prompts or trailing blank lines.
+The text-entry field and Send button appear only when a PIN, passkey, or yes/no
+response is requested. Automatic pairing shows no input controls; codes to type
+on a keyboard/device are displayed as instructions, without a panel entry field.
 
 Volume percentages sit beside their sliders on the same row. There is no Play
 tab; playback stays in the existing media panel. Output volume runs from
 **0 to 150%**, retaining amplification above 100%. Input remains 0–100%.
+Choosing an output changes the system default and makes all currently running
+playback streams follow it through Astal's native stream API. This overrides old
+per-application device pins, so Chrome, Elisa, and other active players use the
+selected output and follow later default changes. Capture/recording targets are
+not changed. Playback is rerouted only after the output selection succeeds, not
+during metadata refresh, volume/mute changes, or failed profile-switch recovery.
+The Devices selector is hidden unless an available alternative exists. Unplugged
+ports are not reintroduced as generic endpoints when their associated routes are
+unavailable; successful helper omissions are scoped to the exact native snapshot
+identities, while newly discovered endpoints retain native fallback until resolved.
+Volume/mute remain independent of that list and always target the live native
+default. A missing/not-yet-ready default displays `—`, not a misleading `0%`.
 Audio uses unmodified `pkgs.astal`, without framework patches or monkey-patches.
 Astal WirePlumber owns audio inventory and state, volume, mute, default-device
 selection, physical routes, and profiles. Astal Bluetooth owns native device
@@ -70,6 +97,9 @@ Only functionality Astal genuinely lacks uses the Rust helper:
 - `audio-control policy` consumes canonical Astal snapshots from AGS. Bounded,
   read-only `pw-dump -N` supplements only omitted `EnumProfile`/`EnumRoute`
   associations and per-endpoint `Route` state, not a second device inventory.
+  `EnumProfile`/`classes` parsing is ALSA-policy-only: Bluetooth profiles use a
+  different schema and must not block either audio selector. Supplemental route
+  associations and native endpoint fallback remain available for non-ALSA cards.
   Rust owns compact **Speaker**, **Headphones**, and USB labels, inactive ALSA
   profile choices, microphone-preserving profile retention, and transaction/rollback
   decisions. It returns typed native action requests; JavaScript validates live
