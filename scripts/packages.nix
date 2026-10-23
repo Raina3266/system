@@ -183,6 +183,7 @@ rec {
 
   networkManager = mkWorkspacePackage "network-manager" {
     cargoPackage = "rofi-network";
+    workspaceMember = "network-manager/rust-custom";
     # Build only this small JSON/QR helper's dependency graph, not the full
     # desktop workspace's GTK/D-Bus dependencies.
     cargoArtifacts = craneLib.buildDepsOnly (
@@ -197,7 +198,6 @@ rec {
     dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/network-manager" \
-        --set NETWORK_MANAGER_NMCLI "${pkgs.lib.getExe' pkgs.networkmanager "nmcli"}" \
         --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
     '';
   };
@@ -230,6 +230,12 @@ rec {
   mediaPanel = import ../niri/panels/media.nix {
     inherit pkgs mediaControl;
   };
+
+  networkPanel = import ../niri/panels/network.nix {
+    inherit pkgs networkManager;
+  };
+
+  dashboardPanel = import ../niri/panels/dashboard.nix { inherit pkgs; };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     dontWrapGApps = true;

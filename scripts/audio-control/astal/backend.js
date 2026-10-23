@@ -415,7 +415,7 @@ export class AudioBackend {
     snapshot() {
         this.updateDefaults();
         return { output: this.audioModel('output'), input: this.audioModel('input'), bluetooth: {
-            available: Boolean(this.adapter), powered: Boolean(this.adapter?.powered), discovering: Boolean(this.adapter?.discovering),
+            available: Boolean(this.adapter), powered: Boolean(this.adapter?.powered),
             devices: bluetoothDevices([...this.bluetoothRecords].map(([device, record]) => ({
                 key: record.key, address: device.address, name: device.name || device.alias || device.address,
                 connected: device.connected, paired: device.paired, busy: record.busy,

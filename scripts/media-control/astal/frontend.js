@@ -158,9 +158,10 @@ function ellipsis(text = '', classes = [], expand = true) {
     return new Gtk.Label({ label: text, css_classes: classes, hexpand: expand, xalign: 0,
         ellipsize: Pango.EllipsizeMode.END, max_width_chars: 1, use_markup: false });
 }
-function button(glyph, tooltip, clicked, classes = []) {
-    const widget = new Gtk.Button({ child: new Gtk.Label({ label: glyph, use_markup: false, xalign: 0.5 }), tooltip_text: tooltip,
+function button(glyph, label, clicked, classes = []) {
+    const widget = new Gtk.Button({ child: new Gtk.Label({ label: glyph, use_markup: false, xalign: 0.5 }),
         css_classes: ['icon-button', ...classes], valign: Gtk.Align.CENTER });
+    widget.update_property([Gtk.AccessibleProperty.LABEL], [label]);
     widget.connect('clicked', clicked);
     return widget;
 }
@@ -168,6 +169,43 @@ function scale(upper, classes = []) {
     return new Gtk.Scale({ orientation: Gtk.Orientation.HORIZONTAL, hexpand: true,
         draw_value: false, css_classes: classes, valign: Gtk.Align.CENTER,
         adjustment: new Gtk.Adjustment({ lower: 0, upper, step_increment: upper / 100, page_increment: upper / 20 }) });
+}
+function volumeBar(scale, beforeStep) {
+    // Enabling the value label changes Gtk.Range rounding; retain 1% precision.
+    const roundDigits = scale.round_digits;
+    scale.draw_value = true;
+    scale.round_digits = roundDigits;
+    scale.value_pos = Gtk.PositionType.TOP;
+    scale.add_css_class('volume-track');
+    let available = true;
+    const formatValue = (_, value) => available ? `${Math.round(value * 100)}%` : '—';
+    scale.set_format_value_func(formatValue);
+    const step = (glyph, label, direction) => {
+        const widget = new Gtk.Button({ label: glyph,
+            css_classes: ['volume-step'], valign: Gtk.Align.CENTER });
+        widget.update_property([Gtk.AccessibleProperty.LABEL], [label]);
+        widget.connect('clicked', () => {
+            if (!scale.is_sensitive()) return;
+            beforeStep();
+            scale.emit('move-slider', direction);
+        });
+        return widget;
+    };
+    const widget = new Gtk.Box({ css_classes: ['volume-bar'], hexpand: true, valign: Gtk.Align.CENTER });
+    widget.append(step('◁', 'Decrease volume', Gtk.ScrollType.STEP_BACKWARD));
+    widget.append(scale);
+    widget.append(step('▷', 'Increase volume', Gtk.ScrollType.STEP_FORWARD));
+    return {
+        widget,
+        setAvailable(value) {
+            widget.sensitive = scale.sensitive;
+            const next = Boolean(value);
+            if (next === available) return;
+            available = next;
+            // GTK caches formatted text even when the numeric value is unchanged.
+            scale.set_format_value_func(formatValue);
+        },
+    };
 }
 function trackKey(player) {
     return player ? JSON.stringify([player.bus, player.instance, player.trackKey]) : '';
@@ -203,6 +241,11 @@ class MediaPanel {
         this.activePlayer = '';
         this.failure = '';
         this.rows = new Map();
+        this.seekDragging = false;
+        this.seekPending = false;
+        this.seekTarget = null;
+        this.volumeDragging = false;
+        this.volumeTarget = null;
 
         this.monitor = null;
         this.window = new Astal.Window({
@@ -245,9 +288,14 @@ class MediaPanel {
         this.root.add_controller(outside);
         const release = new Gtk.EventControllerLegacy({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
         release.connect('event', (_, event) => {
-            if ([Gdk.EventType.BUTTON_RELEASE, Gdk.EventType.TOUCH_END, Gdk.EventType.TOUCH_CANCEL].includes(event.get_event_type())) {
-                this.seekDragging = this.volumeDragging = false;
-                this.seekTarget = this.volumeTarget = null;
+            const type = event.get_event_type();
+            if (type === Gdk.EventType.BUTTON_RELEASE || type === Gdk.EventType.TOUCH_END)
+                this.finishSeek(true);
+            else if (type === Gdk.EventType.TOUCH_CANCEL)
+                this.finishSeek(false);
+            if ([Gdk.EventType.BUTTON_RELEASE, Gdk.EventType.TOUCH_END, Gdk.EventType.TOUCH_CANCEL].includes(type)) {
+                this.volumeDragging = false;
+                this.volumeTarget = null;
             }
             return false;
         });
@@ -280,27 +328,35 @@ class MediaPanel {
         this.seek.connect('change-value', (_, scroll, value) => {
             const player = this.group?.primary;
             const target = this.seekTarget || trackKey(player);
-            if (player && target === trackKey(this.backend.player(player.bus)) && this.modelCurrent())
-                this.backend.action('seek', player.bus, value);
+            if (player && target === trackKey(this.backend.player(player.bus)) && this.modelCurrent()) {
+                this.elapsed.set_label(formatTime(value));
+                if (this.seekDragging) this.seekPending = true;
+                else this.backend.action('seek', player.bus, value);
+            }
             return false;
         });
-        this.drag(this.seek, () => { this.seekDragging = true; this.seekTarget = trackKey(this.group?.primary); });
+        this.drag(this.seek, () => {
+            this.seekDragging = true;
+            this.seekPending = false;
+            this.seekTarget = trackKey(this.group?.primary);
+        });
         this.elapsed = label('--:--', ['elapsed-time']);
         this.total = label('--:--', ['total-time']);
-        const spacer = new Gtk.Box({ hexpand: true });
-        this.details.append(box(true, 4, [this.seek, box(false, 0, [this.elapsed, spacer, this.total])]));
+        this.total.xalign = 1;
+        this.details.append(box(false, 6, [this.elapsed, this.seek, this.total]));
         this.previous = button('󰒮', 'Previous', () => this.action('previous'));
         this.play = button('󰐊', 'Play / pause', () => this.action('toggle'), ['play-button']);
         this.next = button('󰒭', 'Next', () => this.action('next'));
         const transport = box(false, 14, [this.previous, this.play, this.next]);
         this.volumeGlyph = label('󰕾', ['volume-glyph']);
-        this.volumeValue = label('—', ['volume-value']);
         this.volumeButton = new Gtk.Button({ css_classes: ['volume-button'], valign: Gtk.Align.CENTER,
-            child: box(false, 4, [this.volumeGlyph, this.volumeValue]) });
+            child: this.volumeGlyph });
+        this.volumeButton.update_property([Gtk.AccessibleProperty.LABEL], ['Mute / unmute']);
         this.volumeButton.connect('clicked', () => {
             if (!this.volumeControl?.toggleMute()) this.setFailure('Native mute is unavailable or the media source changed.');
         });
         this.volume = scale(1);
+        this.volume.update_property([Gtk.AccessibleProperty.LABEL], ['Volume']);
         this.volume.width_request = 80;
         this.volume.connect('change-value', (_, scroll, value) => {
             const control = this.backend.volume(this.group);
@@ -314,7 +370,8 @@ class MediaPanel {
             return false;
         });
         this.drag(this.volume, () => { this.volumeDragging = true; this.volumeTarget = this.volumeControl?.key; });
-        this.details.append(box(false, 14, [transport, this.volumeButton, this.volume]));
+        this.volumeBar = volumeBar(this.volume, () => { this.volumeDragging = false; this.volumeTarget = null; });
+        this.details.append(box(false, 14, [transport, this.volumeButton, this.volumeBar.widget]));
         this.details.append(new Gtk.Separator({ css_classes: ['divider'] }));
         this.sourceName = ellipsis('', ['source-name']);
         this.chevron = label('󰅃', ['chevron']);
@@ -346,6 +403,18 @@ class MediaPanel {
             return false;
         });
         widget.add_controller(controller);
+    }
+
+    finishSeek(commit) {
+        const player = this.group?.primary;
+        if (commit && this.seekDragging && this.seekPending && player
+            && this.seekTarget === trackKey(this.backend.player(player.bus)) && this.modelCurrent()) {
+            this.backend.action('seek', player.bus, this.seek.get_value());
+        }
+        this.seekDragging = false;
+        this.seekPending = false;
+        this.seekTarget = null;
+        if (!commit) this.position();
     }
 
     modelCurrent() { return this.backend.current(); }
@@ -402,7 +471,7 @@ class MediaPanel {
         this.play.get_child().set_label(player?.playing ? '󰏤' : '󰐊');
         const transport = this.backend.transport(this.group);
         this.play.sensitive = current && transport.enabled;
-        this.play.tooltip_text = transport.reason;
+        this.play.update_property([Gtk.AccessibleProperty.DESCRIPTION], [transport.reason]);
         this.previous.sensitive = current && Boolean(player?.canPrevious);
         this.next.sensitive = current && Boolean(player?.canNext);
         this.seek.sensitive = current && Boolean(player?.canSeek && player?.length);
@@ -411,14 +480,14 @@ class MediaPanel {
         this.seek.adjustment.page_increment = Math.max(1, (player?.length || 20) / 20);
         this.volumeControl = this.backend.volume(this.group);
         this.volume.sensitive = this.volumeControl.enabled;
+        this.volumeBar.setAvailable(this.volumeControl.enabled);
         this.volumeButton.sensitive = this.volumeControl.muteEnabled;
-        this.volume.tooltip_text = this.volumeControl.reason;
-        this.volumeValue.tooltip_text = this.volumeControl.reason;
-        this.volumeButton.tooltip_text = this.volumeControl.muteReason;
+        this.volume.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.reason]);
+        this.volumeBar.widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.reason]);
+        this.volumeButton.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.muteReason]);
         if (!this.volumeDragging) this.volume.set_value(this.volumeControl.value);
         const volume = this.volumeControl.value;
         this.volumeGlyph.set_label(this.volumeControl.muted || volume < 0.01 ? '󰝟' : volume < 0.5 ? '󰖀' : '󰕾');
-        this.volumeValue.set_label(this.volumeControl.enabled ? `${Math.round(volume * 100)}%` : '—');
         this.sourceName.set_label(this.group?.displayName || '');
         this.section.sensitive = this.groups.length > 1;
         if (this.groups.length < 2) { this.sources.reveal_child = false; this.chevron.set_label('󰅃'); }
@@ -470,11 +539,11 @@ class MediaPanel {
             row.group = group;
             row.name.set_label(group.displayName);
             row.title.set_label(group.title);
-            row.widget.tooltip_text = `${group.displayName}\n${group.title}`;
+            row.widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [`${group.displayName}\n${group.title}`]);
             row.play.get_child().set_label(group.primary.playing ? '󰏤' : '󰐊');
             const transport = this.backend.transport(group);
             row.play.sensitive = current && transport.enabled;
-            row.play.tooltip_text = transport.reason;
+            row.play.update_property([Gtk.AccessibleProperty.DESCRIPTION], [transport.reason]);
             if (bus === this.activePlayer) row.widget.add_css_class('current');
             else row.widget.remove_css_class('current');
             row.art.set(group.primary.cover, group.primary.url, this.opened && this.sources.reveal_child);
@@ -517,6 +586,7 @@ class MediaPanel {
         this.positionTimer = 0;
         this.window.keymode = Astal.Keymode.NONE;
         this.seekDragging = this.volumeDragging = false;
+        this.seekPending = false;
         this.seekTarget = this.volumeTarget = null;
         this.sources.reveal_child = false;
         this.chevron.set_label('󰅃');
@@ -573,8 +643,8 @@ function handleRequest(message) {
 
 function closeNetwork() {
     try {
-        AstalIO.Process.exec_asyncv([GLib.getenv('QUICKSHELL') || 'quickshell',
-            'ipc', '--config', 'media', 'call', 'network', 'close'], (_, result) => {
+        AstalIO.Process.exec_asyncv([GLib.getenv('NETWORK_PANEL') || 'network-panel',
+            'close'], (_, result) => {
             try { AstalIO.Process.exec_asyncv_finish(result); }
             catch (error) { console.warn(`Could not dismiss the network panel: ${error.message}`); }
         });

@@ -101,11 +101,9 @@ pub struct Response {
 #[serde(rename_all = "camelCase")]
 pub struct Group {
     pub title: String,
-    pub artist: String,
     pub primary: String,
     pub players: Vec<String>,
     pub display_name: String,
-    pub art_url: String,
     /// Live native stream ID for volume; null when ownership is ambiguous or
     /// details are not ready. The frontend must resolve it in its fresh streams.
     pub stream_id: Option<u32>,
@@ -177,11 +175,9 @@ pub fn analyze(request: &Request) -> Response {
             .zip(matches)
             .map(|(group, matched)| Group {
                 title: group.title.to_owned(),
-                artist: group.artist.to_owned(),
                 primary: group.primary.bus.clone(),
                 players: group.players.iter().map(|p| p.bus.clone()).collect(),
                 display_name: display_name(group.primary),
-                art_url: artwork_url(&group.primary.art_url),
                 stream_id: matched.node.map(|node| node.id),
                 stream_reason: matched.reason.to_owned(),
             })
@@ -275,7 +271,6 @@ fn read_line(input: &mut impl BufRead, bytes: &mut Vec<u8>) -> io::Result<Line> 
 
 struct Members<'a> {
     title: &'a str,
-    artist: &'a str,
     players: Vec<&'a Player>,
     primary: &'a Player,
 }
@@ -327,7 +322,6 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
         } else {
             groups.push(Members {
                 title: &player.title,
-                artist: &player.artist,
                 players: vec![player],
                 primary: player,
             });
@@ -355,7 +349,6 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
             })
             .expect("groups contain at least one player");
         group.title = &group.primary.title;
-        group.artist = &group.primary.artist;
     }
     groups.sort_by_key(|group| order[group.players[0].bus.as_str()]);
     groups
@@ -491,15 +484,6 @@ fn display_name(player: &Player) -> String {
         }
     }
     source_name(player).into_owned()
-}
-
-fn artwork_url(url: &str) -> String {
-    if web_url(url).is_some_and(|url| url.host.eq_ignore_ascii_case("i.ytimg.com"))
-        && let Some((path, _)) = url.split_once('?')
-    {
-        return path.to_owned();
-    }
-    url.to_owned()
 }
 
 fn canonical(value: &str) -> String {

@@ -578,7 +578,6 @@ macro_rules! media_unit_tests {
                     .iter()
                     .map(|player| Members {
                         title: &player.title,
-                        artist: &player.artist,
                         players: vec![player],
                         primary: player,
                     })
@@ -1020,25 +1019,27 @@ macro_rules! media_unit_tests {
             }
 
             #[test]
-            fn artwork_strips_query_only_for_exact_youtube_image_host() {
-                for url in [
-                    "https://i.ytimg.com/vi/id/hq.jpg?format=avif",
-                    "http://i.ytimg.com/vi/id/hq.jpg?x=1",
-                ] {
-                    assert_eq!(artwork_url(url), url.split_once('?').unwrap().0);
-                }
-                for url in [
-                    "https://i.ytimg.com/vi/id/hq.jpg",
-                    "https://i.ytimg.com.evil.test/a.jpg?x=1",
-                    "https://sub.i.ytimg.com/a.jpg?x=1",
-                    "https://evil.test/i.ytimg.com/a.jpg?x=1",
-                    "https://i.ytimg.com@evil.test/a.jpg?x=1",
-                    "https://example.com/a.jpg?x=1",
-                    "file:///tmp/cover.jpg?x=1",
-                    "",
-                ] {
-                    assert_eq!(artwork_url(url), url);
-                }
+            fn group_response_omits_artist_and_artwork_without_changing_player_metadata() {
+                let mut native = player("a", "Native", "Track");
+                native.artist = "Artist".to_owned();
+                native.art_url = "https://i.ytimg.com/vi/id/hq.jpg?format=avif".to_owned();
+                let snapshot = request(vec![native], vec![]);
+                let before = snapshot.clone();
+                let response = serde_json::to_value(analyze(&snapshot)).unwrap();
+                assert_eq!(
+                    response["groups"],
+                    json!([{
+                        "title": "Track", "primary": "a", "players": ["a"],
+                        "displayName": "Native", "streamId": null, "streamReason": NO_MATCH
+                    }])
+                );
+                assert_eq!(snapshot, before);
+                let input = serde_json::to_value(&snapshot).unwrap();
+                assert_eq!(input["players"][0]["artist"], "Artist");
+                assert_eq!(
+                    input["players"][0]["artUrl"],
+                    "https://i.ytimg.com/vi/id/hq.jpg?format=avif"
+                );
             }
 
             #[test]
@@ -1090,7 +1091,6 @@ macro_rules! media_unit_tests {
                             assert_eq!(response.groups[0].players, members);
                             assert_eq!(response.groups[0].primary, "real");
                             assert_eq!(response.groups[0].title, "Get Up");
-                            assert_eq!(response.groups[0].artist, "Far East Movement");
                             assert_eq!(response.groups[0].display_name, "Spotify");
                             assert_eq!(response.groups[0].stream_id, Some(11));
                             assert_eq!(response.groups[1].players, ["other"]);
@@ -1140,7 +1140,6 @@ macro_rules! media_unit_tests {
                             assert_eq!(response.groups.len(), 1);
                             assert_eq!(response.groups[0].primary, expected.bus);
                             assert_eq!(response.groups[0].title, expected.title);
-                            assert_eq!(response.groups[0].artist, expected.artist);
                             assert_eq!(
                                 response.groups[0].players,
                                 snapshot.players.iter().map(|p| p.bus.clone()).collect::<Vec<_>>()
@@ -1219,8 +1218,6 @@ macro_rules! media_unit_tests {
                         assert_eq!(response.groups.len(), 1);
                         assert_eq!(response.groups[0].primary, expected.bus);
                         assert_eq!(response.groups[0].title, expected.title);
-                        assert_eq!(response.groups[0].artist, expected.artist);
-                        assert_eq!(response.groups[0].art_url, expected.art_url);
                     }
                 }
             }
@@ -1291,11 +1288,6 @@ macro_rules! media_unit_tests {
                 assert_eq!(response.groups[0].players, ["a", "b", "c"]);
                 assert_eq!(response.groups[0].primary, "b");
                 assert_eq!(response.groups[0].title, " TRACK ");
-                assert_eq!(response.groups[0].artist, " ARTIST ");
-                assert_eq!(
-                    response.groups[0].art_url,
-                    "https://i.ytimg.com/vi/id/hq.jpg"
-                );
                 let mut snapshot = snapshot;
                 snapshot.players[1].position = 15.001;
                 snapshot.players[2].title = "Other".to_owned();
@@ -1517,6 +1509,21 @@ macro_rules! media_unit_tests {
             }
 
             #[test]
+            fn fractional_seek_json_roundtrips_without_changing_the_requested_value() {
+                let action: Action = serde_json::from_str(
+                    r#"{"kind":"seek","player":"a","position":237.60851756361546}"#,
+                )
+                .unwrap();
+                let requested = 237.60851756361546_f64;
+                assert_eq!(action.position.to_bits(), requested.to_bits());
+
+                let native = native_action(&player("a", "Native", "Track"), "seek", Some(action.position));
+                let encoded = serde_json::to_string(&native).unwrap();
+                let decoded: NativeAction = serde_json::from_str(&encoded).unwrap();
+                assert_eq!(decoded.value.unwrap().to_bits(), requested.to_bits());
+            }
+
+            #[test]
             fn seek_only_addresses_capable_members_and_valid_positions() {
                 let mut snapshot = request(
                     vec![
@@ -1650,7 +1657,8 @@ macro_rules! media_unit_tests {
                 assert_eq!(value["groups"][0]["displayName"], "Native");
                 assert_eq!(value["groups"][0]["streamId"], Value::Null);
                 assert_eq!(value["groups"][0]["streamReason"], NO_MATCH);
-                assert!(value["groups"][0].get("artUrl").is_some());
+                assert!(value["groups"][0].get("artUrl").is_none());
+                assert!(value["groups"][0].get("artist").is_none());
                 assert!(value["groups"][0].get("selector").is_none());
                 assert!(value["groups"][0].get("routingReason").is_none());
                 assert!(value.get("request_id").is_none());
@@ -2317,11 +2325,11 @@ mod media_bridge {
             json!({
                 "requestId": 1, "activePlayer": "native", "actions": [],
                 "groups": [
-                    {"title": "Track \"A\"", "artist": "Artist 雪", "primary": "native",
-                     "players": ["native", "alias"], "displayName": "Native", "artUrl": "",
+                    {"title": "Track \"A\"", "primary": "native",
+                     "players": ["native", "alias"], "displayName": "Native",
                      "streamId": 42, "streamReason": "Unique application playback stream"},
-                    {"title": "Track B", "artist": "Artist 雪", "primary": "other",
-                     "players": ["other"], "displayName": "Other", "artUrl": "",
+                    {"title": "Track B", "primary": "other",
+                     "players": ["other"], "displayName": "Other",
                      "streamId": null,
                      "streamReason": "No matching audio stream. Start playback in this source."}
                 ]

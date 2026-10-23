@@ -15,8 +15,8 @@ window.media-panel {
 .media-panel label { background: transparent; }
 .media-panel .title { color: @mp_cyan; font-size: 15px; font-weight: bold; }
 .media-panel .metadata { color: @mp_foreground; font-size: 13px; }
-.media-panel .total-time { color: @mp_separator; }
-.media-panel .elapsed-time { color: @mp_cyan; }
+.media-panel .total-time,
+.media-panel .elapsed-time { color: @mp_foreground; }
 .media-panel .empty { color: @mp_separator; letter-spacing: 3px; margin: 12px 0; }
 .media-panel .failure { color: @mp_red; font-size: 11px; }
 .media-panel .divider { min-height: 1px; background: alpha(@mp_yellow, 0.15); }
@@ -59,7 +59,6 @@ window.media-panel {
 .media-panel .source-play label { font-size: 13px; }
 .media-panel .volume-button { border: none; padding: 0 4px; border-radius: 16px; }
 .media-panel .volume-glyph { color: @mp_red; font-size: 16px; }
-.media-panel .volume-value { color: @mp_cyan; font-weight: bold; font-size: 12px; }
 .media-panel .volume-button:disabled label { color: @mp_separator; }
 
 .media-panel scale { padding: 0; min-height: 16px; margin: 0; }
@@ -74,6 +73,80 @@ window.media-panel {
 .media-panel scale:hover slider { min-width: 12px; min-height: 12px; margin: -4px 0; }
 .media-panel scale:active slider { min-width: 14px; min-height: 14px; margin: -5px 0; }
 .media-panel scale:disabled slider { background: transparent; }
+
+.media-panel .volume-bar {
+    min-height: 20px;
+    margin: 0;
+    padding: 0;
+    border: 0.35px solid alpha(@mp_foreground, 0.5);
+    border-radius: 0;
+    background: transparent;
+}
+
+.media-panel button.volume-step {
+    min-width: 20px;
+    min-height: 20px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transition: none;
+    color: @mp_cyan;
+}
+.media-panel button.volume-step label { font-size: 12px; color: inherit; }
+.media-panel button.volume-step:hover,
+.media-panel button.volume-step:focus-visible { color: @mp_yellow; }
+.media-panel button.volume-step:disabled { color: @mp_separator; }
+.media-panel scale.volume-track {
+    min-height: 20px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent linear-gradient(@mp_separator, @mp_separator) center / 100% 2px no-repeat;
+}
+.media-panel scale.volume-track trough,
+.media-panel scale.volume-track highlight {
+    min-height: 2px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+/* GTK paints the value before the slider; only the value may have an opaque fill. */
+.media-panel scale.volume-track slider,
+.media-panel scale.volume-track:hover slider,
+.media-panel scale.volume-track:active slider,
+.media-panel scale.volume-track:disabled slider {
+    min-width: 42px;
+    min-height: 18px;
+    margin: -9px 0;
+    padding: 0;
+    border: 0.35px solid alpha(@mp_foreground, 0.5);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transition: none;
+}
+.media-panel scale.volume-track value {
+    min-width: 44px;
+    min-height: 20px;
+    margin: 0 0 -20px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: alpha(@mp_chromeBackground, 0.5);
+    color: @mp_cyan;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+
+.media-panel .volume-bar:disabled { border-color: alpha(@mp_foreground, 0.25); }
+.media-panel scale.volume-track:disabled slider { border-color: alpha(@mp_foreground, 0.25); }
+.media-panel scale.volume-track:disabled value { color: @mp_separator; }
 
 .media-panel .section-button { border: none; padding: 4px 4px 4px 8px; }
 .media-panel .section-button:hover { background: alpha(@mp_dimPink, 0.35); }

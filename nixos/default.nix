@@ -27,7 +27,7 @@ in
   config = {
     _module.args.repoPackages = repoPackages;
 
-    # Browser notifications go to the native Quickshell notification server.
+    # Browser notifications go to the native Astal notification server.
     environment.etc."opt/chrome/policies/managed/desktop-notifications.json".text =
       builtins.toJSON { AllowSystemNotifications = true; };
 

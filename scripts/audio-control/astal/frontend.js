@@ -81,6 +81,42 @@ function volumeValue(value, maximum) {
     return Number.isFinite(value) ? Math.min(maximum, Math.max(0, value)) : 0;
 }
 
+function volumeBar(scale, beforeStep) {
+    let available = true;
+    // Enabling the native value must not change the range's mutation precision.
+    const rounding = scale.round_digits;
+    scale.draw_value = true;
+    scale.round_digits = rounding;
+    scale.value_pos = Gtk.PositionType.TOP;
+    scale.add_css_class('volume-track');
+    const format = (_, value) => available ? `${Math.round(value * 100)}%` : '—';
+    scale.set_format_value_func(format);
+    const widget = new Gtk.Box({ hexpand: true, valign: Gtk.Align.CENTER, css_classes: ['volume-bar'] });
+    const step = (text, direction, description) => {
+        const control = new Gtk.Button({ css_classes: ['volume-step'],
+            width_request: 20, height_request: 20, valign: Gtk.Align.CENTER,
+            child: new Gtk.Label({ label: text, use_markup: false }) });
+        control.update_property([Gtk.AccessibleProperty.LABEL], [description]);
+        control.connect('clicked', () => {
+            if (!scale.is_sensitive()) return;
+            beforeStep();
+            scale.emit('move-slider', direction);
+        });
+        return control;
+    };
+    widget.append(step('◁', Gtk.ScrollType.STEP_BACKWARD, 'Decrease volume'));
+    widget.append(scale);
+    widget.append(step('▷', Gtk.ScrollType.STEP_FORWARD, 'Increase volume'));
+    return { widget, setAvailable(value) {
+        widget.sensitive = scale.sensitive;
+        const next = Boolean(value);
+        if (available === next) return;
+        available = next;
+        // Gtk.Scale caches formatted values, including the unavailable placeholder.
+        scale.set_format_value_func(format);
+    } };
+}
+
 function frame(palette) {
     const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
     drawing.set_draw_func((_, cr, width, height) => {
@@ -124,22 +160,25 @@ export class AudioPanel {
         const keys = new Gtk.EventControllerKey({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
         keys.connect('key-pressed', (_, key) => {
             if (key !== Gdk.KEY_Escape) return false;
-            this.close();
+            const expanded = Object.values(this.audio).find(view => view.deviceChoices.reveal_child);
+            if (expanded) {
+                this.setDeviceExpanded(expanded, false);
+                expanded.devices.grab_focus();
+            } else this.close();
             return true;
         });
-        this.window.add_controller(keys);
         this.root = new Gtk.Overlay({ hexpand: true, vexpand: true });
+        this.root.add_controller(keys);
         this.root.set_child(new Gtk.Box({ hexpand: true, vexpand: true }));
         this.window.set_child(this.root);
-        this.card = new Gtk.Overlay({ width_request: 400, height_request: 520,
+        this.card = new Gtk.Overlay({ width_request: 400,
             halign: Gtk.Align.END, valign: Gtk.Align.START, margin_top: 40, margin_end: 96,
             overflow: Gtk.Overflow.HIDDEN, css_classes: ['audio-card'] });
         this.card.set_child(frame(palette));
         this.content = box(true);
         this.content.add_css_class('audio-content');
         this.card.add_overlay(this.content);
-        // Neither a long device name nor a page's natural height may resize the frame.
-        this.card.set_measure_overlay(this.content, false);
+        this.card.set_measure_overlay(this.content, true);
         this.root.add_overlay(this.card);
         this.root.set_measure_overlay(this.card, false);
         const outside = new Gtk.GestureClick({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
@@ -203,15 +242,17 @@ export class AudioPanel {
         this.pages.add_named(this.buildBluetooth(), 'bluetooth');
         const audio = box(true, 12, [this.buildAudio('output'),
             new Gtk.Separator({ css_classes: ['audio-divider'] }), this.buildAudio('input')]);
-        audio.vexpand = true;
-        this.pages.add_named(audio, 'audio');
+        this.audioPage = scroll(audio, { vexpand: true, propagate_natural_height: true,
+            max_content_height: 520, css_classes: ['audio-page'] });
+        this.pages.add_named(this.audioPage, 'audio');
         this.pageFrame.add_overlay(this.pages);
-        this.pageFrame.set_measure_overlay(this.pages, false);
+        this.pageFrame.set_measure_overlay(this.pages, true);
         this.content.append(this.pageFrame);
     }
 
     buildAudio(kind) {
-        const view = { kind, maximum: kind === 'output' ? 1.5 : 1, rows: new Map(),
+        const view = { kind, maximum: kind === 'output' ? 1.5 : 1,
+            choiceItems: [], choicesSignature: '',
             nodeKey: '', volumeTarget: null, muteTarget: null, dragging: false };
         this.audio[kind] = view;
         view.heading = ellipsis('', ['audio-heading']);
@@ -225,7 +266,7 @@ export class AudioPanel {
         muteKeys.connect('key-pressed', () => { view.muteTarget = view.nodeKey; return false; });
         view.mute.add_controller(muteKeys);
         view.volume = new Gtk.Scale({ orientation: Gtk.Orientation.HORIZONTAL, hexpand: true,
-            draw_value: false, digits: 2, valign: Gtk.Align.CENTER, css_classes: ['volume-slider'],
+            draw_value: false, digits: 2, valign: Gtk.Align.CENTER,
             adjustment: new Gtk.Adjustment({ lower: 0, upper: view.maximum, step_increment: 0.01, page_increment: 0.05 }) });
         this.press(view.volume, () => { view.dragging = true; view.volumeTarget = view.nodeKey; });
         const volumeKeys = new Gtk.EventControllerKey({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
@@ -235,28 +276,49 @@ export class AudioPanel {
             propagation_phase: Gtk.PropagationPhase.CAPTURE });
         volumeScroll.connect('scroll', () => { view.dragging = false; view.volumeTarget = null; return false; });
         view.volume.add_controller(volumeScroll);
-        view.percent = label('0%', ['volume-value']);
-        view.percent.xalign = 1;
+        view.volumeBar = volumeBar(view.volume, () => { view.dragging = false; view.volumeTarget = null; });
         view.volume.connect('change-value', (_, scrollType, value) => {
             const key = view.volumeTarget ?? view.nodeKey;
             if (!this.nodeCurrent(view, key)) return true;
             const next = volumeValue(value, view.maximum);
             view.volume.set_value(next);
-            view.percent.set_label(`${Math.round(next * 100)}%`);
             this.action(kind, () => this.backend.setVolume(kind, next, key));
             return true;
         });
-        view.choices = box(true, 6);
         view.devicesHeading = label('Devices', ['section-heading']);
-        view.deviceList = scroll(view.choices, { vexpand: true, min_content_height: 32 });
+        view.deviceLabel = ellipsis();
+        view.deviceArrow = label('⌄');
+        view.devices = new Gtk.ToggleButton({ hexpand: true, css_classes: ['device-dropdown'],
+            child: box(false, 8, [view.deviceLabel, view.deviceArrow]) });
+        view.devices.update_property([Gtk.AccessibleProperty.LABEL],
+            [kind === 'output' ? 'Output device' : 'Input device']);
+        view.deviceSelection = new Gtk.SingleSelection({ autoselect: false, can_unselect: true });
+        const factory = new Gtk.SignalListItemFactory();
+        factory.connect('setup', (_, item) => item.set_child(ellipsis()));
+        factory.connect('bind', (_, item) => {
+            const text = item.get_item().get_string();
+            const widget = item.get_child();
+            widget.set_label(text);
+            widget.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+                [view.choiceItems[item.get_position()]?.description || text]);
+        });
+        view.deviceList = new Gtk.ListView({ model: view.deviceSelection, factory,
+            single_click_activate: true, css_classes: ['device-list'] });
+        view.deviceChoices = new Gtk.Revealer({ transition_type: Gtk.RevealerTransitionType.SLIDE_DOWN,
+            transition_duration: 180, reveal_child: false,
+            child: scroll(view.deviceList, { propagate_natural_height: true, max_content_height: 240,
+                margin_top: 6, css_classes: ['device-options'] }) });
+        view.devices.connect('toggled', () => this.setDeviceExpanded(view, view.devices.active));
+        view.deviceList.connect('activate', (_, position) => this.selectAudioDevice(view, position));
+        this.setDeviceExpanded(view, false);
         view.error = wrapped('', ['failure']);
         view.error.visible = false;
         const controls = box(true, 4, [view.heading,
-            box(false, 6, [view.mute, view.volume, view.percent]), view.devicesHeading]);
-        const content = box(true, 10, [controls, view.deviceList, view.error]);
-        // Both outer scrollers have zero size hints, so Gtk.Box assigns equal halves.
-        // The inner list normally fills its half; the outer scroll keeps controls reachable on short monitors.
-        return scroll(content, { vexpand: true, css_classes: ['audio-section'] });
+            box(false, 6, [view.mute, view.volumeBar.widget])]);
+        const content = box(true, 10, [controls,
+            box(true, 6, [view.devicesHeading, box(true, 0, [view.devices, view.deviceChoices])]), view.error]);
+        content.add_css_class('audio-section');
+        return content;
     }
 
     buildBluetooth() {
@@ -266,7 +328,7 @@ export class AudioPanel {
         this.pairingPrompt = wrapped('');
         this.pairingPrompt.selectable = true;
         this.dismissPairing = button('×', () => this.action('bluetooth', () => this.backend.dismissPairingMessage()), ['icon-button', 'pairing-dismiss']);
-        this.dismissPairing.tooltip_text = 'Dismiss pairing message';
+        this.dismissPairing.update_property([Gtk.AccessibleProperty.LABEL], ['Dismiss pairing message']);
         this.dismissPairing.valign = Gtk.Align.START;
         const status = box(false, 6, [this.pairingStatus, this.dismissPairing]);
         this.answer = new Gtk.Entry({ placeholder_text: 'PIN/passkey or yes/no', width_chars: 1,
@@ -327,6 +389,7 @@ export class AudioPanel {
         this.pages.visible_child_name = this.currentTab === 0 ? 'bluetooth' : 'audio';
         for (const kind of ['output', 'input']) this.renderAudio(this.audio[kind], state[kind] || {});
         this.renderBluetooth(state.bluetooth || {});
+        this.position();
     }
 
     renderAudio(view, model) {
@@ -337,38 +400,67 @@ export class AudioPanel {
         const enabled = Boolean(model.available && view.nodeKey);
         view.mute.sensitive = view.volume.sensitive = enabled;
         view.mute.get_child().set_label(view.kind === 'input' ? (model.muted ? '󰍭' : '󰍬') : (model.muted ? '󰝟' : '󰕾'));
-        view.mute.tooltip_text = enabled ? (model.muted ? 'Unmute' : 'Mute') : 'No default audio device is available.';
-        view.volume.tooltip_text = enabled ? 'Volume' : 'No default audio device is available.';
+        const description = enabled ? '' : 'No default audio device is available.';
+        view.mute.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+            [model.muted ? 'Unmute' : 'Mute', description]);
+        view.volume.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+            [view.kind === 'output' ? 'Output volume' : 'Input volume', description]);
         const value = volumeValue(model.volume, view.maximum);
         if (!view.dragging || view.volumeTarget !== view.nodeKey) view.volume.set_value(value);
-        view.percent.set_label(enabled ? `${Math.round(view.volume.get_value() * 100)}%` : '—');
+        view.volumeBar.setAvailable(enabled);
         const choices = model.choices || [];
-        view.devicesHeading.visible = view.deviceList.visible = choices.some(choice => !choice.default);
-        const wanted = new Set(choices.map(choice => choice.key));
-        for (const [key, row] of view.rows) {
-            if (wanted.has(key)) continue;
-            view.choices.remove(row);
-            view.rows.delete(key);
+        const hasAlternative = choices.some(choice => !choice.default);
+        view.devicesHeading.visible = view.devices.visible = hasAlternative;
+        view.devices.sensitive = hasAlternative && !model.busy;
+        const selected = choices.findIndex(choice => choice.default);
+        const items = choices.map(choice => ({ key: choice.key, label: choice.label, description: choice.description || '' }));
+        if (selected < 0) items.unshift({ key: '',
+            label: model.available ? model.name || 'Select a device…' : 'Select a device…', description: '' });
+        const signature = JSON.stringify(items);
+        view.choiceItems = items;
+        if (signature !== view.choicesSignature) {
+            view.deviceSelection.set_model(Gtk.StringList.new(items.map(item => item.label)));
+            const choicesScroll = view.deviceChoices.get_child();
+            // The outer page scrolls on short screens; do not let it squeeze this viewport to zero.
+            choicesScroll.min_content_height = Math.min(choicesScroll.max_content_height,
+                view.deviceList.measure(Gtk.Orientation.VERTICAL, -1)[1]);
+            view.choicesSignature = signature;
         }
-        let previous = null;
-        for (const choice of choices) {
-            let row = view.rows.get(choice.key);
-            if (!row) {
-                row = button('', () => this.action(view.kind, () => this.backend.select(view.kind, choice.key)), ['device-choice']);
-                row.hexpand = true;
-                row.get_child().xalign = 0;
-                row.get_child().max_width_chars = 1;
-                view.choices.append(row);
-                view.rows.set(choice.key, row);
-            }
-            row.get_child().set_label(`${choice.default ? '✓  ' : ''}${choice.label}`);
-            row.tooltip_text = choice.description || choice.label;
-            row.sensitive = !model.busy;
-            style(row, 'selected', choice.default);
-            view.choices.reorder_child_after(row, previous);
-            previous = row;
-        }
+        view.deviceSelection.selected = selected < 0 ? 0 : selected;
+        const current = items[view.deviceSelection.selected];
+        view.deviceLabel.set_label(current?.label || '');
+        view.devices.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+            [current?.description || current?.label || '']);
+        if (!hasAlternative || model.busy || !this.opened || this.currentTab !== 1)
+            this.setDeviceExpanded(view, false);
         message(view.error, this.failures[view.kind] || model.error);
+    }
+
+    setDeviceExpanded(view, expanded) {
+        const show = Boolean(expanded && this.opened && this.currentTab === 1
+            && view.devices.visible && view.devices.sensitive);
+        if (show) for (const other of Object.values(this.audio))
+            if (other !== view) this.setDeviceExpanded(other, false);
+        view.devices.active = show;
+        view.deviceChoices.reveal_child = show;
+        view.deviceArrow.set_label(show ? '⌃' : '⌄');
+        view.devices.update_state([Gtk.AccessibleState.EXPANDED], [show]);
+    }
+
+    selectAudioDevice(view, position = view.deviceSelection.selected) {
+        if (!this.opened || this.currentTab !== 1
+            || !view.devices.visible || !view.devices.sensitive) return;
+        const choice = view.choiceItems[position];
+        const live = this.backend.snapshot()?.[view.kind];
+        if (!choice?.key || !live || live.busy) return;
+        const current = live.choices?.find(item => item.key === choice.key);
+        this.setDeviceExpanded(view, false);
+        view.devices.grab_focus();
+        if (current?.default) { this.render(); return; }
+        this.action(view.kind, () => {
+            if (!current) throw new Error('The selected audio device is no longer available.');
+            this.backend.select(view.kind, current.key);
+        });
     }
 
     renderBluetooth(model) {
@@ -385,8 +477,8 @@ export class AudioPanel {
         style(this.pairingStatus, 'failure', notice?.state === 'failed');
         this.pairingCard.visible = Boolean(notice);
         this.dismissPairing.sensitive = !pairing || !notice?.prompt;
-        this.dismissPairing.tooltip_text = this.dismissPairing.sensitive
-            ? 'Dismiss pairing message' : 'Answer or cancel pairing before dismissing this message';
+        this.dismissPairing.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+            [this.dismissPairing.sensitive ? '' : 'Answer or cancel pairing before dismissing this message']);
         this.pairingControls.visible = hasPrompt;
         this.send.sensitive = needsAnswer && this.answer.text.trim() !== '';
         const narrow = this.cardWidth < 320;
@@ -431,7 +523,7 @@ export class AudioPanel {
             row.action.sensitive = Boolean(model.available && model.powered && !pairing && !device.busy);
             row.forget.visible = Boolean(device.paired);
             row.forget.sensitive = Boolean(device.paired && !pairing && !device.busy);
-            row.forget.tooltip_text = `Forget ${device.name || device.address}`;
+            row.forget.update_property([Gtk.AccessibleProperty.LABEL], [`Forget ${device.name || device.address}`]);
             row.widget.orientation = narrow ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL;
             row.buttons.halign = narrow ? Gtk.Align.END : Gtk.Align.FILL;
             style(row.widget, 'connected', device.connected);
@@ -445,6 +537,7 @@ export class AudioPanel {
         for (const view of Object.values(this.audio)) {
             view.dragging = false;
             view.volumeTarget = view.muteTarget = null;
+            this.setDeviceExpanded(view, false);
         }
     }
 
@@ -462,7 +555,16 @@ export class AudioPanel {
         const { width, height } = this.monitor.get_geometry();
         this.cardWidth = Math.max(1, Math.min(400, width - 16));
         this.card.width_request = this.cardWidth;
-        this.card.height_request = Math.max(1, Math.min(520, height - 64));
+        const maximumHeight = Math.max(1, Math.min(520, height - 64));
+        this.card.height_request = this.currentTab === 0 ? maximumHeight : -1;
+        if (this.currentTab === 1) {
+            // Measure tabs, padding and margins without reserving space for audio contents.
+            this.audioPage.propagate_natural_height = false;
+            const [, chromeHeight] = this.content.measure(Gtk.Orientation.VERTICAL, this.cardWidth);
+            const [, viewportHeight] = this.audioPage.measure(Gtk.Orientation.VERTICAL, this.cardWidth);
+            this.audioPage.max_content_height = Math.max(1, maximumHeight - chromeHeight + viewportHeight);
+            this.audioPage.propagate_natural_height = true;
+        }
         this.card.margin_end = Math.round(Math.min(96, Math.max(8, (width - this.cardWidth) / 2)));
     }
 
@@ -473,9 +575,8 @@ export class AudioPanel {
         if (this.monitorSignal) this.monitor.disconnect(this.monitorSignal);
         this.monitor = monitor;
         this.monitorName = name;
-        this.monitorSignal = monitor.connect('notify::geometry', () => { this.position(); this.render(); });
+        this.monitorSignal = monitor.connect('notify::geometry', () => this.render());
         this.window.gdkmonitor = monitor;
-        this.position();
         this.opened = true;
         this.backend.setActive(true, this.currentTab);
         this.render();

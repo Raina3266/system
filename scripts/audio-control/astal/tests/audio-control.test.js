@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { setImmediate as settle } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
@@ -36,6 +36,22 @@ test('audio application uses the public native request virtual and socket writer
     assert.doesNotMatch(source, /\.prototype\.|Object\.defineProperty|gi:\/\/Gio.*SocketService/);
 });
 
+test('inline audio device choices have a quiet dark-red half-opacity trigger and row-only highlights', () => {
+    const css = read('scripts/audio-control/astal/style.css');
+    assert.doesNotMatch(css, /dropdown\.device-dropdown|popover|button\.device-dropdown:(?:hover|focus-visible)/);
+    const trigger = css.match(/\.audio-panel button\.device-dropdown \{([^}]+)\}/)?.[1];
+    assert.ok(trigger, 'the inline toggle has its own style, not control-button highlights');
+    assert.match(trigger, /background: alpha\(shade\(@ap_red, 0\.45\), 0\.5\);/);
+    assert.match(trigger, /border: 0\.35px solid alpha\(@ap_foreground, 0\.5\);/);
+    assert.doesNotMatch(trigger, /@ap_yellow|lighter\(/);
+    const options = css.match(/\.audio-panel (?:scrolledwindow)?\.device-options \{([^}]+)\}/)?.[1];
+    assert.ok(options, 'inline options have a dedicated container style');
+    assert.match(options, /background: transparent;/);
+    assert.match(options, /border: 0\.35px solid alpha\(@ap_foreground, 0\.5\);/);
+    assert.match(css, /\.audio-panel listview\.device-list row:selected \{\s*background: alpha\(@ap_dimPink, 0\.7\);\s*\}/);
+    assert.match(css, /\.audio-panel listview\.device-list row:hover \{\s*background: alpha\(@ap_pink, 0\.333\);\s*\}/);
+});
+
 test('Rust has no second native audio mutation backend or post-pair Bluetooth controls', () => {
     const manifest = read('scripts/audio-control/rust-custom/Cargo.toml');
     assert.doesNotMatch(manifest, /pulsectl|libpulse/);
@@ -50,11 +66,11 @@ test('Rust has no second native audio mutation backend or post-pair Bluetooth co
     assert.doesNotMatch(pairing, /\.set_powered\(|\.discover_devices\(|\.set_trusted\(|device\.connect\(|default_adapter\(|device_addresses\(/);
 });
 
-test('retired QML and Rust status sources and slider aliases remain absent', () => {
-    for (const path of ['niri/audio-control', 'scripts/audio-control/rust-custom/src/waybar.rs', 'themes/quickshell/StyledSlider.qml'])
+test('retired panel implementations and Rust status sources remain absent', () => {
+    for (const path of ['niri/audio-control', 'scripts/audio-control/rust-custom/src/waybar.rs',
+        'niri/quickshell', 'themes/quickshell'])
         assert.equal(existsSync(new URL(path, root)), false, path);
-    assert.doesNotMatch(read('niri/quickshell/style.nix'), /StyledSlider|"audio-control"/);
-    assert.doesNotMatch(read('niri/default.nix'), /\.\/audio-control/);
+    assert.doesNotMatch(read('niri/default.nix'), /\.\/(?:audio-control|quickshell)/);
 });
 }
 
@@ -830,12 +846,25 @@ test('snapshot represents missing hardware without inventing defaults or doing w
     const emptyAudio = { nodeKey: '', available: false, name: 'No device', statusName: '',
         volume: 0, muted: false, choices: [], busy: false, loading: false, error: '' };
     assert.deepEqual(f.snapshot(), { output: emptyAudio, input: emptyAudio,
-        bluetooth: { available: false, powered: false, discovering: false, devices: [],
+        bluetooth: { available: false, powered: false, devices: [],
             pairing: false, pairingMessage: null, error: '' } });
     assert.equal(JSON.parse(f.backend.status()).class, 'unavailable');
     assert.equal(f.helpers.length, 0);
     assert.equal(f.timers.sources.size, 0);
     assert.equal(f.audio.connections, 0);
+});
+
+test('snapshot omits discovery state without starting or stopping native discovery', t => {
+    const f = fixture(t);
+    f.backend.syncBluetooth();
+    for (const discovering of [false, true]) {
+        f.radio.discovering = discovering;
+        const bluetooth = f.snapshot().bluetooth;
+        assert.equal(bluetooth.available, true);
+        assert.equal('discovering' in bluetooth, false);
+        assert.equal(f.radio.discovering, discovering);
+        assert.deepEqual(f.radio.scanCalls, []);
+    }
 });
 
 test('start is idempotent, subscribes to native objects and coalesces change/refresh notifications', t => {
@@ -3488,15 +3517,35 @@ test('waybarStatus serializes quoted, control-character, Unicode, and markup-lik
 // Exercise the real renderer with widget doubles, without loading GTK/GI.
 {
 const frontend = readFileSync(new URL('../frontend.js', import.meta.url), 'utf8');
-const labelDouble = () => ({ text: '', set_label(text) { this.text = text; } });
+const accessibleDouble = () => ({
+    accessibleProperties: new Map(),
+    accessibleStates: new Map(),
+    update_state(states, values) {
+        assert.equal(states.length, values.length, 'accessible states and values are paired');
+        states.forEach((state, index) => {
+            assert.ok(Object.values(mockGtk.AccessibleState).includes(state), 'known native accessible state');
+            assert.equal(typeof values[index], 'boolean');
+            this.accessibleStates.set(state, values[index]);
+        });
+    },
+    update_property(properties, values) {
+        assert.equal(properties.length, values.length, 'accessible properties and values are paired');
+        properties.forEach((property, index) => {
+            assert.ok(Object.values(mockGtk.AccessibleProperty).includes(property), 'known native accessible property');
+            assert.equal(typeof values[index], 'string');
+            this.accessibleProperties.set(property, values[index]);
+        });
+    },
+});
+const labelDouble = (text = '') => ({ ...accessibleDouble(), text, label: text,
+    set_label(text) { this.text = this.label = text; } });
 const buttonDouble = (text, clicked, classes = []) => {
-    const child = labelDouble();
-    child.set_label(text || '');
-    return { classes, get_child: () => child, click: () => clicked?.() };
+    const child = labelDouble(text || '');
+    return { ...accessibleDouble(), classes, get_child: () => child, click: () => clicked?.() };
 };
 const boxDouble = (_vertical, _spacing, children = []) => ({
     children: [...children],
-    append(child) { this.children.push(child); },
+    append(child) { child.parent = this; this.children.push(child); },
     remove(child) {
         const index = this.children.indexOf(child);
         assert.notEqual(index, -1);
@@ -3509,40 +3558,190 @@ const boxDouble = (_vertical, _spacing, children = []) => ({
     },
     add_css_class() {},
 });
-const AudioPanel = vm.runInNewContext(
-    frontend.slice(frontend.indexOf('function volumeValue('), frontend.indexOf('function frame('))
+const INVALID_LIST_POSITION = 0xffffffff;
+class SingleSelectionDouble {
+    constructor(properties) {
+        Object.assign(this, properties);
+        this.handlers = new Map();
+        this.model = null;
+        this.modelWrites = [];
+        this.selectionWrites = [];
+
+        this._selected = INVALID_LIST_POSITION;
+        this.visible = this.sensitive = true;
+    }
+
+    connect(name, callback) {
+        if (!this.handlers.has(name)) this.handlers.set(name, []);
+        this.handlers.get(name).push(callback);
+    }
+
+    notifySelected() {
+        for (const callback of this.handlers.get('notify::selected') || []) callback(this);
+    }
+
+    set_model(model) {
+        this.model = model;
+        this.modelWrites.push(model);
+        this._selected = this.autoselect && model.get_n_items() ? 0 : INVALID_LIST_POSITION;
+        // Selection notifications are not ListView activation, even during render.
+        this.notifySelected();
+    }
+
+    get selected() { return this._selected; }
+    set selected(index) {
+        this._selected = index;
+        this.selectionWrites.push(index);
+        this.notifySelected();
+    }
+}
+const signalWidgetDouble = properties => ({
+    ...accessibleDouble(), visible: true, sensitive: true, ...properties, handlers: new Map(), focusCalls: 0,
+    connect(name, callback) {
+        if (!this.handlers.has(name)) this.handlers.set(name, []);
+        this.handlers.get(name).push(callback);
+    },
+    emit(name, ...args) {
+        for (const callback of this.handlers.get(name) || []) callback(this, ...args);
+    },
+    grab_focus() { this.focusCalls++; return true; },
+});
+const stringListDouble = {
+    new(strings) {
+        const values = Array.from(strings);
+        return {
+            get_n_items: () => values.length,
+            get_string: index => values[index] ?? null,
+            get_item: index => index >= 0 && index < values.length
+                ? { get_string: () => values[index] } : null,
+        };
+    },
+};
+const volumeDouble = () => ({
+    ...accessibleDouble(), value: 0, round_digits: -1, formatWrites: 0, sensitive: true,
+    is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); },
+    set draw_value(value) { this.drawValue = value; this.round_digits = 2; },
+    set_value(value) { this.value = value; },
+    get_value() { return this.value; },
+    set_format_value_func(format) { this.format = format; this.formatWrites++; },
+    get_layout() { return { get_text: () => this.format(this, this.value) }; },
+    add_css_class(name) { this.cssClass = name; },
+});
+const mockGtk = {
+    AccessibleProperty: { LABEL: 'label', DESCRIPTION: 'description' },
+    AccessibleState: { EXPANDED: 'expanded' },
+    RevealerTransitionType: { SLIDE_DOWN: 1 },
+    Orientation: { VERTICAL: 1, HORIZONTAL: 0 }, Align: { END: 2, FILL: 0, START: 1, CENTER: 3 },
+    PositionType: { TOP: 2 }, ScrollType: { STEP_BACKWARD: 6, STEP_FORWARD: 7 },
+    PolicyType: { NEVER: 0, AUTOMATIC: 1 }, PropagationPhase: { CAPTURE: 1 },
+    EventControllerScrollFlags: { BOTH_AXES: 3 }, StackTransitionType: { NONE: 0 },
+    Box: function(properties) {
+        return Object.assign(boxDouble(), { sensitive: true,
+            is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); },
+        }, properties);
+    },
+    Button: function(properties) {
+        const widget = { ...buttonDouble('', null, properties.css_classes), ...properties,
+            get_child() { return this.child; }, add_controller() {},
+            connect(_name, callback) { this.click = callback; } };
+        widget.child.parent = widget;
+        return widget;
+    },
+    ToggleButton: function(properties) {
+        const widget = signalWidgetDouble(properties);
+        widget.get_child = () => widget.child;
+        widget.child.parent = widget;
+        widget._active = false;
+        Object.defineProperty(widget, 'active', {
+            get() { return this._active; },
+            set(value) {
+                if (this._active === value) return;
+                this._active = value;
+                this.emit('toggled');
+            },
+        });
+        widget.click = () => { widget.active = !widget.active; };
+        return widget;
+    },
+    Revealer: function(properties) {
+        const widget = { reveal_child: false, ...properties, get_child() { return this.child; } };
+        widget.child.parent = widget;
+        return widget;
+    },
+    ListView: function(properties) {
+        return Object.assign(signalWidgetDouble(properties), {
+            measureCalls: [],
+            measure(orientation, forSize) {
+                const model = this.model.model;
+                this.measureCalls.push({ orientation, forSize, model });
+                return [0, (model?.get_n_items() || 0) * 32, -1, -1];
+            },
+        });
+    },
+    Label: function(properties) { return Object.assign(labelDouble(properties.label), properties); },
+    Scale: function(properties) { return Object.assign(volumeDouble(), properties, { connect() {}, add_controller() {} }); },
+    Adjustment: function(properties) { return { ...properties }; },
+    EventControllerKey: function() { return { connect() {} }; },
+    EventControllerScroll: function() { return { connect() {} }; },
+    SignalListItemFactory: function() { return { connect(name, callback) { this[name] = callback; } }; },
+    INVALID_LIST_POSITION, StringList: stringListDouble, SingleSelection: SingleSelectionDouble,
+    Entry: function(properties) { return { ...properties, text: '', set_text(text) { this.text = text; }, connect() {} }; },
+    Separator: function(properties) { return { ...properties }; },
+    ScrolledWindow: function(properties) {
+        const widget = { ...properties };
+        widget.child.parent = widget;
+        return widget;
+    },
+    Overlay: function(properties) {
+        return Object.assign(boxDouble(), properties, {
+            set_child(child) { this.append(child); }, add_overlay(child) { this.append(child); }, set_measure_overlay() {},
+        });
+    },
+    DrawingArea: function(properties) { return { ...properties, set_draw_func() {} }; },
+    Stack: function(properties) { return Object.assign(boxDouble(), properties, { add_named(child) { this.append(child); } }); },
+};
+const { AudioPanel, volumeBar } = vm.runInNewContext(
+    frontend.slice(frontend.indexOf('function box('), frontend.indexOf('function style('))
+    + frontend.slice(frontend.indexOf('function volumeValue('), frontend.indexOf('function frame('))
     + frontend.slice(frontend.indexOf('class AudioPanel'), frontend.indexOf('\nfunction monitorFor('))
-    + '\nAudioPanel;', {
-        button: buttonDouble, box: boxDouble, ellipsis: labelDouble, wrapped: labelDouble,
-        scroll: (child, properties = {}) => ({ child, ...properties }),
-        Gtk: { Orientation: { VERTICAL: 1, HORIZONTAL: 0 }, Align: { END: 2, FILL: 0, START: 1 },
-            Entry: function(properties) { return { ...properties, text: '', connect() {} }; },
-            Separator: function(properties) { return { ...properties }; } },
+    + '\n({ AudioPanel, volumeBar });', {
+        Gtk: mockGtk, Pango: { EllipsizeMode: { END: 3 }, WrapMode: { WORD_CHAR: 2 } },
         style: (widget, name, enabled) => { widget[name] = enabled; },
         message: (widget, text) => { widget.set_label(text || ''); widget.visible = Boolean(text); },
     });
-function viewHarness() {
-    const view = { kind: 'output', maximum: 1.5, rows: new Map(), heading: labelDouble(),
-        mute: buttonDouble(), percent: labelDouble(), devicesHeading: {}, deviceList: {}, error: labelDouble(),
-        volume: { value: 0, set_value(value) { this.value = value; }, get_value() { return this.value; } },
-        choices: { append() {}, remove() {}, reorder_child_after() {} } };
-    const panel = { failures: {}, backend: {}, action() {} };
-    return { view, render(model = {}) {
-        AudioPanel.prototype.renderAudio.call(panel, view,
-            { available: true, nodeKey: 'current', name: 'Speaker', volume: 0.25, ...model });
-    } };
+function assertNoTooltip(widget) {
+    assert.ok(!widget.tooltip_text && !widget.tooltip_markup && !widget.has_tooltip, 'widget has no visual tooltip');
+}
+function assertNoInheritedTooltip(widget) {
+    for (let current = widget; current; current = current.parent) assertNoTooltip(current);
+}
+function viewHarness(kind = 'output') {
+    const state = {}, selections = [];
+    const panel = Object.assign(Object.create(AudioPanel.prototype), {
+        opened: true, currentTab: 1, audio: {}, failures: {}, press() {},
+        backend: { snapshot: () => state, select: (...args) => selections.push(args) },
+        render() { this.renderAudio(this.audio[kind], state[kind]); },
+    });
+    const content = panel.buildAudio(kind), view = panel.audio[kind];
+    return { view, panel, state, selections, content,
+        render(model = {}) {
+            state[kind] = { available: true, nodeKey: 'current',
+                name: kind === 'output' ? 'Speaker' : 'Microphone', volume: 0.25, ...model };
+            panel.render();
+        },
+        select(index) { view.deviceList.emit('activate', index); },
+        labels() {
+            return Array.from({ length: view.deviceSelection.model.get_n_items() },
+                (_, index) => view.deviceSelection.model.get_string(index));
+        },
+    };
 }
 
 function bluetoothViewHarness() {
     const panel = {
         deviceRows: new Map(), cardWidth: 400, failures: {}, backend: {}, action() {}, pairing: false,
-        answer: { text: '', visible: false, set_text(text) { this.text = text; } },
-        pairingStatus: labelDouble(), pairingPrompt: labelDouble(), dismissPairing: {},
-        pairingCard: {}, pairingControls: {}, pairingButtons: {}, send: { visible: false },
-        bluetoothState: labelDouble(), bluetoothError: labelDouble(),
-        bluetoothRows: boxDouble(), bluetoothSeparator: { visible: false },
     };
-    panel.bluetoothRows.append(panel.bluetoothSeparator);
+    AudioPanel.prototype.buildBluetooth.call(panel);
     return { panel, render(devices, model = {}) {
         AudioPanel.prototype.renderBluetooth.call(panel, { available: true, powered: true, devices, ...model });
     }, order() {
@@ -3551,6 +3750,89 @@ function bluetoothViewHarness() {
             .map(child => child === panel.bluetoothSeparator ? 'divider' : keys.get(child));
     } };
 }
+
+test('audio creates tooltips only for preserved non-button metadata, never volume ancestors', () => {
+    assert.deepEqual(Array.from(frontend.matchAll(/^\s*([\w.]+)\.tooltip_text\s*=/gm), match => match[1]),
+        ['view.heading', 'row.name']);
+    assert.doesNotMatch(frontend, /tooltip_text\s*:|tooltip_markup|has_tooltip|set_tooltip|Gtk\.Settings/);
+});
+
+test('constructed panel buttons and volume controls stay tooltip-free across enabled and disabled rerenders', () => {
+    const state = { bluetooth: { available: true, powered: true } };
+    for (const kind of ['output', 'input']) state[kind] = {
+        available: true, nodeKey: `current:${kind}`, name: `${kind} device`, volume: 0.25,
+        choices: [{ key: 'default', label: 'Default', description: 'Default route', default: true },
+            { key: 'other', label: 'Other', description: 'Other route' }],
+    };
+    const panel = Object.assign(Object.create(AudioPanel.prototype), {
+        audio: {}, content: boxDouble(), opened: true, currentTab: 1, cardWidth: 400, deviceRows: new Map(), failures: {},
+        backend: { snapshot: () => state }, press() {},
+    });
+    panel.build({ cyan: '#00ffff' });
+    const checkButtons = widget => {
+        let count = 0;
+        if (widget.css_classes?.some(name => ['control-button', 'volume-step', 'device-dropdown'].includes(name))) {
+            assertNoInheritedTooltip(widget);
+            assertNoTooltip(widget.get_child());
+            count++;
+        }
+        for (const child of widget.children || []) count += checkButtons(child);
+        if (widget.child) count += checkButtons(widget.child);
+        return count;
+    };
+    assert.equal(checkButtons(panel.content), 13, 'tabs, mute, steppers, device toggles and pairing buttons are actually constructed');
+    for (const patch of [{}, { muted: true }, { available: false },
+        { available: true, nodeKey: '' }, { nodeKey: 'replacement', muted: false }, { busy: true }]) {
+        for (const kind of ['output', 'input']) state[kind] = { ...state[kind], ...patch };
+        panel.render();
+        assert.equal(checkButtons(panel.content), 13);
+        for (const kind of ['output', 'input']) {
+            const view = panel.audio[kind], model = state[kind];
+            const enabled = Boolean(model.available && model.nodeKey);
+            assertNoInheritedTooltip(view.volume);
+            assertNoInheritedTooltip(view.volumeBar.widget);
+            assert.equal(view.mute.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), model.muted ? 'Unmute' : 'Mute');
+            assert.equal(view.volume.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL),
+                kind === 'output' ? 'Output volume' : 'Input volume');
+            for (const control of [view.volume, view.mute])
+                assert.equal(control.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
+                    enabled ? '' : 'No default audio device is available.');
+            assert.equal(view.heading.tooltip_text, `${kind === 'output' ? 'Output' : 'Input'} · ${model.available ? model.name : 'No device'}`);
+            assertNoInheritedTooltip(view.devices);
+            assert.equal(view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), 'Default route',
+                'dropdown metadata is preserved for assistive technology, not a tooltip');
+            assert.equal(view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL),
+                kind === 'output' ? 'Output device' : 'Input device');
+        }
+    }
+});
+
+test('Bluetooth buttons retain accessible labels without tooltips through pairing, busy and renamed-device rerenders', () => {
+    const h = bluetoothViewHarness();
+    const device = { key: 'headset', name: 'Headset <name>', address: 'AA:01', paired: true };
+    for (const [properties, model] of [
+        [{}, {}],
+        [{ connected: true }, { pairing: true, pairingMessage: { text: 'Pairing…', prompt: 'Enter PIN:' } }],
+        [{ busy: true }, {}],
+        [{ name: 'Renamed headset' }, { powered: false }],
+        [{ name: '', paired: false }, {}],
+        [{}, {}],
+    ]) {
+        const current = { ...device, ...properties };
+        h.render([current], model);
+        const row = h.panel.deviceRows.get(device.key);
+        for (const control of [row.action, row.forget, h.panel.dismissPairing, h.panel.send, h.panel.cancel]) {
+            assertNoInheritedTooltip(control);
+            assertNoTooltip(control.get_child());
+        }
+        assert.equal(row.forget.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL),
+            `Forget ${current.name || current.address}`);
+        assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Dismiss pairing message');
+        assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
+            model.pairing ? 'Answer or cancel pairing before dismissing this message' : '');
+        assert.equal(row.name.tooltip_text, current.name || current.address, 'non-button device-name metadata is preserved');
+    }
+});
 
 test('Bluetooth renderer groups remembered devices before available devices with a divider and paired-only forget', () => {
     const h = bluetoothViewHarness();
@@ -3612,7 +3894,8 @@ test('Bluetooth status card has a compact dismiss button wired to notice dismiss
     AudioPanel.prototype.buildBluetooth.call(panel);
     assert.equal(panel.dismissPairing.get_child().text, '×');
     assert.ok(panel.dismissPairing.classes.includes('pairing-dismiss'));
-    assert.equal(panel.dismissPairing.tooltip_text, 'Dismiss pairing message');
+    assertNoInheritedTooltip(panel.dismissPairing);
+    assert.equal(panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Dismiss pairing message');
     assert.equal(panel.answer.visible, false, 'entry starts hidden to avoid flashing during automatic pairing');
     assert.equal(panel.send.visible, false);
     panel.dismissPairing.click();
@@ -3632,11 +3915,16 @@ test('Bluetooth renderer shows one current pairing status and hides prompt contr
     assert.equal(h.panel.answer.visible, true);
     assert.equal(h.panel.send.visible, true);
     assert.equal(h.panel.dismissPairing.sensitive, false);
-    assert.match(h.panel.dismissPairing.tooltip_text, /Answer or cancel/);
+    assertNoInheritedTooltip(h.panel.dismissPairing);
+    assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Dismiss pairing message');
+    assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
+        'Answer or cancel pairing before dismissing this message');
     h.render([], { pairingMessage: { state: 'paired', text: 'Paired with Headset (AA:01).', prompt: '' } });
     assert.equal(h.panel.pairingCard.visible, true);
     assert.equal(h.panel.pairingStatus.text, 'Paired with Headset (AA:01).');
     assert.equal(h.panel.dismissPairing.sensitive, true);
+    assertNoInheritedTooltip(h.panel.dismissPairing);
+    assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), '');
     assert.equal(h.panel.pairingPrompt.visible, false);
     assert.equal(h.panel.pairingControls.visible, false);
     h.render([], { pairingMessage: { state: 'failed', text: 'Failed to pair with Headset (AA:01): rejected', prompt: '' } });
@@ -3729,36 +4017,561 @@ test('Bluetooth frontend has no manual discovery toggle', () => {
     assert.doesNotMatch(frontend, /this\.scan\b|toggleDiscovery|Stop scan/);
 });
 
-test('audio renderer hides the complete device selector without an available alternative', () => {
-    const h = viewHarness();
-    h.render({ choices: [] });
-    assert.equal(h.view.devicesHeading.visible, false);
-    assert.equal(h.view.deviceList.visible, false);
-    const selected = { key: 'speaker', label: 'Speaker', default: true };
-    h.render({ choices: [selected] });
-    assert.equal(h.view.deviceList.visible, false);
-    h.render({ choices: [selected, { key: 'headphones', label: 'Headphones', default: false }] });
-    assert.equal(h.view.devicesHeading.visible, true);
-    assert.equal(h.view.deviceList.visible, true);
-    assert.equal(h.view.rows.size, 2);
-    h.render({ choices: [selected] });
-    assert.equal(h.view.deviceList.visible, false);
-    assert.equal(h.view.rows.size, 1);
+test('volume bar keeps the native scale and its precision, stepping only through move-slider', () => {
+    const scale = volumeDouble(), events = [];
+    let dragging = true, volumeTarget = 'old';
+    scale.emit = (...args) => events.push([dragging, volumeTarget, ...args]);
+    const bar = volumeBar(scale, () => { dragging = false; volumeTarget = null; });
+    const [backward, native, forward] = bar.widget.children;
+    assert.equal(native, scale);
+    assert.equal(scale.round_digits, -1, 'draw-value must not introduce rounding of native volume mutations');
+    assert.equal(scale.drawValue, true);
+    assert.equal(scale.cssClass, 'volume-track');
+    assert.deepEqual(Array.from(backward.css_classes), ['volume-step']);
+    assert.deepEqual(Array.from(forward.css_classes), ['volume-step']);
+    assert.equal(backward.child.label, '◁');
+    assert.equal(forward.child.label, '▷');
+    for (const widget of [backward, native, forward, bar.widget]) assertNoInheritedTooltip(widget);
+    assert.equal(backward.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Decrease volume');
+    assert.equal(forward.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Increase volume');
+    backward.click();
+    dragging = true; volumeTarget = 'stale';
+    forward.click();
+    assert.deepEqual(events, [[false, null, 'move-slider', 6], [false, null, 'move-slider', 7]]);
+    assert.doesNotMatch(frontend, /view\.percent\b|volume-slider|volume-value/);
 });
 
-test('audio renderer distinguishes unavailable defaults from a real adjustable zero volume', () => {
-    const h = viewHarness();
-    h.render({ available: false, nodeKey: '', volume: 0 });
-    assert.equal(h.view.percent.text, '—');
-    assert.equal(h.view.volume.sensitive, false);
-    assert.match(h.view.volume.tooltip_text, /No default audio device/);
-    h.render({ volume: 0 });
-    assert.equal(h.view.percent.text, '0%');
-    assert.equal(h.view.volume.sensitive, true);
-    assert.equal(h.view.mute.sensitive, true);
-    h.render({ volume: 0.4 });
-    assert.equal(h.view.percent.text, '40%');
+for (const disabled of ['scale', 'ancestor']) {
+    test(`volume bar ignores both arrows with a disabled ${disabled} before clearing drag ownership or emitting`, () => {
+        const scale = volumeDouble(), events = [];
+        let dragging = true, volumeTarget = 'owned-drag', beforeSteps = 0;
+        scale.emit = (...args) => events.push([dragging, volumeTarget, ...args]);
+        const bar = volumeBar(scale, () => {
+            beforeSteps++;
+            dragging = false;
+            volumeTarget = null;
+        });
+        const [backward, , forward] = bar.widget.children;
+        const target = disabled === 'scale' ? scale : bar.widget;
+        target.sensitive = false;
+        assert.equal(scale.sensitive, disabled === 'ancestor', 'ancestor sensitivity is distinct from the scale property');
+        assert.equal(scale.is_sensitive(), false);
+        backward.click();
+        forward.click();
+        assert.equal(beforeSteps, 0, 'disabled clicks must not run beforeStep');
+        assert.equal(dragging, true);
+        assert.equal(volumeTarget, 'owned-drag');
+        assert.deepEqual(events, [], 'disabled clicks must not emit move-slider');
+        target.sensitive = true;
+        forward.click();
+        assert.equal(beforeSteps, 1, 'stepping resumes when effective sensitivity is restored');
+        assert.deepEqual(events, [[false, null, 'move-slider', 7]]);
+    });
+}
+
+test('volume bar invalidates the native cached value only on availability changes', () => {
+    const scale = volumeDouble(), bar = volumeBar(scale, () => {});
+    scale.set_value(0.3749);
+    scale.sensitive = true;
+    bar.setAvailable(true);
+    assert.equal(bar.widget.sensitive, true);
+    assert.equal(scale.get_layout().get_text(), '37%');
+    assert.equal(scale.formatWrites, 1);
+    scale.sensitive = false;
+    bar.setAvailable(false);
+    assert.equal(bar.widget.sensitive, false);
+    assert.equal(scale.get_layout().get_text(), '—');
+    assert.equal(scale.formatWrites, 2);
+    bar.setAvailable(false);
+    assert.equal(scale.formatWrites, 2, 'unchanged snapshots do not reset formatting');
+    scale.sensitive = true;
+    bar.setAvailable(true);
+    assert.equal(bar.widget.sensitive, true);
+    assert.equal(scale.get_layout().get_text(), '37%');
+    assert.equal(scale.formatWrites, 3, 'same-value recovery still invalidates the cached placeholder');
 });
+
+test('audio device selectors use inline native GTK lists without popup or per-device button backends', () => {
+    assert.match(frontend, /new Gtk\.ToggleButton\(/);
+    assert.match(frontend, /new Gtk\.SingleSelection\(/);
+    assert.match(frontend, /new Gtk\.ListView\(/);
+    assert.match(frontend, /Gtk\.StringList\.new\(/);
+    assert.match(frontend, /new Gtk\.Revealer\(/);
+    assert.doesNotMatch(frontend, /Gtk\.(?:DropDown|Popover)|view\.(?:rows|choices|updatingChoices)\b/);
+});
+
+test('opening another inline audio selector collapses the first and resetInteractions collapses both', () => {
+    const h = viewHarness('output');
+    h.render({ choices: [{ key: 'out-default', label: 'Speakers', default: true }, { key: 'out-other', label: 'Dock' }] });
+    h.panel.buildAudio('input');
+    const input = h.panel.audio.input;
+    h.panel.renderAudio(input, { available: true, nodeKey: 'input', choices: [
+        { key: 'in-default', label: 'Mic', default: true }, { key: 'in-other', label: 'USB mic' },
+    ] });
+    h.view.devices.click();
+    assert.equal(h.view.deviceChoices.reveal_child, true);
+    input.devices.click();
+    assert.equal(input.deviceChoices.reveal_child, true);
+    assert.equal(h.view.deviceChoices.reveal_child, false);
+    assert.equal(h.view.devices.active, false);
+    assert.equal(h.view.deviceArrow.label, '⌄');
+    assert.equal(h.view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false);
+    h.view.devices.click();
+    assert.equal(h.view.deviceChoices.reveal_child, true);
+    assert.equal(input.deviceChoices.reveal_child, false);
+    for (const view of Object.values(h.panel.audio)) {
+        view.dragging = true;
+        view.volumeTarget = view.muteTarget = 'stale';
+    }
+    h.panel.resetInteractions();
+    for (const view of Object.values(h.panel.audio)) {
+        assert.equal(view.deviceChoices.reveal_child, false);
+        assert.equal(view.devices.active, false);
+        assert.equal(view.deviceArrow.label, '⌄');
+        assert.equal(view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false);
+        assert.equal(view.dragging, false);
+        assert.equal(view.volumeTarget, null);
+        assert.equal(view.muteTarget, null);
+    }
+    assert.deepEqual(h.selections, []);
+});
+
+for (const kind of ['output', 'input']) {
+    const choices = Object.freeze([
+        Object.freeze({ key: `native:${kind}:10:one`, label: 'USB <Audio> & 🎧',
+            description: 'Built-in device route', default: true }),
+        Object.freeze({ key: `policy:${kind}:20:two`, label: 'USB <Audio> & 🎧',
+            description: 'External device route', default: false }),
+    ]);
+
+    test(`${kind} selector constructs an inline, bounded, animated native list with a separate trigger`, () => {
+        const h = viewHarness(kind), { view } = h;
+        h.render({ choices });
+        assert.ok(view.devices.css_classes.includes('device-dropdown'));
+        assert.ok(!view.devices.css_classes.includes('control-button'), 'the trigger does not inherit custom control highlights');
+        assert.deepEqual(view.devices.child.children, [view.deviceLabel, view.deviceArrow]);
+        assert.equal(view.deviceLabel.use_markup, false);
+        assert.equal(view.deviceLabel.ellipsize, 3);
+        assert.equal(view.deviceLabel.label, choices[0].label);
+        assert.equal(view.deviceArrow.label, '⌄');
+        assert.equal(view.deviceSelection.autoselect, false);
+        assert.equal(view.deviceSelection.can_unselect, true);
+        assert.equal(view.deviceList.model, view.deviceSelection);
+        assert.equal(view.deviceList.single_click_activate, true);
+        assert.ok(view.deviceList.css_classes.includes('device-list'));
+        assert.equal(view.deviceChoices.transition_type, mockGtk.RevealerTransitionType.SLIDE_DOWN);
+        assert.equal(view.deviceChoices.transition_duration, 180);
+        assert.equal(view.deviceChoices.reveal_child, false);
+        const options = view.deviceChoices.child;
+        assert.equal(options.child, view.deviceList);
+        assert.equal(options.max_content_height, 240);
+        assert.equal(options.propagate_natural_height, true);
+        assert.equal(options.margin_top, 6);
+        assert.ok(options.css_classes.includes('device-options'));
+        assert.equal(view.devices.parent, view.deviceChoices.parent, 'the trigger and revealer share the inline layout');
+        assert.equal(view.devices.parent.orientation, mockGtk.Orientation.VERTICAL);
+        assert.ok(view.devices.parent.children.indexOf(view.deviceChoices) > view.devices.parent.children.indexOf(view.devices));
+        for (const widget of [view.devices, view.deviceLabel, view.deviceArrow, view.deviceList, options])
+            assertNoInheritedTooltip(widget);
+    });
+
+    test(`${kind} options reserve measured height up to 240px on model changes without revealing closed content`, () => {
+        for (const opened of [true, false]) {
+            const h = viewHarness(kind), { view } = h;
+            h.panel.opened = opened;
+            const options = view.deviceChoices.get_child();
+            const extra = Array.from({ length: 10 }, (_, index) => ({
+                key: `native:${kind}:extra:${index}`, label: `Extra device ${index}`, default: false,
+            }));
+            for (const [entries, expectedHeight] of [
+                [choices, 64],
+                [[...choices, ...extra], 240],
+                [[...choices, extra[0]], 96],
+                [[choices[0]], 32],
+                [[], 32],
+            ]) {
+                const before = view.deviceList.measureCalls.length;
+                h.render({ choices: entries });
+                assert.equal(view.deviceList.measureCalls.length, before + 1, 'model changes remeasure the list');
+                const measurement = view.deviceList.measureCalls.at(-1);
+                assert.equal(measurement.orientation, mockGtk.Orientation.VERTICAL);
+                assert.equal(measurement.forSize, -1);
+                assert.equal(measurement.model, view.deviceSelection.model, 'measure the replacement model, not stale rows');
+                assert.equal(options.min_content_height, expectedHeight, 'use natural height, capped to the viewport maximum');
+                assert.ok(options.min_content_height > 0, 'the outer page cannot squeeze the options viewport to zero');
+                assert.ok(options.min_content_height <= options.max_content_height);
+                assert.equal(options.max_content_height, 240);
+                assert.equal(view.deviceChoices.reveal_child, false, 'measurement must not expand the revealer');
+                assert.equal(view.devices.active, false);
+                assert.equal(view.deviceArrow.label, '⌄');
+                assert.equal(view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false);
+                h.render({ choices: entries, volume: 0.6, muted: true });
+                assert.equal(view.deviceList.measureCalls.length, before + 1, 'unchanged models retain their measured minimum');
+                assert.equal(options.min_content_height, expectedHeight);
+                assert.equal(view.deviceChoices.reveal_child, false);
+            }
+            assert.deepEqual(h.selections, []);
+        }
+    });
+
+    test(`${kind} list factory renders literal ellipsized accessible labels without tooltips, including recycled rows`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        const { factory } = h.view.deviceList;
+        const item = {
+            position: 0,
+            set_child(child) { this.child = child; },
+            get_child() { return this.child; },
+            get_position() { return this.position; },
+            get_item() { return h.view.deviceSelection.model.get_item(this.position); },
+        };
+        factory.setup(factory, item);
+        for (const index of [0, 1]) {
+            item.position = index;
+            factory.bind(factory, item);
+            assert.equal(item.child.label, choices[index].label);
+            assert.equal(item.child.use_markup, false);
+            assert.equal(item.child.ellipsize, 3);
+            assert.equal(item.child.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[index].description);
+            assertNoTooltip(item.child);
+        }
+        h.render({ choices: choices.map(choice => ({ ...choice, description: '' })) });
+        factory.bind(factory, item);
+        assert.equal(item.child.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].label);
+        assertNoTooltip(item.child);
+    });
+
+    test(`${kind} toggle synchronizes expansion, chevron and native accessibility state without selecting`, () => {
+        const h = viewHarness(kind), { view } = h;
+        h.render({ choices });
+        const check = expanded => {
+            assert.equal(view.devices.active, expanded);
+            assert.equal(view.deviceChoices.reveal_child, expanded);
+            assert.equal(view.deviceArrow.label, expanded ? '⌃' : '⌄');
+            assert.equal(view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), expanded);
+        };
+        check(false);
+        view.devices.click();
+        check(true);
+        h.render({ choices, volume: 0.6, muted: true });
+        check(true);
+        view.devices.click();
+        check(false);
+        h.panel.setDeviceExpanded(view, true);
+        check(true);
+        h.panel.setDeviceExpanded(view, false);
+        check(false);
+        assert.deepEqual(h.selections, []);
+    });
+
+    test(`${kind} expansion is gated and collapses when hidden, busy, closed or on the inactive tab`, () => {
+        for (const [name, configure] of [
+            ['hidden', h => { h.view.devices.visible = false; }],
+            ['insensitive', h => { h.view.devices.sensitive = false; }],
+            ['closed', h => { h.panel.opened = false; }],
+            ['inactive tab', h => { h.panel.currentTab = 0; }],
+        ]) {
+            const h = viewHarness(kind);
+            h.render({ choices });
+            configure(h);
+            h.panel.setDeviceExpanded(h.view, true);
+            assert.equal(h.view.deviceChoices.reveal_child, false, name);
+            assert.equal(h.view.devices.active, false, name);
+            assert.equal(h.view.deviceArrow.label, '⌄', name);
+            assert.equal(h.view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false, name);
+        }
+        for (const [name, update] of [
+            ['no alternatives', h => h.render({ choices: [choices[0]] })],
+            ['busy', h => h.render({ choices, busy: true })],
+            ['closed panel', h => { h.panel.opened = false; h.panel.render(); }],
+            ['inactive tab', h => { h.panel.currentTab = 0; h.panel.render(); }],
+        ]) {
+            const h = viewHarness(kind);
+            h.render({ choices });
+            h.view.devices.click();
+            assert.equal(h.view.deviceChoices.reveal_child, true);
+            update(h);
+            assert.equal(h.view.deviceChoices.reveal_child, false, name);
+            assert.equal(h.view.devices.active, false, name);
+            assert.equal(h.view.deviceArrow.label, '⌄', name);
+            assert.equal(h.view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false, name);
+            assert.deepEqual(h.selections, [], name);
+        }
+    });
+
+    test(`${kind} native selection notifications never write; only row activation uses the activated position`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        h.view.deviceSelection.selected = 1;
+        h.view.deviceSelection.selected = INVALID_LIST_POSITION;
+        h.view.deviceSelection.set_model(stringListDouble.new(choices.map(choice => choice.label)));
+        assert.deepEqual(h.selections, [], 'model changes and keyboard selection are read-only');
+        h.view.deviceSelection.selected = 0;
+        h.select(1);
+        assert.deepEqual(h.selections, [[kind, choices[1].key]], 'activate position wins over the selected index');
+        h.view.deviceSelection.selected = 1;
+        h.panel.selectAudioDevice(h.view);
+        assert.deepEqual(h.selections, [[kind, choices[1].key], [kind, choices[1].key]],
+            'direct callers may omit the position and use the current native selection');
+    });
+
+    test(`${kind} activating a valid row collapses choices and focuses the trigger, including the current default`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        for (const position of [0, 1]) {
+            h.view.devices.click();
+            assert.equal(h.view.deviceChoices.reveal_child, true);
+            const before = h.view.devices.focusCalls;
+            h.select(position);
+            assert.equal(h.view.deviceChoices.reveal_child, false);
+            assert.equal(h.view.devices.active, false);
+            assert.equal(h.view.deviceArrow.label, '⌄');
+            assert.equal(h.view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false);
+            assert.equal(h.view.devices.focusCalls, before + 1);
+            assert.equal(h.view.deviceSelection.selected, 0, 'native default remains authoritative until backend confirmation');
+            assert.equal(h.view.deviceLabel.label, choices[0].label);
+        }
+        assert.deepEqual(h.selections, [[kind, choices[1].key]]);
+    });
+
+    test(`${kind} renderer hides the complete dropdown without an available alternative`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices: [] });
+        assert.equal(h.view.devicesHeading.visible, false);
+        assert.equal(h.view.devices.visible, false);
+        assert.equal(h.view.devices.sensitive, false);
+        h.render({ choices: [choices[0]] });
+        assert.equal(h.view.devicesHeading.visible, false);
+        assert.equal(h.view.devices.visible, false);
+        assert.equal(h.view.devices.sensitive, false);
+        h.render({ choices });
+        assert.equal(h.view.devicesHeading.visible, true);
+        assert.equal(h.view.devices.visible, true);
+        assert.equal(h.view.devices.sensitive, true);
+        assert.equal(h.view.deviceSelection.model.get_n_items(), 2);
+        h.render({ choices: [choices[0]] });
+        assert.equal(h.view.devicesHeading.visible, false);
+        assert.equal(h.view.devices.visible, false);
+        assert.equal(h.view.deviceSelection.model.get_n_items(), 1);
+        assert.deepEqual(h.selections, []);
+    });
+
+    test(`${kind} dropdown selects the real key despite duplicate literal labels`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        assert.deepEqual(h.labels(), choices.map(choice => choice.label));
+        assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), choices.map(choice => choice.key));
+        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[0].description);
+        h.select(0);
+        assert.deepEqual(h.selections, [], 'selecting the native default is not a mutation');
+        h.select(1);
+        assert.deepEqual(h.selections, [[kind, choices[1].key]]);
+        assert.equal(h.state[kind].choices, choices, 'GTK selection must not rewrite native state');
+        assert.equal(h.view.deviceSelection.selected, 0, 'the renderer still follows the native default');
+    });
+
+    test(`${kind} dropdown follows native default changes and reordered keys without native writes`, () => {
+        const h = viewHarness(kind), notifications = [], activations = [];
+        h.view.deviceSelection.connect('notify::selected', () => notifications.push(h.view.deviceSelection.selected));
+        h.view.deviceList.connect('activate', (_, position) => activations.push(position));
+        const entries = [choices[1], choices[0]];
+        h.render({ choices: entries });
+        assert.equal(h.view.deviceSelection.selected, 1, 'model replacement must not select the first non-default item');
+        const model = h.view.deviceSelection.model;
+        const switched = entries.map(choice => ({ ...choice, default: !choice.default }));
+        h.render({ choices: switched });
+        assert.equal(h.view.deviceSelection.model, model, 'changing only the native default keeps the string model');
+        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].description);
+        h.render({ choices: [switched[1], switched[0]] });
+        assert.notEqual(h.view.deviceSelection.model, model, 'key order matters even when both labels are identical');
+        assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), [choices[0].key, choices[1].key]);
+        assert.equal(h.view.deviceSelection.selected, 1);
+        assert.ok(h.view.deviceSelection.modelWrites.length >= 2);
+        assert.ok(h.view.deviceSelection.selectionWrites.length >= 2);
+        assert.ok(notifications.length >= 4, 'model replacement and selected assignments emit notifications');
+        assert.deepEqual(activations, [], 'native model/selection notifications never activate a row');
+        assert.equal(Object.hasOwn(h.view, 'updatingChoices'), false);
+        assert.deepEqual(h.selections, []);
+        h.select(0);
+        assert.deepEqual(h.selections, [[kind, choices[0].key]], 'the reordered index resolves to its stored key');
+    });
+
+    test(`${kind} dropdown does not rebuild its string model for volume, mute or busy updates`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        const model = h.view.deviceSelection.model;
+        h.render({ choices: choices.map(choice => ({ ...choice })), volume: 0.6, muted: true });
+        assert.equal(h.view.deviceSelection.model, model);
+        assert.equal(h.view.deviceSelection.modelWrites.length, 1);
+        assert.equal(h.view.volume.get_layout().get_text(), '60%');
+        h.render({ choices, volume: 0, busy: true });
+        assert.equal(h.view.deviceSelection.model, model);
+        assert.equal(h.view.deviceSelection.modelWrites.length, 1);
+        assert.equal(h.view.devices.sensitive, false);
+        assert.equal(h.view.volume.sensitive, true, 'selection busy state does not disable native volume');
+        assert.equal(h.view.mute.sensitive, true);
+        assert.deepEqual(h.selections, []);
+    });
+
+    test(`${kind} dropdown signature includes keys, labels and descriptions`, () => {
+        const h = viewHarness(kind);
+        let entries = choices;
+        h.render({ choices: entries });
+        for (const [field, value] of [['description', 'Updated accessible description'],
+            ['label', '<b>Updated literal name & text</b>'], ['key', `native:${kind}:replacement`]]) {
+            const previous = h.view.deviceSelection.model;
+            entries = entries.map((choice, index) => index === 0 ? { ...choice, [field]: value } : choice);
+            h.render({ choices: entries });
+            assert.notEqual(h.view.deviceSelection.model, previous, `${field} change must replace the model`);
+            assert.equal(h.view.deviceSelection.model.get_string(0), entries[0].label);
+            assert.equal(h.view.deviceLabel.label, entries[0].label);
+            assert.equal(h.view.choiceItems[0][field], value);
+            assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), entries[0].description);
+        }
+        h.render({ choices: entries.map(choice => ({ ...choice, description: '' })) });
+        assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), entries[0].label,
+            'empty descriptions fall back to literal accessible labels');
+        assert.deepEqual(h.selections, []);
+    });
+
+    test(`${kind} dropdown handles hotplug removal and an unavailable default without selecting another device`, () => {
+        const h = viewHarness(kind);
+        const third = { key: `native:${kind}:30:three`, label: 'Dock', description: 'Dock route', default: false };
+        h.render({ choices: [...choices, third] });
+        h.render({ choices: [{ ...choices[1], default: true }, third] });
+        assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), [choices[1].key, third.key]);
+        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].description);
+        assert.deepEqual(h.selections, []);
+        h.select(1);
+        assert.deepEqual(h.selections, [[kind, third.key]]);
+        h.render({ choices: [{ ...choices[1], default: true }] });
+        assert.equal(h.view.devices.visible, false);
+        assert.equal(h.view.devices.sensitive, false);
+        h.render({ choices: [], available: false, nodeKey: '' });
+        assert.equal(h.view.devicesHeading.visible, false);
+        assert.equal(h.view.devices.visible, false);
+        assert.equal(h.view.devices.sensitive, false);
+        assert.ok(h.view.choiceItems.every(item => !item.key));
+        assert.deepEqual(h.selections, [[kind, third.key]], 'hotplug renders never choose a replacement');
+    });
+
+    test(`${kind} dropdown prepends a non-actionable placeholder when no choice is the native default`, () => {
+        const h = viewHarness(kind);
+        const entries = choices.map(choice => ({ ...choice, default: false }));
+        for (const [model, placeholder] of [
+            [{ name: 'Unlisted native <device> & name' }, 'Unlisted native <device> & name'],
+            [{ available: false, nodeKey: '', name: 'Stale native name' }, 'Select a device…'],
+            [{ name: '' }, 'Select a device…'],
+        ]) {
+            h.render({ choices: entries, ...model });
+            assert.deepEqual(h.labels(), [placeholder, ...entries.map(choice => choice.label)]);
+            assert.equal(h.view.choiceItems[0].key, '');
+            assert.equal(h.view.deviceSelection.selected, 0);
+            assert.equal(h.view.deviceLabel.label, placeholder);
+            assert.equal(h.view.devices.visible, true);
+            assert.equal(h.view.devices.sensitive, true);
+            const before = h.selections.length;
+            h.select(0);
+            assert.equal(h.selections.length, before, 'the placeholder must never reach backend.select');
+            h.select(1);
+            assert.deepEqual(h.selections.at(-1), [kind, choices[0].key]);
+            assert.equal(h.selections.length, before + 1, 'the first real choice remains selectable without a default');
+        }
+    });
+
+    test(`${kind} dropdown blocks native writes for busy, hidden, inactive and invalid selection events`, () => {
+        const cases = [
+            ['rendered busy', h => h.render({ choices, busy: true })],
+            ['live busy before rerender', h => { h.state[kind] = { ...h.state[kind], busy: true }; }],
+            ['missing live model', h => { delete h.state[kind]; }],
+            ['insensitive widget', h => { h.view.devices.sensitive = false; }],
+            ['hidden widget', h => { h.view.devices.visible = false; }],
+            ['Bluetooth tab', h => { h.panel.currentTab = 0; }],
+            ['closed panel', h => { h.panel.opened = false; }],
+            ['GTK invalid position', () => {}, INVALID_LIST_POSITION],
+            ['out-of-range position', () => {}, choices.length],
+            ['negative position', () => {}, -1],
+        ];
+        for (const [name, configure, index = 1] of cases) {
+            const h = viewHarness(kind);
+            h.render({ choices });
+            configure(h);
+            h.select(index);
+            assert.deepEqual(h.selections, [], name);
+            assert.equal(h.view.error.visible, false, `${name} must be ignored rather than reported as a failure`);
+        }
+    });
+
+    test(`${kind} dropdown revalidates stale keys against the live snapshot instead of using labels or indexes`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        const replacement = { ...choices[1], key: `native:${kind}:replugged` };
+        h.state[kind] = { ...h.state[kind], choices: [choices[0], replacement] };
+        h.select(1);
+        assert.deepEqual(h.selections, [], 'a new key at the same index with the same label is not the selected device');
+        assert.ok(h.panel.failures[kind]);
+        assert.equal(h.view.error.visible, true);
+        assert.equal(h.view.error.text, h.panel.failures[kind]);
+        assert.equal(h.view.choiceItems[1].key, replacement.key, 'the failure rerender picks up the current snapshot');
+        h.select(1);
+        assert.deepEqual(h.selections, [[kind, replacement.key]]);
+        assert.equal(h.view.error.visible, false);
+    });
+
+    test(`${kind} dropdown checks the live native default rather than the rendered default flag`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        h.state[kind] = { ...h.state[kind], choices: choices.map(choice => ({ ...choice, default: !choice.default })) };
+        h.select(1);
+        assert.deepEqual(h.selections, [], 'an externally changed native default needs no redundant selection');
+        h.select(0);
+        assert.deepEqual(h.selections, [[kind, choices[0].key]], 'a formerly default choice is selectable by its key');
+    });
+
+    test(`${kind} dropdown surfaces backend selection errors through the existing action path`, () => {
+        const h = viewHarness(kind);
+        h.render({ choices });
+        h.panel.backend.select = (...args) => {
+            h.selections.push(args);
+            throw new Error('Native device selection failed');
+        };
+        h.select(1);
+        assert.deepEqual(h.selections, [[kind, choices[1].key]]);
+        assert.equal(h.panel.failures[kind], 'Native device selection failed');
+        assert.equal(h.view.error.text, 'Native device selection failed');
+        assert.equal(h.view.error.visible, true);
+        h.panel.backend.select = (...args) => h.selections.push(args);
+        h.select(1);
+        assert.equal(h.panel.failures[kind], '');
+        assert.equal(h.view.error.visible, false);
+        h.render({ choices, error: 'Native route acknowledgement failed' });
+        assert.equal(h.view.error.text, 'Native route acknowledgement failed');
+        assert.equal(h.view.error.visible, true);
+    });
+
+    test(`${kind} audio renderer distinguishes unavailable defaults from a real adjustable zero volume`, () => {
+        const h = viewHarness(kind);
+        h.render({ available: false, nodeKey: '', volume: 0 });
+        assert.equal(h.view.volume.get_layout().get_text(), '—');
+        assert.equal(h.view.volume.sensitive, false);
+        assert.equal(h.view.volumeBar.widget.sensitive, false);
+        assertNoInheritedTooltip(h.view.volume);
+        assert.equal(h.view.volume.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
+            'No default audio device is available.');
+        h.render({ volume: 0 });
+        assert.equal(h.view.volume.get_layout().get_text(), '0%');
+        assert.equal(h.view.volume.sensitive, true);
+        assert.equal(h.view.volumeBar.widget.sensitive, true);
+        assert.equal(h.view.mute.sensitive, true);
+        assertNoInheritedTooltip(h.view.volume);
+        assert.equal(h.view.volume.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), '');
+        h.render({ volume: 0.4 });
+        assert.equal(h.view.volume.get_layout().get_text(), '40%');
+    });
+}
 }
 
 // Tests consolidated from launcher.test.js.
@@ -3769,24 +4582,48 @@ test('built audio launcher', {
     skip: launcherPath ? false : 'Set AUDIO_PANEL_LAUNCHER to the built audio-panel executable.',
 }, async t => {
     const source = readFileSync(launcherPath, 'utf8');
-    const calls = [...source.matchAll(/\bexec ([^\s]+\/bin\/ags) (run|request)\b/g)];
+    const calls = [...source.matchAll(/(?:^|\s)(\/[^\s"']+\/bin\/ags) (bundle|request|run)\b/g)];
     const runtimes = new Set(calls.map(match => match[1]));
     assert.equal(runtimes.size, 1, 'launcher must use one explicit AGS runtime');
-    assert.deepEqual(calls.map(match => match[2]).sort(), ['request', 'run']);
+    assert.deepEqual(calls.map(match => match[2]).sort(), ['bundle', 'request']);
+    const [ags] = runtimes;
+    const gjs = ags.replace(/\/ags$/, '/panel-gjs');
+    assert.ok(source.includes(`exec ${gjs} -m "$bundle"`), 'run must exec the companion GJS wrapper');
 
     const root = mkdtempSync(join(tmpdir(), 'audio-launcher-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
-    const fake = join(root, 'ags');
-    writeFileSync(fake, `#!${process.execPath}\n`
-        + 'const keys = ["AUDIO_PANEL_CONFIG", "AUDIO_PANEL_PALETTE", "AUDIO_CONTROL_HELPER"];\n'
-        + 'console.log(JSON.stringify({argv: process.argv.slice(2), '
-        + 'env: Object.fromEntries(keys.map(key => [key, process.env[key]]))}));\n');
-    chmodSync(fake, 0o700);
+    const keys = ['AUDIO_PANEL_CONFIG', 'AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER', 'XDG_RUNTIME_DIR'];
+    const fakes = new Map();
+    for (const [program, path] of [['ags', ags], ['panel-gjs', gjs]]) {
+        const fake = join(root, program);
+        writeFileSync(fake, `#!${process.execPath}\n`
+            + 'const fs = require("node:fs");\n'
+            + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
+            + 'const argv = process.argv.slice(2);\n'
+            + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
+            + 'if (program === "ags" && argv[0] === "bundle") {\n'
+            + '  console.log(JSON.stringify(data));\n'
+            + '  if (process.env.PANEL_TEST_BUNDLE_STATUS) {\n'
+            + '    console.error("fixture compiler failed");\n'
+            + '    process.exit(Number(process.env.PANEL_TEST_BUNDLE_STATUS));\n'
+            + '  }\n'
+            + '  fs.writeFileSync(argv.at(-1), JSON.stringify({config: argv.at(-2)}));\n'
+            + '} else {\n'
+            + '  if (program === "panel-gjs") data.bundle = JSON.parse(fs.readFileSync(argv.at(-1), "utf8"));\n'
+            + '  console.log(JSON.stringify(data));\n'
+            + '}\n');
+        chmodSync(fake, 0o700);
+        fakes.set(path, fake);
+    }
     const launcher = join(root, 'audio-panel');
-    writeFileSync(launcher, source.replaceAll([...runtimes][0], () => fake));
+    writeFileSync(launcher, source.replaceAll(gjs, () => fakes.get(gjs)).replaceAll(ags, () => fakes.get(ags)));
     chmodSync(launcher, 0o700);
-    const env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config with spaces') };
-    for (const key of ['AUDIO_PANEL_CONFIG', 'AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER']) delete env[key];
+    const env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config with spaces'),
+        XDG_RUNTIME_DIR: join(root, 'runtime with spaces') };
+    mkdirSync(env.XDG_RUNTIME_DIR, { mode: 0o700 });
+    const sharedBundle = join(env.XDG_RUNTIME_DIR, 'ags.js');
+    writeFileSync(sharedBundle, 'another panel owns this shared-path sentinel');
+    for (const key of [...keys.filter(key => key !== 'XDG_RUNTIME_DIR'), 'PANEL_TEST_BUNDLE_STATUS']) delete env[key];
 
     function run(args, overrides = {}) {
         const result = spawnSync(launcher, args, { env: { ...env, ...overrides }, encoding: 'utf8',
@@ -3799,10 +4636,40 @@ test('built audio launcher', {
     function success(args, overrides) {
         const result = run(args, overrides);
         assert.equal(result.status, 0, result.stderr);
-        return JSON.parse(result.stdout);
+        return result.stdout.trim().split('\n').map(line => JSON.parse(line));
     }
 
-    await t.test('validates command arity and help without invoking AGS', () => {
+    function request(args) {
+        const records = success(args);
+        assert.equal(records.length, 1, 'requests must not compile or start GJS');
+        const [data] = records;
+        assert.equal(data.program, 'ags');
+        assert.equal(data.env.XDG_RUNTIME_DIR, env.XDG_RUNTIME_DIR, 'IPC uses the original runtime directory');
+        return data;
+    }
+
+    function launch(overrides = {}) {
+        const records = success(['run'], overrides);
+        assert.equal(records.length, 2, 'compile once, then start GJS once');
+        const [compiler, runtime] = records;
+        assert.equal(compiler.program, 'ags');
+        assert.equal(runtime.program, 'panel-gjs');
+        const runtimeDir = overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR;
+        const config = overrides.AUDIO_PANEL_CONFIG ?? `${env.XDG_CONFIG_HOME}/ags/audio/frontend.js`;
+        const bundle = join(runtimeDir, 'ags-panels', 'audio-panel.js');
+        assert.deepEqual(compiler.argv, ['bundle', '--gtk', '4', '--', config, bundle]);
+        assert.deepEqual(runtime.argv, ['-m', bundle]);
+        assert.deepEqual(runtime.bundle, { config }, 'GJS reads the output of this compilation');
+        assert.equal(statSync(join(runtimeDir, 'ags-panels')).mode & 0o777, 0o700);
+        for (const data of records) {
+            assert.equal(data.env.XDG_RUNTIME_DIR, runtimeDir, 'bundling must not change the IPC namespace');
+            assert.equal(data.env.AUDIO_PANEL_CONFIG, config);
+        }
+        assert.equal(readFileSync(sharedBundle, 'utf8'), 'another panel owns this shared-path sentinel');
+        return { compiler, runtime };
+    }
+
+    await t.test('validates command arity and help without invoking AGS or GJS', () => {
         for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'],
             ['bluetoothPower', 'extra'], ['toggle', 'DP-1', 'extra'], ['--help', 'extra'], ['-h', 'extra']]) {
             const result = run(args);
@@ -3819,7 +4686,7 @@ test('built audio launcher', {
 
     await t.test('targets the audio instance with typed JSON requests', () => {
         for (const command of ['status', 'close', 'bluetoothPower', 'toggle']) {
-            const data = success([command]);
+            const data = request([command]);
             assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'audio-panel', '--']);
             assert.equal(data.argv.length, 5);
             assert.deepEqual(JSON.parse(data.argv[4]), { command });
@@ -3827,26 +4694,49 @@ test('built audio launcher', {
     });
 
     await t.test('escapes monitor arguments without interpreting shell syntax', () => {
-        for (const monitor of ['', 'eDP-1', 'Display with spaces', 'DP-\'"; touch /not-executed; 🎧']) {
-            const data = success(['toggle', monitor]);
+        const marker = join(root, 'monitor-was-evaluated');
+        for (const monitor of ['', 'eDP-1', 'Display with spaces', `DP-'"; touch ${marker}; $(touch ${marker}); 🎧`]) {
+            const data = request(['toggle', monitor]);
             assert.deepEqual(JSON.parse(data.argv[4]), { command: 'toggle', ...(monitor ? { monitor } : {}) });
+        }
+        assert.equal(existsSync(marker), false);
+        assert.equal(existsSync(join(env.XDG_RUNTIME_DIR, 'ags-panels')), false, 'requests do not create bundles');
+    });
+
+    await t.test('bundles GTK4 to the audio-specific file before executing GJS with store-backed defaults', () => {
+        const { compiler, runtime } = launch();
+        for (const data of [compiler, runtime]) {
+            assert.match(data.env.AUDIO_PANEL_PALETTE, /^\/nix\/store\//);
+            assert.match(data.env.AUDIO_CONTROL_HELPER, /\/bin\/audio-control$/);
         }
     });
 
-    await t.test('supplies the GTK4 entry point and store-backed defaults', () => {
-        const data = success(['run']);
-        assert.deepEqual(data.argv, ['run', '--gtk4', '--', `${env.XDG_CONFIG_HOME}/ags/audio/frontend.js`]);
-        assert.equal(data.env.AUDIO_PANEL_CONFIG, data.argv.at(-1));
-        assert.match(data.env.AUDIO_PANEL_PALETTE, /^\/nix\/store\//);
-        assert.match(data.env.AUDIO_CONTROL_HELPER, /\/bin\/audio-control$/);
+    await t.test('preserves explicit overrides and passes paths as native arguments without shell evaluation', () => {
+        const marker = join(root, 'config-was-evaluated');
+        const overrides = { AUDIO_PANEL_CONFIG: join(root, `custom '"; $(touch ${marker}); frontend.js`),
+            AUDIO_PANEL_PALETTE: join(root, 'palette with spaces.json'), AUDIO_CONTROL_HELPER: join(root, 'custom helper'),
+            XDG_RUNTIME_DIR: join(root, 'isolated runtime $HOME with spaces') };
+        mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
+        const { compiler, runtime } = launch(overrides);
+        for (const data of [compiler, runtime]) assert.deepEqual(data.env, overrides);
+        assert.equal(existsSync(marker), false);
+        assert.equal(existsSync(join(overrides.XDG_RUNTIME_DIR, 'ags.js')), false);
     });
 
-    await t.test('preserves explicit runtime overrides including paths with spaces', () => {
-        const overrides = { AUDIO_PANEL_CONFIG: join(root, 'custom frontend.js'),
-            AUDIO_PANEL_PALETTE: join(root, 'palette.json'), AUDIO_CONTROL_HELPER: join(root, 'custom-helper') };
-        const data = success(['run'], overrides);
-        assert.deepEqual(data.env, overrides);
-        assert.equal(data.argv.at(-1), overrides.AUDIO_PANEL_CONFIG);
+    await t.test('compiler failure cannot execute GJS, even when a stale audio bundle exists', () => {
+        const runtimeDir = join(root, 'failed compilation runtime');
+        const bundleDir = join(runtimeDir, 'ags-panels');
+        mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
+        const bundle = join(bundleDir, 'audio-panel.js');
+        writeFileSync(bundle, JSON.stringify({ config: 'stale frontend.js' }));
+        const result = run(['run'], { XDG_RUNTIME_DIR: runtimeDir, PANEL_TEST_BUNDLE_STATUS: '41' });
+        assert.equal(result.status, 41, result.stderr);
+        assert.match(result.stderr, /fixture compiler failed/);
+        const records = result.stdout.trim().split('\n').map(line => JSON.parse(line));
+        assert.equal(records.length, 1, 'a stale bundle is never executed after compilation fails');
+        assert.equal(records[0].program, 'ags');
+        assert.equal(records[0].argv[0], 'bundle');
+        assert.equal(records[0].env.XDG_RUNTIME_DIR, runtimeDir);
     });
 });
 }

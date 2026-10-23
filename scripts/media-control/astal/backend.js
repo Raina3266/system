@@ -348,9 +348,9 @@ export class Planner {
                 stream.id !== 0 && stream.id === group.streamId && stream.ready))
                 fail('Model group references an unavailable audio stream.');
             return {
-                title: text(group.title, 'Group title'), artist: text(group.artist, 'Group artist'),
+                title: text(group.title, 'Group title'),
                 primary, players, displayName: text(group.displayName, 'Group displayName'),
-                artUrl: text(group.artUrl, 'Group artUrl'), streamId: group.streamId,
+                streamId: group.streamId,
                 streamReason: text(group.streamReason, 'Group streamReason'),
             };
         });
@@ -390,6 +390,7 @@ export class Planner {
                     fail('Native track operation lacks the exact target/capability.');
                 break;
             case 'seek':
+                // The Rust model must preserve this binary64 position exactly across JSON.
                 if (op !== 'seek' || !target.players.includes(player.bus) || !player.canSeek
                     || !Number.isFinite(operation.value) || operation.value < 0 || operation.value !== intent.position)
                     fail('Native seek plan lacks the exact target, capability, or requested value.');

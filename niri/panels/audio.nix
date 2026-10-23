@@ -4,16 +4,19 @@
 }:
 let
   inherit (pkgs) lib;
-  ags = pkgs.ags.override {
-    extraPackages = [
-      # --gtk4 only preloads layer-shell. AGS uses wrapGAppsHook3, so GTK4's
-      # typelibs must also be explicit inputs to its generated runtime wrapper.
-      pkgs.gtk4
-      pkgs.graphene
-      pkgs.gtk4-layer-shell
-      pkgs.astal.wireplumber
-      pkgs.astal.bluetooth
-    ];
+  ags = import ./ags-runtime.nix {
+    inherit pkgs;
+    ags = pkgs.ags.override {
+      extraPackages = [
+        # AGS uses wrapGAppsHook3, so GTK4's typelibs must also be explicit
+        # inputs to its generated runtime wrapper.
+        pkgs.gtk4
+        pkgs.graphene
+        pkgs.gtk4-layer-shell
+        pkgs.astal.wireplumber
+        pkgs.astal.bluetooth
+      ];
+    };
   };
   palette = pkgs.writeText "audio-panel-palette.json" (
     builtins.toJSON (import ../../themes/palette.nix)
@@ -65,8 +68,11 @@ pkgs.writeShellApplication {
     export AUDIO_CONTROL_HELPER="''${AUDIO_CONTROL_HELPER:-${lib.getExe audioControl}}"
 
     if [ "$command" = run ]; then
-      # AGS 2.3 has no run --instance flag; the application owns its instance name.
-      exec ${lib.getExe ags} run --gtk4 -- "$AUDIO_PANEL_CONFIG"
+      runtime_dir="''${XDG_RUNTIME_DIR:?audio-panel: XDG_RUNTIME_DIR is required}/ags-panels"
+      ${pkgs.coreutils}/bin/install -d -m 700 "$runtime_dir"
+      bundle="$runtime_dir/audio-panel.js"
+      ${lib.getExe ags} bundle --gtk 4 -- "$AUDIO_PANEL_CONFIG" "$bundle"
+      exec ${ags}/bin/panel-gjs -m "$bundle"
     fi
 
     request=$(${lib.getExe pkgs.jq} -cn \

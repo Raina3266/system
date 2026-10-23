@@ -1,0 +1,9 @@
+{
+  "name": "desktop-network-panel",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test.js",
+    "test:ui": "node test.js --ui"
+  }
+}

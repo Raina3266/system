@@ -1,6 +1,6 @@
 # Dashboard, network/media/audio, and Calendar/Tasks modules.
 #
-# Media and audio use AGS/Astal GTK4; dashboard and network stay in Quickshell.
+# Media, audio, dashboard, and network use AGS/Astal GTK4.
 {
   lib,
   pkgs,
@@ -26,64 +26,18 @@ let
     format = "{}";
     return-type = "json";
     interval = 5;
-    exec = pkgs.writeShellScript "waybar-dashboard-battery" ''
-      bat=""
-      for candidate in /sys/class/power_supply/BAT*; do
-        if [ -d "$candidate" ]; then
-          bat="$candidate"
-          break
-        fi
-      done
-
-      if [ -z "$bat" ]; then
-        ${pkgs.jq}/bin/jq -cn \
-          --arg text "󰕮" \
-          --arg tooltip "Dashboard" \
-          '{text:$text, tooltip:$tooltip, class:"clear"}'
-        exit 0
-      fi
-
-      capacity=$(${pkgs.coreutils}/bin/cat "$bat/capacity" 2>/dev/null)
-      status=$(${pkgs.coreutils}/bin/cat "$bat/status" 2>/dev/null)
-      profile=$(${pkgs.power-profiles-daemon}/bin/powerprofilesctl get 2>/dev/null)
-
-      icons=("󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹")
-      idx=$((capacity / 10))
-      [ "$idx" -gt 9 ] && idx=9
-      icon="''${icons[$idx]}"
-
-      case "$status" in
-        Charging|"Not charging") icon="󰂄"; class="charging" ;;
-        Full) icon="󰂄"; class="full" ;;
-        *)
-          class="discharging"
-          if [ "$capacity" -le 15 ]; then
-            class="critical"
-          elif [ "$capacity" -le 25 ]; then
-            class="warning"
-          elif [ "$capacity" -lt 50 ]; then
-            class="low"
-          fi
-          ;;
-      esac
-
-      ${pkgs.jq}/bin/jq -cn \
-        --arg text "$icon $capacity%" \
-        --arg tooltip "$status | Profile: $profile | Click: Dashboard" \
-        --arg class "$class" \
-        '{text:$text, tooltip:$tooltip, class:$class}'
-    '';
+    exec = "${lib.getExe packages.dashboardPanel} status";
     tooltip = true;
-    on-click = "${lib.getExe pkgs.quickshell} -c media ipc call dashboard toggle ${lib.escapeShellArg monitor}";
+    on-click = "${lib.getExe packages.dashboardPanel} toggle ${lib.escapeShellArg monitor}";
   };
 
   networkModule = monitor: {
-    exec = "${lib.getExe pkgs.quickshell} ipc --config media call network status";
+    exec = "${lib.getExe packages.networkPanel} status";
     interval = 5;
     return-type = "json";
     tooltip = true;
     escape = false;
-    on-click = "${lib.getExe pkgs.quickshell} ipc --config media call network toggle ${lib.escapeShellArg monitor}";
+    on-click = "${lib.getExe packages.networkPanel} toggle ${lib.escapeShellArg monitor}";
   };
 
   # The resident AGS/Astal audio panel owns the badge and Bluetooth/Audio popup.

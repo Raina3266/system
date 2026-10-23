@@ -3,7 +3,6 @@
   config,
   lib,
   repoRoot,
-  repoPackages,
   ...
 }:
 let
@@ -44,7 +43,6 @@ in
 {
   imports = [
     ./panels
-    ./quickshell
     ./waybar
   ];
 
@@ -74,7 +72,6 @@ in
     swaybg
     swaylock # Mod+Alt+L in config.kdl
     nwg-displays
-    bluez-tools
     wireplumber # PipeWire/WirePlumber control (wpctl for niri audio binds)
     brightnessctl # Screen brightness control
     xrandr # Display layout info for X11 apps

@@ -1,4 +1,4 @@
-# Media and audio use AGS/Astal GTK4; the remaining panels stay in Quickshell.
+# Media, audio, network, dashboard, and notifications use AGS/Astal GTK4.
 {
   config,
   lib,
@@ -13,6 +13,8 @@
     repoPackages.mediaControl
     repoPackages.audioPanel
     repoPackages.audioControl
+    repoPackages.dashboardPanel
+    repoPackages.networkPanel
   ];
 
   # Keep generated assets outside this directory-level live link so Home
@@ -23,6 +25,12 @@
   xdg.configFile."ags/audio".source =
     config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/audio-control/astal";
   xdg.configFile."ags/audio-palette.json".source = repoPackages.audioPanel.palette;
+  xdg.configFile."ags/network".source =
+    config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/network-manager/astal";
+  xdg.configFile."ags/network-palette.json".source = repoPackages.networkPanel.palette;
+  xdg.configFile."ags/dashboard".source =
+    config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/dashboard";
+  xdg.configFile."ags/dashboard-palette.json".source = repoPackages.dashboardPanel.palette;
 
   systemd.user.services.ags-media = {
     Unit = {
@@ -42,9 +50,37 @@
         "MEDIA_PANEL_CONFIG=${config.xdg.configHome}/ags/media/frontend.js"
         "MEDIA_PANEL_PALETTE=${config.xdg.configHome}/ags/media-palette.json"
         "MEDIA_CONTROL=${lib.getExe repoPackages.mediaControl}"
-        "QUICKSHELL=${lib.getExe pkgs.quickshell}"
+        "NETWORK_PANEL=${lib.getExe repoPackages.networkPanel}"
       ];
       Restart = lib.mkForce "on-failure";
+      RestartSec = 3;
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  systemd.user.services.ags-network = {
+    Unit = {
+      Description = "AGS/Astal GTK4 network panel";
+      X-Restart-Triggers = [ config.xdg.configFile."ags/network-palette.json".source ];
+      ConditionEnvironment = [
+        "WAYLAND_DISPLAY"
+        "XDG_CURRENT_DESKTOP=niri"
+      ];
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${lib.getExe repoPackages.networkPanel} run";
+      Environment = [
+        "GDK_BACKEND=wayland"
+        "NETWORK_PANEL_CONFIG=${config.xdg.configHome}/ags/network/frontend.js"
+        "NETWORK_PANEL_PALETTE=${config.xdg.configHome}/ags/network-palette.json"
+        "NETWORK_CUSTOM_HELPER=${lib.getExe repoPackages.networkManager}"
+        "NETWORK_EDITOR=${lib.getExe' pkgs.networkmanagerapplet "nm-connection-editor"}"
+        "DASHBOARD_PANEL=${lib.getExe repoPackages.dashboardPanel}"
+        "MEDIA_PANEL=${lib.getExe repoPackages.mediaPanel}"
+      ];
+      Restart = "on-failure";
       RestartSec = 3;
     };
     Install.WantedBy = [ "graphical-session.target" ];
@@ -75,8 +111,41 @@
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
+  systemd.user.services.ags-dashboard = {
+    Unit = {
+      Description = "AGS/Astal GTK4 dashboard and notification server";
+      Conflicts = [ "swaync.service" ];
+      X-Restart-Triggers = [ config.xdg.configFile."ags/dashboard-palette.json".source ];
+      ConditionEnvironment = [
+        "WAYLAND_DISPLAY"
+        "XDG_CURRENT_DESKTOP=niri"
+      ];
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "dbus";
+      BusName = "org.freedesktop.Notifications";
+      ExecStart = "${lib.getExe repoPackages.dashboardPanel} run";
+      Environment = [
+        "GDK_BACKEND=wayland"
+        "DASHBOARD_PANEL_CONFIG=${config.xdg.configHome}/ags/dashboard/power.ts"
+        "DASHBOARD_PANEL_PALETTE=${config.xdg.configHome}/ags/dashboard-palette.json"
+        "NETWORK_PANEL=${lib.getExe repoPackages.networkPanel}"
+        "NOTIFICATION_HISTORY=%S/dashboard/notifications.json"
+        "LEGACY_NOTIFICATION_HISTORY=%S/quickshell/notifications.json"
+      ];
+      StateDirectory = "dashboard";
+      StateDirectoryMode = "0700";
+      UMask = "0077";
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
   systemd.user.services.waybar.Unit = {
-    Wants = [ "audio-control-ui.service" ];
-    After = [ "audio-control-ui.service" ];
+    Wants = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" ];
+    After = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" ];
   };
 }

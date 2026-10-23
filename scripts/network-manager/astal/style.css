@@ -1,0 +1,126 @@
+window.network-panel {
+    background: transparent;
+    color: @np_cyan;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+}
+
+.network-panel .network-card,
+.network-panel .network-card * {
+    min-width: 0;
+    min-height: 0;
+    box-shadow: none;
+    text-shadow: none;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+}
+
+.network-panel .network-card { background: transparent; padding: 0; margin: 0; border: none; }
+.network-panel .network-content { padding: 12px; }
+.network-panel label { background: transparent; color: @np_cyan; padding: 0; margin: 0; }
+.network-panel .heading { font-weight: bold; letter-spacing: 1px; }
+.network-panel .network-name { font-weight: bold; }
+.network-panel .metadata { color: @np_foreground; }
+.network-panel .warning { color: @np_yellow; }
+.network-panel .network-divider {
+    min-height: 1px;
+    background: alpha(@np_separator, 0.4);
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.network-panel button.control-button {
+    background: transparent;
+    background-image: none;
+    color: @np_cyan;
+    border: 0.35px solid alpha(@np_foreground, 0.5);
+    border-radius: 3px;
+    min-height: 27.3px;
+    min-width: 0;
+    padding: 0 8px;
+    margin: 0;
+    outline: none;
+    transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.network-panel button.control-button label { color: inherit; font-weight: bold; padding: 0; margin: 0; }
+.network-panel button.control-button.selected { background: alpha(@np_dimPink, 0.35); }
+/* Paint the extra hover stroke inward, so keyboard focus never resizes a row. */
+.network-panel button.control-button:hover,
+.network-panel button.control-button:focus-visible {
+    background: alpha(@np_pink, 0.333);
+    border-color: @np_yellow;
+    box-shadow: inset 0 0 0 1.15px @np_yellow;
+}
+.network-panel button.control-button:active { background: alpha(@np_pink, 0.45); }
+.network-panel button.control-button:disabled {
+    color: @np_separator;
+    background: transparent;
+    border-color: alpha(@np_foreground, 0.25);
+    box-shadow: none;
+}
+.network-panel button.wifi-toggle { min-width: 61.3px; }
+.network-panel button.icon-button { min-width: 27.3px; padding: 0; border-radius: 999px; }
+.network-panel button.icon-button label { color: @np_red; font-size: 14px; font-weight: normal; }
+.network-panel button.icon-button:disabled label { color: @np_separator; }
+
+.network-panel entry.network-password {
+    background: alpha(@np_chromeBackground, 0.8);
+    background-image: none;
+    color: @np_cyan;
+    caret-color: @np_cyan;
+    border: 0.35px solid alpha(@np_foreground, 0.5);
+    border-radius: 3px;
+    min-height: 27.3px;
+    min-width: 0;
+    padding: 0 6px;
+    margin: 0;
+    outline: none;
+}
+.network-panel entry.network-password:focus-within {
+    border-color: @np_yellow;
+    box-shadow: inset 0 0 0 1.15px @np_yellow;
+}
+.network-panel entry.network-password placeholder { color: @np_separator; }
+.network-panel entry.network-password selection { background: @np_pink; color: @np_background; }
+
+.network-panel dropdown.profile-choice { padding: 0; margin: 0; }
+.network-panel dropdown.profile-choice > button {
+    background: alpha(@np_chromeBackground, 0.8);
+    background-image: none;
+    color: @np_cyan;
+    border: 0.35px solid alpha(@np_foreground, 0.5);
+    border-radius: 3px;
+    min-height: 27.3px;
+    padding: 0 8px;
+    margin: 0;
+    outline: none;
+}
+.network-panel dropdown.profile-choice > button:hover,
+.network-panel dropdown.profile-choice > button:focus-visible { border-color: @np_yellow; }
+.network-panel dropdown.profile-choice popover > contents {
+    background: #25252f;
+    border: 1px solid @np_yellow;
+    border-radius: 3px;
+    color: @np_cyan;
+    padding: 4px;
+}
+.network-panel dropdown.profile-choice listview { background: transparent; color: @np_cyan; }
+.network-panel dropdown.profile-choice listview row { padding: 4px 6px; border: none; }
+.network-panel dropdown.profile-choice listview row:selected { background: alpha(@np_pink, 0.333); }
+
+.network-panel scrolledwindow,
+.network-panel viewport { background: transparent; border: none; padding: 0; margin: 0; }
+.network-panel scrolledwindow > overshoot,
+.network-panel scrolledwindow > undershoot { background: transparent; background-image: none; border: none; }
+.network-panel scrollbar { background: transparent; border: none; padding: 0; margin: 0; }
+.network-panel scrollbar slider {
+    background: alpha(@np_pink, 0.5);
+    min-width: 3px;
+    min-height: 12px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 2px;
+}
+.network-panel scrollbar.horizontal slider { min-width: 12px; min-height: 3px; }

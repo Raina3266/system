@@ -100,13 +100,11 @@ in
             Wants = [
               "waybar-timer.service"
               "rofi-clipboard-collector.service"
-              "quickshell-media.service"
               "ags-media.service"
             ];
             After = [
               "waybar-timer.service"
               "rofi-clipboard-collector.service"
-              "quickshell-media.service"
               "ags-media.service"
             ];
           };

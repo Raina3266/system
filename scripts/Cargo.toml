@@ -2,7 +2,7 @@
 members = [
   "audio-control/rust-custom",
   "media-control/rust-custom",
-  "network-manager",
+  "network-manager/rust-custom",
   "ocr-screenshot",
   "preview-panel",
   "rofi-clipboard",

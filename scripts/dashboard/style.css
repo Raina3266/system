@@ -1,0 +1,143 @@
+/* Higher than USER priority, but deliberately confined to these two windows. */
+window.dashboard-ui {
+    background: transparent;
+    color: @dp_foreground;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+    opacity: 1;
+}
+
+window.dashboard-ui,
+.dashboard-ui * {
+    color: @dp_foreground;
+    opacity: 1;
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+    outline-style: none;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+    font-weight: normal;
+    font-style: normal;
+    letter-spacing: 0;
+    transition: none;
+}
+
+.dashboard-ui .cut-frame { background: transparent; }
+.dashboard-ui label { background: transparent; }
+
+.dashboard-ui .section {
+    background: transparent;
+    border: 1px solid alpha(@dp_cyan, 0.28);
+    border-radius: 3px;
+    /* Including the border, the section inset is exactly 12px. */
+    padding: 11px;
+}
+.dashboard-ui .section-glyph { color: @dp_pink; font-size: 14px; }
+.dashboard-ui .section-title {
+    color: @dp_cyan;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+.dashboard-ui .section-divider { min-height: 1px; background: alpha(@dp_cyan, 0.16); }
+
+.dashboard-ui .battery-glyph { color: @dp_pink; font-size: 23px; }
+.dashboard-ui .battery-label {
+    color: @dp_separator;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1.2px;
+}
+.dashboard-ui .battery-status { color: @dp_cyan; font-size: 11px; }
+.dashboard-ui .battery-percentage { color: @dp_foreground; font-family: "JetBrains Mono", monospace; font-size: 17px; }
+
+.dashboard-ui button { opacity: 1; }
+.dashboard-ui .action-tile {
+    background: transparent;
+    border: 1px solid alpha(@dp_separator, 0.35);
+    border-radius: 3px;
+    transform: scale(1);
+    transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+}
+.dashboard-ui .action-tile:hover, .dashboard-ui .action-tile:focus-visible { background: alpha(@dp_dimPink, 0.25); }
+.dashboard-ui .action-tile.active {
+    background: alpha(@dp_dimPink, 0.5);
+    border-color: alpha(@dp_cyan, 0.8);
+}
+.dashboard-ui .action-tile:active { transform: scale(0.97); }
+.dashboard-ui .tile-glyph { color: @dp_pink; font-size: 17px; }
+.dashboard-ui .tile-caption { color: @dp_separator; font-size: 9px; font-weight: bold; letter-spacing: 1px; }
+.dashboard-ui .action-tile.active .tile-glyph { color: @dp_cyan; }
+.dashboard-ui .action-tile.active .tile-caption { color: @dp_foreground; }
+.dashboard-ui .action-tile:disabled { opacity: 0.45; transform: scale(1); }
+
+.dashboard-ui .metric-label { color: @dp_separator; font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }
+.dashboard-ui .metric-value { color: @dp_foreground; font-size: 11px; font-family: "JetBrains Mono", monospace; }
+.dashboard-ui .metric-bar { min-height: 5px; }
+.dashboard-ui .metric-bar trough { min-height: 5px; border-radius: 2px; background: alpha(@dp_separator, 0.2); }
+.dashboard-ui .metric-bar progress { min-height: 5px; border-radius: 2px; background: @dp_pink; }
+.dashboard-ui .metric-bar.critical progress { background: @dp_red; }
+
+.dashboard-ui .history-count { color: @dp_foreground; font-size: 9px; font-weight: bold; letter-spacing: 0.8px; margin-right: 8px; }
+.dashboard-ui .notifications-empty { color: @dp_separator; font-size: 10px; letter-spacing: 1.5px; margin: 8px 0; }
+
+.dashboard-ui .icon-button, .dashboard-ui .notification-action {
+    background: transparent;
+    border: 0.35px solid alpha(@dp_foreground, 0.5);
+    border-radius: 3px;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.dashboard-ui .icon-button { border-radius: 999px; }
+.dashboard-ui .icon-glyph { color: @dp_red; font-size: 14px; }
+.dashboard-ui .notification-close .icon-glyph { font-size: 10px; }
+.dashboard-ui .icon-button:hover, .dashboard-ui .icon-button:focus-visible,
+.dashboard-ui .notification-action:hover, .dashboard-ui .notification-action:focus-visible {
+    background: alpha(@dp_pink, 0.333);
+    border-color: @dp_yellow;
+    border-width: 1.5px;
+}
+.dashboard-ui .icon-button:active, .dashboard-ui .notification-action:active { background: alpha(@dp_pink, 0.45); }
+.dashboard-ui .icon-button:disabled, .dashboard-ui .notification-action:disabled {
+    background: transparent;
+    border: 0.35px solid alpha(@dp_foreground, 0.25);
+}
+.dashboard-ui .icon-button:disabled .icon-glyph { color: @dp_separator; }
+
+.dashboard-ui .notification-entry {
+    background: transparent;
+    border: 1px solid alpha(@dp_cyan, 0.42);
+    border-radius: 2px;
+    transition: background-color 120ms ease-out;
+}
+.dashboard-ui .notification-entry.hovered, .dashboard-ui .notification-entry:focus-visible { background: alpha(@dp_dimPink, 0.35); }
+.dashboard-ui .notification-layout { margin: 8px 23px 8px 11px; }
+.dashboard-ui .notification-stripe { min-width: 2px; background: @dp_cyan; }
+.dashboard-ui .notification-entry.critical .notification-stripe { background: @dp_red; }
+.dashboard-ui .popup-entry, .dashboard-ui .popup-entry.hovered, .dashboard-ui .popup-entry:focus-visible { background: transparent; border: none; }
+.dashboard-ui .popup-entry .notification-layout { margin: 9px 24px 9px 12px; }
+.dashboard-ui .notification-app { color: @dp_pink; font-size: 9px; font-weight: bold; letter-spacing: 1.2px; }
+.dashboard-ui .notification-summary { color: @dp_cyan; font-size: 12px; font-weight: bold; }
+.dashboard-ui .notification-body { color: @dp_foreground; font-size: 12px; }
+.dashboard-ui .notification-action { padding: 0 8px; }
+.dashboard-ui .notification-action-label { color: @dp_cyan; font-size: 12px; font-weight: bold; }
+.dashboard-ui .notification-action:disabled .notification-action-label { color: @dp_separator; }
+.dashboard-ui flowbox, .dashboard-ui flowboxchild { background: transparent; border: none; padding: 0; margin: 0; }
+
+.dashboard-ui scrolledwindow, .dashboard-ui viewport { background: transparent; border: none; }
+.dashboard-ui scrollbar { background: transparent; }
+.dashboard-ui scrollbar slider {
+    min-width: 3px;
+    min-height: 24px;
+    border-radius: 2px;
+    background: alpha(@dp_pink, 0.5);
+}
+.dashboard-ui scrollbar slider:hover { background: @dp_pink; }
+.dashboard-ui scrollbar.horizontal slider { min-width: 24px; min-height: 3px; }

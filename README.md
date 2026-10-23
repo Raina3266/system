@@ -4,7 +4,7 @@ This repository contains nine Rust packages used by the desktop configuration:
 
 - `audio-control` — headless audio compatibility policy, request-local PIN/passkey pairing, and HID++ battery publication
 - `media-control` — headless media grouping, conservative stream matching, artwork, and video-author metadata
-- `network-manager` — only the detail/secret/QR and legacy-WEP gaps in Quickshell’s native networking API
+- `network-manager` — QR-only Wi-Fi share-code encoding; native network information, secrets, and WEP settings stay in GJS/libnm
 - `ocr-screenshot` — screenshot OCR and clipboard integration
 - `preview-panel` — the shared GTK4 preview surface
 - [`rofi-clipboard`](#rofi-clipboard) — clipboard history and memos
@@ -12,9 +12,10 @@ This repository contains nine Rust packages used by the desktop configuration:
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
-The Niri configuration uses **AGS 2.3/Astal GTK4 for media and audio**. The
-dashboard, network, and notification popups remain in Quickshell. `media-panel`
-and `audio-panel` are Nix-packaged launchers, not additional Rust GUIs.
+The Niri configuration uses **AGS 2.3/Astal GTK4 for media, audio, dashboard,
+notifications, and network**. The panel commands are Nix-packaged launchers,
+not additional Rust GUIs. The dashboard is TypeScript-only, with its application,
+metrics, notifications, styles, and tests directly in `scripts/dashboard/`.
 
 ## Live desktop editing
 
@@ -25,7 +26,8 @@ from `/home/raina/System`. They no longer need another system rebuild:
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
 | `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
-| `themes/quickshell/*.qml` | Quickshell reloads dashboard, network, and notifications on save |
+| `scripts/dashboard/*.ts`, `style.css` | Live-linked AGS dashboard/notification sources; restart `ags-dashboard.service` to apply edits |
+| `scripts/network-manager/astal/*.js`, `style.css` | Live-linked AGS network sources; restart `ags-network.service` to apply edits |
 | `scripts/media-control/astal/*.js`, `style.css` | Live-linked AGS media sources; restart `ags-media.service` to apply edits |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
@@ -71,8 +73,10 @@ The text-entry field and Send button appear only when a PIN, passkey, or yes/no
 response is requested. Automatic pairing shows no input controls; codes to type
 on a keyboard/device are displayed as instructions, without a panel entry field.
 
-Volume percentages sit beside their sliders on the same row. There is no Play
-tab; playback stays in the existing media panel. Output volume runs from
+Audio and media volume use compact rectangular bars with percentages inside the
+moving thumb and hollow triangle buttons for 1% steps. Colors follow the existing
+palette; mute controls remain separate. There is no Play tab in audio; playback
+stays in the existing media panel. Output volume runs from
 **0 to 150%**, retaining amplification above 100%. Input remains 0–100%.
 Choosing an output changes the system default and makes all currently running
 playback streams follow it through Astal's native stream API. This overrides old
@@ -80,8 +84,9 @@ per-application device pins, so Chrome, Elisa, and other active players use the
 selected output and follow later default changes. Capture/recording targets are
 not changed. Playback is rerouted only after the output selection succeeds, not
 during metadata refresh, volume/mute changes, or failed profile-switch recovery.
-The Devices selector is hidden unless an available alternative exists. Unplugged
-ports are not reintroduced as generic endpoints when their associated routes are
+Input and output use Devices dropdowns that follow the native default and are
+hidden unless an available alternative exists. Unplugged ports are not
+reintroduced as generic endpoints when their associated routes are
 unavailable; successful helper omissions are scoped to the exact native snapshot
 identities, while newly discovered endpoints retain native fallback until resolved.
 Volume/mute remain independent of that list and always target the live native
@@ -176,11 +181,9 @@ and the native application lifecycle, independently of `media-panel`. Its public
 including on errors. Repeated Waybar polling does not rely on garbage collection
 to release sockets, and no framework implementation is patched.
 
-**Migration prerequisite:** apply the normal NixOS/Home Manager generation before
-restarting the UI. The migration audit found the installed generation still using
-the old Quickshell audio unit and dangling live QML links; the new
-`~/.config/ags/audio` link was not yet installed. A restart alone cannot install
-the AGS configuration or updated helper. Let the generation manage the links and
+**Installation prerequisite:** apply the normal NixOS/Home Manager generation
+after changing the runtime, helper, service, or configuration links. A restart
+alone cannot install those changes; let the generation manage the links and
 unit rather than repairing them manually.
 
 After the switch, the service starts with the graphical session and Waybar wants
@@ -250,7 +253,15 @@ AGS runtime wrapper, the new policy-capable helper selected by
 generic AGS or an old installed helper is not sufficient. It checks real GI
 integration and bounded subprocess pipes, split UTF-8, interactive input, errors,
 and timeouts. It reads native state but never changes devices, starts discovery,
-or initiates pairing. The audio-panel tests have no Python dependency.
+or initiates pairing. These Node/GJS checks have no Python dependency.
+
+The optional `scripts/audio-control/astal/tests/dropdown-smoke.js` checks real
+GTK dropdown models, keyboard/pointer selection, popup dismissal and bounded
+layout with a fake backend. It requires authenticated private Xvfb and a
+service-free private D-Bus (both bus addresses isolated), the audio AGS wrapper,
+`AUDIO_PANEL_CONFIG`/`AUDIO_PANEL_PALETTE`, and
+`AUDIO_DROPDOWN_ISOLATED=1`. Python 3 and libX11 provide its isolated XTEST input.
+Do not run this UI entry point against the desktop display or buses.
 
 The consolidated `tests/audio-control.test.js` includes launcher coverage. The
 built-launcher test uses an isolated fake AGS executable, without desktop IPC,
@@ -434,41 +445,35 @@ A minimal custom module configuration looks like this:
 
 ## Desktop panels
 
-### Quickshell dashboard
+### Dashboard (AGS/Astal GTK4)
 
-`Mod+N` and the right-most Waybar battery button open the Quickshell dashboard
-in a monitor-local layer-shell window near the top-right of the screen. The
-button continues to show battery level and charging state, with low, warning,
-and critical classes for Waybar styling.
+`Mod+N` and the right-most Waybar battery button invoke `dashboard-panel toggle`.
+The 440px dashboard retains its top-right placement, yellow cut-corner frame
+and glow, cyan/pink palette, three sections, scrolling, and Escape/outside-click
+dismissal. The Waybar badge retains battery percentage and charging/low states,
+now read from Astal rather than a parallel shell status reader.
 
-The dashboard uses Quickshell's shared frame, palette, and buttons. Its
-three sections are:
+- **Power:** native Astal battery and power profiles, plus airplane mode through
+  native NetworkManager and Bluetooth adapter power. Idle inhibition is removed.
+- **System parameters:** asynchronous Gio reads of `/proc/stat`, `/proc/meminfo`,
+  and `/sys/class/thermal/thermal_zone0/temp` every 2.5 seconds while open;
+  root filesystem usage from the existing coreutils `df` every 30 seconds.
+  Closing cancels reads, timers, and pending `df`. No monitoring daemon is added.
+- **Notifications:** native AstalNotifd owns `org.freedesktop.Notifications`.
+  TypeScript supplies archive/popup policy, not another notification backend.
 
-- **Power:** battery state and power profiles through Quickshell's native
-  UPower/PowerProfiles services, airplane mode through NetworkManager and
-  Bluetooth bindings, and idle inhibition through Quickshell's Wayland
-  `IdleInhibitor`;
-- **System parameters:** CPU and RAM from `/proc`, temperature from the kernel
-  thermal interface, and root filesystem usage from `df`. Quickshell 0.3.1 has
-  no general system-monitor service, so procfs/sysfs use `FileView` and `df`
-  supplies filesystem capacity; and
-- **Notifications:** Quickshell's native `NotificationServer` owns
-  `org.freedesktop.Notifications`. The dashboard and popup stack share the same
-  event-driven history, DND, dismiss, clear-all, and native action handlers.
-
-Only system metrics are polled while the dashboard is open. Notifications
-update directly from native service signals. The history viewport shows
-roughly three rows and scrolls for more. Wi-Fi details,
-media, audio, the agenda, settings, and session power actions remain in their
-existing Waybar panels or declarative system controls.
+Sources, tests, and runtime metadata live in `scripts/dashboard/`; the launcher
+is `niri/panels/dashboard.nix`. The `ags-dashboard` user service owns the
+resident `dashboard-panel` application, starting `power.ts`. `parameters.ts`
+contains metrics and `notification.ts` contains notification state and widgets.
+Run `npm test` in `scripts/dashboard/` for the consolidated `tests.ts` suite.
 
 ### Notification popups
 
-Quickshell displays up to five newest-first popup cards near the top-right of
-the first available monitor. They reuse `PopupFrame`, `ControlButton`,
-`IconButton`, and the dashboard's `NotificationEntry`, including app images,
-plain-text bodies, close controls, and native action buttons. Popups do not
-take keyboard focus.
+The AGS dashboard displays up to five newest-first popup cards near the
+top-right of the first available monitor. Popups and history share GTK
+notification rows with app images, plain-text bodies, close controls, and native
+action buttons. Popups do not take keyboard focus.
 
 The default timeout is eight seconds; explicit application timeouts are
 respected. Hover pauses expiry, zero-timeout and critical notifications remain
@@ -476,61 +481,136 @@ until dismissed, and DND hides popups while retaining non-transient history.
 Expired entries stay in the dashboard without stale actions. Transient
 notifications are never archived, and client-requested closes remove entries.
 
-The latest 200 entries and DND state are saved through native `FileView` to
-`$XDG_STATE_HOME/quickshell/notifications.json` (normally
-`~/.local/state/quickshell/notifications.json`). The user service creates its
-private state directory. History survives QML reloads and process restarts;
-application actions cannot survive a full process restart.
+The latest 200 entries are saved atomically through Gio to
+`$XDG_STATE_HOME/dashboard/notifications.json`, with private directory/file
+permissions. When the new archive is absent, the previous
+`$XDG_STATE_HOME/quickshell/notifications.json` is imported once as archived text,
+without modifying the old file or retaining stale actions. Native Astal
+DND state is mirrored in the archive. Restarts do not replay popup windows;
+Astal-restored live actions are reattached only to matching archived rows.
 
+`F8` invokes `dashboard-panel toggleDnd`. Apply a normal NixOS/Home Manager
+switch before restarting the new service: the updated runtime, live links, and
+notification-bus ownership cannot be installed by a service restart alone.
 
-Earlier daemon history can be imported once as archived text before the
-handoff; subsequent notifications go directly to Quickshell.
+### Network panel (AGS/Astal GTK4)
 
-### Network panel
+`network-panel` opens the network card on the monitor whose Waybar button was
+clicked. It retains the bounded 420×520 layout, chamfered translucent frame,
+colors, controls, profile chooser, and outside-click/Escape dismissal. Network
+scanning runs only while the panel is open and Wi-Fi is enabled.
 
-The network button opens the Quickshell panel on the monitor whose button was
-clicked. It shares the same frame, controls, colors, and outside-click/Escape
-dismissal as the other popups. Scanning is enabled only while this panel is open.
+AstalNetwork supplies the shared native NetworkManager client. Its exposed
+libnm objects in GJS own **all** Wi-Fi/Ethernet information and operations:
+multiple adapters, signal/security, software/hardware radio state, saved
+profiles, scanning, activation, disconnection, forgetting, IP metadata and
+permission-controlled secrets. No Astal patches, second client, Rust network
+inventory, or `nmcli` backend is used.
 
-Native `Quickshell.Networking` supplies device/network models, Wi-Fi software
-and hardware state, signal/security, saved profiles, open/OWE/personal activation,
-PSK prompts/retries, disconnect, and Forget with confirmation. Rows put active
-connections first, then saved profiles, and sort strength by icon bucket to
-avoid reshuffling for one-percent changes. Ethernet takes priority in Waybar.
-The badge is native IPC JSON rather than a Rust inventory/status process.
+Astal's `wifi`/`wired` convenience views select a single adapter, and its AP
+activation helper does not cover every required security/profile flow. The GJS
+adapter therefore uses the **same Astal-owned client** and its exposed libnm
+objects for multi-adapter lifecycle, exact-UUID activation, open/WEP/SAE/OWE
+settings, profile deletion, metadata and secrets. These remain native
+operations, not custom-backend exceptions. Activation completes only when the
+requested connection and device both report `ACTIVATED`; closing a pending UI
+request does not issue an implicit network disconnect.
 
-Saved profiles can be selected by UUID. Quickshell 0.3.1 cannot target a chosen
-profile when supplying a replacement PSK, so ambiguous per-profile credential
-edits go to **Advanced** (`nm-connection-editor`) rather than modifying another
-profile. Preconfigured enterprise/hidden profiles remain usable; creating those
-profiles also belongs in Advanced, not a misleading generic password prompt.
+Rows put active connections first, then saved profiles, and sort strength by
+icon bucket to avoid reshuffling for one-percent changes. Ethernet takes
+priority in Waybar. Profiles are selected by UUID, not their display names.
+Open, OWE, WEP and personal WPA/WPA2/WPA3 connections use native libnm settings.
+Ambiguous per-profile credential updates and enterprise/hidden configuration
+remain in **Advanced** (`nm-connection-editor`). Forget confirms deletion of
+all matching saved profiles and disconnects the network.
 
 **Info** shows SSID, signal/security, active profile ID/UUID, interface/MAC,
 IPv4/IPv6, gateways, DNS, BSSID, frequency/band/channel/mode, and link rate.
 Passwords are queried only after **Reveal password**, not on opening Info.
-**QR** explicitly requests a large share code for supported saved open/WEP/WPA
-profiles. Hidden flags and QR delimiters are handled; enterprise and Enhanced
-Open credentials are rejected with an explanation.
+**QR** explicitly requests a share code for supported open/WEP/personal WPA
+profiles, including the hidden flag. Enterprise and Enhanced Open sharing
+remain unsupported, with an explanation.
 
-Quickshell 0.3.1 does not expose IP/radio details, saved-secret retrieval, a QR
-encoder, or initial WEP credentials. Only these gaps remain in Rust:
+Rust owns only the QR encoder, a capability Astal/libnm does not provide:
+`network-manager qr` reads bounded JSON on stdin and returns a PNG data URL.
+All old `info`, `secret`, and `connect-wep` commands have been removed. Neither
+credentials nor QR payloads appear in command arguments or temporary files.
+GJS pins the interface, SSID, profile UUID, active connection path and BSSID;
+late secret/QR replies are discarded after roaming, connection changes,
+selection changes or dismissal, and displayed sensitive state is cleared.
 
-```text
-network-manager info <interface> <expected-ssid>
-network-manager secret <interface> <expected-ssid> <profile-uuid> <bssid>
-network-manager qr <interface> <expected-ssid> <profile-uuid> <bssid>
-network-manager connect-wep <interface> <expected-ssid>
+The helper protocol accepts only `network-manager qr`, with no extra
+arguments. One JSON object is read from stdin, limited to 16 KiB including
+syntax and whitespace:
+
+```json
+{"ssid":"Guest","authentication":"WPA","password":"example-only","hidden":false}
 ```
 
-The helper no longer enumerates networks or implements status, scanning,
-ordinary connection, disconnect, or forget. `info` never requests secrets.
-WEP input is a JSON password record over stdin; QR payloads also go through
-stdin, never process arguments or temporary files. Interface, active profile
-UUID, SSID, connection path, and BSSID are validated before/after reads; stale
-UI responses are discarded after connection/selection/visibility changes.
-Secret/QR requests pin the identity obtained by a preceding nonsecret Info
-read and reject a changed profile/AP before querying any secret. Completed
-secret-bearing stdout lines are not retained in a collector after dispatch.
+`ssid` is a nonempty UTF-8 string of at most 32 bytes without control
+characters; `authentication` is exactly `nopass`, `WPA`, or `WEP`; `password`
+contains no control characters and is nonempty for WPA/WEP (optional for
+`nopass`, whose payload never includes a password); `hidden` is a required
+boolean. Unknown fields, wrong types, malformed JSON/UTF-8, and oversized
+input fail. Backslash, semicolon, comma, colon, and double quote are escaped
+in QR fields; Unicode, whitespace, and the hidden flag are preserved. The
+payload goes only to `qrencode` stdin — the packaged wrapper sets only
+`NETWORK_MANAGER_QRENCODE` — with encoder diagnostics suppressed and PNG reads
+capped at 1 MiB. Success returns `{"image":"data:image/png;base64,..."}`;
+failures exit with status 2 and generic JSON `error`/stderr diagnostics, never
+credential-bearing parser or subprocess output. The helper does not query
+NetworkManager.
+
+UI, native integration and tests live in `scripts/network-manager/astal/`,
+with the same file layout as the media and audio panels: `frontend.js` (GTK4
+widgets, rendering, application IPC), `backend.js` (Astal service integration,
+native actions, transport to the Rust helper), `logic.js` (GTK-independent
+presentation/controller utilities), `style.css`, and the consolidated
+cross-runtime `test.js`. The QR-only Rust helper and its protocol tests live in
+`scripts/network-manager/rust-custom/`. The launcher is
+`niri/panels/network.nix`, with the runtime typelibs and JSON palette generated
+from `themes/palette.nix`; `niri/panels/default.nix` provides the resident
+`ags-network.service` and live Home Manager links, with palette restart
+triggers. `scripts/Cargo.toml` and `scripts/packages.nix` integrate the
+workspace and packages; Cargo's package remains `rofi-network` to preserve
+`Cargo.lock`, while the installed helper executable is `network-manager`.
+
+```sh
+network-panel run
+network-panel status
+network-panel toggle eDP-1
+network-panel close
+systemctl --user restart ags-network.service  # Apply live JS/CSS edits after installation
+```
+
+The native application owns the `network-panel` AGS instance. Requests are
+JSON; monitor names are transported without shell interpolation. Status
+polling is read-only and never dismisses panels or mutates network state.
+
+All four panel launchers compile with `ags bundle --gtk 4` into distinct files
+under `$XDG_RUNTIME_DIR/ags-panels/`, then execute their packaged `panel-gjs`
+wrapper. AGS 2.3's `run` command shares one `ags.js` output across instances,
+which can execute another panel's code during concurrent startup; the wrapper
+preserves each panel's native GI environment and GTK4 layer-shell preload,
+while `XDG_RUNTIME_DIR` itself stays unchanged so Astal IPC sockets remain
+accessible. The network application checks native registration before holding
+its event loop, so registration failure exits instead of serving an
+uninitialized badge forever.
+
+Environment overrides:
+
+- `NETWORK_PANEL_CONFIG`: defaults to
+  `${XDG_CONFIG_HOME:-$HOME/.config}/ags/network/frontend.js`.
+- `NETWORK_PANEL_PALETTE`: generated JSON palette; the service uses its Home
+  Manager configuration link.
+- `NETWORK_CUSTOM_HELPER`: QR-only `network-manager` executable.
+- `NETWORK_EDITOR`: `nm-connection-editor` for the Advanced flow.
+- `DASHBOARD_PANEL`/`MEDIA_PANEL`: peer launchers invoked by
+  `dismissOtherPanels()`; other panels use `NETWORK_PANEL` (default
+  `network-panel`) to dismiss network.
+
+Apply the normal NixOS/Home Manager switch once to install the new launcher,
+service and links. A service restart alone cannot install migration wiring.
 
 
 ### Media panel (AGS/Astal GTK4)
@@ -589,21 +669,25 @@ It does not install generated children into that live link. The palette is
 serialized from `themes/palette.nix` to the separate
 `~/.config/ags/media-palette.json`; the frontend generates GTK `@define-color`
 rules programmatically from this JSON without writing generated CSS under the
-live link. Quickshell still gets its generated `Colors.qml` from the same palette.
+live link.
 
 The Niri-only `ags-media.service` runs `media-panel run`, restarts on failure,
 and is wanted by Waybar and the graphical session. The launcher uses the pinned
-AGS 2.3 CLI: `ags run --gtk4 -- <entry>`. Its overridden AGS package includes GTK4,
-Graphene, GTK4 layer-shell, Astal MPRIS, and Astal WirePlumber in the generated
-runtime wrapper; no manual `GI_TYPELIB_PATH` supplement is needed.
+AGS 2.3 compiler: `ags bundle --gtk 4 -- <entry> <output>`. All four panel
+launchers use distinct `$XDG_RUNTIME_DIR/ags-panels/<name>-panel.js` outputs;
+`ags run` would otherwise share a single `ags.js` file and race at login.
+`niri/panels/ags-runtime.nix` adds a companion `panel-gjs` wrapper using each
+AGS package's captured runtime environment and GTK4 layer-shell preload.
+Media retains GTK4, Graphene, Astal MPRIS and Astal WirePlumber; no manual
+`GI_TYPELIB_PATH` supplement is needed.
 `niri/panels/media.nix` also builds a combined native GdkPixbuf loader cache for
 standard formats, librsvg, and `webp-pixbuf-loader`, preserving PNG/JPEG/SVG while
 adding WebP artwork support. AGS's wrapper sets `GDK_PIXBUF_MODULE_FILE` to this
 cache rather than the default librsvg cache that omits WebP; no JavaScript
 decoder or user environment override is needed. The frontend subclasses native
 `Astal.Application`, constructs it with `instance_name: "media-panel"`, and uses
-its `acquire_socket()` and application lifecycle APIs. AGS 2.3 has no
-`run --instance` flag. Requests use Astal's native request socket through
+its `acquire_socket()` and application lifecycle APIs. Requests use Astal's
+native request socket through
 `ags request --instance media-panel -- <JSON>` with this payload:
 
 ```json
@@ -632,42 +716,38 @@ systemctl --user restart ags-media.service  # Apply live JS/CSS edits
 
 `MEDIA_PANEL_CONFIG` selects the entry file, defaulting to
 `$XDG_CONFIG_HOME/ags/media/frontend.js` (or `~/.config/ags/media/frontend.js`).
-`MEDIA_PANEL_PALETTE` is a JSON file path; `MEDIA_CONTROL` and `QUICKSHELL`
+`MEDIA_PANEL_PALETTE` is a JSON file path; `MEDIA_CONTROL` and `NETWORK_PANEL`
 are executable paths, not shell commands. The launcher supplies store-backed
 defaults, and the service explicitly supplies these values plus
 `GDK_BACKEND=wayland`. Graphical-session Wayland and D-Bus variables are inherited.
 
 Rebuild after changing Nix/service wiring or the Rust helper; JS/CSS changes
-only require restarting the media service. The legacy `quickshell-media.service`
-and `quickshell --config media` names are intentionally retained for the
-**non-media** desktop panels. Quickshell no longer exports a `media` IPC target.
+only require restarting the media service. Network requests use the separate
+`network-panel` launcher.
 
 ### Shared popup style
 
-The dashboard, network, and notification popups share QML components from
-`themes/quickshell/`. The AGS media and audio cards recreate the same presentation
-in GTK4 rather than loading QML; only palette values are shared across toolkits.
-`niri/quickshell/style.nix` installs a local `shared/` directory of aliases
-inside each popup's configuration root. All aliases point to the same
-source files and palette; styles are not copied. This keeps imports
-inside Quickshell's configuration sandbox without patching Quickshell:
+The AGS/Astal GTK4 cards use per-panel GTK CSS for controls and Cairo-drawn
+chamfered frames for translucent backgrounds and yellow outlines.
+`themes/palette.nix` supplies the shared colors as generated JSON palettes,
+kept outside the live-linked source directories.
 
-| Source | Shared behavior |
+| Panel | Presentation sources |
 | --- | --- |
-| `themes/quickshell/PopupFrame.qml` | Charcoal background, 10% transparency, thin yellow outline, matching corner cuts |
-| `themes/quickshell/ControlButton.qml` | Cyan text/red glyphs, 50%-transparent gray outlines, yellow/thicker outlines only on hover |
-| `themes/quickshell/IconButton.qml` | Circular variant of the shared button; volume buttons can suppress their outlines |
-| `themes/palette.nix` | One palette exported as Quickshell colors and AGS media/audio JSON |
+| Audio | `scripts/audio-control/astal/`: `style.css`, frame in `frontend.js` |
+| Media | `scripts/media-control/astal/`: `style.css`, frame in `frontend.js` |
+| Network | `scripts/network-manager/astal/`: `style.css`, frame in `frontend.js` |
+| Dashboard/notifications | `scripts/dashboard/`: `style.css`, frames and shared widgets in `notification.ts` |
 
 Audio uses Bluetooth/Audio tabs and native services. Output volume
 still spans 0–150%; the separate media panel is limited to 100%.
 Popup sizes and placement remain specific to their content, not separate themes.
 
-After installing the shared directory and palette links through Home Manager,
-if an edit is not picked up by Quickshell's live reload, refresh its UIs:
+After installing service/configuration links through Home Manager, restart
+the corresponding panel service to apply live JS/CSS edits. For network:
 
 ```sh
-systemctl --user restart quickshell-media.service
+systemctl --user restart ags-network.service
 ```
 
 ### Audio panel
@@ -680,10 +760,11 @@ but its AGS instance is `audio-panel`. Playback remains in the media panel.
 
 Dashboard, network, media, and audio use transparent monitor-sized layer
 surfaces with a visible card. The backdrop consumes outside clicks;
-Escape and a second button press dismiss the card. Opening network closes the
-dashboard and invokes `media-panel close` once through a Quickshell `Process`;
-network status polling never spawns a media command. Opening media closes network
-through `QUICKSHELL ipc --config media call network close`. The audio popup stays
+Escape and a second button press dismiss the card. Opening network invokes
+`dashboard-panel close` and `media-panel close` directly through asynchronous
+Gio subprocesses; network status polling never spawns another panel command.
+Opening media or dashboard closes network through `network-panel close`.
+The audio popup stays
 independent. Native notifications use a small non-focus-taking layer surface
 instead, so toasts do not grab keyboard input.
 
@@ -694,18 +775,14 @@ its card is closed.
 
 ### Verifying changes
 
-These protocol/controller checks use private D-Bus sessions and temporary/fake
-data, not the desktop notification owner or real network mutations:
+From the repository root, run the frontend and Rust policy/protocol checks:
 
 ```sh
-python3 themes/quickshell/tests/native_notifications.py
-python3 themes/quickshell/tests/network_controller.py
-python3 themes/quickshell/tests/panel_handoff.py
+npm --prefix scripts/dashboard test
+npm --prefix scripts/network-manager/astal test
 cargo test --manifest-path scripts/Cargo.toml --locked \
   -p audio-control -p media-control -p rofi-network --all-targets
 cargo build --manifest-path scripts/Cargo.toml --locked -p rofi-network -p media-control
-
-
 ```
 
 The Rust tests for `audio-control` and `media-control` each live in that
@@ -744,12 +821,55 @@ are printed; normal Cargo tests skip this live-desktop test.
 
 Rust `media-control` tests cover duplicate/source policy, conservative stream
 matching, native action plans, metadata caching, and the JSON bridges. Media
-frontend tests live with the JavaScript modules in `scripts/media-control/astal/`, not
-under Quickshell. `themes/quickshell/tests/panel_handoff.py` loads the real shell with fake panel
-components on a private D-Bus, proving network-open cross-close without media
-subprocesses during status polling.
+frontend tests live with the JavaScript modules in `scripts/media-control/astal/`.
 
-The Qt Quick tests in `themes/quickshell/tests/` cover network ordering/status,
-notification row sizing, and native action controls. They use installed shared
-component aliases and palette (or a staged equivalent). Do not activate a new
-generation or send real playback/network commands just to run isolated checks.
+Dashboard tests are consolidated in `scripts/dashboard/tests.ts` and use Node's
+built-in TypeScript transformation. `npm --prefix scripts/dashboard test` runs
+the parsing, metrics, battery/status, notification, DND, archive, and mocked
+native-service lifecycle checks without a display or desktop-service mutations.
+No separate Python helpers or test-output directories are retained.
+
+The consolidated `scripts/network-manager/astal/test.js` is one cross-runtime
+entry point; the former `controller.js` and `runtime.js` were folded into
+`backend.js`/`frontend.js`/`logic.js`, and the former `tests/` directory into
+`test.js`'s Node and GJS modes. `node --test test.js` exercises controller
+policy and formatting with simulated native dependencies — identity-pinned
+requests, cancellation races, launcher and startup checks — without GTK/GI or
+live NetworkManager state. Rust tests cover QR escaping, validation,
+malformed/oversized input, output bounds, and rejected legacy arguments:
+
+```sh
+cargo test --locked --manifest-path scripts/Cargo.toml -p rofi-network
+cargo fmt --manifest-path scripts/Cargo.toml -p rofi-network -- --check
+nix-instantiate --parse niri/panels/network.nix >/dev/null
+nix-instantiate --parse niri/panels/default.nix >/dev/null
+nix-instantiate --parse scripts/packages.nix >/dev/null
+```
+
+The same `test.js` carries GJS modes for native and QR-pipe coverage. Use the
+network launcher's overridden AGS runtime (it includes all required GTK4,
+AstalNetwork, and NM typelibs), not an unrelated global AGS installation:
+
+```sh
+panel-gjs -m scripts/network-manager/astal/test.js native
+panel-gjs -m scripts/network-manager/astal/test.js runtime
+```
+
+`native` uses real libnm settings and Gio cancellation with simulated
+device/reply objects, without creating a live NM client or mutating network
+state. `runtime` exercises the real asynchronous QR pipes with fake encoders,
+malformed/oversized replies, cancellation, reaping, and fake panel launchers;
+`NETWORK_TEST_QR_HELPER` optionally exercises the packaged helper.
+
+`node test.js --ui --ags PATH --palette FILE` runs the real GTK UI widgets and
+the closed application bootstrap — native offline initialization and socket
+requests — through its own authenticated Xvfb and a service-free private D-Bus
+for both bus addresses. Never run the `ui`/`application` checks directly
+against the desktop session. Xvfb checks bounded GTK allocation and
+interaction, not Wayland layer-shell placement or exclusive keyboard grabs;
+verify those in the Niri session after installing the configuration.
+
+Do not switch generations or send real playback/network commands just to run
+isolated checks. Evaluate/build `networkManager` and `networkPanel` from
+`scripts/packages.nix` for package/runtime validation; no test requires
+rebuilding/switching the system or changing live network state.

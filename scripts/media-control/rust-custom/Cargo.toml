@@ -10,4 +10,5 @@ path = "src/tests.rs"
 [dependencies]
 lofty = "0.22"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Seek positions must round-trip exactly for the frontend's binary64 guard.
+serde_json = { version = "1", features = ["float_roundtrip"] }

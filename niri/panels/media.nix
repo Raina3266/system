@@ -19,24 +19,27 @@ let
         ${lib.getDev pkgs.gdk-pixbuf}/bin/gdk-pixbuf-query-loaders
     done > "$out"
   '';
-  ags = (pkgs.ags.override {
-    extraPackages = [
-      # --gtk4 only preloads layer-shell. AGS uses wrapGAppsHook3, so GTK4's
-      # typelibs must also be explicit inputs to its generated runtime wrapper.
-      pkgs.gtk4
-      pkgs.graphene
-      pkgs.gtk4-layer-shell
-      pkgs.astal.mpris
-      pkgs.astal.wireplumber
-    ];
-  }).overrideAttrs
-    (old: {
-      # Setup hooks otherwise select librsvg's cache, not a union of loaders.
-      # Override it after setup and before gappsWrapperArgsHook captures it.
-      postInstall = (old.postInstall or "") + ''
-        export GDK_PIXBUF_MODULE_FILE=${pixbufLoaders}
-      '';
-    });
+  ags = import ./ags-runtime.nix {
+    inherit pkgs;
+    ags = (pkgs.ags.override {
+      extraPackages = [
+        # AGS uses wrapGAppsHook3, so GTK4's typelibs must also be explicit
+        # inputs to its generated runtime wrapper.
+        pkgs.gtk4
+        pkgs.graphene
+        pkgs.gtk4-layer-shell
+        pkgs.astal.mpris
+        pkgs.astal.wireplumber
+      ];
+    }).overrideAttrs
+      (old: {
+        # Setup hooks otherwise select librsvg's cache, not a union of loaders.
+        # Override it after setup and before gappsWrapperArgsHook captures it.
+        postInstall = (old.postInstall or "") + ''
+          export GDK_PIXBUF_MODULE_FILE=${pixbufLoaders}
+        '';
+      });
+  };
   palette = pkgs.writeText "media-panel-palette.json" (
     builtins.toJSON (import ../../themes/palette.nix)
   );
@@ -81,11 +84,14 @@ pkgs.writeShellApplication {
     export MEDIA_PANEL_CONFIG="''${MEDIA_PANEL_CONFIG:-''${XDG_CONFIG_HOME:-$HOME/.config}/ags/media/frontend.js}"
     export MEDIA_PANEL_PALETTE="''${MEDIA_PANEL_PALETTE:-${palette}}"
     export MEDIA_CONTROL="''${MEDIA_CONTROL:-${lib.getExe mediaControl}}"
-    export QUICKSHELL="''${QUICKSHELL:-${lib.getExe pkgs.quickshell}}"
+    export NETWORK_PANEL="''${NETWORK_PANEL:-network-panel}"
 
     if [ "$command" = run ]; then
-      # The native Astal.Application owns the instance name.
-      exec ${lib.getExe ags} run --gtk4 -- "$MEDIA_PANEL_CONFIG"
+      runtime_dir="''${XDG_RUNTIME_DIR:?media-panel: XDG_RUNTIME_DIR is required}/ags-panels"
+      ${pkgs.coreutils}/bin/install -d -m 700 "$runtime_dir"
+      bundle="$runtime_dir/media-panel.js"
+      ${lib.getExe ags} bundle --gtk 4 -- "$MEDIA_PANEL_CONFIG" "$bundle"
+      exec ${ags}/bin/panel-gjs -m "$bundle"
     fi
 
     request=$(${lib.getExe pkgs.jq} -cn \
