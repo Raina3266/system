@@ -49,35 +49,29 @@ window.dashboard-ui,
 }
 .dashboard-ui .section-divider { min-height: 1px; background: alpha(@dp_cyan, 0.16); }
 
-.dashboard-ui .battery-glyph { color: @dp_pink; font-size: 23px; }
-.dashboard-ui .battery-label {
-    color: @dp_separator;
-    font-size: 9px;
-    font-weight: bold;
-    letter-spacing: 1.2px;
-}
-.dashboard-ui .battery-status { color: @dp_cyan; font-size: 11px; }
-.dashboard-ui .battery-percentage { color: @dp_foreground; font-family: "JetBrains Mono", monospace; font-size: 17px; }
 
 .dashboard-ui button { opacity: 1; }
-.dashboard-ui .action-tile {
+.dashboard-ui .switcher-title {
+    min-width: 104px;
+    color: @dp_red;
+    font-size: 11px;
+    font-weight: bold;
+}
+.dashboard-ui .button-switcher { min-height: 42px; }
+.dashboard-ui .switcher-value { color: @dp_cyan; font-size: 12px; font-weight: bold; }
+.dashboard-ui button.switcher-step {
+    color: @dp_cyan;
     background: transparent;
-    border: 1px solid alpha(@dp_separator, 0.35);
-    border-radius: 3px;
-    transform: scale(1);
-    transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+    border-bottom: 1px solid transparent;
+    margin: 0 4px;
 }
-.dashboard-ui .action-tile:hover, .dashboard-ui .action-tile:focus-visible { background: alpha(@dp_dimPink, 0.25); }
-.dashboard-ui .action-tile.active {
-    background: alpha(@dp_dimPink, 0.5);
-    border-color: alpha(@dp_cyan, 0.8);
-}
-.dashboard-ui .action-tile:active { transform: scale(0.97); }
-.dashboard-ui .tile-glyph { color: @dp_pink; font-size: 17px; }
-.dashboard-ui .tile-caption { color: @dp_separator; font-size: 9px; font-weight: bold; letter-spacing: 1px; }
-.dashboard-ui .action-tile.active .tile-glyph { color: @dp_cyan; }
-.dashboard-ui .action-tile.active .tile-caption { color: @dp_foreground; }
-.dashboard-ui .action-tile:disabled { opacity: 0.45; transform: scale(1); }
+.dashboard-ui .switcher-arrow { color: inherit; font-size: 23px; }
+.dashboard-ui button.switcher-step:hover,
+.dashboard-ui button.switcher-step:focus-visible { color: @dp_red; border-bottom-color: @dp_cyan; }
+.dashboard-ui button.switcher-step:active { color: @dp_pink; }
+.dashboard-ui button.switcher-step:disabled { color: @dp_separator; border-bottom-color: transparent; }
+.dashboard-ui .switcher-tick { min-width: 16px; min-height: 2px; background: alpha(@dp_red, 0.25); }
+.dashboard-ui .switcher-tick.active { background: @dp_red; }
 
 .dashboard-ui .metric-label { color: @dp_separator; font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }
 .dashboard-ui .metric-value { color: @dp_foreground; font-size: 11px; font-family: "JetBrains Mono", monospace; }

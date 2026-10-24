@@ -173,7 +173,7 @@ impl CardData {
                 available: String,
                 classes: Value,
             }
-            let raw: RawProfile = serde_json::from_value(value.clone())?;
+            let raw = RawProfile::deserialize(value)?;
             validate_text(&raw.name)?;
             if raw.index < 0
                 || raw.name.is_empty()
@@ -207,7 +207,7 @@ impl CardData {
                 #[serde(default)]
                 devices: Vec<u32>,
             }
-            let raw: RawRoute = serde_json::from_value(value.clone())?;
+            let raw = RawRoute::deserialize(value)?;
             validate_text(&raw.name)?;
             validate_text(&raw.description)?;
             let kind = match raw.direction.as_str() {
@@ -240,7 +240,7 @@ impl CardData {
             if value.get("device").is_none() || value.get("profile").is_none() {
                 continue;
             }
-            let active: ActiveRoute = serde_json::from_value(value.clone())?;
+            let active = ActiveRoute::deserialize(value)?;
             if !active_devices.insert((active.device, active.profile)) {
                 return Err("Ambiguous per-endpoint active Route state".into());
             }
@@ -289,7 +289,7 @@ fn parse_classes(value: &Value) -> AppResult<(Vec<u32>, Vec<u32>)> {
         if class[2] != "card.profile.devices" {
             return Err("Missing profile device association".into());
         }
-        let devices: Vec<u32> = serde_json::from_value(class[3].clone())?;
+        let devices = Vec::<u32>::deserialize(&class[3])?;
         if class[1].as_u64() != Some(devices.len() as u64) {
             return Err("Invalid profile node count".into());
         }

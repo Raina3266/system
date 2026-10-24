@@ -1,6 +1,6 @@
 # Custom Scripts
 
-This repository contains nine Rust packages used by the desktop configuration:
+This repository contains eight Rust packages used by the desktop configuration:
 
 - `audio-control` — headless audio compatibility policy, request-local PIN/passkey pairing, and HID++ battery publication
 - `media-control` — headless media grouping, conservative stream matching, artwork, and video-author metadata
@@ -8,7 +8,6 @@ This repository contains nine Rust packages used by the desktop configuration:
 - `ocr-screenshot` — screenshot OCR and clipboard integration
 - `preview-panel` — the shared GTK4 preview surface
 - [`rofi-clipboard`](#rofi-clipboard) — clipboard history and memos
-- `rofi-filesearch` — searchable file launcher with previews
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 

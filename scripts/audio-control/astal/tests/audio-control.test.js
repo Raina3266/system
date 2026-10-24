@@ -36,12 +36,13 @@ test('audio application uses the public native request virtual and socket writer
     assert.doesNotMatch(source, /\.prototype\.|Object\.defineProperty|gi:\/\/Gio.*SocketService/);
 });
 
-test('inline audio device choices have a quiet dark-red half-opacity trigger and row-only highlights', () => {
+test('inline audio device choices have a quiet transparent trigger and row-only highlights', () => {
     const css = read('scripts/audio-control/astal/style.css');
     assert.doesNotMatch(css, /dropdown\.device-dropdown|popover|button\.device-dropdown:(?:hover|focus-visible)/);
     const trigger = css.match(/\.audio-panel button\.device-dropdown \{([^}]+)\}/)?.[1];
     assert.ok(trigger, 'the inline toggle has its own style, not control-button highlights');
-    assert.match(trigger, /background: alpha\(shade\(@ap_red, 0\.45\), 0\.5\);/);
+    assert.match(trigger, /background: transparent;/);
+    assert.match(trigger, /background-image: none;/);
     assert.match(trigger, /border: 0\.35px solid alpha\(@ap_foreground, 0\.5\);/);
     assert.doesNotMatch(trigger, /@ap_yellow|lighter\(/);
     const options = css.match(/\.audio-panel (?:scrolledwindow)?\.device-options \{([^}]+)\}/)?.[1];
@@ -624,6 +625,30 @@ test('canonical snapshot uses native cards, identities, profile indexes and rout
     f.audio.notify('devices');
     assert.equal(inactive.handlers.size, 0);
     assert.deepEqual(nativeCard.profileWrites, []);
+});
+
+test('choices share one native snapshot per calculation without caching later route changes', t => {
+    const nativeCard = card();
+    const route = { index: 0, name: 'headphones', available: YES };
+    const output = endpoint({ card: nativeCard, routes: [route], route });
+    const f = fixture(t, { outputs: [output], inputs: [] });
+    f.backend.start();
+    f.load('output', [choice({ node: output, portActive: true })]);
+    const expected = plain(f.backend.choices('output'));
+    assert.equal(expected.length, 1);
+    assert.equal(expected[0].default, true);
+
+    let snapshots = 0;
+    const nativeSnapshot = f.backend.nativeSnapshot.bind(f.backend);
+    f.backend.nativeSnapshot = () => { snapshots++; return nativeSnapshot(); };
+    assert.deepEqual(plain(f.backend.choices('output')), expected);
+    assert.equal(snapshots, 1);
+
+    route.available = NO;
+    assert.deepEqual(plain(f.backend.choices('output')), []);
+    assert.equal(snapshots, 2, 'the next calculation reads native availability again');
+    assert.deepEqual(output.routeWrites, []);
+    assert.deepEqual(output.defaultWrites, []);
 });
 
 test('snapshot discovers endpoint cards and omits unresolved native defaults and identities', t => {

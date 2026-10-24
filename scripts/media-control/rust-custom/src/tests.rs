@@ -659,6 +659,41 @@ macro_rules! media_unit_tests {
             }
 
             #[test]
+            fn volume_multiple_candidates_retain_claims_on_otherwise_unique_matches() {
+                let mut players = vec![
+                    player("a", "Native", "A"),
+                    player("b", "Native", "Unknown"),
+                    player("c", "Other", "C"),
+                ];
+                let mut nodes = vec![
+                    node(1, "Native", "A"),
+                    node(2, "Native", "Another track"),
+                    node(3, "Other", "C"),
+                ];
+                for _ in 0..2 {
+                    for (source, matched) in players.iter().zip(volume_matches(&players, &nodes)) {
+                        match source.bus.as_str() {
+                            "a" => {
+                                assert!(matched.node.is_none());
+                                assert_eq!(matched.reason, SHARED);
+                            }
+                            "b" => {
+                                assert!(matched.node.is_none());
+                                assert_eq!(matched.reason, MULTIPLE);
+                            }
+                            "c" => {
+                                assert_eq!(matched.node.unwrap().id, 3);
+                                assert_eq!(matched.reason, UNIQUE);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    players.reverse();
+                    nodes.reverse();
+                }
+            }
+
+            #[test]
             fn volume_active_paused_and_aliases() {
                 let mut players = vec![
                     player("paused", "Google Chrome", ""),

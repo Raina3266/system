@@ -1,0 +1,57 @@
+window.app-launcher {
+    background: transparent;
+    color: #66e7ef;
+    font-family: "Rajdhani", "JetBrains Mono", monospace;
+    font-size: 10px;
+}
+
+.app-launcher .launcher-card { background: transparent; }
+.app-launcher .launcher-content { padding: 12px; }
+.app-launcher .launcher-search {
+    min-width: 0;
+    min-height: 0;
+    padding: 0 8px;
+    border: 1px solid alpha(#FCEE0A, 0.35);
+    border-radius: 0;
+    background: alpha(#0F0C17, 0.55);
+    box-shadow: none;
+    color: #F8F8F2;
+    caret-color: #FCEE0A;
+    font-size: 11px;
+}
+.app-launcher .launcher-search:focus-within { border-color: #FCEE0A; }
+.app-launcher .launcher-search text { background: transparent; color: #F8F8F2; }
+.app-launcher .launcher-search image { color: #5DF4FE; }
+.app-launcher .launcher-scroll { background: transparent; border: none; }
+.app-launcher button.app-tile {
+    min-width: 0;
+    min-height: 0;
+    padding: 2px 0;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    outline: none;
+    color: #58ced9;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+.app-launcher button.app-tile:hover,
+.app-launcher button.app-tile.selected,
+.app-launcher button.app-tile:focus-visible {
+    background: alpha(#236674, 0.19);
+    border-color: alpha(#66e7ef, 0.42);
+}
+.app-launcher button.app-tile:active { background: alpha(#66e7ef, 0.23); }
+.app-launcher .app-name {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    text-shadow: 0 0 5px alpha(#26c6da, 0.28);
+}
+.app-launcher .launcher-empty { color: #6eb6bd; font-size: 10px; }
+.app-launcher button.app-tile.launch-error { color: #ff6b75; border-color: #ff6b75; }
+.app-launcher scrollbar { background: transparent; }
+.app-launcher scrollbar slider { min-width: 3px; border-radius: 0; background: #326c74; }
+.app-launcher scrollbar slider:hover { background: #66e7ef; }

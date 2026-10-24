@@ -213,6 +213,82 @@ window { width: 375px; }
     }
 
     #[test]
+    fn theme_and_layout_parse_the_same_complete_geometry() {
+        let layout = THEME.replace("preview-panel-settings", "preview-panel-layout");
+        assert_eq!(
+            parse_layout(&layout).unwrap(),
+            WindowOverrides {
+                width: Some(480),
+                height: Some(615),
+                companion_width: Some(400),
+                side: Some(Side::Right),
+                gap: Some(14),
+                x: Some(35),
+                y: Some(-20),
+            }
+        );
+        assert_eq!(
+            parse_layout("/* preview-panel-layout\n\n*/").unwrap(),
+            WindowOverrides::default()
+        );
+    }
+
+    #[test]
+    fn theme_and_layout_preserve_setting_validation_errors() {
+        let cases = [
+            (
+                "width 480px;",
+                "invalid setting \"width 480px;\"; expected name: value;",
+            ),
+            ("width: 480px", "width must end with a semicolon"),
+            (
+                "width: wide;",
+                "width must be a whole number, optionally followed by px",
+            ),
+            ("width: 199px;", "width must be between 200 and 8192 pixels"),
+            (
+                "height: 8193;",
+                "height must be between 200 and 8192 pixels",
+            ),
+            ("gap: -1px;", "gap must be between 0 and 512 pixels"),
+            ("x: -8193px;", "x must be between -8192 and 8192 pixels"),
+            ("y: 8193px;", "y must be between -8192 and 8192 pixels"),
+            ("side: middle;", "side must be either left or right"),
+            (
+                "companion_width: 400px;\ncompanion-width: 500px;",
+                "preview-panel setting \"companion_width\" is repeated",
+            ),
+            (
+                "width: 480px;\nwidth: invalid;",
+                "width must be a whole number, optionally followed by px",
+            ),
+        ];
+        for (settings, expected) in cases {
+            let theme = format!("/* preview-panel-settings\n{settings}\n*/");
+            let layout = format!("/* preview-panel-layout\n{settings}\n*/");
+            assert_eq!(parse(&theme).unwrap_err().to_string(), expected, "{theme}");
+            assert_eq!(
+                parse_layout(&layout).unwrap_err().to_string(),
+                expected,
+                "{layout}"
+            );
+        }
+
+        for (marker, expected) in [
+            ("settings", "unknown preview-panel setting \"opacity\""),
+            ("layout", "unknown preview-panel layout setting \"opacity\""),
+        ] {
+            let source = format!("/* preview-panel-{marker}\nopacity: 1;\n*/");
+            let error = if marker == "settings" {
+                parse(&source).unwrap_err()
+            } else {
+                parse_layout(&source).unwrap_err()
+            };
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
     fn higher_priority_overrides_win_over_rasi_layout() {
         let layout = WindowOverrides {
             width: Some(300),
@@ -491,6 +567,60 @@ mod ipc {
         assert_eq!(response[18], CONTENT_TEXT);
         assert_eq!(u64::from_be_bytes(response[19..27].try_into().unwrap()), 77);
         assert_eq!(&response[27..], text.as_bytes());
+    }
+
+    #[test]
+    fn panel_state_response_encodes_every_reply_variant() {
+        for (reply, disposition, kind, id) in [
+            (SwitchReply::Rejected, 0, 0, 0_u64),
+            (SwitchReply::SameItem, 1, 0, 0),
+            (SwitchReply::Ready(None), 2, 0, 0),
+            (
+                SwitchReply::Ready(Some(ContentSnapshot::Text {
+                    id: 42,
+                    text: String::new(),
+                })),
+                2,
+                1,
+                42,
+            ),
+            (
+                SwitchReply::Ready(Some(ContentSnapshot::Image { id: u64::MAX })),
+                2,
+                2,
+                u64::MAX,
+            ),
+        ] {
+            let mut response = Vec::new();
+            write_panel_state(&mut response, u64::MAX, &reply).unwrap();
+            let mut payload = vec![disposition, kind];
+            payload.extend_from_slice(&id.to_be_bytes());
+            assert_eq!(
+                response,
+                frame(PANEL_STATE, u64::MAX, &payload),
+                "{reply:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn panel_state_response_propagates_incomplete_header_and_text_writes() {
+        let text = "中文\n";
+        let reply = SwitchReply::Ready(Some(ContentSnapshot::Text {
+            id: 42,
+            text: text.to_owned(),
+        }));
+        let mut payload = vec![SWITCH_READY, CONTENT_TEXT];
+        payload.extend_from_slice(&42_u64.to_be_bytes());
+        payload.extend_from_slice(text.as_bytes());
+        let expected = frame(PANEL_STATE, 31, &payload);
+
+        for length in [0, 1, 16, 17, 26, 27, 28, expected.len() - 1] {
+            let mut output = vec![0; length];
+            let error = write_panel_state(output.as_mut_slice(), 31, &reply).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::WriteZero, "length: {length}");
+            assert_eq!(output, expected[..length], "length: {length}");
+        }
     }
 
     #[test]

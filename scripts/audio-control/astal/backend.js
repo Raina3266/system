@@ -346,8 +346,7 @@ export class AudioBackend {
         return { cards, nodes, defaultOutput: current('output'), defaultInput: current('input') };
     }
 
-    endpointModels(kind) {
-        const snapshot = this.nativeSnapshot();
+    endpointModels(kind, snapshot = this.nativeSnapshot()) {
         return snapshot.nodes.filter(node => node.kind === kind).map(node => {
             const endpoint = this.endpoints(kind).find(endpoint => endpoint.id === node.id);
             return { ...node, key: this.endpointKey(endpoint), isDefault: this.defaults[kind].object === endpoint,
@@ -357,7 +356,8 @@ export class AudioBackend {
 
     choices(kind) {
         const state = this.metadata[kind];
-        return deviceChoices(state.entries, this.endpointModels(kind), this.nativeSnapshot().cards, state.resolvedNodes);
+        const snapshot = this.nativeSnapshot();
+        return deviceChoices(state.entries, this.endpointModels(kind, snapshot), snapshot.cards, state.resolvedNodes);
     }
 
     audioModel(kind) {

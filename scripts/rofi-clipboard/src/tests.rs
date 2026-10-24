@@ -656,6 +656,26 @@ mod rofi {
     }
 
     #[test]
+    fn record_values_escape_protocol_separators_without_changing_unicode() {
+        for (value, record, option) in [
+            ("", "", ""),
+            ("中文 👩🏽‍💻\n\t", "中文 👩🏽‍💻\n\t", "中文 👩🏽‍💻\n\t"),
+            ("\0\u{1e}\u{1f}␀", "␀\n\u{1f}␀", "␀\n ␀"),
+            (
+                "\u{1f}\u{1f}\0\0\u{1e}\u{1e}",
+                "\u{1f}\u{1f}␀␀\n\n",
+                "  ␀␀\n\n",
+            ),
+        ] {
+            for (is_option, expected) in [(false, record), (true, option)] {
+                let mut output = b"prefix:".to_vec();
+                write_sanitized_value(&mut output, value, is_option);
+                assert_eq!(output, format!("prefix:{expected}").as_bytes());
+            }
+        }
+    }
+
+    #[test]
     fn selection_callback_executable_is_shell_quoted() {
         assert_eq!(
             shell_quote("/nix/store/example/bin/tool"),

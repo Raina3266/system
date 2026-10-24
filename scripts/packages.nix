@@ -154,22 +154,6 @@ rec {
   # left for this crate to add.
   previewPanel = mkWorkspacePackage "preview-panel" { };
 
-  rofiFilesearch = mkWorkspacePackage "rofi-filesearch" {
-    dontWrapGApps = true;
-    postInstall = ''
-      wrapProgram "$out/bin/rofi-filesearch" \
-        --set ROFI_FILESEARCH_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_FILESEARCH_FD "${pkgs.lib.getExe pkgs.fd}" \
-        --set ROFI_FILESEARCH_GIO "${pkgs.lib.getExe' pkgs.glib "gio"}" \
-        --set ROFI_FILESEARCH_XDG_OPEN "${pkgs.lib.getExe' pkgs.xdg-utils "xdg-open"}" \
-        --set ROFI_FILESEARCH_DOLPHIN "${pkgs.lib.getExe pkgs.kdePackages.dolphin}" \
-        --set ROFI_FILESEARCH_FILE "${pkgs.lib.getExe pkgs.file}" \
-        --set ROFI_FILESEARCH_PDFTOPPM "${pkgs.lib.getExe' pkgs.poppler-utils "pdftoppm"}" \
-        --set ROFI_FILESEARCH_FFMPEGTHUMBNAILER "${pkgs.lib.getExe pkgs.ffmpegthumbnailer}" \
-        --set ROFI_FILESEARCH_PREVIEW_PANEL "${previewPanel}/bin/preview-panel"
-    '';
-  };
-
   rofiClipboard = mkWorkspacePackage "rofi-clipboard" {
     dontWrapGApps = true;
     postInstall = ''
@@ -236,6 +220,8 @@ rec {
   };
 
   dashboardPanel = import ../niri/panels/dashboard.nix { inherit pkgs; };
+
+  appLauncher = import ../niri/panels/app-launcher.nix { inherit pkgs; };
 
   waybarTimer = mkWorkspacePackage "waybar-timer" {
     dontWrapGApps = true;

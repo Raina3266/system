@@ -17,7 +17,6 @@ let
 
     "preview-panel/preview-panel.css" = "themes/rofi/preview-panel.css";
     "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
-    "rofi/rofi-finder.rasi" = "themes/rofi/rofi-finder.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
   };
 

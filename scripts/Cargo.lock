@@ -1296,10 +1296,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rofi-filesearch"
-version = "0.1.0"
-
-[[package]]
 name = "rofi-network"
 version = "0.1.0"
 dependencies = [

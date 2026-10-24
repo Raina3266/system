@@ -455,6 +455,21 @@ mod metadata {
     }
     #[test]
     fn ambiguous_or_malformed_associations_are_rejected() {
+        for (parameter, field, value) in [
+            ("EnumProfile", "priority", json!("high")),
+            (
+                "EnumProfile",
+                "classes",
+                json!([1, ["Audio/Sink", 1, "card.profile.devices", [-1]]]),
+            ),
+            ("EnumRoute", "profiles", json!([1.5])),
+            ("EnumRoute", "devices", json!([-1])),
+            ("Route", "device", json!("3")),
+        ] {
+            let mut raw = dump();
+            raw[0]["info"]["params"][parameter][0][field] = value;
+            assert!(Metadata::from_dump(&snapshot(), AudioKind::Output, &raw).is_err());
+        }
         let mut raw = dump();
         let duplicate = raw[0].clone();
         raw.as_array_mut().unwrap().push(duplicate);

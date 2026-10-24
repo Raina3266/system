@@ -26,7 +26,7 @@ export function emptyMetrics(): Metrics {
 
 export type CpuSample = { total: number; idle: number };
 export function parseCpu(text: string): CpuSample | null {
-    const fields = (text.split(/\r?\n/)[0] || '').trim().split(/\s+/);
+    const fields = (text.split(/\r?\n/, 1)[0] || '').trim().split(/\s+/);
     if (fields.shift() !== 'cpu' || fields.length < 4 || fields.some(value => !/^\d+$/.test(value)))
         return null;
     // Linux guest/guest_nice are already included in user/nice, not extra time.

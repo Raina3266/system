@@ -11,5 +11,3 @@ configuration {
     show-icons: true;
     icon-theme: "WhiteSur-dark";
 }
-
-@theme "~/.config/rofi/rofi-finder.rasi"

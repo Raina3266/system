@@ -80,6 +80,15 @@ mod supervisor {
     }
 
     #[test]
+    fn parses_pid_prefixes_without_accepting_overflow_or_signs() {
+        assert_eq!(
+            parse_fuser_pids(b"\t0 4294967295m 4294967296 +12 -34 m99 77\xff \r\n"),
+            vec![0, u32::MAX, 77]
+        );
+        assert!(parse_fuser_pids(b" \t\r\n").is_empty());
+    }
+
+    #[test]
     fn placeholder_is_generated_without_a_build_time_image() {
         let arguments = placeholder_ffmpeg_arguments(&Config::default());
         assert!(arguments.contains(&"lavfi".to_owned()));

@@ -1,4 +1,4 @@
-# Media, audio, network, dashboard, and notifications use AGS/Astal GTK4.
+# Media, audio, network, dashboard, notifications, and app launcher use AGS/Astal GTK4.
 {
   config,
   lib,
@@ -15,6 +15,7 @@
     repoPackages.audioControl
     repoPackages.dashboardPanel
     repoPackages.networkPanel
+    repoPackages.appLauncher
   ];
 
   # Keep generated assets outside this directory-level live link so Home
@@ -31,6 +32,8 @@
   xdg.configFile."ags/dashboard".source =
     config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/dashboard";
   xdg.configFile."ags/dashboard-palette.json".source = repoPackages.dashboardPanel.palette;
+  xdg.configFile."ags/app-launcher".source =
+    config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/app-launcher";
 
   systemd.user.services.ags-media = {
     Unit = {
@@ -144,8 +147,31 @@
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
+  systemd.user.services.ags-app-launcher = {
+    Unit = {
+      Description = "AGS/Astal GTK4 app launcher";
+      ConditionEnvironment = [
+        "WAYLAND_DISPLAY"
+        "XDG_CURRENT_DESKTOP=niri"
+      ];
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${lib.getExe repoPackages.appLauncher} run";
+      Environment = [
+        "GDK_BACKEND=wayland"
+        "APP_LAUNCHER_CONFIG=${config.xdg.configHome}/ags/app-launcher/frontend.js"
+        "NIRI=${lib.getExe pkgs.niri}"
+      ];
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
   systemd.user.services.waybar.Unit = {
-    Wants = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" ];
-    After = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" ];
+    Wants = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" "ags-app-launcher.service" ];
+    After = [ "audio-control-ui.service" "ags-dashboard.service" "ags-network.service" "ags-app-launcher.service" ];
   };
 }

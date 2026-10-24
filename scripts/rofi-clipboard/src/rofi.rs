@@ -376,7 +376,7 @@ fn write_header(output: &mut Vec<u8>, key: &str, value: &str) {
     output.push(0);
     output.extend_from_slice(key.as_bytes());
     output.push(UNIT_SEPARATOR);
-    output.extend_from_slice(sanitize_record_value(value).as_bytes());
+    write_sanitized_value(output, value, false);
     output.push(RECORD_SEPARATOR);
 }
 
@@ -387,7 +387,7 @@ fn write_row_option(output: &mut Vec<u8>, first: &mut bool, key: &str, value: &s
     *first = false;
     output.extend_from_slice(key.as_bytes());
     output.push(UNIT_SEPARATOR);
-    output.extend_from_slice(sanitize_option_value(value).as_bytes());
+    write_sanitized_value(output, value, true);
 }
 
 pub(crate) fn row_value(item: &ClipboardItem) -> String {
@@ -451,14 +451,15 @@ fn short_mime(mime: &str) -> &str {
         .unwrap_or(mime)
 }
 
-fn sanitize_record_value(value: &str) -> String {
-    value
-        .replace('\0', "␀")
-        .replace(char::from(RECORD_SEPARATOR), "\n")
-}
-
-fn sanitize_option_value(value: &str) -> String {
-    sanitize_record_value(value).replace(char::from(UNIT_SEPARATOR), " ")
+pub(crate) fn write_sanitized_value(output: &mut Vec<u8>, value: &str, is_option: bool) {
+    for byte in value.bytes() {
+        match byte {
+            0 => output.extend_from_slice("␀".as_bytes()),
+            RECORD_SEPARATOR => output.push(b'\n'),
+            UNIT_SEPARATOR if is_option => output.push(b' '),
+            byte => output.push(byte),
+        }
+    }
 }
 
 fn truncate_chars(value: &str, maximum: usize) -> String {

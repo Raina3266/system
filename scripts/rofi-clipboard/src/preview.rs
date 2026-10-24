@@ -194,32 +194,17 @@ fn active_socket_from_environment() -> Option<PathBuf> {
 }
 
 fn launch_content(path: &Path, id: u64, content: &PanelContent) -> Result<()> {
-    let launch_result = match content {
-        PanelContent::Text(text) => launch_text_editor(path, id, text),
-        PanelContent::ReadOnlyText(text) => launch_file_preview(path, id, text),
-        PanelContent::Image(image_path) => launch_image_preview(path, id, image_path),
+    let (arguments, initial_text) = match content {
+        PanelContent::Text(text) => (TEXT_EDITOR_ARGUMENTS.as_slice(), text.as_str()),
+        PanelContent::ReadOnlyText(text) => (FILE_PREVIEW_ARGUMENTS.as_slice(), text.as_str()),
+        PanelContent::Image(_) => (IMAGE_PREVIEW_ARGUMENTS.as_slice(), ""),
     };
-    if let Err(error) = launch_result {
+    if let Err(error) = launch_panel(path, arguments, initial_text, id, content) {
         let _ = send(path, CLOSE, 0, &[]);
         let _ = cleanup_session(path);
         return Err(error);
     }
     Ok(())
-}
-
-fn launch_text_editor(path: &Path, id: u64, text: &str) -> Result<()> {
-    let content = PanelContent::Text(text.to_owned());
-    launch_panel(path, &TEXT_EDITOR_ARGUMENTS, text, id, &content)
-}
-
-fn launch_file_preview(path: &Path, id: u64, text: &str) -> Result<()> {
-    let content = PanelContent::ReadOnlyText(text.to_owned());
-    launch_panel(path, &FILE_PREVIEW_ARGUMENTS, text, id, &content)
-}
-
-fn launch_image_preview(path: &Path, id: u64, image_path: &Path) -> Result<()> {
-    let content = PanelContent::Image(image_path.to_path_buf());
-    launch_panel(path, &IMAGE_PREVIEW_ARGUMENTS, "", id, &content)
 }
 
 fn launch_panel(

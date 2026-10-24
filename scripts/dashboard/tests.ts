@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { registerHooks } from 'node:module';
 import path from 'node:path';
-import type { NotificationRow } from './notification.ts';
+import type { NotificationRow, Palette } from './notification.ts';
 
 class Signals {
     private handlers = new Map<number, { signal: string; callback: (...args: any[]) => void }>();
@@ -19,6 +19,55 @@ class Signals {
             if (handler.signal === signal) handler.callback(this, ...args);
     }
 }
+
+class Widget extends Signals {
+    [key: string]: any;
+    sensitive = true;
+    visible = true;
+    parent: Box | null = null;
+    get_next_sibling(): Widget | null {
+        const siblings = this.parent?.children || [];
+        return siblings[siblings.indexOf(this) + 1] || null;
+    }
+    css_classes: string[] = [];
+    accessible = new Map<number, unknown>();
+    constructor(properties: Record<string, any> = {}) { super(); Object.assign(this, properties); }
+    add_css_class(name: string) { if (!this.css_classes.includes(name)) this.css_classes.push(name); }
+    remove_css_class(name: string) { this.css_classes = this.css_classes.filter(value => value !== name); }
+    has_css_class(name: string) { return this.css_classes.includes(name); }
+    update_property(properties: number[], values: unknown[]) {
+        properties.forEach((property, index) => this.accessible.set(property, values[index]));
+    }
+    queue_draw() {}
+}
+
+class Box extends Widget {
+    children: Widget[] = [];
+    append(child: Widget) { child.parent = this; this.children.push(child); }
+    get_first_child(): Widget | null { return this.children[0] || null; }
+}
+class Label extends Widget { label = ''; constructor(properties: Record<string, any> = {}) { super(properties); Object.assign(this, properties); } }
+class Button extends Widget {
+    get_child(): Widget | null { return this.child || null; }
+}
+class Overlay extends Widget {
+    overlays: Widget[] = [];
+    measured = new Map<Widget, boolean>();
+    set_child(child: Widget) { this.child = child; }
+    add_overlay(child: Widget) { this.overlays.push(child); }
+    set_measure_overlay(child: Widget, measure: boolean) { this.measured.set(child, measure); }
+}
+class DrawingArea extends Widget {
+    draw: ((...args: any[]) => void) | null = null;
+    set_draw_func(callback: (...args: any[]) => void) { this.draw = callback; }
+}
+const Gtk = {
+    Box, Label, Button, Overlay, DrawingArea,
+    Orientation: { HORIZONTAL: 0, VERTICAL: 1 },
+    Align: { FILL: 0, START: 1, END: 2, CENTER: 3 },
+    Overflow: { VISIBLE: 0 },
+    AccessibleProperty: { LABEL: 0, DESCRIPTION: 1 },
+};
 
 let clock = 0, serial = 0;
 const timers = new Map<number, { due: number; interval: number; callback: () => boolean }>();
@@ -166,9 +215,9 @@ const mockGI: Record<string, any> = {
         State: { CHARGING: 1, PENDING_CHARGE: 5, FULLY_CHARGED: 4 } },
     AstalPowerProfiles: { get_default: () => power }, AstalNetwork: { get_default: () => network },
     AstalBluetooth: { get_default: () => bluetooth },
-    // UI classes are declared on import, but no application or widgets are instantiated.
+    // Native widget doubles exercise controls without starting the application.
     GObject: { registerClass: (_metadata: any, implementation: any) => implementation },
-    Astal: { Application: class {} }, AstalIO: {}, Gtk: {}, Gdk: {}, Pango: {}, Gtk4LayerShell: {},
+    Astal: { Application: class {} }, AstalIO: {}, Gtk, Gdk: {}, Pango: {}, Gtk4LayerShell: {},
     system: { programPath: '' },
 };
 (globalThis as any)[Symbol.for('dashboard-test-gi')] = mockGI;
@@ -193,7 +242,7 @@ const {
 const {
     MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
 } = await import('./parameters.ts');
-const { DashboardApplication, DashboardBackend, parseRequest } = await import('./power.ts');
+const { ButtonSwitcher, DashboardApplication, DashboardBackend, parseRequest } = await import('./power.ts');
 hooks.deregister();
 
 beforeEach(() => {
@@ -217,6 +266,181 @@ const row = (id: string, overrides: Partial<NotificationRow> = {}): Notification
     id, app: 'Test', summary: 'Summary', body: 'Body', icon: 'test-symbolic', urgency: 1,
     transient: false, timeout: -1, actions: [{ identifier: 'open', text: 'Open' }], closed: false,
     ...overrides,
+});
+
+const palette: Palette = {
+    background: '#101010', secondaryBackground: '#202020', elevated: '#303030', foreground: '#eeeeee',
+    separator: '#404040', cyan: '#00ffff', pink: '#ff00ff', dimPink: '#804080', yellow: '#ffff00', red: '#ff0000',
+};
+const profileChoices = [
+    { id: 'power-saver', label: 'Power Saver' },
+    { id: 'balanced', label: 'Balanced' },
+    { id: 'performance', label: 'Performance' },
+] as const;
+
+function switcher(choices: readonly { id: string; label: string }[] = profileChoices) {
+    const requests: string[] = [];
+    const control = new ButtonSwitcher('Profile', choices, id => requests.push(id), palette);
+    const previous = control.previous as unknown as Button;
+    const next = control.next as unknown as Button;
+    const value = control.value as unknown as Label;
+    const indicators = control.indicators as unknown as Box;
+    return { control, requests, previous, next, value, indicators };
+}
+
+test('switcher constructs a native caption/frame row and exposes accessible native arrows', () => {
+    const { control, previous, next, value, indicators } = switcher();
+    const widget = control.widget as unknown as Box;
+    assert.ok(widget instanceof Box);
+    assert.equal(widget.orientation, Gtk.Orientation.HORIZONTAL);
+    assert.ok(widget.children.some(child => child instanceof Label && child.label === 'Profile'));
+    assert.ok(widget.children.some(child => child instanceof Overlay));
+    assert.ok(previous instanceof Button);
+    assert.ok(next instanceof Button);
+    assert.ok(value instanceof Label);
+    assert.ok(indicators instanceof Box);
+    assert.equal(value.label, 'Unavailable');
+    control.update('balanced');
+    assert.equal(previous.accessible.get(Gtk.AccessibleProperty.LABEL), 'Previous profile');
+    assert.equal(next.accessible.get(Gtk.AccessibleProperty.LABEL), 'Next profile');
+    assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Balanced');
+});
+
+test('switcher arrows wrap in declared order and skip unavailable choices', () => {
+    const { control, requests, previous, next } = switcher();
+    // Availability order must not reorder the declared choices; unknown IDs are ignored.
+    control.update('power-saver', ['performance', 'missing', 'power-saver']);
+    next.emit('clicked');
+    previous.emit('clicked');
+    assert.deepEqual(requests, ['performance', 'performance']);
+    control.update('performance', ['performance', 'power-saver']);
+    next.emit('clicked');
+    previous.emit('clicked');
+    assert.deepEqual(requests, ['performance', 'performance', 'power-saver', 'power-saver']);
+    control.update('balanced');
+    next.emit('clicked');
+    previous.emit('clicked');
+    assert.deepEqual(requests.slice(-2), ['performance', 'power-saver']);
+    control.update('performance');
+    next.emit('clicked');
+    control.update('power-saver');
+    previous.emit('clicked');
+    assert.deepEqual(requests.slice(-2), ['power-saver', 'performance']);
+});
+
+test('switcher unknown active selects first with next and last with previous', () => {
+    const { control, requests, previous, next } = switcher();
+    control.update('unknown', ['performance', 'balanced']);
+    assert.equal(previous.sensitive, true);
+    assert.equal(next.sensitive, true);
+    next.emit('clicked');
+    previous.emit('clicked');
+    assert.deepEqual(requests, ['balanced', 'performance']);
+});
+
+test('switcher single available choice disables current selection but can restore a different one', () => {
+    const { control, requests, previous, next, value } = switcher();
+    control.update('balanced', ['balanced']);
+    assert.equal(value.label, 'Balanced');
+    assert.equal(previous.sensitive, false);
+    assert.equal(next.sensitive, false);
+    // Emit directly, even though GTK would normally suppress disabled activation.
+    previous.emit('clicked');
+    next.emit('clicked');
+    assert.deepEqual(requests, []);
+    control.update('performance', ['balanced']);
+    assert.equal(value.label, 'Performance');
+    assert.equal(previous.sensitive, true);
+    assert.equal(next.sensitive, true);
+    previous.emit('clicked');
+    next.emit('clicked');
+    assert.deepEqual(requests, ['balanced', 'balanced']);
+    control.update('balanced', ['balanced']);
+    previous.emit('clicked');
+    next.emit('clicked');
+    assert.deepEqual(requests, ['balanced', 'balanced']);
+});
+
+test('switcher empty availability preserves native truth while empty choices are unavailable; both guard callbacks', () => {
+    for (const choices of [profileChoices, []]) {
+        const { control, requests, previous, next, value } = switcher(choices);
+        for (const available of [[], ['missing']]) {
+            control.update('balanced', available);
+            assert.equal(value.label, choices.length ? 'Balanced' : 'Unavailable');
+            assert.equal(previous.sensitive, false);
+            assert.equal(next.sensitive, false);
+            previous.emit('clicked');
+            next.emit('clicked');
+        }
+        if (!choices.length) {
+            control.update('unknown');
+            assert.equal(value.label, 'Unavailable');
+            assert.equal(previous.sensitive, false);
+            assert.equal(next.sensitive, false);
+            previous.emit('clicked');
+            next.emit('clicked');
+        }
+        assert.deepEqual(requests, []);
+    }
+});
+
+test('switcher update is read-only and clicks await authoritative state without optimistic selection', () => {
+    const { control, requests, previous, next, value, indicators } = switcher();
+    for (const active of ['power-saver', 'performance', 'balanced']) control.update(active);
+    assert.deepEqual(requests, []);
+    assert.equal(value.label, 'Balanced');
+    const tickState = () => indicators.children.map(tick => [...tick.css_classes]);
+    const before = tickState();
+    next.emit('clicked');
+    next.emit('clicked');
+    previous.emit('clicked');
+    assert.deepEqual(requests, ['performance', 'performance', 'power-saver']);
+    assert.equal(value.label, 'Balanced');
+    assert.deepEqual(tickState(), before);
+    control.update('performance');
+    assert.equal(value.label, 'Performance');
+    assert.notDeepEqual(tickState(), before);
+    next.emit('clicked');
+    assert.deepEqual(requests, ['performance', 'performance', 'power-saver', 'power-saver']);
+});
+
+test('switcher ticks reflect authoritative selection and availability and reset on update', () => {
+    const { control, requests, indicators } = switcher();
+    const state = () => indicators.children.map(tick => ({
+        classes: [...tick.css_classes].sort(), visible: tick.visible,
+    }));
+    control.update('balanced');
+    assert.equal(indicators.children.length, profileChoices.length);
+    const balanced = state();
+    control.update('performance');
+    const performance = state();
+    assert.notDeepEqual(performance[1], balanced[1]);
+    assert.notDeepEqual(performance[2], balanced[2]);
+    assert.deepEqual(performance[0], balanced[0]);
+    control.update('balanced', ['power-saver', 'balanced']);
+    const filtered = state();
+    assert.notDeepEqual(filtered[2], balanced[2]);
+    assert.deepEqual(filtered[0], balanced[0]);
+    assert.deepEqual(filtered[1], balanced[1]);
+    control.update('balanced');
+    assert.deepEqual(state(), balanced);
+    assert.deepEqual(requests, []);
+});
+
+test('switcher airplane yes/no choices cycle in both directions without optimistic toggles', () => {
+    const { control, requests, previous, next, value } = switcher([
+        { id: 'no', label: 'No' }, { id: 'yes', label: 'Yes' },
+    ]);
+    control.update('no');
+    previous.emit('clicked');
+    next.emit('clicked');
+    assert.deepEqual(requests, ['yes', 'yes']);
+    assert.equal(value.label, 'No');
+    control.update('yes');
+    previous.emit('clicked');
+    next.emit('clicked');
+    assert.deepEqual(requests, ['yes', 'yes', 'no', 'no']);
+    assert.equal(value.label, 'Yes');
 });
 
 test('strict JSON request envelope and command arity', () => {
@@ -245,6 +469,10 @@ test('all missing metrics use -1, not plausible zero readings', () => {
 test('CPU deltas include iowait as idle, exclude double-counted guest time', () => {
     const before = parseCpu('cpu  100 20 30 400 50 6 7 8 20 5\ncpu0 1 2 3 4');
     assert.deepEqual(before, { total: 621, idle: 450 });
+    for (const newline of ['\n', '\r\n']) {
+        assert.deepEqual(parseCpu(`cpu 1 2 3 4${newline}cpu0 malformed${newline}intr 999`), { total: 10, idle: 4 });
+        assert.equal(parseCpu(`cpu malformed${newline}cpu 1 2 3 4`), null, 'only the first line is the aggregate sample');
+    }
     const after = parseCpu('cpu  140 20 40 440 60 6 7 8 60 5');
     assert.equal(cpuPercent(before, after), 50);
     assert.equal(cpuPercent(null, after), -1);
@@ -576,6 +804,43 @@ test('notification replacement, hover reset, critical exemption and native close
     assert.equal(center.history.length, 1);
     center.dismissNotification(key);
     assert.equal(center.history.length, 0);
+    center.dispose();
+});
+
+test('notification controls find the matching live row without acting on archived or missing rows', () => {
+    const center = new NotificationCenter();
+    native.send(new NativeNotification(1, 'First', { expire_timeout: 10 }));
+    const first = center.history[0].id;
+    native.send(new NativeNotification(2, 'Second', { resident: true }));
+    const second = center.history[0].id;
+    native.send(new NativeNotification(3, 'Third', { expire_timeout: 20 }));
+    const third = center.history[0].id;
+
+    center.setHovered(third, true);
+    advance(20);
+    assert.equal(center.history.find(row => row.id === first)!.closed, true);
+    assert.ok(native.get_notification(3), 'hover must pause only the matching live notification');
+    center.invokeNotificationAction(first, 'open');
+    center.invokeNotificationAction('missing', 'open');
+    center.invokeNotificationAction(second, 'missing');
+    assert.deepEqual(native.invoked, []);
+    center.invokeNotificationAction(second, 'open');
+    assert.deepEqual(native.invoked, [[2, 'open']]);
+
+    native.send(new NativeNotification(2, 'Replacement', { resident: true, actions: [{ id: 'reply', label: 'Reply' }] }));
+    center.invokeNotificationAction(second, 'open');
+    center.invokeNotificationAction(second, 'reply');
+    assert.deepEqual(native.invoked, [[2, 'open'], [2, 'reply']]);
+    center.dismissNotification(second);
+    assert.equal(native.get_notification(2), undefined);
+    assert.deepEqual(native.resolutions, [[1, 1], [2, 2]]);
+    center.dismissNotification(first);
+    center.dismissNotification('missing');
+    center.setHovered('missing', true);
+    assert.deepEqual(center.history.map(row => row.id), [third]);
+    center.setHovered(third, false);
+    advance(20);
+    assert.equal(native.get_notification(3), undefined);
     center.dispose();
 });
 

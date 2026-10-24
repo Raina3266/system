@@ -654,7 +654,12 @@ fn match_groups<'a>(groups: &[Members<'_>], streams: &'a [Stream]) -> Vec<Stream
 
     // Keep original claims even when a browser source is denied volume control.
     // Paused sources participate equally: playback state is not ownership.
-    let claims = candidates.clone();
+    let mut claims = vec![0usize; nodes.len()];
+    for options in &candidates {
+        for &node in options {
+            claims[node] += 1;
+        }
+    }
     for (index, src) in sources.iter().enumerate() {
         if src.browser
             && detailed_counts[index] != 1
@@ -675,20 +680,17 @@ fn match_groups<'a>(groups: &[Members<'_>], streams: &'a [Stream]) -> Vec<Stream
         .iter()
         .enumerate()
         .map(|(index, options)| {
-            let (node, reason) =
-                match options.as_slice() {
-                    [] => (None, reasons[index]),
-                    [node] => {
-                        if claims.iter().enumerate().any(|(other_index, claim)| {
-                            other_index != index && claim.contains(node)
-                        }) {
-                            (None, SHARED)
-                        } else {
-                            (Some(nodes[*node]), UNIQUE)
-                        }
+            let (node, reason) = match options.as_slice() {
+                [] => (None, reasons[index]),
+                [node] => {
+                    if claims[*node] > 1 {
+                        (None, SHARED)
+                    } else {
+                        (Some(nodes[*node]), UNIQUE)
                     }
-                    _ => (None, MULTIPLE),
-                };
+                }
+                _ => (None, MULTIPLE),
+            };
             StreamMatch { node, reason }
         })
         .collect()

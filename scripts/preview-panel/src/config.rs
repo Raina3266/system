@@ -100,60 +100,17 @@ pub fn embedded() -> Config {
 }
 
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
-    let settings = settings_block(source)?;
-    let mut width = None;
-    let mut height = None;
-    let mut companion_width = None;
-    let mut panel_side = None;
-    let mut panel_gap = None;
-    let mut x = None;
-    let mut y = None;
-
-    for line in settings.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let (key, value) = line.split_once(':').ok_or_else(|| {
-            ConfigError::new(format!("invalid setting {line:?}; expected name: value;"))
-        })?;
-        let key = key.trim();
-        let value = value
-            .trim()
-            .strip_suffix(';')
-            .ok_or_else(|| ConfigError::new(format!("{key} must end with a semicolon")))?
-            .trim();
-
-        match key {
-            "width" => set_once(&mut width, dimension(value, "width")?, "width")?,
-            "height" => set_once(&mut height, dimension(value, "height")?, "height")?,
-            "companion_width" | "companion-width" => set_once(
-                &mut companion_width,
-                dimension(value, "companion_width")?,
-                "companion_width",
-            )?,
-            "side" => set_once(&mut panel_side, side(value)?, "side")?,
-            "gap" => set_once(&mut panel_gap, gap(value)?, "gap")?,
-            "x" => set_once(&mut x, offset(value, "x")?, "x")?,
-            "y" => set_once(&mut y, offset(value, "y")?, "y")?,
-            _ => {
-                return Err(ConfigError::new(format!(
-                    "unknown preview-panel setting {key:?}"
-                )));
-            }
-        }
-    }
+    let settings = parse_settings(settings_block(source)?, "setting")?;
 
     Ok(Config {
         window: WindowConfig {
-            width: required(width, "width")?,
-            height: required(height, "height")?,
-            companion_width: required(companion_width, "companion_width")?,
-            side: required(panel_side, "side")?,
-            gap: required(panel_gap, "gap")?,
-            x: required(x, "x")?,
-            y: required(y, "y")?,
+            width: required(settings.width, "width")?,
+            height: required(settings.height, "height")?,
+            companion_width: required(settings.companion_width, "companion_width")?,
+            side: required(settings.side, "side")?,
+            gap: required(settings.gap, "gap")?,
+            x: required(settings.x, "x")?,
+            y: required(settings.y, "y")?,
         },
         css: source.to_owned(),
     })
@@ -163,6 +120,10 @@ pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
     let Some(settings) = optional_settings_block(source, LAYOUT_START)? else {
         return Ok(WindowOverrides::default());
     };
+    parse_settings(settings, "layout setting")
+}
+
+fn parse_settings(settings: &str, setting_kind: &str) -> Result<WindowOverrides, ConfigError> {
     let mut overrides = WindowOverrides::default();
 
     for line in settings.lines() {
@@ -195,7 +156,7 @@ pub fn parse_layout(source: &str) -> Result<WindowOverrides, ConfigError> {
             "y" => set_once(&mut overrides.y, offset(value, "y")?, "y")?,
             _ => {
                 return Err(ConfigError::new(format!(
-                    "unknown preview-panel layout setting {key:?}"
+                    "unknown preview-panel {setting_kind} {key:?}"
                 )));
             }
         }

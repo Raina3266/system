@@ -309,14 +309,11 @@ pub(crate) fn parse_fuser_pids(output: &[u8]) -> Vec<u32> {
     output
         .split(u8::is_ascii_whitespace)
         .filter_map(|field| {
-            let digits: Vec<u8> = field
+            let end = field
                 .iter()
-                .copied()
-                .take_while(u8::is_ascii_digit)
-                .collect();
-            (!digits.is_empty())
-                .then(|| std::str::from_utf8(&digits).ok()?.parse::<u32>().ok())
-                .flatten()
+                .position(|byte| !byte.is_ascii_digit())
+                .unwrap_or(field.len());
+            std::str::from_utf8(&field[..end]).ok()?.parse().ok()
         })
         .collect()
 }

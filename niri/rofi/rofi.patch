@@ -1,8 +1,7 @@
 Rust-backed Rofi integration against 6d2a5281e45dee92dfbdaf6f9ba6081c4c608682.
 
-Preserve stable selection callbacks, the selected item during filtering,
-per-mode refresh/initial selection, and opt-in Wayland keyboard focus sharing.
-These are the existing four patches consolidated without behaviour changes.
+Support clipboard preview callbacks, selection preservation/initial selection,
+and opt-in Wayland keyboard focus sharing.
 
 diff --git a/doc/rofi-actions.5.markdown b/doc/rofi-actions.5.markdown
 index 01f42f0..a0cc52e 100644
@@ -169,7 +168,7 @@ index 30689ae..154791c 100644
  
    if (state->tb_filtered_rows) {
      char *r = g_strdup_printf("%u", state->filtered_lines);
-@@ -2106,6 +2133,16 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
+@@ -2106,6 +2133,10 @@ void rofi_view_ellipsize_listview(RofiViewState *state,
  }
  
  void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
@@ -177,16 +176,10 @@ index 30689ae..154791c 100644
 +  if (mode_changed) {
 +    state->previous_line = UINT32_MAX;
 +  }
-+  if (mode_changed && mode != NULL &&
-+      g_strcmp0(g_getenv("ROFI_REFRESH_SCRIPT_ON_MODE_SWITCH"), "true") ==
-+          0) {
-+    mode_destroy(mode);
-+    mode_init(mode);
-+  }
    state->sw = mode;
    // Update prompt;
    if (state->prompt) {
-@@ -2130,6 +2167,13 @@ void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
+@@ -2130,6 +2161,13 @@ void rofi_view_switch_mode(RofiViewState *state, Mode *mode) {
    state->reload = TRUE;
    state->refilter = TRUE;
    rofi_view_refilter_force(state);

@@ -13,7 +13,7 @@ import Bluetooth from 'gi://AstalBluetooth';
 import { MetricBar, MetricsSampler, type Metrics } from './parameters.ts';
 import {
     NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
-    connectedMonitors, box, ellipsis, iconButton, invoke, label, loadTheme, scroll, style,
+    connectedMonitors, box, iconButton, invoke, label, loadTheme, scroll, style,
     type Palette,
 } from './notification.ts';
 
@@ -171,23 +171,82 @@ export function parseRequest(text: string): DashboardRequest {
     return request;
 }
 
-export class ActionTile {
-    readonly widget: Gtk.Button;
+export class ButtonSwitcher {
+    readonly widget: Gtk.Box;
+    readonly previous: Gtk.Button;
+    readonly next: Gtk.Button;
+    readonly value: Gtk.Label;
+    readonly indicators: Gtk.Box;
+    private active = '';
+    private available: string[] = [];
 
-    constructor(glyph: string, text: string, clicked: () => unknown) {
-        const icon = label(glyph, ['tile-glyph']);
-        const caption = label(text, ['tile-caption']);
-        icon.xalign = caption.xalign = 0.5;
-        const content = box(true, 3, [icon, caption]);
-        content.halign = content.valign = Gtk.Align.CENTER;
-        this.widget = new Gtk.Button({ child: content, css_classes: ['action-tile'],
-            height_request: 62, hexpand: true, tooltip_text: text });
-        this.widget.connect('clicked', () => invoke(clicked));
+    constructor(title: string, private readonly choices: readonly { id: string; label: string }[],
+        private readonly changed: (id: string) => unknown, palette: Palette) {
+        const caption = label(title, ['switcher-title']);
+        this.value = label('Unavailable', ['switcher-value'], true);
+        this.value.xalign = 0.5;
+        this.indicators = box(false, 4, choices.map(() => new Gtk.Box({ css_classes: ['switcher-tick'] })));
+        this.indicators.halign = Gtk.Align.CENTER;
+        const arrow = (text: string, direction: -1 | 1) => {
+            const button = new Gtk.Button({ child: label(text, ['switcher-arrow']),
+                css_classes: ['switcher-step'], width_request: 30, height_request: 38 });
+            (button.get_child() as Gtk.Label).xalign = 0.5;
+            button.update_property([Gtk.AccessibleProperty.LABEL],
+                [`${direction < 0 ? 'Previous' : 'Next'} ${title.toLowerCase()}`]);
+            button.connect('clicked', () => {
+                if (!button.sensitive || !this.available.length) return;
+                const index = this.available.indexOf(this.active);
+                const target = index < 0 ? (direction > 0 ? 0 : this.available.length - 1)
+                    : (index + direction + this.available.length) % this.available.length;
+                invoke(() => this.changed(this.available[target]));
+            });
+            return button;
+        };
+        this.previous = arrow('◁', -1);
+        this.next = arrow('▷', 1);
+        const control = box(false, 4, [this.previous,
+            box(true, 4, [this.value, this.indicators]), this.next]);
+        control.valign = Gtk.Align.CENTER;
+        const frame = new Gtk.Overlay({ hexpand: true, css_classes: ['button-switcher'] });
+        const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
+        const colour = (hex: string) => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+        const [red, green, blue] = colour(palette.red);
+        const [backRed, backGreen, backBlue] = colour(palette.secondaryBackground);
+        drawing.set_draw_func((_area, cr, width, height) => {
+            const right = width - 0.5, bottom = height - 0.5, cut = Math.min(9, width / 2, height / 2);
+            cr.moveTo(0.5, 0.5);
+            cr.lineTo(right, 0.5);
+            cr.lineTo(right, bottom - cut);
+            cr.lineTo(right - cut, bottom);
+            cr.lineTo(0.5, bottom);
+            cr.closePath();
+            cr.setSourceRGBA(backRed, backGreen, backBlue, 0.6);
+            cr.fillPreserve();
+            cr.setSourceRGBA(red, green, blue, 0.5);
+            cr.setLineWidth(1);
+            cr.stroke();
+        });
+        frame.set_child(drawing);
+        frame.add_overlay(control);
+        frame.set_measure_overlay(control, true);
+        this.widget = box(false, 10, [caption, frame]);
+        this.update('');
     }
 
-    update(active: boolean, available = true): void {
-        style(this.widget, 'active', active);
-        this.widget.sensitive = available;
+    update(active: string, available: readonly string[] = this.choices.map(choice => choice.id)): void {
+        this.active = active;
+        this.available = this.choices.filter(choice => available.includes(choice.id)).map(choice => choice.id);
+        this.value.label = this.choices.find(choice => choice.id === active)?.label || 'Unavailable';
+        this.value.update_property([Gtk.AccessibleProperty.LABEL], [this.value.label]);
+        const canStep = this.available.length > 1 || (this.available.length === 1 && this.available[0] !== active);
+        this.previous.sensitive = this.next.sensitive = canStep;
+        let tick = this.indicators.get_first_child();
+        for (const choice of this.choices) {
+            if (!tick) break;
+            tick.visible = this.available.includes(choice.id);
+            style(tick, 'active', choice.id === active);
+            tick = tick.get_next_sibling();
+        }
     }
 }
 
@@ -223,8 +282,8 @@ export class DashboardPanel {
     readonly card: Gtk.Overlay;
     readonly viewport: Gtk.ScrolledWindow;
     readonly content: Gtk.Box;
-    readonly airplane: ActionTile;
-    readonly profiles = new Map<string, ActionTile>();
+    readonly airplane: ButtonSwitcher;
+    readonly profile: ButtonSwitcher;
     readonly metrics: Record<'cpu' | 'memory' | 'disk' | 'temperature', MetricBar>;
     readonly history: NotificationStack;
     readonly archive: Gtk.ScrolledWindow;
@@ -232,9 +291,7 @@ export class DashboardPanel {
     readonly empty: Gtk.Label;
     readonly dnd: Gtk.Button;
     readonly clear: Gtk.Button;
-    readonly batteryGlyph: Gtk.Label;
-    readonly batteryStatus: Gtk.Label;
-    readonly batteryPercentage: Gtk.Label;
+
     opened = false;
     monitor: Gdk.Monitor | null = null;
     private animation = 0;
@@ -260,23 +317,18 @@ export class DashboardPanel {
         this.window.connect('map', () => { if (this.opened) this.root.grab_focus(); });
 
         const power = new Section('󰚥', 'POWER');
-        this.batteryGlyph = label('󰁹', ['battery-glyph']);
-        this.batteryStatus = ellipsis('', ['battery-status']);
-        this.batteryPercentage = label('—', ['battery-percentage']);
-        power.append(box(false, 10, [this.batteryGlyph,
-            box(true, 2, [label('BATTERY', ['battery-label']), this.batteryStatus]), this.batteryPercentage]));
-        this.airplane = new ActionTile('󰀝', 'AIRPLANE', () => backend.toggleAirplaneMode());
+
+        this.profile = new ButtonSwitcher('Power profile', [
+            { id: 'power-saver', label: 'Power saver' }, { id: 'balanced', label: 'Balanced' },
+            { id: 'performance', label: 'Performance' },
+        ], profile => backend.setProfile(profile), palette);
+        power.append(this.profile.widget);
+        this.airplane = new ButtonSwitcher('Airplane mode', [
+            { id: 'no', label: 'No' }, { id: 'yes', label: 'Yes' },
+        ], value => {
+            if ((value === 'yes') !== backend.airplaneMode) backend.toggleAirplaneMode();
+        }, palette);
         power.append(this.airplane.widget);
-        const profileRow = box(false, 6);
-        profileRow.homogeneous = true;
-        for (const [profile, glyph, title] of [
-            ['power-saver', '󰌪', 'SAVER'], ['balanced', '󰁹', 'BALANCED'], ['performance', '󰓅', 'PERFORMANCE'],
-        ]) {
-            const tile = new ActionTile(glyph, title, () => backend.setProfile(profile));
-            this.profiles.set(profile, tile);
-            profileRow.append(tile.widget);
-        }
-        power.append(profileRow);
 
         const system = new Section('󰍛', 'SYSTEM PARAMETERS');
         this.metrics = { cpu: new MetricBar('CPU'), memory: new MetricBar('MEMORY'),
@@ -322,16 +374,9 @@ export class DashboardPanel {
     get connector(): string { return this.monitor?.get_connector() || ''; }
 
     render(): void {
-        const { battery, metrics, notifications } = this.backend;
-        const status = !battery.ready ? 'READING BATTERY STATUS'
-            : !battery.present ? 'NO BATTERY DETECTED' : (battery.status || '—').toUpperCase();
-        this.batteryStatus.label = status;
-        this.batteryGlyph.label = status === 'CHARGING' ? '󰂄' : '󰁹';
-        this.batteryPercentage.label = battery.ready && battery.present && Number.isFinite(battery.percentage)
-            ? `${Math.round(Math.max(0, Math.min(1, battery.percentage)) * 100)}%` : '—';
-        this.airplane.update(this.backend.airplaneMode);
-        this.profiles.forEach((tile, profile) => tile.update(this.backend.activeProfile === profile,
-            this.backend.profiles.includes(profile)));
+        const { metrics, notifications } = this.backend;
+        this.airplane.update(this.backend.airplaneMode ? 'yes' : 'no');
+        this.profile.update(this.backend.activeProfile, this.backend.profiles);
         this.metrics.cpu.update(metrics.cpuPercent, metrics.cpuPercent < 0 ? '—' : `${metrics.cpuPercent}%`);
         this.metrics.memory.update(metrics.memoryPercent, metrics.memoryPercent < 0 ? '—'
             : `${metrics.memoryUsedGiB.toFixed(1)} / ${metrics.memoryTotalGiB.toFixed(1)} GiB`);

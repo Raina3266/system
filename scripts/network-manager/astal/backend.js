@@ -372,11 +372,12 @@ export class NetworkBackend {
                 if (profile.get_connection_type() !== (wireless ? WIFI : WIRED) || !compatible(device, profile)) continue;
                 if (!wireless) { add(device, false).profiles.push(profile); continue; }
                 const ssid = profile.get_setting_wireless()?.get_ssid();
-                if (!bytesKey(ssid)) continue;
+                const ssidKey = bytesKey(ssid);
+                if (!ssidKey) continue;
                 // AP.connection_valid also handles transition modes, BSSID, band,
                 // protocol/cipher restrictions, and SSID bytes without lossy decoding.
                 const matches = [...entries.values()].filter(entry => entry.device === device
-                    && entry.ssidKey === bytesKey(ssid) && entry.aps.some(ap => apCompatible(ap, profile)));
+                    && entry.ssidKey === ssidKey && entry.aps.some(ap => apCompatible(ap, profile)));
                 if (matches.length) for (const entry of matches) entry.profiles.push(profile);
                 else add(device, true, ssid, profileSecurity(profile)).profiles.push(profile);
             }
@@ -781,7 +782,7 @@ export function encodeQr(request, cancellable = null) {
                 const count = stream.write_bytes_finish(result);
                 if (done) return;
                 if (count <= 0) throw new Error();
-                input = input.slice(count);
+                input = input.subarray(count);
                 if (input.length) write();
                 else { input = null; closeStream(stream); }
             } catch (_) { finish(new Error('Could not send the Wi-Fi QR request.')); }

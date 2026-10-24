@@ -268,9 +268,16 @@ export class NotificationCenter {
         }
     }
 
+    private findLive(id: string): LiveNotification | undefined {
+        for (const live of this.live.values()) {
+            if (live.key === id) return live;
+        }
+        return undefined;
+    }
+
     setHovered(id: string, hovered: boolean) {
         if (this.disposed) return;
-        const live = [...this.live.values()].find(live => live.key === id);
+        const live = this.findLive(id);
         if (!live || live.hovered === hovered || (hovered && !this.popups.some(row => row.id === id))) return;
         live.hovered = hovered;
         // Leaving starts a full interval, not the remainder of the old timeout.
@@ -279,7 +286,7 @@ export class NotificationCenter {
 
     dismissNotification(id: string) {
         this.transaction(() => {
-            const live = [...this.live.values()].find(live => live.key === id);
+            const live = this.findLive(id);
             live?.native.dismiss();
             this.history = this.history.filter(row => row.id !== id);
             this.popups = this.popups.filter(row => row.id !== id);
@@ -289,7 +296,7 @@ export class NotificationCenter {
 
     invokeNotificationAction(id: string, identifier: string) {
         if (this.disposed) return;
-        const live = [...this.live.values()].find(live => live.key === id);
+        const live = this.findLive(id);
         if (live?.native.actions.some((action: Notifd.Action) => action.id === identifier)) live.native.invoke(identifier);
     }
 
@@ -503,7 +510,9 @@ export class NotificationEntry {
         this.row = row;
         this.widget = new Gtk.Overlay({ css_classes: ['notification-entry', ...(popup ? ['popup-entry'] : [])],
             hexpand: true, height_request: 64, overflow: Gtk.Overflow.HIDDEN });
-        this.artwork = new Gtk.Image({ pixel_size: 64, width_request: 64, height_request: 64, valign: Gtk.Align.START });
+        const artworkSize = popup ? 125 : 64;
+        this.artwork = new Gtk.Image({ pixel_size: artworkSize, width_request: artworkSize,
+            height_request: artworkSize, valign: Gtk.Align.START });
         this.app = ellipsis('', ['notification-app']);
         this.summary = wrapped(['notification-summary'], 2);
         this.body = wrapped(['notification-body'], 3);

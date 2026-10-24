@@ -343,38 +343,28 @@ pub(crate) fn write_panel_state(
     serial: u64,
     reply: &SwitchReply,
 ) -> io::Result<()> {
-    let mut payload = Vec::new();
-    match reply {
-        SwitchReply::Rejected => {
-            payload.extend_from_slice(&[SWITCH_REJECTED, CONTENT_NONE]);
-            payload.extend_from_slice(&0_u64.to_be_bytes());
+    let (disposition, kind, id, text) = match reply {
+        SwitchReply::Rejected => (SWITCH_REJECTED, CONTENT_NONE, 0, ""),
+        SwitchReply::SameItem => (SWITCH_SAME_ITEM, CONTENT_NONE, 0, ""),
+        SwitchReply::Ready(None) => (SWITCH_READY, CONTENT_NONE, 0, ""),
+        SwitchReply::Ready(Some(ContentSnapshot::Text { id, text })) => {
+            (SWITCH_READY, CONTENT_TEXT, *id, text.as_str())
         }
-        SwitchReply::SameItem => {
-            payload.extend_from_slice(&[SWITCH_SAME_ITEM, CONTENT_NONE]);
-            payload.extend_from_slice(&0_u64.to_be_bytes());
+        SwitchReply::Ready(Some(ContentSnapshot::Image { id })) => {
+            (SWITCH_READY, CONTENT_IMAGE, *id, "")
         }
-        SwitchReply::Ready(snapshot) => {
-            payload.push(SWITCH_READY);
-            match snapshot {
-                None => {
-                    payload.push(CONTENT_NONE);
-                    payload.extend_from_slice(&0_u64.to_be_bytes());
-                }
-                Some(ContentSnapshot::Text { id, text }) => {
-                    payload.push(CONTENT_TEXT);
-                    payload.extend_from_slice(&id.to_be_bytes());
-                    payload.extend_from_slice(text.as_bytes());
-                }
-                Some(ContentSnapshot::Image { id }) => {
-                    payload.push(CONTENT_IMAGE);
-                    payload.extend_from_slice(&id.to_be_bytes());
-                }
-            }
-        }
-    }
+    };
 
-    writer.write_all(&[PANEL_STATE])?;
-    writer.write_all(&serial.to_be_bytes())?;
-    writer.write_all(&(payload.len() as u64).to_be_bytes())?;
-    writer.write_all(&payload)
+    // Keep the fixed fields on the stack and write text directly from the snapshot.
+    let mut bytes = [0_u8; HEADER_SIZE + 2 + ITEM_ID_SIZE];
+    let (header, prefix) = bytes.split_at_mut(HEADER_SIZE);
+    header[0] = PANEL_STATE;
+    header[1..9].copy_from_slice(&serial.to_be_bytes());
+    header[9..17].copy_from_slice(&((prefix.len() + text.len()) as u64).to_be_bytes());
+    prefix[0] = disposition;
+    prefix[1] = kind;
+    prefix[2..].copy_from_slice(&id.to_be_bytes());
+
+    writer.write_all(&bytes)?;
+    writer.write_all(text.as_bytes())
 }
