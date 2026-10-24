@@ -21,73 +21,73 @@ function label(text, css, props = {}) {
     return new Gtk.Label({ label: text, css_classes: [css], ...props });
 }
 
-
 // GTK draws the geometry directly: no CSS clip-path support or external artwork required.
-function frame(kind) {
+function frame(draw) {
     const area = new Gtk.DrawingArea({ hexpand: true, vexpand: true, can_target: false });
-    area.set_draw_func((_area, cr, width, height) => {
-        if (kind === 'panel') {
-            // Match the media panel's frame without changing the application tiles.
-            const cut = 10, inset = 0.5;
-            cr.moveTo(cut + inset, inset);
-            cr.lineTo(width - inset, inset);
-            cr.lineTo(width - inset, height - cut - inset);
-            cr.lineTo(width - cut - inset, height - inset);
-            cr.lineTo(inset, height - inset);
-            cr.lineTo(inset, cut + inset);
-            cr.closePath();
-            cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.9);
-            cr.fillPreserve();
-            cr.setSourceRGBA(252 / 255, 238 / 255, 10 / 255, 1);
-            cr.setLineWidth(1);
-            cr.stroke();
-            return;
-        }
-        const inset = 4;
-        const cut = 5;
-        const x = inset, y = inset, right = width - inset, bottom = height - inset;
-        cr.moveTo(x, y);
-        cr.lineTo(right - cut, y);
-        cr.lineTo(right, y + cut);
-        cr.lineTo(right, bottom);
-        cr.lineTo(x + cut, bottom);
-        cr.lineTo(x, bottom - cut);
-        cr.closePath();
-        cr.setSourceRGBA(0.015, 0.045, 0.05, 0.94);
-        cr.fillPreserve();
-        cr.setSourceRGBA(0.20, 0.87, 0.92, 0.12);
-        cr.setLineWidth(4);
-        cr.strokePreserve();
-        cr.setSourceRGBA(0.24, 0.85, 0.91, 0.85);
-        cr.setLineWidth(1);
-        cr.stroke();
-        cr.setSourceRGBA(0.20, 0.85, 0.90, 0.055);
-        for (let row = y + 4; row < bottom - 3; row += 4) {
-            cr.moveTo(x + 3, row);
-            cr.lineTo(right - 3, row);
-        }
-        cr.setLineWidth(1);
-        cr.stroke();
-        cr.setSourceRGBA(0.42, 0.97, 1, 0.95);
-        cr.moveTo(x, y + 24);
-        cr.lineTo(x, y);
-        cr.lineTo(x + 29, y);
-        cr.moveTo(right - 33, bottom);
-        cr.lineTo(right, bottom);
-        cr.lineTo(right, bottom - 20);
-        cr.stroke();
-        cr.setSourceRGBA(0.27, 0.88, 0.93, 0.55);
-        cr.rectangle(width * 0.46, 2, width * 0.43, 1);
-        cr.rectangle(width * 0.56, height - 3, width * 0.32, 2);
-        for (let i = 0; i < 6; i++) cr.rectangle(width - 14 - i * 4, height - 8, 2, 2);
-        cr.fill();
-    });
+    area.set_draw_func((_area, cr, width, height) => draw(cr, width, height));
     return area;
 }
 
-function tile(application, index, activate) {
+function drawPanelFrame(cr, width, height) {
+    // Match the media panel's outline and translucent background.
+    const cut = 10, inset = 0.5;
+    cr.moveTo(cut + inset, inset);
+    cr.lineTo(width - inset, inset);
+    cr.lineTo(width - inset, height - cut - inset);
+    cr.lineTo(width - cut - inset, height - inset);
+    cr.lineTo(inset, height - inset);
+    cr.lineTo(inset, cut + inset);
+    cr.closePath();
+    cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.9);
+    cr.fillPreserve();
+    cr.setSourceRGBA(252 / 255, 238 / 255, 10 / 255, 1);
+    cr.setLineWidth(1);
+    cr.stroke();
+}
+
+function drawTileFrame(cr, width, height) {
+    const inset = 4, cut = 5;
+    const x = inset, y = inset, right = width - inset, bottom = height - inset;
+    cr.moveTo(x, y);
+    cr.lineTo(right - cut, y);
+    cr.lineTo(right, y + cut);
+    cr.lineTo(right, bottom);
+    cr.lineTo(x + cut, bottom);
+    cr.lineTo(x, bottom - cut);
+    cr.closePath();
+    cr.setSourceRGBA(0.015, 0.045, 0.05, 0.94);
+    cr.fillPreserve();
+    cr.setSourceRGBA(0.20, 0.87, 0.92, 0.12);
+    cr.setLineWidth(4);
+    cr.strokePreserve();
+    cr.setSourceRGBA(0.24, 0.85, 0.91, 0.85);
+    cr.setLineWidth(1);
+    cr.stroke();
+    cr.setSourceRGBA(0.20, 0.85, 0.90, 0.055);
+    for (let row = y + 4; row < bottom - 3; row += 4) {
+        cr.moveTo(x + 3, row);
+        cr.lineTo(right - 3, row);
+    }
+    cr.setLineWidth(1);
+    cr.stroke();
+    cr.setSourceRGBA(0.42, 0.97, 1, 0.95);
+    cr.moveTo(x, y + 24);
+    cr.lineTo(x, y);
+    cr.lineTo(x + 29, y);
+    cr.moveTo(right - 33, bottom);
+    cr.lineTo(right, bottom);
+    cr.lineTo(right, bottom - 20);
+    cr.stroke();
+    cr.setSourceRGBA(0.27, 0.88, 0.93, 0.55);
+    cr.rectangle(width * 0.46, 2, width * 0.43, 1);
+    cr.rectangle(width * 0.56, height - 3, width * 0.32, 2);
+    for (let i = 0; i < 6; i++) cr.rectangle(width - 14 - i * 4, height - 8, 2, 2);
+    cr.fill();
+}
+
+function tile(application, activate) {
     const iconFrame = new Gtk.Overlay({ width_request: 56, height_request: 56, halign: Gtk.Align.CENTER });
-    iconFrame.set_child(frame('tile'));
+    iconFrame.set_child(frame(drawTileFrame));
     const image = new Gtk.Image({ pixel_size: 34, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
     image.set_from_gicon(application.app.get_icon() || Gio.ThemedIcon.new('application-x-executable'));
     iconFrame.add_overlay(image);
@@ -99,7 +99,7 @@ function tile(application, index, activate) {
     const content = box(true, 4, [iconFrame, caption]);
     const button = new Gtk.Button({ child: content, width_request: TILE_WIDTH, height_request: TILE_HEIGHT,
         css_classes: ['app-tile'] });
-    button.connect('clicked', () => activate(index));
+    button.connect('clicked', activate);
     return button;
 }
 
@@ -112,6 +112,7 @@ export class LauncherPanel {
         this.selected = 0;
         this.results = [];
         this.tiles = [];
+        this.tileCache = new WeakMap();
         this.hideTimer = 0;
         this.window = new Astal.Window({ application: app, name: 'app-launcher', namespace: 'astal:app-launcher',
             anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT,
@@ -125,7 +126,7 @@ export class LauncherPanel {
             transition_duration: ANIMATION_MS, halign: Gtk.Align.START, valign: Gtk.Align.END,
             margin_start: PANEL_LEFT, margin_bottom: BAR_GAP });
         this.card = new Gtk.Overlay({ css_classes: ['launcher-card'] });
-        this.card.set_child(frame('panel'));
+        this.card.set_child(frame(drawPanelFrame));
         this.search = new Gtk.SearchEntry({ placeholder_text: 'Search applications',
             height_request: SEARCH_HEIGHT, hexpand: true, search_delay: 80,
             css_classes: ['launcher-search'] });
@@ -224,31 +225,43 @@ export class LauncherPanel {
         } else this.window.visible = false;
     }
 
+    getTile(application, index) {
+        let button = this.tileCache.get(application);
+        if (!button) {
+            button = tile(application, () => this.launch(button.resultIndex));
+            const focus = new Gtk.EventControllerFocus();
+            focus.connect('enter', () => this.select(button.resultIndex));
+            button.add_controller(focus);
+            this.tileCache.set(application, button);
+        }
+        // Native reloads create new application objects; old tiles can then be collected.
+        button.resultIndex = index;
+        button.remove_css_class('selected');
+        button.remove_css_class('launch-error');
+        return button;
+    }
+
     render() {
         const gridFocused = this.tiles.includes(this.window.get_focus());
-        this.results = this.backend.query(this.search.get_text());
+        const query = this.search.get_text().trim();
+        this.results = this.backend.query(query);
         while (this.grid.get_first_child()) this.grid.remove(this.grid.get_first_child());
         this.tiles = this.results.map((application, index) => {
-            const button = tile(application, index, selected => this.launch(selected));
+            const button = this.getTile(application, index);
             this.grid.attach(button, index % this.columns, Math.floor(index / this.columns), 1, 1);
-            const focus = new Gtk.EventControllerFocus();
-            focus.connect('enter', () => this.select(index));
-            button.add_controller(focus);
             return button;
         });
         this.gridStack.visible_child_name = this.results.length ? 'apps' : 'empty';
-        this.empty.label = this.search.get_text().trim() ? 'NO MATCHING APPLICATIONS' : 'NO APPLICATIONS';
-        const selectFirst = this.results.length && (this.search.get_text().trim() || gridFocused);
+        this.empty.label = query ? 'NO MATCHING APPLICATIONS' : 'NO APPLICATIONS';
+        const selectFirst = this.results.length && (query || gridFocused);
         this.select(selectFirst ? 0 : -1, this.opened && gridFocused);
         this.scroll.get_vadjustment().set_value(0);
     }
 
     select(index, focus = false) {
+        this.tiles[this.selected]?.remove_css_class('selected');
         this.selected = index;
-        this.tiles.forEach((button, position) => {
-            if (position === index) button.add_css_class('selected');
-            else button.remove_css_class('selected');
-        });
+        this.tiles[index]?.add_css_class('selected');
         if (focus) {
             const button = this.tiles[index];
             if (!button) { this.root.grab_focus(); return; }
@@ -289,7 +302,6 @@ export class LauncherPanel {
         if (this.backend.launch(application)) this.close();
         else {
             this.tiles[index]?.add_css_class('launch-error');
-
             console.error(`Could not launch ${application.entry}`);
         }
     }

@@ -206,7 +206,8 @@ class Native extends Signals {
 let native = new Native();
 const device = Object.assign(new Signals(), { is_present: true, percentage: 0.42, state: 1 });
 const upower = Object.assign(new Signals(), { daemon_version: '1', on_battery: false });
-const power = Object.assign(new Signals(), { profiles: [{ profile: 'balanced' }, { profile: 'power-saver' }], active_profile: 'balanced' });
+let availableProfiles = [{ profile: 'balanced' }, { profile: 'power-saver' }];
+const power = Object.assign(new Signals(), { get_profiles: () => availableProfiles, active_profile: 'balanced' });
 const network = Object.assign(new Signals(), { client: Object.assign(new Signals(), { wireless_enabled: true }) as any });
 const bluetooth = Object.assign(new Signals(), { adapters: [] as any[] });
 const mockGI: Record<string, any> = {
@@ -251,7 +252,7 @@ beforeEach(() => {
     environment.set('XDG_STATE_HOME', '/test/state');
     device.is_present = true; device.percentage = 0.42; device.state = 1;
     upower.daemon_version = '1'; upower.on_battery = false;
-    power.profiles = [{ profile: 'balanced' }, { profile: 'power-saver' }]; power.active_profile = 'balanced';
+    availableProfiles = [{ profile: 'balanced' }, { profile: 'power-saver' }]; power.active_profile = 'balanced';
     network.client = Object.assign(new Signals(), { wireless_enabled: true });
     bluetooth.adapters = [Object.assign(new Signals(), { powered: true }), Object.assign(new Signals(), { powered: false })];
 });
@@ -288,13 +289,27 @@ function switcher(choices: readonly { id: string; label: string }[] = profileCho
     return { control, requests, previous, next, value, indicators };
 }
 
-test('switcher constructs a native caption/frame row and exposes accessible native arrows', () => {
+test('switcher has no outside caption, keeps its frame transparent and exposes accessible arrows', () => {
     const { control, previous, next, value, indicators } = switcher();
     const widget = control.widget as unknown as Box;
     assert.ok(widget instanceof Box);
     assert.equal(widget.orientation, Gtk.Orientation.HORIZONTAL);
-    assert.ok(widget.children.some(child => child instanceof Label && child.label === 'Profile'));
-    assert.ok(widget.children.some(child => child instanceof Overlay));
+    assert.equal(widget.hexpand, true);
+    assert.equal(widget.children.length, 1);
+    assert.equal(widget.children.some(child => child instanceof Label), false);
+    const frame = widget.children[0] as Overlay;
+    assert.ok(frame instanceof Overlay);
+    assert.equal(frame.hexpand, true);
+    const drawing = frame.child as DrawingArea;
+    const calls: string[] = [];
+    const paint = new Map<string, number[]>();
+    const context = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'setLineWidth', 'stroke', 'fill', 'fillPreserve']
+        .map(method => [method, (...args: number[]) => { calls.push(method); paint.set(method, args); }]));
+    drawing.draw!(drawing, context, 320, 42);
+    assert.ok(calls.includes('stroke'));
+    assert.deepEqual(paint.get('setSourceRGBA'), [238 / 255, 238 / 255, 238 / 255, 0.5]);
+    assert.deepEqual(paint.get('setLineWidth'), [0.35]);
+    assert.equal(calls.includes('fill') || calls.includes('fillPreserve'), false);
     assert.ok(previous instanceof Button);
     assert.ok(next instanceof Button);
     assert.ok(value instanceof Label);
@@ -427,20 +442,22 @@ test('switcher ticks reflect authoritative selection and availability and reset 
     assert.deepEqual(requests, []);
 });
 
-test('switcher airplane yes/no choices cycle in both directions without optimistic toggles', () => {
+test('switcher shows Airplane mode On/Off inside and cycles without optimistic toggles', () => {
     const { control, requests, previous, next, value } = switcher([
-        { id: 'no', label: 'No' }, { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'Airplane mode: Off' }, { id: 'yes', label: 'Airplane mode: On' },
     ]);
     control.update('no');
     previous.emit('clicked');
     next.emit('clicked');
     assert.deepEqual(requests, ['yes', 'yes']);
-    assert.equal(value.label, 'No');
+    assert.equal(value.label, 'Airplane mode: Off');
+    assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Airplane mode: Off');
     control.update('yes');
     previous.emit('clicked');
     next.emit('clicked');
     assert.deepEqual(requests, ['yes', 'yes', 'no', 'no']);
-    assert.equal(value.label, 'Yes');
+    assert.equal(value.label, 'Airplane mode: On');
+    assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Airplane mode: On');
 });
 
 test('strict JSON request envelope and command arity', () => {
@@ -609,6 +626,42 @@ test('backend native controls, fractional battery, radio hotplug and read-only s
     assert.equal(changes, before);
     backend.dispose(); backend.dispose();
     assert.equal(timers.size, 0);
+});
+
+test('power profile switcher uses the native getter and cycles all available profiles', () => {
+    availableProfiles = profileChoices.map(choice => ({ profile: choice.id }));
+    power.active_profile = 'power-saver';
+    assert.equal('profiles' in power, false);
+    const backend = new DashboardBackend();
+    const control = new ButtonSwitcher('Power profile', profileChoices, profile => backend.setProfile(profile), palette);
+    const render = () => control.update(backend.activeProfile, backend.profiles);
+    const unsubscribe = backend.subscribe(render);
+    try {
+        render();
+        assert.deepEqual(backend.profiles, ['power-saver', 'balanced', 'performance']);
+        assert.equal(control.previous.sensitive, true);
+        assert.equal(control.next.sensitive, true);
+        for (const expected of ['balanced', 'performance', 'power-saver']) {
+            (control.next as unknown as Button).emit('clicked');
+            assert.equal(power.active_profile, expected);
+            power.emit('notify::active-profile');
+            assert.equal(backend.activeProfile, expected);
+            assert.equal(control.value.label, profileChoices.find(choice => choice.id === expected)!.label);
+        }
+        (control.previous as unknown as Button).emit('clicked');
+        assert.equal(power.active_profile, 'performance');
+        power.emit('notify::active-profile');
+        assert.equal(control.value.label, 'Performance');
+        availableProfiles = [{ profile: 'balanced' }];
+        power.active_profile = 'balanced';
+        power.emit('notify::active-profile');
+        assert.deepEqual(backend.profiles, ['balanced']);
+        assert.equal(control.previous.sensitive, false);
+        assert.equal(control.next.sensitive, false);
+    } finally {
+        unsubscribe();
+        backend.dispose();
+    }
 });
 
 test('status preserves battery percentage, decile glyphs, thresholds and profile tooltip', () => {

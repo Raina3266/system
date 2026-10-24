@@ -7,10 +7,12 @@ import { applicationsFor } from './logic.js';
 export class LauncherBackend {
     constructor(onChanged) {
         this.apps = new Apps.Apps({ show_hidden: false });
+        this.sortedApplications = null;
         this.refreshIdle = 0;
         this.appMonitor = Gio.AppInfoMonitor.get();
         // Astal reloads on this signal first; its read-only list does not emit notify::list.
         this.appSignal = this.appMonitor.connect('changed', () => {
+            this.sortedApplications = null;
             if (this.refreshIdle) return;
             this.refreshIdle = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                 this.refreshIdle = 0;
@@ -20,9 +22,11 @@ export class LauncherBackend {
         });
     }
 
-    get applications() { return applicationsFor(this.apps); }
+    get applications() { return this.sortedApplications ??= applicationsFor(this.apps); }
 
-    query(search) { return applicationsFor(this.apps, search); }
+    query(search) {
+        return search.trim() ? applicationsFor(this.apps, search) : this.applications;
+    }
 
     launch(application) { return application.launch(); }
 

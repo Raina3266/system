@@ -675,7 +675,7 @@ and is wanted by Waybar and the graphical session. The launcher uses the pinned
 AGS 2.3 compiler: `ags bundle --gtk 4 -- <entry> <output>`. All four panel
 launchers use distinct `$XDG_RUNTIME_DIR/ags-panels/<name>-panel.js` outputs;
 `ags run` would otherwise share a single `ags.js` file and race at login.
-`niri/panels/ags-runtime.nix` adds a companion `panel-gjs` wrapper using each
+`mkAgsRuntime` in `niri/panels/default.nix` adds a companion `panel-gjs` wrapper using each
 AGS package's captured runtime environment and GTK4 layer-shell preload.
 Media retains GTK4, Graphene, Astal MPRIS and Astal WirePlumber; no manual
 `GI_TYPELIB_PATH` supplement is needed.

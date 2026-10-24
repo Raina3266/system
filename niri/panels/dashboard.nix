@@ -16,7 +16,7 @@ let
         ${lib.getDev pkgs.gdk-pixbuf}/bin/gdk-pixbuf-query-loaders
     done > "$out"
   '';
-  ags = import ./ags-runtime.nix {
+  ags = (import ./default.nix).mkAgsRuntime {
     inherit pkgs;
     ags = (pkgs.ags.override {
       extraPackages = [

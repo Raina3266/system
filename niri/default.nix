@@ -42,7 +42,7 @@ let
 in
 {
   imports = [
-    ./panels
+    (import ./panels).module
     ./waybar
   ];
 

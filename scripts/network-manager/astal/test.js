@@ -1661,12 +1661,35 @@ async function nodeLauncherTests() {
     const read = path => readFileSync(new URL(path, root), 'utf8');
     const panels = ['network', 'audio', 'media', 'dashboard'];
 
+    test('panel module exports the shared runtime helper once and removes the old helper file', () => {
+        const source = read('niri/panels/default.nix');
+        assert.equal(existsSync(new URL('niri/panels/ags-runtime.nix', root)), false);
+        assert.match(source, /mkAgsRuntime\s*=\s*\{\s*pkgs,\s*ags,?\s*\}:/);
+        assert.equal((source.match(/\bmkAgsRuntime\s*=/g) ?? []).length, 1);
+        assert.equal((source.match(/makeWrapper\s+\$\{lib\.getExe pkgs\.gjs\}\s+"\$out\/bin\/panel-gjs"/g) ?? []).length, 1);
+        assert.match(source, /module\s*=\s*\{[\s\S]*?\}:\s*\{/);
+    });
+
+    test('Niri imports the exported panel Home Manager module', () => {
+        const source = read('niri/default.nix');
+        assert.match(source, /imports = \[\s*\(import \.\/panels\)\.module\b/);
+        assert.doesNotMatch(source, /(?:^|\n)\s*\.\/panels\s*(?:\n|$)/);
+    });
+
+    for (const panel of [...panels, 'app-launcher']) {
+        test(`${panel} uses the shared runtime helper without defining a second wrapper`, () => {
+            const source = read(`niri/panels/${panel}.nix`);
+            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{\s*inherit pkgs;\s*ags = /);
+            assert.doesNotMatch(source, /ags-runtime\.nix|\bmkAgsRuntime\s*=|makeWrapper|\$out\/bin\/panel-gjs/);
+        });
+    }
+
     // AGS 2.3 run shares $XDG_RUNTIME_DIR/ags.js across every instance. Keep the
     // original runtime directory for IPC, but compile to an explicit panel file.
     for (const panel of panels) {
         test(`${panel} launcher bundles to its own GTK4 file without changing the IPC namespace`, () => {
             const source = read(`niri/panels/${panel}.nix`);
-            assert.match(source, /ags = import \.\/ags-runtime\.nix\s*\{/);
+            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{/);
             assert.doesNotMatch(source, /\$\{(?:lib\.getExe ags|ags)\}(?:\/bin\/ags)?\s+run\b/);
             assert.doesNotMatch(source, /--gtk4\b/, 'the bundle command takes --gtk 4, not run\'s --gtk4');
             assert.doesNotMatch(source, /(?:^|\n)\s*(?:export\s+)?XDG_RUNTIME_DIR=/);
@@ -1682,7 +1705,7 @@ async function nodeLauncherTests() {
     }
 
     test('companion GJS wrapper reuses the customized AGS GI/pixbuf environment and GTK4 layer shell', () => {
-        const source = read('niri/panels/ags-runtime.nix');
+        const source = read('niri/panels/default.nix');
         assert.match(source, /ags\.overrideAttrs\s*\(old:/, 'extend the supplied per-panel AGS package');
         assert.match(source, /postFixup = \(old\.postFixup or ""\) \+/);
         assert.match(source, /makeWrapper \$\{lib\.getExe pkgs\.gjs\} "\$out\/bin\/panel-gjs"/);
@@ -1699,7 +1722,7 @@ async function nodeLauncherTests() {
             }
             assert.match(source, /GDK_PIXBUF_MODULEDIR="\$module_dir"/);
             assert.match(source, /\$\{lib\.getDev pkgs\.gdk-pixbuf\}\/bin\/gdk-pixbuf-query-loaders/);
-            assert.match(source, /ags = import \.\/ags-runtime\.nix\s*\{\s*inherit pkgs;\s*ags = \(pkgs\.ags\.override/);
+            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{\s*inherit pkgs;\s*ags = \(pkgs\.ags\.override/);
             assert.match(source, /postInstall = \(old\.postInstall or ""\) \+ ''\s*export GDK_PIXBUF_MODULE_FILE=\$\{pixbufLoaders\}/);
         });
     }

@@ -4,7 +4,7 @@
 }:
 let
   inherit (pkgs) lib;
-  ags = import ./ags-runtime.nix {
+  ags = (import ./default.nix).mkAgsRuntime {
     inherit pkgs;
     ags = pkgs.ags.override {
       extraPackages = [

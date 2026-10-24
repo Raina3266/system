@@ -90,7 +90,7 @@ export class DashboardBackend {
             percentage: present && Number.isFinite(device.percentage) ? Math.max(0, Math.min(1, device.percentage)) : -1 };
         this.airplaneMode = !this.network.client?.wireless_enabled
             && (this.bluetooth.adapters || []).every((adapter: Bluetooth.Adapter) => !adapter.powered);
-        this.profiles = (this.power.profiles || []).map((profile: PowerProfiles.Profile) => profile.profile)
+        this.profiles = (this.power.get_profiles() || []).map((profile: PowerProfiles.Profile) => profile.profile)
                     .filter((profile: string) => typeof profile === 'string' && profile.length > 0);
         this.activeProfile = this.power.active_profile || '';
         this.emit();
@@ -182,14 +182,14 @@ export class ButtonSwitcher {
 
     constructor(title: string, private readonly choices: readonly { id: string; label: string }[],
         private readonly changed: (id: string) => unknown, palette: Palette) {
-        const caption = label(title, ['switcher-title']);
+
         this.value = label('Unavailable', ['switcher-value'], true);
         this.value.xalign = 0.5;
         this.indicators = box(false, 4, choices.map(() => new Gtk.Box({ css_classes: ['switcher-tick'] })));
         this.indicators.halign = Gtk.Align.CENTER;
         const arrow = (text: string, direction: -1 | 1) => {
             const button = new Gtk.Button({ child: label(text, ['switcher-arrow']),
-                css_classes: ['switcher-step'], width_request: 30, height_request: 38 });
+                css_classes: ['switcher-step'], width_request: 24, height_request: 38 });
             (button.get_child() as Gtk.Label).xalign = 0.5;
             button.update_property([Gtk.AccessibleProperty.LABEL],
                 [`${direction < 0 ? 'Previous' : 'Next'} ${title.toLowerCase()}`]);
@@ -210,8 +210,8 @@ export class ButtonSwitcher {
         const frame = new Gtk.Overlay({ hexpand: true, css_classes: ['button-switcher'] });
         const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
         const colour = (hex: string) => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
-        const [red, green, blue] = colour(palette.red);
-        const [backRed, backGreen, backBlue] = colour(palette.secondaryBackground);
+        const [red, green, blue] = colour(palette.foreground);
+
         drawing.set_draw_func((_area, cr, width, height) => {
             const right = width - 0.5, bottom = height - 0.5, cut = Math.min(9, width / 2, height / 2);
             cr.moveTo(0.5, 0.5);
@@ -220,16 +220,16 @@ export class ButtonSwitcher {
             cr.lineTo(right - cut, bottom);
             cr.lineTo(0.5, bottom);
             cr.closePath();
-            cr.setSourceRGBA(backRed, backGreen, backBlue, 0.6);
-            cr.fillPreserve();
+
             cr.setSourceRGBA(red, green, blue, 0.5);
-            cr.setLineWidth(1);
+            cr.setLineWidth(0.35);
             cr.stroke();
         });
         frame.set_child(drawing);
         frame.add_overlay(control);
         frame.set_measure_overlay(control, true);
-        this.widget = box(false, 10, [caption, frame]);
+        this.widget = box(false, 0, [frame]);
+        this.widget.hexpand = true;
         this.update('');
     }
 
@@ -322,13 +322,15 @@ export class DashboardPanel {
             { id: 'power-saver', label: 'Power saver' }, { id: 'balanced', label: 'Balanced' },
             { id: 'performance', label: 'Performance' },
         ], profile => backend.setProfile(profile), palette);
-        power.append(this.profile.widget);
+
         this.airplane = new ButtonSwitcher('Airplane mode', [
-            { id: 'no', label: 'No' }, { id: 'yes', label: 'Yes' },
+            { id: 'no', label: 'Airplane mode: Off' }, { id: 'yes', label: 'Airplane mode: On' },
         ], value => {
             if ((value === 'yes') !== backend.airplaneMode) backend.toggleAirplaneMode();
         }, palette);
-        power.append(this.airplane.widget);
+        const powerControls = box(false, 10, [this.profile.widget, this.airplane.widget]);
+        powerControls.homogeneous = true;
+        power.append(powerControls);
 
         const system = new Section('󰍛', 'SYSTEM PARAMETERS');
         this.metrics = { cpu: new MetricBar('CPU'), memory: new MetricBar('MEMORY'),

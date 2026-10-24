@@ -7,6 +7,58 @@ import { parseRequest, panelLayout, applicationsFor, nextIndex, ANIMATION_MS, BA
 async function unitTests() {
     const { default: test } = await import('node:test');
     const { default: assert } = await import('node:assert/strict');
+    const { readFileSync } = await import('node:fs');
+    const { runInNewContext } = await import('node:vm');
+
+    function loadClass(file, name, context) {
+        const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+        const start = source.indexOf(`export class ${name}`);
+        const end = source.indexOf('\nexport ', start + 1);
+        const definition = source.slice(start, end).replace('export class', 'class');
+        return runInNewContext(`${definition}\n${name};`, context);
+    }
+
+    function panelFixture() {
+        let query = '', focused = null;
+        let results = [{ name: 'Anki', entry: 'anki' }];
+        const created = [], children = [], launches = [];
+        const Panel = loadClass('./frontend.js', 'LauncherPanel', {
+            Gtk: { EventControllerFocus: class { connect(_signal, callback) { this.enter = callback; } } },
+            Astal: { Keymode: { EXCLUSIVE: 1 } },
+            console: { error() {} },
+            tile(application, activate) {
+                const button = {
+                    application, activate, classes: new Set(), controllers: [],
+                    add_controller(controller) { this.controllers.push(controller); },
+                    grab_focus() { focused = this; this.controllers.forEach(controller => controller.enter()); },
+                    compute_bounds: () => [false],
+                    add_css_class(name) { this.classes.add(name); },
+                    remove_css_class(name) { this.classes.delete(name); },
+                };
+                created.push(button);
+                return button;
+            },
+        });
+        const panel = Object.assign(Object.create(Panel.prototype), {
+            opened: false, monitor: null, selected: -1, tiles: [], tileCache: new WeakMap(), columns: GRID_COLUMNS, hideTimer: 0,
+            backend: { query: () => results, launch(application) { launches.push(application); return false; } },
+            window: { get_focus: () => focused }, gridStack: {}, empty: {}, revealer: {},
+            grid: {
+                get_first_child: () => children[0] || null,
+                remove(button) { children.splice(children.indexOf(button), 1); },
+                attach(button, column, row) {
+                    assert.ok(!children.includes(button), 'Tiles must be detached before reattaching');
+                    Object.assign(button, { column, row });
+                    children.push(button);
+                },
+            },
+            scroll: { get_vadjustment: () => ({ set_value() {} }) },
+            search: { get_text: () => query, set_text(value) { query = value; }, grab_focus() { focused = panel.search; } },
+            setMonitor() {}, resize() {},
+        });
+        return { panel, created, children, launches,
+            setQuery(value) { query = value; }, setResults(value) { results = value; } };
+    }
 
     test('IPC accepts only supported commands and valid monitor names', () => {
         assert.deepEqual(parseRequest('{"command":"toggle","monitor":"DP-8"}'), { command: 'toggle', monitor: 'DP-8' });
@@ -53,45 +105,103 @@ async function unitTests() {
         assert.ok(panelLayout(320, 600).columns < GRID_COLUMNS);
     });
 
-    test('launcher opens and clears search without preselecting the first app', async () => {
-        const { readFileSync } = await import('node:fs');
-        const { runInNewContext } = await import('node:vm');
-        const source = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
-        const Panel = runInNewContext(source.slice(source.indexOf('export class LauncherPanel'),
-            source.indexOf('\nexport const LauncherApplication')).replace('export class', 'class') + '\nLauncherPanel;', {
-            Gtk: { EventControllerFocus: class { connect() {} } },
-            Astal: { Keymode: { EXCLUSIVE: 1 } },
-            tile() {
-                return { classes: new Set(), add_controller() {}, grab_focus() {},
-                    compute_bounds: () => [false],
-                    add_css_class(name) { this.classes.add(name); },
-                    remove_css_class(name) { this.classes.delete(name); } };
-            },
-        });
-        let query = '', focused = null;
-        const panel = Object.assign(Object.create(Panel.prototype), {
-            opened: false, tiles: [], columns: 4, hideTimer: 0,
-            backend: { query: () => [{ name: 'Anki', entry: 'anki' }] },
-            window: { get_focus: () => focused }, gridStack: {}, empty: {}, revealer: {},
-            grid: { get_first_child: () => null, attach() {} },
-            scroll: { get_vadjustment: () => ({ set_value() {} }) },
-            search: { get_text: () => query, set_text(value) { query = value; }, grab_focus() {} },
-            setMonitor() {}, resize() {},
-        });
+    test('launcher opens and clears search without preselecting the first app', () => {
+        const { panel, setQuery } = panelFixture();
         panel.render();
         assert.equal(panel.selected, -1);
         assert.ok(panel.tiles.every(tile => !tile.classes.has('selected')));
-        query = 'Anki';
+        setQuery('Anki');
         panel.render();
         assert.equal(panel.selected, 0, 'typed searches retain their first-result selection');
-        query = '';
+        setQuery('');
         panel.render();
         assert.equal(panel.selected, -1, 'clearing search removes the default highlight');
-        panel.select(0);
-        focused = panel.tiles[0];
+        panel.select(0, true);
         panel.toggle({ get_connector: () => 'test' });
         assert.equal(panel.selected, -1, 'reopening clears stale keyboard selection');
         assert.ok(panel.tiles.every(tile => !tile.classes.has('selected')));
+    });
+
+    test('tiles are reused across filtering and reflow without stale click or focus indices', () => {
+        const { panel, created, children, launches, setResults, setQuery } = panelFixture();
+        const apps = ['Anki', 'Chrome', 'Zed'].map(name => ({ name, entry: name }));
+        setResults(apps);
+        panel.render();
+        const original = [...panel.tiles];
+        setQuery('zed');
+        setResults([apps[2], apps[1]]);
+        panel.render();
+        assert.equal(created.length, 3);
+        assert.equal(panel.tiles[0], original[2]);
+        panel.tiles[0].activate();
+        assert.equal(launches[0], apps[2]);
+        assert.ok(panel.tiles[0].classes.has('launch-error'));
+        panel.tiles[1].grab_focus();
+        assert.equal(panel.selected, 1);
+        panel.render();
+        assert.equal(panel.selected, 0, 'Grid-focused refresh must refocus the first result');
+        assert.ok(panel.tiles.every(tile => !tile.classes.has('launch-error')));
+        assert.ok(panel.tiles.every(tile => tile.controllers.length === 1));
+        setResults(apps);
+        panel.columns = 2;
+        panel.render();
+        assert.equal(panel.tiles[2], original[2]);
+        assert.deepEqual([panel.tiles[2].column, panel.tiles[2].row], [0, 1]);
+        assert.equal(created.length, 3);
+        setResults([]);
+        panel.render();
+        assert.equal(children.length, 0);
+        assert.equal(panel.selected, -1);
+        const replacement = { name: 'New Anki', entry: apps[0].entry };
+        setResults([replacement]);
+        panel.render();
+        assert.notEqual(panel.tiles[0], original[0], 'Native object replacements must refresh tile metadata');
+        panel.tiles[0].activate();
+        assert.equal(launches[1], replacement);
+    });
+
+    test('alphabetical cache invalidates on every native change, including coalesced events', () => {
+        let entries = [{ name: 'Zed', entry: 'zed' }], reads = 0, searches = 0, changed = 0;
+        const pending = new Map();
+        let signal;
+        const monitor = { connect(_name, callback) { signal = callback; return 1; }, disconnect() { signal = null; } };
+        const Backend = loadClass('./backend.js', 'LauncherBackend', {
+            Apps: { Apps: class {
+                get list() { reads++; return entries; }
+                fuzzy_query(search) { searches++; assert.equal(search, 'z'); return entries; }
+            } },
+            Gio: { AppInfoMonitor: { get: () => monitor } },
+            GLib: {
+                PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false,
+                idle_add(_priority, callback) { pending.set(1, callback); return 1; },
+                source_remove(id) { pending.delete(id); },
+            },
+            applicationsFor,
+        });
+        const backend = new Backend(() => changed++);
+        const first = backend.applications;
+        assert.equal(backend.applications, first);
+        assert.equal(backend.query('  '), first);
+        assert.equal(reads, 1);
+        backend.query(' z ');
+        backend.query('z');
+        assert.equal(searches, 2, 'Native ranking must not be cached');
+        signal();
+        const second = backend.applications;
+        assert.notEqual(second, first);
+        entries = [{ name: 'Zoom', entry: 'zoom' }];
+        signal();
+        assert.equal(backend.applications[0].entry, 'zoom');
+        assert.equal(reads, 3, 'Each catalog change must invalidate even before the idle refresh');
+        assert.equal(pending.size, 1);
+        const refresh = pending.get(1);
+        pending.clear();
+        refresh();
+        assert.equal(changed, 1);
+        signal();
+        backend.dispose();
+        assert.equal(pending.size, 0);
+        assert.equal(signal, null);
     });
 
     test('keyboard navigation clamps to real entries, including a partial last row', () => {
@@ -145,6 +255,10 @@ async function smokeTests() {
         assert(panel.results.length === panel.backend.applications.length, 'Unfiltered grid must include every visible app');
         assert(panel.tiles.length === panel.results.length, 'Every app must have a tile');
         assert(panel.tiles.every(tile => !tile.get_has_tooltip()), 'Application tiles must not show tooltips');
+        const catalog = panel.backend.applications;
+        const originalTiles = new Map(panel.results.map((application, index) => [application, panel.tiles[index]]));
+        assert(panel.backend.applications === catalog && panel.backend.query('  ') === catalog,
+            'Unfiltered reads must reuse the alphabetical catalog');
         assert(panel.card.get_width() > 0 && panel.card.get_height() > 0, 'Panel must be allocated');
         const [valid, bounds] = panel.card.compute_bounds(panel.root);
         assert(valid && bounds.get_x() === PANEL_LEFT, 'Panel must sit at the bottom-left');
@@ -193,6 +307,8 @@ async function smokeTests() {
         panel.search.set_text(application.name);
         await wait(150);
         assert(panel.results.some(result => result.entry === application.entry), 'Search must include an exact application name');
+        assert(panel.tiles.every((tile, index) => tile === originalTiles.get(panel.results[index])),
+            'Filtering must reuse the existing native application tiles');
         assert(searchFocused(), 'Filtering must not steal focus from the search field');
         assert(panel.results.map(result => result.entry).join() === panel.backend.query(application.name).map(result => result.entry).join(),
             'Displayed search results must preserve native Astal ranking');
@@ -204,11 +320,24 @@ async function smokeTests() {
         panel.search.set_text('');
         await wait(150);
         assert(panel.results.length === panel.backend.applications.length, 'Clearing search must restore every application');
+        assert(panel.tiles.every((tile, index) => tile === originalTiles.get(panel.results[index])),
+            'Clearing search must reuse the original tiles');
+        panel.tiles[0].add_css_class('launch-error');
+        panel.render();
+        assert(!panel.tiles[0].has_css_class('launch-error'), 'Rerendering must clear transient launch errors');
         assert(panel.selected === -1 && panel.tiles.every(tile => !tile.has_css_class('selected')),
             'Clearing search must restore the grid without a default selected tile');
         panel.keyPressed(Gdk.KEY_Down);
         panel.keyPressed(Gdk.KEY_f, Gdk.ModifierType.CONTROL_MASK);
         assert(searchFocused(), 'Ctrl+F must return to search');
+        // A real desktop change reloads Astal's catalog before the frontend's idle refresh.
+        panel.backend.apps.reload();
+        panel.backend.appMonitor.emit('changed');
+        await wait(150);
+        assert(panel.backend.applications !== catalog, 'Native catalog changes must invalidate the alphabetical cache');
+        assert(panel.tiles.every(tile => ![...originalTiles.values()].includes(tile)),
+            'Native reloads must replace tiles rather than retain stale application metadata');
+        assert(searchFocused(), 'Native catalog refresh must retain search focus');
         const status = JSON.parse(await app.handleRequest('{"command":"status"}'));
         assert(status.opened && status.applications === panel.backend.applications.length, 'Status must expose native application count');
         await app.handleRequest('{"command":"close"}');
