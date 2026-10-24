@@ -132,7 +132,7 @@ export class NetworkPanel {
             return true;
         });
         this.window.add_controller(keys);
-        this.root = new Gtk.Overlay({ hexpand: true, vexpand: true });
+        this.root = new Gtk.Overlay({ hexpand: true, vexpand: true, focusable: true });
         this.root.set_child(new Gtk.Box({ hexpand: true, vexpand: true }));
         this.window.set_child(this.root);
         this.card = new Gtk.Overlay({ width_request: 420, height_request: 520,
@@ -142,7 +142,7 @@ export class NetworkPanel {
         this.content = box(true);
         this.content.add_css_class('network-content');
         // Normally only the list/details scroll. This outer viewport is a safety
-        // valve for monitors too short even for the header and credential form.
+        // valve for monitors too short even for the credential form.
         this.contentScroll = scroll(this.content);
         this.card.add_overlay(this.contentScroll);
         this.card.set_measure_overlay(this.contentScroll, false);
@@ -162,16 +162,7 @@ export class NetworkPanel {
     }
 
     build() {
-        this.heading = label('NETWORK', ['heading'], false);
-        this.wifi = button('Wi-Fi off', () => this.controller.toggleWifi(), ['wifi-toggle']);
-        this.refresh = button('↻', () => this.controller.refresh(), ['icon-button']);
-        this.refresh.tooltip_text = 'Refresh networks';
-        this.refresh.update_property([Gtk.AccessibleProperty.LABEL], ['Refresh networks']);
-        this.closeButton = button('×', () => this.close(), ['icon-button']);
-        this.closeButton.tooltip_text = 'Close network panel';
-        this.closeButton.update_property([Gtk.AccessibleProperty.LABEL], ['Close network panel']);
-        this.header = box(false, 8, [this.heading, this.wifi, this.refresh, this.closeButton]);
-        this.content.append(this.header);
+
         this.wifiNotice = label('', ['warning']);
         this.error = label('', ['warning']);
         this.error.lines = 3;
@@ -185,6 +176,8 @@ export class NetworkPanel {
         this.pages = new Gtk.Stack({ transition_type: Gtk.StackTransitionType.NONE,
             hhomogeneous: false, vhomogeneous: false, hexpand: true, vexpand: true });
         this.networkRows = box(true);
+        this.networkSeparator = new Gtk.Separator({ css_classes: ['network-divider'], visible: false });
+        this.networkRows.append(this.networkSeparator);
         this.empty = label('No networks available');
         this.empty.halign = Gtk.Align.CENTER;
         this.empty.valign = Gtk.Align.CENTER;
@@ -211,9 +204,7 @@ export class NetworkPanel {
         this.forget = box(true, 8, [label('Forget ALL saved profiles for this network and disconnect it?'),
             box(false, 8, [this.forgetConfirm, this.forgetCancel])]);
         this.content.append(this.forget);
-        this.advanced = button('Advanced…', () => this.controller.openEditor());
-        this.advanced.halign = Gtk.Align.START;
-        this.content.append(this.advanced);
+
     }
 
     buildInfo() {
@@ -276,17 +267,22 @@ export class NetworkPanel {
         row.forget = button('Forget', () => this.controller.requestForget(key));
         row.info = button('Info', () => { this.clearPassword(); this.controller.info(key); });
         row.qr = button('QR', () => { this.clearPassword(); this.controller.qr(key); });
-        const actions = box(false, 8, [row.connect, row.forget, row.info, row.qr]);
-        row.widget = box(true, 4, [row.name, row.metadata, row.profile,
-            scroll(actions, { hscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vscrollbar_policy: Gtk.PolicyType.NEVER,
-                min_content_height: 28 }), new Gtk.Separator({ css_classes: ['network-divider'] })]);
+        row.heading = box(false, 8, [row.name, row.connect]);
+        row.actions = scroll(box(false, 8, [row.forget, row.info, row.qr]), {
+            hscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vscrollbar_policy: Gtk.PolicyType.NEVER,
+            min_content_height: 28 });
+        row.widget = box(true, 4, [row.heading, row.metadata, row.profile, row.actions]);
         this.networkRows.append(row.widget);
         this.rows.set(key, row);
         return row;
     }
 
     renderRows() {
-        const c = this.controller, data = c.rows || [];
+        const c = this.controller;
+        const remembered = (c.rows || []).filter(row => row.known || row.connected);
+        const available = (c.rows || []).filter(row => !row.known && !row.connected);
+        const data = [...remembered, ...available];
+        this.networkSeparator.visible = remembered.length > 0 && available.length > 0;
         const wanted = new Set(data.map(row => row.key));
         for (const [key, row] of this.rows) {
             if (wanted.has(key)) continue;
@@ -294,8 +290,13 @@ export class NetworkPanel {
             this.rows.delete(key);
             this.profileChoices.delete(key);
         }
-        let previous = null;
+        let previous = null, separated = false;
         for (const dataRow of data) {
+            if (this.networkSeparator.visible && !dataRow.known && !dataRow.connected && !separated) {
+                this.networkRows.reorder_child_after(this.networkSeparator, previous);
+                previous = this.networkSeparator;
+                separated = true;
+            }
             const row = this.rows.get(dataRow.key) || this.createRow(dataRow.key);
             row.data = dataRow;
             row.name.set_label(`${dataRow.kind === 'WIRED' ? 'Wired' : 'Wi-Fi'} · ${dataRow.name}`);
@@ -318,9 +319,10 @@ export class NetworkPanel {
             row.connect.get_child().set_label(dataRow.connected ? 'Disconnect' : 'Connect');
             row.connect.sensitive = !dataRow.changing && (!dataRow.wireless || (c.wifiEnabled && c.wifiHardwareEnabled));
             row.forget.visible = Boolean(dataRow.known);
-            row.forget.sensitive = !dataRow.changing;
+            row.forget.sensitive = Boolean(dataRow.known && !dataRow.changing);
             row.info.visible = Boolean(dataRow.connected);
             row.qr.visible = Boolean(dataRow.connected && dataRow.wireless);
+            row.actions.visible = row.forget.visible || row.info.visible || row.qr.visible;
             if (row.widget.get_prev_sibling() !== previous) this.networkRows.reorder_child_after(row.widget, previous);
             previous = row.widget;
         }
@@ -347,11 +349,7 @@ export class NetworkPanel {
         if (shown && (!this.monitor || this.monitor.get_connector() !== c.monitor)) this.setMonitor(monitorFor(c.monitor));
         if (shown !== this.presented) this.window.keymode = shown ? Astal.Keymode.EXCLUSIVE : Astal.Keymode.NONE;
         if (this.window.visible !== shown) this.window.visible = shown;
-        this.wifi.get_child().set_label(c.wifiEnabled ? 'Wi-Fi on' : 'Wi-Fi off');
-        if (c.wifiEnabled) this.wifi.add_css_class('selected');
-        else this.wifi.remove_css_class('selected');
-        this.wifi.sensitive = Boolean(c.wifiAvailable && c.wifiHardwareEnabled);
-        this.refresh.sensitive = Boolean(c.wifiAvailable && c.wifiEnabled);
+
         message(this.wifiNotice, !c.wifiAvailable ? 'No Wi-Fi adapter'
             : !c.wifiHardwareEnabled ? 'Wi-Fi is hardware blocked' : !c.wifiEnabled ? 'Wi-Fi is off' : '');
         message(this.error, c.error);
@@ -366,7 +364,7 @@ export class NetworkPanel {
         this.renderInfo(shown && c.page === 'info');
         this.renderQr(shown && c.page === 'qr' ? c.qrImage || '' : '');
         if (shown && changed && this.credentials.visible) this.password.grab_focus();
-        else if (shown && !this.presented) this.closeButton.grab_focus();
+        else if (shown && !this.presented) this.root.grab_focus();
         this.presented = shown;
     }
 
@@ -483,6 +481,10 @@ export const NetworkApplication = GObject.registerClass({ GTypeName: 'NetworkPan
             case 'status': return this.controller.status();
             case 'toggle': this.panel.toggle(command.monitor || ''); break;
             case 'close': this.panel.close(); break;
+            case 'toggleWifi':
+                this.controller.toggleWifi();
+                if (this.controller.error) throw new Error(this.controller.error);
+                break;
             default: throw new Error('Unknown network panel command.');
             }
             return 'ok';

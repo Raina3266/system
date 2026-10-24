@@ -24,7 +24,7 @@ function failure(message, authentication = false) {
     return error;
 }
 
-function safeError(error, message = 'The network operation failed. Check permissions or use Advanced.') {
+function safeError(error, message = 'The network operation failed. Check permissions and the saved network settings.') {
     if (error?.[SAFE]) return error;
     // Never expose an NM/DBus diagnostic: it may include a setting's secret value.
     let authentication = false;
@@ -172,7 +172,7 @@ function setPassword(connection, password) {
         security.psk = password;
         security.psk_flags = NM.SettingSecretFlags.NONE;
     } else {
-        throw failure('Configure authentication for this network with Advanced.');
+        throw failure('Configure authentication for this network in a network connection editor.');
     }
     try { connection.verify_secrets(); } catch (_) { throw failure('Enter a valid network password.', true); }
 }
@@ -191,7 +191,7 @@ function newConnection(entry, password) {
         const ap = bestAP(entry);
         if (!ap) throw failure('This network is no longer in range. Refresh and try again.');
         if (ap.get_mode() !== MODES.INFRA)
-            throw failure('Configure this network mode with Advanced.');
+            throw failure('Configure this network mode in a network connection editor.');
         connection.add_setting(new NM.SettingWireless({ ssid: entry.ssidBytes, mode: 'infrastructure' }));
         switch (entry.securityType) {
         case 'open': break;
@@ -209,19 +209,19 @@ function newConnection(entry, password) {
                 key_mgmt: 'owe', pmf: NM.SettingWirelessSecurityPmf.REQUIRED,
             }));
             break;
-        default: throw failure('Create an authentication profile with Advanced before connecting.');
+        default: throw failure('Create a suitable saved authentication profile before connecting.');
         }
         if (['wep', 'psk', 'sae'].includes(entry.securityType)) {
             if (password === null) throw failure('A password is required for this network.', true);
             setPassword(connection, password);
         } else if (password !== null) {
-            throw failure('This network does not accept an inline password. Use Advanced.');
+            throw failure('This network does not accept an inline password. Configure its saved profile in a network connection editor.');
         }
     } else {
-        if (password !== null) throw failure('Configure wired authentication with Advanced.');
+        if (password !== null) throw failure('Configure wired authentication in a network connection editor.');
         connection.add_setting(new NM.SettingWired());
     }
-    try { connection.verify(); } catch (_) { throw failure('The network settings are not supported. Use Advanced.'); }
+    try { connection.verify(); } catch (_) { throw failure('The network settings are not supported. Configure a supported saved profile first.'); }
     return connection;
 }
 
@@ -289,13 +289,6 @@ export class NetworkBackend {
         if (this._started) this._sync();
     }
 
-    async refresh() {
-        if (this._disposed) throw failure('The network panel is closed.');
-        this._sync();
-        if (!this._canScan()) return;
-        await Promise.all(this._devices().filter(device => device.get_device_type() === NM.DeviceType.WIFI)
-            .map(device => this._scan(device)));
-    }
 
     toggleWifi() {
         if (this._disposed || !this.client?.get_nm_running() || !this.wifiAvailable)
@@ -511,13 +504,13 @@ export class NetworkBackend {
             const entry = this._entry(key);
             operation.device = entry.device;
             if (!entry.wireless || ['owe', 'enterprise', 'unknown'].includes(entry.securityType))
-                throw failure('Sharing credentials is not supported for this network. Use Advanced.');
+                throw failure('Sharing credentials is not supported for this network.');
             const profile = entry.device.get_active_connection()?.get_connection();
             if (!profile || profile.get_uuid() !== expected.profileUuid)
                 throw failure('The active saved profile is no longer available.');
             const type = profileSecurity(profile);
             if (!['open', 'wep', 'psk', 'sae'].includes(type))
-                throw failure('Sharing credentials is not supported for this network. Use Advanced.');
+                throw failure('Sharing credentials is not supported for this network.');
             const hidden = Boolean(profile.get_setting_wireless()?.get_hidden());
             let password = '';
             if (type !== 'open') {
@@ -528,7 +521,7 @@ export class NetworkBackend {
                 const security = profile.get_setting_wireless_security();
                 password = type === 'wep' ? secrets[`wep-key${security.get_wep_tx_keyidx()}`] : secrets.psk;
                 if (typeof password !== 'string' || !password)
-                    throw failure('The saved password is not available. Use Advanced.');
+                    throw failure('The saved password is not available. Check the saved network settings.');
             }
             this._check(operation);
             this._assertIdentity(key, expected);
@@ -555,7 +548,7 @@ export class NetworkBackend {
             if (cancellable) externalId = cancellable.connect(() => operation.io.cancel());
             if (timeout) timer = GLib.timeout_add(PRIORITY, timeout, () => {
                 timer = 0;
-                operation.error = failure('The network request timed out. Try again or use Advanced.');
+                operation.error = failure('The network request timed out. Try again.');
                 operation.io.cancel();
                 return GLib.SOURCE_REMOVE;
             });
@@ -596,7 +589,7 @@ export class NetworkBackend {
             if (entry.wireless && (!this.wifiEnabled || !this.wifiHardwareEnabled))
                 throw failure('Enable Wi-Fi and check the hardware switch before connecting.');
             if (password !== null && entry.profiles.length > 1)
-                throw failure('Multiple saved profiles match this network. Update credentials with Advanced.');
+                throw failure('Multiple saved profiles match this network. Update the intended profile in a network connection editor.');
             let profile = profileUuid ? entry.profiles.find(profile => profile.get_uuid() === profileUuid) : entry.profiles[0];
             if (profileUuid && !profile) throw failure('The selected saved profile is no longer available.');
             if (profile && password !== null) {
@@ -610,7 +603,7 @@ export class NetworkBackend {
                 entry = this._entry(key, original.device);
                 profile = entry.profiles.find(current => current.get_uuid() === profile.get_uuid() && sameObject(current, profile));
                 if (!profile) throw failure('The selected saved profile changed. Refresh and try again.');
-                if (entry.profiles.length > 1) throw failure('The saved profile selection changed. Update credentials with Advanced.');
+                if (entry.profiles.length > 1) throw failure('The saved profile selection changed. Update the intended profile in a network connection editor.');
             }
             this._check(operation);
             entry = this._entry(key, original.device);
@@ -621,7 +614,7 @@ export class NetworkBackend {
                 ? await nativeAsync(this.client, 'activate_connection_async', 'activate_connection_finish', [connection, entry.device, path(ap) || null], operation.io)
                 : await nativeAsync(this.client, 'add_and_activate_connection_async', 'add_and_activate_connection_finish', [connection, entry.device, path(ap) || null], operation.io);
             this._check(operation);
-            if (!active) throw failure('The connection could not be started. Try again or use Advanced.');
+            if (!active) throw failure('The connection could not be started. Try again.');
             if (active.get_uuid() !== requestedUuid)
                 throw failure('The selected saved profile changed during activation. Refresh and try again.');
             await this._waitActivated(entry, active, operation);
@@ -655,7 +648,7 @@ export class NetworkBackend {
                 // Initial FAILED state can still describe the previous request.
                 if (state === NM.ActiveConnectionState.DEACTIVATED || state === NM.ActiveConnectionState.DEACTIVATING
                     || (target && seenDeviceProgress && deviceState === NM.DeviceState.FAILED)) {
-                    finish(failure('The connection failed. Check authentication or use Advanced.', authReason(device, active))); return;
+                    finish(failure('The connection failed. Check authentication and the saved network settings.', authReason(device, active))); return;
                 }
                 if (target) seenTarget = true;
                 else if (current && seenTarget) {
@@ -833,6 +826,6 @@ export function controllerRuntime() {
     return {
         encodeQr,
         createCancellable: () => new Gio.Cancellable(),
-        launchEditor: () => spawn([GLib.getenv('NETWORK_EDITOR') || 'nm-connection-editor']),
+
     };
 }

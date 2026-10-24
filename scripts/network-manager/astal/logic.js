@@ -58,7 +58,7 @@ export function parseRequest(text) {
         if (typeof text !== 'string' || text.length > 8192) throw new Error();
         request = JSON.parse(text);
         if (!request || Array.isArray(request) || typeof request !== 'object'
-            || !['status', 'toggle', 'close'].includes(request.command)
+            || !['status', 'toggle', 'close', 'toggleWifi'].includes(request.command)
             || Object.keys(request).some(key => key !== 'command' && (key !== 'monitor' || request.command !== 'toggle'))
             || ('monitor' in request && (typeof request.monitor !== 'string' || request.monitor.length > 512
                 || /[\x00-\x1f\x7f]/.test(request.monitor)))) throw new Error();
@@ -71,12 +71,12 @@ const acceptsPassword = row => row && ['wep', 'psk', 'sae'].includes(row.securit
 // Request policy lives here; all service state and network mutations stay in the
 // native adapter. Injected runtime hooks also make races testable without NM.
 export class NetworkController {
-    constructor({ backend, onChange = () => {}, encodeQr, createCancellable, launchEditor }) {
+    constructor({ backend, onChange = () => {}, encodeQr, createCancellable }) {
         this.backend = backend;
         this.onChange = onChange;
         this.encodeQr = encodeQr;
         this.createCancellable = createCancellable;
-        this.launchEditor = launchEditor;
+
         this.rows = [];
         this.opened = false;
         this.monitor = '';
@@ -123,7 +123,7 @@ export class NetworkController {
         if (this.credentialKey && (!this.credentialRow || profileStamp(this.credentialRow) !== this.credentialProfiles)) {
             this.credentialKey = '';
             this.credentialProfiles = '';
-            this.error = 'Saved profiles changed. Select the network again or use Advanced.';
+            this.error = 'Saved profiles changed. Select the network again.';
         }
         if (this.forgetKey && !this.row(this.forgetKey)) this.forgetKey = '';
         if (this.pendingKey && !this.row(this.pendingKey)) {
@@ -186,13 +186,6 @@ export class NetworkController {
         this.emit();
     }
 
-    async refresh() {
-        this.error = '';
-        const serial = this.serial;
-        try { await this.backend.refresh(); }
-        catch (error) { if (serial === this.serial && this.opened) this.error = error.message; }
-        this.emit();
-    }
 
     requestCredentials(row) {
         this.credentialKey = row.key;
@@ -210,7 +203,7 @@ export class NetworkController {
         } else if (row.wireless && !row.known && acceptsPassword(row)) {
             this.requestCredentials(row);
         } else if (row.wireless && !row.known && !['open', 'owe'].includes(row.securityType)) {
-            this.error = 'Create an authentication profile with Advanced before connecting to this network.';
+            this.error = 'Create a saved authentication profile in a network connection editor before connecting to this network.';
         } else {
             return this._activate(row, { profileUuid });
         }
@@ -230,7 +223,7 @@ export class NetworkController {
             if (this.mutation !== operation || operation.serial !== this.serial || this.disposed) return;
             const current = this.row(row.key);
             if (error.authentication && current?.profiles.length > 1) {
-                this.error = 'This saved profile needs credentials. Use Advanced to update it without changing another profile.';
+                this.error = 'This saved profile needs credentials. Update it in a network connection editor without changing another profile.';
             } else if (error.authentication && acceptsPassword(current) && this.opened) {
                 this.requestCredentials(current);
                 this.error = 'A Wi-Fi password is required or was not accepted.';
@@ -249,7 +242,7 @@ export class NetworkController {
         if (!acceptsPassword(row) || !password || this.pendingKey || !this.wifiEnabled || !this.wifiHardwareEnabled) return;
         if (row.profiles.length > 1 || profileStamp(row) !== this.credentialProfiles) {
             this.cancelCredentials();
-            this.error = 'Saved profiles changed or need per-profile credentials. Use Advanced to update the selected profile.';
+            this.error = 'Saved profiles changed or need per-profile credentials. Update the selected profile in a network connection editor.';
             this.emit();
             return;
         }
@@ -378,11 +371,6 @@ export class NetworkController {
         }
     }
 
-    openEditor() {
-        this.close();
-        try { this.launchEditor(); }
-        catch (_) { this.error = 'Could not start the advanced network editor.'; this.emit(); }
-    }
 
     status() {
         const row = primary(this.rows);

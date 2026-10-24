@@ -94,7 +94,7 @@
             "NETWORK_PANEL_CONFIG=${config.xdg.configHome}/ags/network/frontend.js"
             "NETWORK_PANEL_PALETTE=${config.xdg.configHome}/ags/network-palette.json"
             "NETWORK_CUSTOM_HELPER=${lib.getExe repoPackages.networkManager}"
-            "NETWORK_EDITOR=${lib.getExe' pkgs.networkmanagerapplet "nm-connection-editor"}"
+
             "DASHBOARD_PANEL=${lib.getExe repoPackages.dashboardPanel}"
             "MEDIA_PANEL=${lib.getExe repoPackages.mediaPanel}"
           ];

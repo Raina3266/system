@@ -496,8 +496,11 @@ notification-bus ownership cannot be installed by a service restart alone.
 
 `network-panel` opens the network card on the monitor whose Waybar button was
 clicked. It retains the bounded 420×520 layout, chamfered translucent frame,
-colors, controls, profile chooser, and outside-click/Escape dismissal. Network
-scanning runs only while the panel is open and Wi-Fi is enabled.
+colors, profile chooser, and outside-click/Escape dismissal, without a header
+or manual scan button. Middle-click the Waybar network button to toggle Wi-Fi
+without opening or closing the panel. Scanning starts when the panel opens and
+repeats every 15 seconds while it stays open and Wi-Fi is enabled, including
+on the Info and QR pages; it stops when the panel closes or the radio is off.
 
 AstalNetwork supplies the shared native NetworkManager client. Its exposed
 libnm objects in GJS own **all** Wi-Fi/Ethernet information and operations:
@@ -515,13 +518,17 @@ operations, not custom-backend exceptions. Activation completes only when the
 requested connection and device both report `ACTIVATED`; closing a pending UI
 request does not issue an implicit network disconnect.
 
-Rows put active connections first, then saved profiles, and sort strength by
-icon bucket to avoid reshuffling for one-percent changes. Ethernet takes
+Connected and saved networks are grouped above nearby unsaved networks, with
+one divider between the groups, like the Bluetooth device list. Connect or
+Disconnect sits beside each network name; unsaved networks have no Forget
+button or empty actions row. Within each group, native connection ordering and
+signal-icon buckets avoid reshuffling for one-percent changes. Ethernet takes
 priority in Waybar. Profiles are selected by UUID, not their display names.
 Open, OWE, WEP and personal WPA/WPA2/WPA3 connections use native libnm settings.
 Ambiguous per-profile credential updates and enterprise/hidden configuration
-remain in **Advanced** (`nm-connection-editor`). Forget confirms deletion of
-all matching saved profiles and disconnects the network.
+require a separately configured saved profile; the panel does not launch an
+external connection editor. Forget confirms deletion of all matching saved
+profiles and disconnects the network.
 
 **Info** shows SSID, signal/security, active profile ID/UUID, interface/MAC,
 IPv4/IPv6, gateways, DNS, BSSID, frequency/band/channel/mode, and link rate.
@@ -579,6 +586,7 @@ network-panel run
 network-panel status
 network-panel toggle eDP-1
 network-panel close
+network-panel toggleWifi  # Toggle the native Wi-Fi radio without changing panel visibility
 systemctl --user restart ags-network.service  # Apply live JS/CSS edits after installation
 ```
 
@@ -603,7 +611,7 @@ Environment overrides:
 - `NETWORK_PANEL_PALETTE`: generated JSON palette; the service uses its Home
   Manager configuration link.
 - `NETWORK_CUSTOM_HELPER`: QR-only `network-manager` executable.
-- `NETWORK_EDITOR`: `nm-connection-editor` for the Advanced flow.
+
 - `DASHBOARD_PANEL`/`MEDIA_PANEL`: peer launchers invoked by
   `dismissOtherPanels()`; other panels use `NETWORK_PANEL` (default
   `network-panel`) to dismiss network.

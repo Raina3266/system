@@ -211,7 +211,7 @@ async function isolatedUI(argv) {
         fs.writeFileSync(guard, `#!${process.execPath}\nconst fs = require('node:fs');\n`
             + `fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.argv) + '\\n');\nprocess.exit(125);\n`,
             { mode: 0o700 });
-        for (const name of ['NETWORK_CUSTOM_HELPER', 'NETWORK_EDITOR', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) env[name] = guard;
+        for (const name of ['NETWORK_CUSTOM_HELPER', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) env[name] = guard;
         const config = join(root, 'bus.conf');
         const socket = join(env.XDG_RUNTIME_DIR, 'bus').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         // Omit all service directories: nothing, including desktop portals, can autoactivate.
@@ -235,7 +235,7 @@ async function isolatedUI(argv) {
         const counts = {};
         for (const [phase, title, minimum] of [['ui', 'network GTK UI', 85], ['application', 'network application bootstrap', 36]]) {
             const output = await runTest(phase);
-            if (fs.existsSync(attempts)) throw new Error(`${phase} attempted an external helper/editor/panel call:\n${output}`);
+            if (fs.existsSync(attempts)) throw new Error(`${phase} attempted an external helper/panel call:\n${output}`);
             for (const service of processes.filter(record => record.service)) {
                 if (service.result || service.failure) throw new Error(`Private service failed:\n${fs.readFileSync(service.logPath, 'utf8')}`);
             }
@@ -276,7 +276,13 @@ async function isolatedUI(argv) {
 async function nodeControllerTests() {
     const { default: assert } = await import('node:assert/strict');
     const { describe, it } = await import('node:test');
-    const { NetworkController } = await import('./logic.js');
+    const { NetworkController, parseRequest } = await import('./logic.js');
+    const { readFileSync } = await import('node:fs');
+    const { default: vm } = await import('node:vm');
+    const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    const requestMethod = frontend.match(/        handleRequest\(request\) \{([\s\S]*?)\n        \}/);
+    assert.ok(requestMethod, 'The real frontend request handler is available for isolated IPC tests');
+    const handleRequest = vm.runInNewContext(`({ handleRequest(request) { ${requestMethod[1]} } }).handleRequest`, { parseRequest });
 
     // These doubles model the adapter boundary, not libnm. In particular, activation
     // stays pending until the fake native adapter reports ACTIVATED or rejects it.
@@ -338,7 +344,7 @@ async function nodeControllerTests() {
             this.wifiHardwareEnabled = true;
             this.opened = false;
             this.calls = {
-                start: 0, dispose: 0, opened: [], refresh: 0, toggleWifi: 0,
+                start: 0, dispose: 0, opened: [], toggleWifi: 0,
                 activate: [], disconnect: [], forget: [], details: [], readSecret: [],
             };
             this.identities = new Map(rows.filter(row => row.connected).map(row => [row.key, {
@@ -352,7 +358,6 @@ async function nodeControllerTests() {
         dispose() { this.calls.dispose++; this.opened = false; }
         notify() { this.onChange?.(); }
         setOpened(opened) { this.calls.opened.push(opened); this.opened = opened; }
-        refresh() { this.calls.refresh++; return this.refreshResult; }
         toggleWifi() {
             this.calls.toggleWifi++;
             if (this.toggleError) throw this.toggleError;
@@ -385,7 +390,7 @@ async function nodeControllerTests() {
 
     function fixture(t, rows = [wifi()], { opened = true } = {}) {
         const backend = new FakeBackend(rows);
-        const hooks = { changes: 0, cancellations: [], encodings: [], editorLaunches: 0 };
+        const hooks = { changes: 0, cancellations: [], encodings: [] };
         const controller = new NetworkController({
             backend,
             onChange: () => hooks.changes++,
@@ -402,10 +407,6 @@ async function nodeControllerTests() {
                 const encoding = { request, io, ...deferred() };
                 hooks.encodings.push(encoding);
                 return encoding.promise;
-            },
-            launchEditor: () => {
-                hooks.editorLaunches++;
-                if (hooks.editorError) throw hooks.editorError;
             },
         });
         t.after(() => controller.dispose());
@@ -430,7 +431,7 @@ async function nodeControllerTests() {
 
     function mutationCounts(backend) {
         return {
-            opened: [...backend.calls.opened], refresh: backend.calls.refresh,
+            opened: [...backend.calls.opened],
             toggleWifi: backend.calls.toggleWifi, activate: backend.calls.activate.length,
             disconnect: backend.calls.disconnect.length, forget: backend.calls.forget.length,
         };
@@ -466,7 +467,7 @@ async function nodeControllerTests() {
             assert.equal(controller.opened, false);
             assert.equal(backend.opened, false);
             assert.deepEqual(backend.calls.opened, [true, false]);
-            assert.equal(backend.calls.refresh, 0, 'scan scheduling remains the native backend’s responsibility');
+            assert.equal(typeof controller.refresh, 'undefined', 'scan scheduling has no public manual-refresh path');
         });
 
         it('moves an open panel to a new monitor without a false close transition', t => {
@@ -479,28 +480,20 @@ async function nodeControllerTests() {
             assert.deepEqual(backend.calls.opened, [true, true]);
         });
 
-        it('delegates a requested scan and reports its backend failure while open', async t => {
-            const { controller, backend } = fixture(t);
-            const scan = deferred();
-            backend.refreshResult = scan.promise;
-            const work = controller.refresh();
-            assert.equal(backend.calls.refresh, 1);
-            scan.reject(new Error('Native scan failed.'));
-            await work;
-            assert.equal(controller.error, 'Native scan failed.');
-        });
-
-        it('ignores a scan failure from a closed or newer panel request', async t => {
-            const { controller, backend } = fixture(t);
-            const scan = deferred();
-            backend.refreshResult = scan.promise;
-            const work = controller.refresh();
+        it('keeps native scanning enabled on info and QR pages until the panel closes', async t => {
+            const { controller, backend } = fixture(t, [active()]);
+            controller.info('wifi');
+            assert.equal(controller.page, 'info');
+            assert.equal(backend.opened, true);
+            const qr = controller.qr('wifi');
+            assert.equal(controller.page, 'qr');
+            assert.equal(backend.opened, true);
+            assert.deepEqual(backend.calls.opened, [true], 'Page navigation does not interrupt native scanning');
             controller.close();
-            controller.toggle('DP-2');
-            scan.reject(new Error('Old scan failed.'));
-            await work;
-            assert.equal(controller.error, '');
-            assert.equal(controller.opened, true);
+            assert.equal(backend.opened, false);
+            assert.deepEqual(backend.calls.opened, [true, false]);
+            backend.calls.readSecret[0].resolve(credentials);
+            await qr;
         });
     });
 
@@ -563,30 +556,24 @@ async function nodeControllerTests() {
 
         for (const securityType of ['open', 'owe']) {
             it(`connects a new ${securityType.toUpperCase()} network natively without a password prompt`, async t => {
-                const { controller, backend, hooks } = fixture(t, [wifi({ securityType })]);
+                const { controller, backend } = fixture(t, [wifi({ securityType })]);
                 const work = controller.connectNetwork('wifi');
                 assert.equal(backend.calls.activate.length, 1);
                 assert.equal(Object.hasOwn(backend.calls.activate[0].options, 'password'), false);
                 assert.equal(controller.credentialKey, '');
                 assert.equal(backend.calls.readSecret.length, 0);
-                assert.equal(hooks.editorLaunches, 0);
                 backend.calls.activate[0].resolve();
                 await work;
             });
         }
 
         for (const securityType of ['enterprise', 'unknown']) {
-            it(`requires Advanced for a new ${securityType} network instead of inventing credentials`, async t => {
-                const { controller, backend, hooks } = fixture(t, [wifi({ securityType })]);
+            it(`refuses inline setup for a new ${securityType} network instead of inventing credentials`, async t => {
+                const { controller, backend } = fixture(t, [wifi({ securityType })]);
                 await controller.connectNetwork('wifi');
-                assert.match(controller.error, /Advanced/);
+                assert.notEqual(controller.error, '');
                 assert.equal(controller.credentialKey, '');
                 assert.equal(backend.calls.activate.length, 0);
-                assert.equal(hooks.editorLaunches, 0, 'Advanced is an explicit user action');
-                controller.openEditor();
-                assert.equal(controller.opened, false);
-                assert.equal(hooks.editorLaunches, 1);
-                assert.deepEqual(backend.calls.opened, [true, false]);
             });
         }
 
@@ -624,7 +611,7 @@ async function nodeControllerTests() {
             backend.calls.activate[0].reject(authenticationFailure());
             await first;
             assert.equal(controller.credentialKey, '');
-            assert.match(controller.error, /Advanced/);
+            assert.notEqual(controller.error, '');
             await controller.submitPassword(password);
             assert.equal(backend.calls.activate.length, 1);
         });
@@ -650,7 +637,7 @@ async function nodeControllerTests() {
             await controller.submitPassword(password);
             assert.equal(backend.calls.activate.length, 1);
             assert.equal(controller.credentialKey, '');
-            assert.match(controller.error, /Advanced/);
+            assert.notEqual(controller.error, '');
         });
 
         it('keeps a retry valid across harmless saved-profile renames', async t => {
@@ -684,15 +671,6 @@ async function nodeControllerTests() {
             controller.dispose();
             await controller.connectNetwork('wifi');
             assert.equal(backend.calls.activate.length, 0);
-        });
-
-        it('reports an editor launch failure without reopening the panel', t => {
-            const { controller, hooks } = fixture(t);
-            hooks.editorError = new Error('Editor unavailable.');
-            controller.openEditor();
-            assert.equal(controller.opened, false);
-            assert.match(controller.error, /Could not start.*editor/);
-            assert.equal(hooks.editorLaunches, 1);
         });
     });
 
@@ -938,6 +916,51 @@ async function nodeControllerTests() {
         });
     });
 
+    describe('toggleWifi IPC policy', () => {
+        for (const opened of [false, true]) {
+            for (const failure of [false, true]) {
+                it(`${failure ? 'reports a native radio failure' : 'delegates the native radio toggle'} while ${opened ? 'open' : 'closed'} without changing visibility`, t => {
+                    const { controller, backend } = fixture(t, undefined, { opened });
+                    const visibility = { opened: controller.opened, monitor: controller.monitor, backendOpened: backend.opened };
+                    const openedCalls = [...backend.calls.opened];
+                    const panel = {
+                        toggle() { assert.fail('Radio IPC must not open or move the panel'); },
+                        close() { assert.fail('Radio IPC must not close the panel'); },
+                    };
+                    if (failure) backend.toggleError = new Error('Native radio permission denied.');
+                    const request = () => handleRequest.call({ controller, panel }, '{"command":"toggleWifi"}');
+                    if (failure) assert.throws(request, error => error.message === 'Native radio permission denied.');
+                    else assert.equal(request(), 'ok');
+                    assert.equal(backend.calls.toggleWifi, 1);
+                    assert.equal(controller.wifiEnabled, failure);
+                    assert.deepEqual({ opened: controller.opened, monitor: controller.monitor, backendOpened: backend.opened }, visibility);
+                    assert.deepEqual(backend.calls.opened, openedCalls, 'Radio IPC does not change the scan visibility policy');
+                    assert.equal(backend.calls.activate.length, 0);
+                    assert.equal(backend.calls.disconnect.length, 0);
+                    assert.equal(backend.calls.forget.length, 0);
+                    if (failure) {
+                        backend.toggleError = null;
+                        assert.equal(request(), 'ok', 'A successful retry clears the prior IPC error');
+                        assert.equal(controller.error, '');
+                        assert.equal(backend.calls.toggleWifi, 2);
+                        assert.deepEqual({ opened: controller.opened, monitor: controller.monitor, backendOpened: backend.opened }, visibility);
+                        assert.deepEqual(backend.calls.opened, openedCalls);
+                    }
+                });
+            }
+        }
+
+        it('rejects monitor and mutation arguments before reaching the native radio adapter', t => {
+            const { controller, backend } = fixture(t, undefined, { opened: false });
+            for (const extra of [{ monitor: '' }, { monitor: 'DP-1' }, { enabled: true }, { password: 'not-a-radio-argument' }]) {
+                assert.throws(() => handleRequest.call({ controller, panel: {} }, JSON.stringify({ command: 'toggleWifi', ...extra })),
+                    /Invalid network panel request/);
+            }
+            assert.equal(backend.calls.toggleWifi, 0);
+            assert.deepEqual(backend.calls.opened, []);
+        });
+    });
+
     describe('details and on-demand sensitive reads', () => {
         it('opens details without authorizing a secret read and pins all native identity fields on reveal', async t => {
             const { controller, backend, hooks } = fixture(t, [active()]);
@@ -1167,12 +1190,12 @@ async function nodeControllerTests() {
         it('does not encode if the native secret request fails', async t => {
             const { controller, backend, hooks } = fixture(t, [active()]);
             const work = controller.qr('wifi');
-            backend.calls.readSecret[0].reject(new Error('Sharing is unsupported. Use Advanced.'));
+            backend.calls.readSecret[0].reject(new Error('Native secret request failed.'));
             await work;
             assert.equal(hooks.encodings.length, 0);
             assert.equal(controller.qrImage, '');
             assert.equal(controller.qrLoading, false);
-            assert.match(controller.error, /Advanced/);
+            assert.equal(controller.error, 'Native secret request failed.');
         });
 
         it('does not start the encoder when credentials arrive after closing', async t => {
@@ -1281,7 +1304,6 @@ async function nodeControllerTests() {
                 assert.deepEqual(backend.calls.details, ['wired']);
                 assert.deepEqual(mutationCounts(backend), before);
                 assert.equal(backend.calls.readSecret.length, 0);
-                assert.equal(hooks.editorLaunches, 0);
                 assert.equal(hooks.encodings.length, 0);
                 assert.equal(hooks.cancellations.length, 0);
                 assert.equal(hooks.changes, changes, 'polling must not cause panel render/dismiss hooks');
@@ -1589,9 +1611,9 @@ async function nodeLogicTests() {
     });
 
     describe('strict panel request parsing', () => {
-        it('accepts only the three panel commands, with an optional monitor for toggle', () => {
+        it('accepts only the four panel commands, with an optional monitor for toggle', () => {
             for (const request of [
-                { command: 'status' }, { command: 'close' }, { command: 'toggle' },
+                { command: 'status' }, { command: 'close' }, { command: 'toggle' }, { command: 'toggleWifi' },
                 { command: 'toggle', monitor: '' }, { command: 'toggle', monitor: 'DP-1' },
                 { command: 'toggle', monitor: `屏幕 'quoted'; echo $(not-a-shell)` },
             ]) assert.deepEqual(parseRequest(JSON.stringify(request)), request);
@@ -1614,19 +1636,21 @@ async function nodeLogicTests() {
         });
 
         it('rejects missing, wrong-type, unknown, case-changed, and native mutation commands', () => {
-            for (const command of [undefined, null, 1, true, [], {}, '', 'Status', 'run', 'connect', 'disconnect', 'forget', 'scan', 'wifi']) {
+            for (const command of [undefined, null, 1, true, [], {}, '', 'Status', 'togglewifi', 'ToggleWifi', 'run', 'connect', 'disconnect', 'forget', 'scan', 'wifi']) {
                 assert.throws(() => parseRequest(JSON.stringify({ command })), requestError);
             }
         });
 
         it('rejects every unknown field, including native mutation arguments and prototype-shaped fields', () => {
-            for (const command of ['status', 'toggle', 'close']) {
+            for (const command of ['status', 'toggle', 'close', 'toggleWifi']) {
                 for (const extra of ['extra', 'password', 'profileUuid', 'interface', '__proto__', 'constructor']) {
                     assert.throws(() => parseRequest(JSON.stringify({ command, [extra]: true })), requestError);
                 }
             }
-            for (const command of ['status', 'close']) {
-                assert.throws(() => parseRequest(JSON.stringify({ command, monitor: '' })), requestError);
+            for (const command of ['status', 'close', 'toggleWifi']) {
+                for (const monitor of ['', 'DP-1', null, 7]) {
+                    assert.throws(() => parseRequest(JSON.stringify({ command, monitor })), requestError);
+                }
             }
         });
 
@@ -1704,6 +1728,15 @@ async function nodeLauncherTests() {
         });
     }
 
+    test('Waybar network middle-click toggles Wi-Fi without a monitor or a panel visibility command', () => {
+        const source = read('niri/waybar/system.nix');
+        const module = source.match(/networkModule = monitor: \{([\s\S]*?)\n  \};/);
+        assert.ok(module, 'Waybar defines the shared network module');
+        assert.ok(module[1].includes('on-click-middle = "${lib.getExe packages.networkPanel} toggleWifi";'));
+        assert.ok(module[1].includes('on-click = "${lib.getExe packages.networkPanel} toggle ${lib.escapeShellArg monitor}";'),
+            'Left-click still opens or closes the panel on its monitor');
+    });
+
     test('companion GJS wrapper reuses the customized AGS GI/pixbuf environment and GTK4 layer shell', () => {
         const source = read('niri/panels/default.nix');
         assert.match(source, /ags\.overrideAttrs\s*\(old:/, 'extend the supplied per-panel AGS package');
@@ -1744,7 +1777,7 @@ async function nodeLauncherTests() {
         const fixture = mkdtempSync(join(tmpdir(), 'network-launcher-'));
         t.after(() => rmSync(fixture, { recursive: true, force: true }));
         const keys = ['NETWORK_PANEL_CONFIG', 'NETWORK_PANEL_PALETTE', 'NETWORK_CUSTOM_HELPER',
-            'NETWORK_EDITOR', 'DASHBOARD_PANEL', 'MEDIA_PANEL', 'XDG_RUNTIME_DIR'];
+            'DASHBOARD_PANEL', 'MEDIA_PANEL', 'XDG_RUNTIME_DIR'];
         const fakes = new Map();
         // Neither executable imports GTK, Astal or NetworkManager. The fake compiler
         // writes an identity marker so the fake GJS can verify which file it read.
@@ -1815,7 +1848,7 @@ async function nodeLauncherTests() {
         }
 
         await t.test('validates commands and help without invoking the compiler or GJS', () => {
-            for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'],
+            for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'], ['toggleWifi', 'DP-1'], ['toggleWifi', ''],
                 ['toggle', 'DP-1', 'extra'], ['--help', 'extra'], ['-h', 'extra']]) {
                 const result = run(args);
                 assert.equal(result.status, 2, JSON.stringify(args));
@@ -1826,13 +1859,14 @@ async function nodeLauncherTests() {
                 const result = run([command]);
                 assert.equal(result.status, 0);
                 assert.match(result.stdout, /^Usage: network-panel/);
+                assert.match(result.stdout, /toggleWifi/);
             }
             assert.equal(existsSync(join(env.XDG_RUNTIME_DIR, 'ags-panels')), false);
         });
 
         await t.test('requests retain the network instance, JSON payload and original runtime directory', () => {
             const marker = join(fixture, 'monitor-was-evaluated');
-            for (const args of [['status'], ['close'], ['toggle'], ['toggle', ''], ['toggle', 'eDP-1'],
+            for (const args of [['status'], ['close'], ['toggleWifi'], ['toggle'], ['toggle', ''], ['toggle', 'eDP-1'],
                 ['toggle', 'Display with spaces'], ['toggle', `DP-'"; touch ${marker}; $(touch ${marker}); 🌐`]]) {
                 const records = success(args);
                 assert.equal(records.length, 1, 'requests neither compile nor launch GJS');
@@ -1852,7 +1886,7 @@ async function nodeLauncherTests() {
             for (const data of [compiler, runtime]) {
                 assert.match(data.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
                 assert.match(data.env.NETWORK_CUSTOM_HELPER, /\/bin\/network-manager$/);
-                assert.match(data.env.NETWORK_EDITOR, /\/bin\/nm-connection-editor$/);
+
                 assert.equal(data.env.DASHBOARD_PANEL, 'dashboard-panel');
                 assert.equal(data.env.MEDIA_PANEL, 'media-panel');
             }
@@ -1862,7 +1896,7 @@ async function nodeLauncherTests() {
             const marker = join(fixture, 'config-was-evaluated');
             const overrides = { NETWORK_PANEL_CONFIG: join(fixture, `custom '"; $(touch ${marker}); frontend.js`),
                 NETWORK_PANEL_PALETTE: join(fixture, 'custom palette.json'), NETWORK_CUSTOM_HELPER: join(fixture, 'custom helper'),
-                NETWORK_EDITOR: join(fixture, 'custom editor'), DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
+                DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
                 MEDIA_PANEL: join(fixture, 'custom media'), XDG_RUNTIME_DIR: join(fixture, 'isolated runtime $HOME with spaces') };
             mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
             const { compiler, runtime } = launch(overrides);
@@ -1962,6 +1996,7 @@ async function gjsNativeTests() {
     const { default: NM } = await import('gi://NM?version=1.0');
     const { default: System } = await import('system');
     const { NetworkBackend } = await import('./backend.js');
+    const { NetworkController } = await import('./logic.js');
 
     const S = NM['80211ApSecurityFlags'];
     const bytes = value => new GLib.Bytes(new TextEncoder().encode(value));
@@ -2017,7 +2052,8 @@ async function gjsNativeTests() {
     class Device extends Signals {
         constructor(iface, wireless = true) {
             super(); Object.assign(this, { iface, wireless, aps: [], active: null, activeAP: null,
-                state: NM.DeviceState.DISCONNECTED, reason: NM.DeviceStateReason.NONE, scans: 0, scanFinishes: 0, disconnects: 0 });
+                state: NM.DeviceState.DISCONNECTED, reason: NM.DeviceStateReason.NONE, scans: 0, scanFinishes: 0, disconnects: 0,
+                                holdScans: false, pendingScans: [] });
         }
         get_path() { return `/offline/device/${this.iface}`; }
         get_iface() { return this.iface; }
@@ -2036,7 +2072,13 @@ async function gjsNativeTests() {
             return profile.get_connection_type() === (this.wireless ? NM.SETTING_WIRELESS_SETTING_NAME : NM.SETTING_WIRED_SETTING_NAME)
                 && (!profile.get_interface_name() || profile.get_interface_name() === this.iface);
         }
-        request_scan_async(io, callback) { this.scans++; later(() => callback(this, { cancelled: io.is_cancelled() }), 5); }
+        request_scan_async(io, callback) {
+            this.scans++;
+            const scan = { io, finish: () => callback(this, { cancelled: io.is_cancelled() }) };
+            if (this.holdScans) this.pendingScans.push(scan);
+            else later(scan.finish, 5);
+        }
+        finishScans() { for (const scan of this.pendingScans.splice(0)) scan.finish(); }
         request_scan_finish(result) { this.scanFinishes++; if (result.cancelled) throw new Error('cancelled'); return true; }
         disconnect_async(io, callback) {
             this.disconnects++;
@@ -2063,14 +2105,14 @@ async function gjsNativeTests() {
     class Client extends Signals {
         constructor() {
             super(); this.devices = []; this.profiles = []; this.running = true; this.enabled = true; this.hardware = true;
-            this.calls = []; this.finishes = 0; this.accepted = null; this.automatic = true; this.replyDelay = 0;
+            this.calls = []; this.radioWrites = []; this.finishes = 0; this.accepted = null; this.automatic = true; this.replyDelay = 0;
         }
         get_devices() { return this.devices; }
         get_connections() { return this.profiles; }
         get_nm_running() { return this.running; }
         wireless_get_enabled() { return this.enabled; }
         wireless_hardware_get_enabled() { return this.hardware; }
-        wireless_set_enabled(enabled) { this.enabled = enabled; this.emit('notify'); }
+        wireless_set_enabled(enabled) { this.radioWrites.push(enabled); this.enabled = enabled; this.emit('notify'); }
         activate_connection_async(profile, device, specific, io, callback) {
             this.calls.push({ profile, device, specific, saved: true }); this.accept(profile, device, specific, io, callback);
         }
@@ -2266,7 +2308,8 @@ async function gjsNativeTests() {
             wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
             selected = row(backend, 'same', 'psk');
             assert(selected.key === key && selected.strength === 95 && !backend.getIdentity(key), 'Stable grouping and best AP selection');
-            await backend.refresh(); assert(wifi.scans === 0, 'No closed-panel scans');
+            await delay(12); assert(wifi.scans === 0, 'No closed-panel scans');
+            assert(typeof backend.refresh === 'undefined', 'Native scanning has no public manual-refresh path');
             backend.setOpened(true); await delay(12); assert(wifi.scans === 1 && second.scans === 1, 'All Wi-Fi devices scan while open');
             backend.setOpened(false); assert(!backend._scanTimer, 'Closing removes periodic scan');
             client.hardware = false;
@@ -2278,6 +2321,84 @@ async function gjsNativeTests() {
             assert(!backend.available && backend.rows.length === 0, 'NM lifecycle reflected');
         } finally { backend.dispose(); }
         assert(client.handlers.size === 0 && wired.handlers.size === 0, 'Signal teardown');
+    }
+
+    async function automaticScanning() {
+        const { client, wifi, backend } = fixture();
+        const second = new Device('wlan-other');
+        client.devices.push(second);
+        const saved = profile('scan', 'psk');
+        client.profiles = [saved]; wifi.aps = [new AP('scan', 'psk', 70, 1)];
+        wifi.active = new Active(saved, 'scan'); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
+        wifi.activeAP = wifi.aps[0]; wifi.state = NM.DeviceState.ACTIVATED;
+        wifi.holdScans = second.holdScans = true;
+        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable(), encodeQr: async () => '' });
+        async function finishScans() { wifi.finishScans(); second.finishScans(); await delay(); }
+        async function tick() {
+            const source = GLib.MainContext.default().find_source_by_id(backend._scanTimer);
+            assert(source, 'An open panel owns a native periodic scan source');
+            // Advance only this source, not the system clock or the native adapter.
+            source.set_ready_time(0);
+            await delay(2);
+        }
+        try {
+            controller.start();
+            const key = row(backend, 'scan').key;
+            assert(wifi.scans === 0 && second.scans === 0 && !backend._scanTimer, 'Startup stays scan-free while hidden');
+            controller.toggle('offline-test');
+            assert(wifi.scans === 1 && second.scans === 1, 'Opening immediately scans every native Wi-Fi device');
+            const source = GLib.MainContext.default().find_source_by_id(backend._scanTimer);
+            const interval = source.get_ready_time() - GLib.get_monotonic_time();
+            assert(interval > 13e6 && interval < 17e6, 'Native periodic scan deadline is fifteen seconds, allowing GLib coalescing');
+            controller.info(key);
+            await tick();
+            assert(controller.page === 'info' && wifi.scans === 1 && second.scans === 1,
+                'Periodic ticks on info do not overlap in-flight scans');
+            await finishScans();
+            await tick();
+            assert(wifi.scans === 2 && second.scans === 2, 'Periodic native scans continue on the info page');
+            await finishScans();
+            await controller.qr(key);
+            await tick();
+            assert(controller.page === 'qr' && wifi.scans === 3 && second.scans === 3, 'Periodic native scans continue on the QR page');
+            controller.close();
+            assert(!backend._scanTimer && !backend._scanMembers.size, 'Closing removes the periodic source and scan members');
+            assert([...wifi.pendingScans, ...second.pendingScans].every(scan => scan.io.is_cancelled()), 'Closing cancels every in-flight native scan');
+            await finishScans();
+            assert(!backend._scans.size, 'Cancelled scan callbacks are drained');
+            await delay(12);
+            assert(wifi.scans === 3 && second.scans === 3, 'No scans resume while hidden');
+            controller.toggle('offline-test');
+            assert(wifi.scans === 4 && second.scans === 4, 'Reopening starts an immediate scan again');
+            await finishScans();
+            client.enabled = false; client.emit('notify'); await delay(12);
+            assert(!backend._scanTimer && !backend._scanMembers.size && wifi.scans === 4 && second.scans === 4, 'Radio-off removes the timer and stops scans while open');
+            client.enabled = true; client.emit('notify'); await delay(12);
+            assert(backend._scanTimer && wifi.scans === 5 && second.scans === 5, 'Radio-on resumes immediate and periodic scans while open');
+            client.hardware = false; client.emit('notify'); await delay(12);
+            assert(!backend._scanTimer && !backend._scanMembers.size && wifi.scans === 5 && second.scans === 5, 'Hardware-off stops scans while open');
+            assert([...wifi.pendingScans, ...second.pendingScans].every(scan => scan.io.is_cancelled()), 'Hardware-off cancels in-flight scans');
+            await finishScans();
+            client.hardware = true; client.emit('notify'); await delay(12);
+            assert(backend._scanTimer && wifi.scans === 6 && second.scans === 6, 'Hardware recovery resumes automatic scans');
+            await finishScans();
+        } finally {
+            controller.dispose();
+            await finishScans();
+        }
+        assert(!backend._scanTimer && !backend._scans.size, 'Disposal releases every automatic scan');
+    }
+
+    async function nativeRadioToggle() {
+        const { client, wifi, backend } = fixture();
+        try {
+            backend.toggleWifi(); backend.toggleWifi();
+            equal(client.radioWrites, [false, true], 'Global toggles delegate exact radio state changes to the stubbed native client');
+            assert(!backend._opened && !backend._scanTimer && wifi.scans === 0, 'A native radio toggle never opens or scans a hidden panel');
+            client.hardware = false;
+            let error; try { backend.toggleWifi(); } catch (caught) { error = caught; }
+            assert(/hardware/.test(error?.message) && client.radioWrites.length === 2, 'Hardware blocking fails before a native radio write');
+        } finally { backend.dispose(); }
     }
 
     async function nativeSettings() {
@@ -2298,7 +2419,7 @@ async function gjsNativeTests() {
         for (const type of ['enterprise', 'unknown']) {
             const { client, wifi, backend } = fixture(); wifi.aps = [new AP('advanced', type, 65, 1)];
             try {
-                await rejects(backend.activate(row(backend, 'advanced').key), /Advanced/);
+                await rejects(backend.activate(row(backend, 'advanced').key), /./);
                 assert(client.calls.length === 0, 'Unsupported inline setup does not invoke activation');
             } finally { backend.dispose(); }
         }
@@ -2467,7 +2588,8 @@ async function gjsNativeTests() {
         nativeSignalTeardown();
         securityLabels();
         await activationCacheOrdering();
-        await grouping(); await nativeSettings(); await nativeSettingsEdges(); await profilesAndSecrets();
+        await grouping(); await automaticScanning(); await nativeRadioToggle();
+        await nativeSettings(); await nativeSettingsEdges(); await profilesAndSecrets();
         await activationIdentityAndCancellation(); await activationLifecycle();
         print('Native network tests passed: security labels, libnm settings, grouping, devices, scans, profiles, secrets, exact ACTIVATED state, cancellation and teardown. No live NM mutations.');
     }
@@ -2566,7 +2688,7 @@ async function gjsRuntimeTests() {
         const large = { ...request, password: request.password + 'é\\;:'.repeat(2200) };
         const operations = [];
         const fixtures = [];
-        const environment = new Map(['NETWORK_CUSTOM_HELPER', 'NETWORK_EDITOR', 'DASHBOARD_PANEL', 'MEDIA_PANEL']
+        const environment = new Map(['NETWORK_CUSTOM_HELPER', 'DASHBOARD_PANEL', 'MEDIA_PANEL']
             .map(name => [name, GLib.getenv(name)]));
         const ownPid = String(Gio.Credentials.new().get_unix_pid());
         const originalChildren = new Set(childPids(ownPid));
@@ -2844,14 +2966,6 @@ async function gjsRuntimeTests() {
                 a.cancel();
                 check(a.is_cancelled() && !b.is_cancelled(), 'Native cancellation must remain request-local.');
             });
-            await test('controllerRuntime launches only the literal fake editor with no arguments', async () => {
-                const helper = fixture(`fs.writeSync(1, ${JSON.stringify(PRIVATE_MARKER)})\nfs.writeSync(2, ${JSON.stringify(PRIVATE_MARKER)})`, { args: [] });
-                GLib.setenv('NETWORK_EDITOR', helper.path, true);
-                controllerRuntime().launchEditor();
-                await ready(helper);
-                check(report(helper.output).argv_ok && report(helper.output).executable_ok, 'Editor launch must use a direct argv array.');
-                await reaped(helper);
-            });
             await test('dismissOtherPanels closes exactly the fake dashboard and media launchers', async () => {
                 const dashboard = fixture('', { args: ['close'] });
                 const media = fixture('', { args: ['close'] });
@@ -2943,7 +3057,7 @@ async function gjsRuntimeTests() {
             } else {
                 if (stdout.trim()) print(stdout.trim());
                 if (stderr.trim()) print(stderr.trim());
-                print('PASS captured stdout/stderr contain no credential marker (including suppressed helper/editor diagnostics)');
+                print('PASS captured stdout/stderr contain no credential marker (including suppressed helper diagnostics)');
                 code = child.get_successful() ? 0 : 1;
             }
         } catch (_) { print('FAIL runtime supervisor (exception details suppressed for privacy).'); }
@@ -3006,6 +3120,10 @@ async function gjsUITests() {
         }
         throw new Error(`Missing event controller ${type.name}`);
     }
+    function* widgets(widget) {
+        yield widget;
+        for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) yield* widgets(child);
+    }
     function network(key, properties = {}) {
         return { key, name: '<b>Literal SSID</b> ' + 'Long network name '.repeat(8), ssid: 'test', interface: 'wlan0',
             kind: 'WI-FI', wireless: true, connected: true, changing: false, known: true,
@@ -3026,8 +3144,12 @@ async function gjsUITests() {
         toggle(monitor = '') { this.record('toggle', monitor); this.opened = !this.opened || monitor !== this.monitor; this.monitor = monitor; this.emit(); }
         close() { this.record('close'); this.opened = false; this.emit(); }
         back() { this.record('back'); this.page = 'list'; this.selectedRow = null; this.emit(); }
-        toggleWifi() { this.record('wifi'); }
-        refresh() { this.record('refresh'); }
+        toggleWifi() {
+            this.record('wifi');
+            this.error = this.toggleError?.message || '';
+            if (!this.error) this.wifiEnabled = !this.wifiEnabled;
+            this.emit();
+        }
         connectNetwork(...args) { this.record('connect', ...args); }
         disconnectNetwork(key) { this.record('disconnect', key); }
         submitPassword(value) { this.record('password', value); this.cancelCredentials(); }
@@ -3039,11 +3161,25 @@ async function gjsUITests() {
         qr(key) { this.record('qr', key); this.page = 'qr'; this.selectedRow = this.rows.find(row => row.key === key); this.emit(); }
         revealSecret() { this.record('reveal'); this.secretRequested = true; this.secret = '<b>literal secret</b>'; this.emit(); }
         hideSecret() { this.record('hide'); this.secretRequested = false; this.secret = ''; this.emit(); }
-        openEditor() { this.record('editor'); }
         status() { return '{"text":"offline","class":"wifi"}'; }
     }
 
     let panel, host;
+    function visibleNetworkOrder() {
+        const keys = new Map([...panel.rows.values()].map(row => [row.widget, row.key]));
+        const order = [];
+        for (let child = panel.networkRows.get_first_child(); child; child = child.get_next_sibling()) {
+            if (child.visible) order.push(child === panel.networkSeparator ? 'divider' : keys.get(child) || 'unexpected widget');
+        }
+        return order;
+    }
+    function assertNetworkOrder(expected, message) {
+        equal(visibleNetworkOrder(), expected, message);
+        const dividers = [...widgets(panel.networkRows)].filter(widget => widget instanceof Gtk.Separator
+            && widget.has_css_class('network-divider'));
+        assert(dividers.length === 1 && dividers[0] === panel.networkSeparator, 'The list owns one group divider, not per-row separators');
+        equal(panel.networkSeparator.visible, expected.includes('divider'), 'The divider is visible only between two nonempty groups');
+    }
     async function smoke() {
         const services = ['org.freedesktop.NetworkManager', 'org.bluez', 'org.freedesktop.Notifications'];
         assert(services.every(name => !owner(name)), 'No desktop services exist on the isolated bus');
@@ -3064,6 +3200,7 @@ async function gjsUITests() {
         panel.toggle();
         assert(c.opened && c.monitor === (monitor.get_connector() || ''), 'Omitted monitor is resolved before controller toggle');
         equal(dismissals, 1, 'Opening dismisses other panels once');
+        assert(panel.root.focusable && panel.window.get_focus() === panel.root, 'Opening initially focuses the root without a header control');
         panel.toggle();
         assert(!c.opened && dismissals === 1, 'Repeated omitted-monitor toggle closes without dismissing other panels again');
         panel.toggle('removed-connector');
@@ -3098,8 +3235,14 @@ async function gjsUITests() {
         }
         await layout(1280, 800);
         print('PASS initial layout, monitor resolution and opening-only handoff');
-        equal([panel.wifi.get_height(), panel.refresh.get_height(), panel.closeButton.get_height()], [28, 28, 28], 'Header controls retain their original 28px height');
         assert(panel.pages.get_height() > 200, 'Network list occupies the remaining card height');
+        const tree = [...widgets(panel.root)];
+        assert(panel.content.get_first_child() === panel.wifiNotice, 'Content begins with network notices, with no empty header row');
+        assert(!tree.some(widget => widget instanceof Gtk.Label && widget.label === 'NETWORK'), 'No NETWORK title is present in the native widget tree');
+        assert(!tree.some(widget => widget instanceof Gtk.Button
+            && (/^(?:Wi-Fi (?:on|off)|↻|×|Advanced(?:…|\.{3})?)$/.test(widget.get_child()?.label || widget.label || '')
+                || widget.has_css_class('wifi-toggle') || ['Refresh networks', 'Close network panel'].includes(widget.tooltip_text))),
+        'No global Wi-Fi, manual scan, close or Advanced button is present in the native widget tree');
         const wifi = panel.rows.get('wifi');
         assert(wifi.name.label.includes('<b>Literal SSID</b>') && !wifi.name.use_markup, 'SSID is always literal text');
         assert(wifi.profile.visible && !panel.rows.get('wired').profile.visible, 'Profile chooser appears only for multiple profiles');
@@ -3126,7 +3269,8 @@ async function gjsUITests() {
         const focus = host.get_focus(), profileModel = wifi.profile.get_model();
         c.rows = [{ ...c.rows[1] }, { ...c.rows[0], strength: 43 }]; c.emit();
         await wait();
-        assert(panel.rows.get('wifi') === wifi && panel.networkRows.get_last_child() === wifi.widget, 'Stable row survives native-style updates and reorder');
+        assert(panel.rows.get('wifi') === wifi, 'Stable row survives native-style updates and reorder');
+        assertNetworkOrder(['wired', 'wifi'], 'Visible row order follows native updates even with a hidden separator');
         assert(wifi.profile.get_model() === profileModel, 'Unchanged profile model is not recreated');
         assert(panel.password.text === 'offline-test-password' && host.get_focus() === focus, 'Ordinary updates preserve password and keyboard focus');
         assert(!panel.password.visibility, 'Password entry is masked');
@@ -3145,12 +3289,106 @@ async function gjsUITests() {
         assert(!wifi.profile.visible && !panel.profileChoices.has('wifi'), 'Removed profile UUID falls back to automatic without stale selection');
         dataRow.profiles = profiles; c.emit();
         print('PASS stable rows, UUID selection, focus and credential lifecycle');
-        panel.wifi.emit('clicked'); panel.refresh.emit('clicked'); panel.advanced.emit('clicked');
-        assert(['wifi', 'refresh', 'editor'].every(action => c.calls.some(call => call[0] === action)), 'Header and Advanced dispatch only controller actions');
+
+        {
+            const originalRows = c.rows;
+            const available = network('new-wifi', { name: 'Never connected', known: false, connected: false, profiles: [] });
+            const changing = network('joining-wifi', { name: 'Joining for the first time', known: false, connected: false, changing: true, profiles: [] });
+            const connectedOnly = network('connected-only', { name: 'Connected without a saved profile', known: false, profiles: [] });
+            const savedWired = network('saved-wired', { name: 'Saved Ethernet', kind: 'WIRED', wireless: false, connected: false,
+                profiles: [{ id: 'Wired profile', uuid: 'wired-saved' }] });
+            wifi.profile.selected = 2;
+            const model = wifi.profile.get_model();
+            c.rows = [available, originalRows.find(row => row.key === 'wifi'), changing, savedWired, connectedOnly,
+                originalRows.find(row => row.key === 'wired')];
+            c.emit();
+            await wait();
+            assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
+                'Saved or connected networks precede unsaved networks, preserving order within each group');
+            const unsaved = panel.rows.get('new-wifi'), joining = panel.rows.get('joining-wifi');
+            const connected = panel.rows.get('connected-only'), wired = panel.rows.get('saved-wired');
+            const availableModel = unsaved.profile.get_model();
+            for (const row of [wifi, unsaved, joining, wired]) {
+                assert(row.widget.get_first_child() === row.heading && row.heading.orientation === Gtk.Orientation.HORIZONTAL
+                    && row.name.get_parent() === row.heading && row.connect.get_parent() === row.heading
+                    && row.heading.get_first_child() === row.name && row.heading.get_last_child() === row.connect,
+                'The name and Connect/Disconnect button share the top horizontal row');
+                assert(![...widgets(row.actions)].includes(row.connect), 'Connect is not repeated in the secondary action row');
+            }
+            const [inline, connectBounds] = unsaved.connect.compute_bounds(unsaved.heading);
+            assert(inline && Math.abs(connectBounds.get_x() + connectBounds.get_width() - unsaved.heading.get_width()) <= 1,
+                'The inline Connect button is right-aligned in the normal viewport');
+            assert(unsaved.name.wrap && unsaved.name.label === 'Wi-Fi · Never connected', 'Inline network names retain wrapping and the Wi-Fi prefix');
+            for (const row of [unsaved, joining]) {
+                assert(!row.forget.visible && !row.forget.sensitive, 'Never-connected Wi-Fi has no visible or enabled Forget button');
+                assert(!row.info.visible && !row.qr.visible && !row.profile.visible && !row.actions.visible,
+                    'Unsaved Wi-Fi has no connected-only actions, profile chooser or empty secondary row');
+            }
+            assert(unsaved.connect.sensitive && !joining.connect.sensitive, 'An unsaved changing network stays in the available group with Connect disabled');
+            unsaved.connect.emit('clicked');
+            equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'Unsaved inline Connect dispatches the current key without a saved UUID');
+            assert(!connected.forget.visible && !connected.forget.sensitive && connected.info.visible && connected.qr.visible && connected.actions.visible,
+                'A connected-only Wi-Fi network is remembered for grouping, but has no saved profile to forget');
+            assert(wired.name.label === 'Wired · Saved Ethernet' && wired.forget.visible && wired.forget.sensitive
+                && wired.actions.visible && !wired.info.visible && !wired.qr.visible, 'Disconnected saved Ethernet retains Forget but no connected-only controls');
+            wired.connect.emit('clicked');
+            equal(c.calls.at(-1), ['connect', 'saved-wired', ''], 'Saved Ethernet still dispatches native default-profile activation');
+            wired.forget.emit('clicked');
+            equal(c.calls.at(-1), ['forget', 'saved-wired'], 'Saved Ethernet Forget still dispatches its own key');
+            panel.forgetCancel.emit('clicked');
+            const liveWired = panel.rows.get('wired');
+            assert(liveWired.forget.visible && liveWired.info.visible && !liveWired.qr.visible, 'Connected saved Ethernet keeps Forget and Info, never Wi-Fi QR');
+            liveWired.connect.emit('clicked');
+            equal(c.calls.at(-1), ['disconnect', 'wired'], 'Connected Ethernet still dispatches Disconnect');
+
+            c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, known: false, connected: false } : row); c.emit();
+            assertNetworkOrder(['saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'wifi', 'joining-wifi'],
+                'Losing known and connected state moves the existing row across the divider');
+            assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
+                'Cross-group moves preserve the widget, unchanged profile model and selected UUID');
+            assert(!wifi.forget.visible && !wifi.forget.sensitive && !wifi.actions.visible, 'A newly unsaved row hides Forget and its empty secondary action row');
+            wifi.connect.emit('clicked');
+            equal(c.calls.at(-1), ['connect', 'wifi', 'uuid-b'], 'The moved inline Connect retains UUID-based dispatch');
+            c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, known: true } : row); c.emit();
+            assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
+                'A newly saved disconnected row returns to the remembered group');
+            assert(wifi.forget.visible && wifi.forget.sensitive && wifi.actions.visible && !wifi.info.visible && !wifi.qr.visible,
+                'Saving restores Forget without exposing connected-only actions');
+            assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
+                'Saving does not recreate the row or lose its selected UUID');
+
+            c.rows = c.rows.map(row => row.key === 'new-wifi' ? { ...row, connected: true } : row); c.emit();
+            assertNetworkOrder(['new-wifi', 'wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'joining-wifi'],
+                'Connecting an unsaved network moves it above the divider without marking it saved');
+            assert(panel.rows.get('new-wifi') === unsaved && unsaved.profile.get_model() === availableModel
+                && !unsaved.forget.visible && !unsaved.forget.sensitive && unsaved.info.visible && unsaved.qr.visible && unsaved.actions.visible,
+                'The connected unsaved row keeps its widgets and gains only connected actions');
+            unsaved.connect.emit('clicked');
+            equal(c.calls.at(-1), ['disconnect', 'new-wifi'], 'The moved row now dispatches Disconnect');
+            c.rows = c.rows.map(row => row.key === 'new-wifi' ? { ...row, connected: false } : row);
+            unsaved.connect.emit('clicked');
+            equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'A stale Disconnect label still consults live data after a group change');
+            c.emit();
+            assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
+                'Disconnecting an unsaved network restores available-group order');
+            assert(!unsaved.actions.visible, 'Disconnecting the unsaved row removes the now-empty secondary actions');
+
+            c.rows = c.rows.map(row => ({ ...row, known: true, connected: false })); c.emit();
+            assertNetworkOrder(c.rows.map(row => row.key), 'The divider is hidden when only remembered networks remain');
+            c.rows = c.rows.map(row => ({ ...row, known: false, connected: false })); c.emit();
+            assertNetworkOrder(c.rows.map(row => row.key), 'The divider is hidden when only unsaved networks remain');
+            c.rows = originalRows; c.emit();
+            assertNetworkOrder(['wired', 'wifi'], 'Restoring the original saved group leaves no trailing visible divider');
+            assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
+                'Repeated group transitions preserve the original Wi-Fi widget and UUID selection');
+            assert(!panel.rows.has('new-wifi') && !panel.rows.has('saved-wired'), 'Temporary networks are removed without disturbing retained rows');
+            print('PASS inline network actions, unsaved Forget policy, single group divider and live group transitions');
+        }
+
         c.wifiEnabled = false; c.emit();
-        assert(panel.wifiNotice.label === 'Wi-Fi is off' && !panel.refresh.sensitive && !wifi.connect.sensitive, 'Disabled Wi-Fi state is reflected');
+        assert(panel.wifiNotice.label === 'Wi-Fi is off' && !wifi.connect.sensitive, 'Disabled Wi-Fi state is reflected without header controls');
         c.wifiHardwareEnabled = false; c.emit();
-        assert(panel.wifiNotice.label === 'Wi-Fi is hardware blocked' && !panel.wifi.sensitive, 'Hardware block is reflected');
+        assert(panel.wifiNotice.label === 'Wi-Fi is hardware blocked' && !wifi.connect.sensitive, 'Hardware block is reflected without a global toggle');
         c.wifiAvailable = false; c.emit();
         equal(panel.wifiNotice.label, 'No Wi-Fi adapter', 'Missing Wi-Fi adapter is reflected');
         c.wifiAvailable = c.wifiHardwareEnabled = c.wifiEnabled = true; c.emit();
@@ -3182,7 +3420,7 @@ async function gjsUITests() {
         assert(!panel.detailLabels.get('bssid').visible && !panel.reveal.sensitive, 'Wired info omits Wi-Fi fields and secret reveal');
         panel.backButton.emit('clicked');
 
-        print('PASS Wi-Fi controls, forget confirmation and info/reveal/hide pages');
+        print('PASS Wi-Fi notices, forget confirmation and info/reveal/hide pages');
         wifi.qr.emit('clicked');
         c.qrLoading = true; c.emit();
         equal(panel.qrStatus.label, 'Generating QR code…', 'QR loading state');
@@ -3200,9 +3438,9 @@ async function gjsUITests() {
 
         print('PASS QR PNG rendering and page cleanup');
         c.error = '<b>Literal error</b> ' + 'An unusually long error '.repeat(60); c.emit();
-        panel.closeButton.grab_focus();
+        panel.root.grab_focus();
         await wait();
-        equal([panel.card.get_width(), panel.card.get_height()], [420, 520], 'Header focus, long SSIDs and errors never enlarge the frame');
+        equal([panel.card.get_width(), panel.card.get_height()], [420, 520], 'Root focus, long SSIDs and errors never enlarge the frame');
         assert(!panel.error.use_markup && panel.error.lines === 3, 'Errors are literal and bounded to three lines');
         c.error = ''; c.credentialKey = ''; c.credentialRow = null; c.emit();
         await layout(360, 240);
@@ -3235,15 +3473,38 @@ async function gjsUITests() {
         equal(app.handleRequest('{"command":"status"}'), c.status(), 'Status returns controller Waybar JSON unchanged');
         assert(c.calls.length === before && dismissals === dismissedBefore, 'Status has no controller mutation or panel handoff');
         app.handleRequest('{"command":"close"}');
-        assert(!c.calls.slice(before).some(call => ['connect', 'disconnect', 'wifi', 'refresh', 'password', 'forget', 'confirmForget'].includes(call[0])), 'Close cannot mutate network state');
+        assert(!c.calls.slice(before).some(call => ['connect', 'disconnect', 'wifi', 'password', 'forget', 'confirmForget'].includes(call[0])), 'Close cannot mutate network state');
         for (const request of ['{"command":"run"}', '{"command":"toggle","monitor":7}', '{"command":"close","extra":true}', '<untrusted>']) {
             let rejected = false;
             try { app.handleRequest(request); } catch (_) { rejected = true; }
             assert(rejected, 'Invalid IPC request is rejected');
         }
-        print('PASS real-import frontend IPC status, close and strict request parsing');
+        for (const opened of [false, true]) {
+            if (opened) panel.toggle();
+            const visibility = [c.opened, c.monitor, panel.window.visible, dismissals];
+            const callsBeforeToggle = c.calls.length;
+            equal(app.handleRequest('{"command":"toggleWifi"}'), 'ok', 'Radio IPC delegates successfully to the fake controller');
+            equal(c.calls.slice(callsBeforeToggle), [['wifi']], 'Radio IPC dispatches only the global toggle action');
+            equal([c.opened, c.monitor, panel.window.visible, dismissals], visibility, 'Radio IPC does not open, close, move or hand off the panel');
+            c.toggleError = new Error('Mock radio permission denied.');
+            let error;
+            try { app.handleRequest('{"command":"toggleWifi"}'); } catch (caught) { error = caught; }
+            equal(error?.message, 'Mock radio permission denied.', 'Native radio failure propagates to the IPC error path');
+            equal([c.opened, c.monitor, panel.window.visible, dismissals], visibility, 'Failed radio IPC also preserves visibility');
+            c.toggleError = null;
+            if (opened) panel.close();
+        }
+        for (const monitor of ['', 'DP-1']) {
+            const callsBeforeInvalid = c.calls.length;
+            let rejected = false;
+            try { app.handleRequest(JSON.stringify({ command: 'toggleWifi', monitor })); } catch (_) { rejected = true; }
+            assert(rejected && c.calls.length === callsBeforeInvalid, 'Radio IPC rejects monitor arguments without dispatch');
+        }
+        c.error = ''; c.emit();
+        print('PASS real-import frontend IPC status, close, radio toggle/error and strict request parsing');
         c.rows = []; c.emit();
         assert(panel.empty.visible && panel.rows.size === 0 && panel.profileChoices.size === 0, 'Removed rows and their profile choices are cleaned up');
+        assertNetworkOrder([], 'An empty network list has no visible rows or divider');
         assert(services.every(name => !owner(name)), 'No real service was started or mutated');
         print(`PASS network GTK UI: ${checks} assertions; fake controller only, no native network mutations`);
         print('LIMITATION Xvfb validates GTK layout/events, not compositor layer-shell placement or keyboard grabs.');
@@ -3366,12 +3627,31 @@ async function gjsApplicationTests() {
             'Actual controller status reports offline with no network devices');
         equal(await request('{"command":"status"}'), status, 'Real socket status matches actual controller Waybar JSON');
         equal(await request('{"command":"close"}'), 'ok', 'Real socket close succeeds while already closed');
+        const nativeToggleWifi = backend.toggleWifi;
+        let radioCalls = 0, radioError = null;
+        // Exercise real IPC/controller routing, but never write to the real NM.Client.
+        backend.toggleWifi = () => { radioCalls++; if (radioError) throw radioError; };
+        try {
+            equal(await request('{"command":"toggleWifi"}'), 'ok', 'Real socket radio command reaches the stubbed native boundary');
+            equal(radioCalls, 1, 'Socket radio command delegates exactly once');
+            closedState(controller, backend, panel, 'After stubbed radio toggle');
+            radioError = new Error('Isolated radio permission denied.');
+            equal(JSON.parse(await request('{"command":"toggleWifi"}')), { error: radioError.message }, 'Real socket returns the controller radio error');
+            equal(radioCalls, 2, 'Failed radio request is not retried implicitly');
+            closedState(controller, backend, panel, 'After stubbed radio failure');
+            equal(JSON.parse(await request('{"command":"toggleWifi","monitor":"DP-1"}')),
+                { error: 'Invalid network panel request.' }, 'Socket radio command rejects monitor arguments');
+            equal(radioCalls, 2, 'Invalid radio arguments never reach the native boundary');
+            radioError = null;
+            equal(await request('{"command":"toggleWifi"}'), 'ok', 'A later radio request clears the previous controller error');
+            equal(controller.error, '', 'Successful socket radio request clears stale errors');
+        } finally { backend.toggleWifi = nativeToggleWifi; }
         equal(JSON.parse(await request('{"command":"run","untrusted":"bootstrap-untrusted-marker"}')),
             { error: 'Invalid network panel request.' }, 'Real socket rejects invalid requests without reflecting untrusted input');
         equal(await request('{"command":"status"}'), status, 'Socket close and error leave offline status unchanged');
         await pause();
         closedState(controller, backend, panel, 'After socket requests');
-        print('PASS real application startPanel, native offline backend and closed-only socket status/close/error roundtrips');
+        print('PASS real application startPanel, native offline backend and closed-only socket status/close/stubbed-radio/error roundtrips');
 
         app.disposePanel();
         assert(app.panel === null && app.controller === null && app.get_windows().length === 0, 'Application disposal removes panel references and windows');

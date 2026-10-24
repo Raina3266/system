@@ -26,7 +26,7 @@ pkgs.writeShellApplication {
   passthru = { inherit ags palette; };
   text = ''
     usage() {
-      printf '%s\n' 'Usage: network-panel run | status | toggle [monitor] | close'
+      printf '%s\n' 'Usage: network-panel run | status | toggle [monitor] | close | toggleWifi'
     }
     if [ "$#" -eq 0 ]; then
       usage >&2
@@ -39,7 +39,7 @@ pkgs.writeShellApplication {
         usage
         exit 0
         ;;
-      run|status|close)
+      run|status|close|toggleWifi)
         if [ "$#" -ne 1 ]; then usage >&2; exit 2; fi
         ;;
       toggle)
@@ -51,7 +51,7 @@ pkgs.writeShellApplication {
     export NETWORK_PANEL_CONFIG="''${NETWORK_PANEL_CONFIG:-''${XDG_CONFIG_HOME:-$HOME/.config}/ags/network/frontend.js}"
     export NETWORK_PANEL_PALETTE="''${NETWORK_PANEL_PALETTE:-${palette}}"
     export NETWORK_CUSTOM_HELPER="''${NETWORK_CUSTOM_HELPER:-${lib.getExe networkManager}}"
-    export NETWORK_EDITOR="''${NETWORK_EDITOR:-${lib.getExe' pkgs.networkmanagerapplet "nm-connection-editor"}}"
+
     export DASHBOARD_PANEL="''${DASHBOARD_PANEL:-dashboard-panel}"
     export MEDIA_PANEL="''${MEDIA_PANEL:-media-panel}"
 

@@ -38,6 +38,7 @@ let
     tooltip = true;
     escape = false;
     on-click = "${lib.getExe packages.networkPanel} toggle ${lib.escapeShellArg monitor}";
+    on-click-middle = "${lib.getExe packages.networkPanel} toggleWifi";
   };
 
   # The resident AGS/Astal audio panel owns the badge and Bluetooth/Audio popup.

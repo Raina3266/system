@@ -18,13 +18,13 @@ window.network-panel {
 .network-panel .network-card { background: transparent; padding: 0; margin: 0; border: none; }
 .network-panel .network-content { padding: 12px; }
 .network-panel label { background: transparent; color: @np_cyan; padding: 0; margin: 0; }
-.network-panel .heading { font-weight: bold; letter-spacing: 1px; }
+
 .network-panel .network-name { font-weight: bold; }
 .network-panel .metadata { color: @np_foreground; }
 .network-panel .warning { color: @np_yellow; }
 .network-panel .network-divider {
     min-height: 1px;
-    background: alpha(@np_separator, 0.4);
+    background: @np_separator;
     border: none;
     padding: 0;
     margin: 0;
@@ -44,7 +44,7 @@ window.network-panel {
     transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
 .network-panel button.control-button label { color: inherit; font-weight: bold; padding: 0; margin: 0; }
-.network-panel button.control-button.selected { background: alpha(@np_dimPink, 0.35); }
+
 /* Paint the extra hover stroke inward, so keyboard focus never resizes a row. */
 .network-panel button.control-button:hover,
 .network-panel button.control-button:focus-visible {
@@ -59,10 +59,7 @@ window.network-panel {
     border-color: alpha(@np_foreground, 0.25);
     box-shadow: none;
 }
-.network-panel button.wifi-toggle { min-width: 61.3px; }
-.network-panel button.icon-button { min-width: 27.3px; padding: 0; border-radius: 999px; }
-.network-panel button.icon-button label { color: @np_red; font-size: 14px; font-weight: normal; }
-.network-panel button.icon-button:disabled label { color: @np_separator; }
+
 
 .network-panel entry.network-password {
     background: alpha(@np_chromeBackground, 0.8);
