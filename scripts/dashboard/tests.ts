@@ -32,7 +32,12 @@ class Widget extends Signals {
     }
     css_classes: string[] = [];
     accessible = new Map<number, unknown>();
-    constructor(properties: Record<string, any> = {}) { super(); Object.assign(this, properties); }
+    constructor(properties: Record<string, any> = {}) {
+        super();
+        for (const [name, value] of Object.entries(properties))
+            if (value === undefined) throw new TypeError(`Invalid value 'undefined' for property ${name}`);
+        Object.assign(this, properties);
+    }
     add_css_class(name: string) { if (!this.css_classes.includes(name)) this.css_classes.push(name); }
     remove_css_class(name: string) { this.css_classes = this.css_classes.filter(value => value !== name); }
     has_css_class(name: string) { return this.css_classes.includes(name); }
@@ -239,7 +244,7 @@ const hooks = registerHooks({
 });
 const {
     NotificationCenter, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
-    notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke,
+    notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke, iconButton,
 } = await import('./notification.ts');
 const {
     MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
@@ -289,6 +294,18 @@ function switcher(choices: readonly { id: string; label: string }[] = profileCho
     const indicators = control.indicators as unknown as Box;
     return { control, requests, previous, next, value, indicators };
 }
+
+test('icon buttons omit absent tooltips instead of passing undefined to GObject', () => {
+    let clicked = 0;
+    for (const tooltip of [null, '', 'Clear notifications']) {
+        const button = iconButton('×', tooltip, () => { clicked++; }) as unknown as Button;
+        assert.equal(Object.hasOwn(button, 'tooltip_text'), tooltip !== null);
+        if (tooltip !== null) assert.equal(button.tooltip_text, tooltip);
+        assert.equal((button.get_child() as Label).label, '×');
+        button.emit('clicked');
+    }
+    assert.equal(clicked, 3);
+});
 
 test('switcher has no outside caption, keeps its frame transparent and exposes accessible arrows', () => {
     const { control, previous, next, value, indicators } = switcher();

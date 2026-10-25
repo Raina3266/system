@@ -401,7 +401,7 @@ export function invoke(action: () => unknown): void {
 export function iconButton(glyph: string, tooltip: string | null, clicked: () => unknown, size = 28): Gtk.Button {
     const child = label(glyph, ['icon-glyph']);
     child.xalign = 0.5;
-    const widget = new Gtk.Button({ child, tooltip_text: tooltip ?? undefined, css_classes: ['icon-button'],
+    const widget = new Gtk.Button({ child, ...(tooltip === null ? {} : { tooltip_text: tooltip }), css_classes: ['icon-button'],
         width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
     widget.connect('clicked', () => invoke(clicked));
     return widget;
