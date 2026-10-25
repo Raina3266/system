@@ -31,6 +31,15 @@ let
     on-click = "${lib.getExe packages.dashboardPanel} toggle ${lib.escapeShellArg monitor}";
   };
 
+  clipboardModule = monitor: {
+    exec = "${lib.getExe packages.clipboardPanel} status";
+    interval = 5;
+    return-type = "json";
+    tooltip = true;
+    escape = true;
+    on-click = "${lib.getExe packages.clipboardPanel} toggle ${lib.escapeShellArg monitor}";
+  };
+
   networkModule = monitor: {
     exec = "${lib.getExe packages.networkPanel} status";
     interval = 5;
@@ -73,6 +82,7 @@ in
     dashboardModule
     networkModule
     mediaModule
+    clipboardModule
     ;
 
   homeConfig = {
@@ -112,6 +122,7 @@ in
     "custom/dashboard" = dashboardModule "";
     "custom/network" = networkModule "";
     "custom/media" = mediaModule "";
+    "custom/clipboard-panel" = clipboardModule "";
 
     "custom/lyrics" = {
       hide-empty-text = true;

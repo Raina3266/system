@@ -54,6 +54,7 @@ let
         "custom/dashboard" = system.dashboardModule output;
         "custom/network" = system.networkModule output;
         "custom/media" = system.mediaModule output;
+        "custom/clipboard-panel" = system.clipboardModule output;
       };
     }) panelOutputs
   );

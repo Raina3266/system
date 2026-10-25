@@ -34,6 +34,7 @@ window#waybar.bottom {
 #custom-network,
 #custom-audio,
 #custom-clipboard,
+#custom-clipboard-panel,
 #custom-timer,
 #custom-dashboard,
 #tray {
@@ -133,6 +134,7 @@ window#waybar.bottom {
 #custom-network:hover,
 #custom-audio:hover,
 #custom-clipboard:hover,
+#custom-clipboard-panel:hover,
 #custom-timer:hover,
 #custom-dashboard:hover,
 #custom-obsidian:hover,

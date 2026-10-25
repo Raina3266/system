@@ -165,6 +165,24 @@ rec {
     '';
   };
 
+  clipboardCustom = mkWorkspacePackage "clipboard-custom" {
+    workspaceMember = "clipboard/rust-custom";
+    dontWrapGApps = true;
+    cargoArtifacts = craneLib.buildDepsOnly (
+      commonArgs
+      // {
+        pname = "clipboard-custom-deps";
+        version = "0.1.0";
+        src = craneLib.cleanCargoSource ./.;
+        cargoExtraArgs = "--locked --package clipboard-custom";
+      }
+    );
+  };
+
+  clipboardPanel = import ../niri/panels/clipboard.nix {
+    inherit pkgs clipboardCustom;
+  };
+
   networkManager = mkWorkspacePackage "network-manager" {
     cargoPackage = "rofi-network";
     workspaceMember = "network-manager/rust-custom";

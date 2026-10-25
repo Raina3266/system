@@ -1,0 +1,60 @@
+window.clipboard-panel {
+    background: transparent;
+    color: @cp_cyan;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 12px;
+}
+.clipboard-panel .clipboard-card,
+.clipboard-panel .clipboard-card * { box-shadow: none; text-shadow: none; }
+.clipboard-panel .clipboard-content { padding: 16px; }
+.clipboard-panel label { background: transparent; }
+.clipboard-panel .title { color: @cp_cyan; font-size: 16px; font-weight: bold; }
+.clipboard-panel .metadata { color: @cp_foreground; font-size: 11px; }
+.clipboard-panel .failure { color: @cp_red; font-size: 12px; }
+.clipboard-panel .empty { color: @cp_separator; padding: 16px; }
+.clipboard-panel button {
+    background: transparent;
+    background-image: none;
+    color: @cp_cyan;
+    border: 0.35px solid alpha(@cp_foreground, 0.5);
+    border-radius: 3px;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 6px 10px;
+    outline: none;
+    transition: background 120ms ease-out, border-color 100ms ease-out;
+}
+.clipboard-panel button:hover,
+.clipboard-panel button:focus-visible {
+    background: alpha(@cp_pink, 0.333);
+    border-color: @cp_yellow;
+}
+.clipboard-panel button:active,
+.clipboard-panel button.active { background: @cp_dimPink; border-color: @cp_yellow; }
+.clipboard-panel button:disabled { color: @cp_separator; border-color: alpha(@cp_foreground, 0.2); }
+.clipboard-panel entry {
+    color: @cp_foreground;
+    background: @cp_secondaryBackground;
+    border: 1px solid alpha(@cp_separator, 0.5);
+    border-radius: 3px;
+    min-height: 32px;
+    box-shadow: none;
+}
+.clipboard-panel entry:focus-within { border-color: @cp_pink; }
+.clipboard-panel .history { background: transparent; }
+.clipboard-panel .history row { min-height: 40px; border-radius: 3px; color: @cp_foreground; }
+.clipboard-panel .history row:hover { background: alpha(@cp_dimPink, 0.5); }
+.clipboard-panel .history row:selected { background: @cp_dimPink; color: @cp_cyan; }
+.clipboard-panel .editor,
+.clipboard-panel .editor text { background: @cp_secondaryBackground; color: @cp_foreground; caret-color: @cp_cyan; }
+.clipboard-panel .editor text selection { background: @cp_dimPink; color: @cp_foreground; }
+.clipboard-panel .image-preview { background: @cp_secondaryBackground; }
+.clipboard-panel scrolledwindow { background: transparent; border: none; }
+.clipboard-panel scrollbar { background: transparent; }
+.clipboard-panel scrollbar slider {
+    background: alpha(@cp_pink, 0.5);
+    min-width: 3px;
+    border: none;
+    border-radius: 2px;
+}

@@ -31,6 +31,7 @@
         repoPackages.dashboardPanel
         repoPackages.networkPanel
         repoPackages.appLauncher
+        repoPackages.clipboardPanel
       ];
 
       # Keep generated assets outside this directory-level live link so Home
@@ -49,6 +50,9 @@
       xdg.configFile."ags/dashboard-palette.json".source = repoPackages.dashboardPanel.palette;
       xdg.configFile."ags/app-launcher".source =
         config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/app-launcher";
+      xdg.configFile."ags/clipboard".source =
+        config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/clipboard/astal";
+      xdg.configFile."ags/clipboard-palette.json".source = repoPackages.clipboardPanel.palette;
 
       systemd.user.services.ags-media = {
         Unit = {
@@ -185,18 +189,46 @@
         Install.WantedBy = [ "graphical-session.target" ];
       };
 
+      systemd.user.services.ags-clipboard = {
+        Unit = {
+          Description = "AGS/Astal GTK4 clipboard history and preview panel";
+          X-Restart-Triggers = [ config.xdg.configFile."ags/clipboard-palette.json".source ];
+          ConditionEnvironment = [
+            "WAYLAND_DISPLAY"
+            "XDG_CURRENT_DESKTOP=niri"
+          ];
+          PartOf = [ "graphical-session.target" ];
+          Wants = [ "rofi-clipboard-collector.service" ];
+          After = [ "graphical-session.target" "rofi-clipboard-collector.service" ];
+        };
+        Service = {
+          ExecStart = "${lib.getExe repoPackages.clipboardPanel} run";
+          Environment = [
+            "GDK_BACKEND=wayland"
+            "CLIPBOARD_PANEL_CONFIG=${config.xdg.configHome}/ags/clipboard/frontend.js"
+            "CLIPBOARD_PANEL_PALETTE=${config.xdg.configHome}/ags/clipboard-palette.json"
+          ];
+          UMask = "0077";
+          Restart = "on-failure";
+          RestartSec = 3;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
+
       systemd.user.services.waybar.Unit = {
         Wants = [
           "audio-control-ui.service"
           "ags-dashboard.service"
           "ags-network.service"
           "ags-app-launcher.service"
+          "ags-clipboard.service"
         ];
         After = [
           "audio-control-ui.service"
           "ags-dashboard.service"
           "ags-network.service"
           "ags-app-launcher.service"
+          "ags-clipboard.service"
         ];
       };
     };
