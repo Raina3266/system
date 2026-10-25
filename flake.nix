@@ -47,20 +47,11 @@
 
       # Devshell for scripts/. Nix gives each derivation its own pkg-config and
       # libraries, but a plain shell — and the editor's rust-analyzer — sees
-      # only the user profile, so the -sys crates fail their build scripts.
+      # only the user profile, so D-Bus bindings fail their build scripts.
       # Enter it with `nix develop .#rust`, or a local untracked .envrc.
       devShells.x86_64-linux.rust = pkgs.mkShell {
         nativeBuildInputs = [ pkgs.pkg-config ];
-        buildInputs = with pkgs; [
-          glib
-          gtk4
-          gtk4-layer-shell
-          graphene
-          pango
-          cairo
-          gdk-pixbuf
-          dbus
-        ];
+        buildInputs = [ pkgs.dbus ];
       };
     };
 }

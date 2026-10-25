@@ -11,6 +11,7 @@ import GdkX11 from 'gi://GdkX11?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import System from 'system';
+import { loadPanelStyle } from '../../../panels/style.js';
 
 if (GLib.getenv('AUDIO_DROPDOWN_ISOLATED') !== '1'
     || GLib.getenv('GDK_BACKEND') !== 'x11'
@@ -102,8 +103,8 @@ const extracted = source.slice(0, boundary)
     .replace(/^import .*;[ \t]*$/gm, '')
     .replace('export class AudioPanel', 'class AudioPanel');
 assert(!/^\s*(?:import|export)\b/m.test(extracted), 'All imports/exports stripped before evaluation');
-const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib',
-    `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib);
+const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib', 'loadPanelStyle',
+    `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib, loadPanelStyle);
 
 // XTEST uses the existing libX11 request allocator, so no xdotool, python-xlib,
 // libXtst, shell, or extra on-disk input harness is needed. All input is sent
@@ -913,6 +914,18 @@ async function smoke() {
     panel.render();
     host.present();
     await wait(200);
+    for (const tab of panel.tabs) {
+        const rgb = (tab.has_css_class('selected') ? palette.cyan : palette.pink)
+            .slice(1).match(/../g).map(value => parseInt(value, 16) / 255);
+        for (const state of [Gtk.StateFlags.NORMAL, Gtk.StateFlags.PRELIGHT, Gtk.StateFlags.FOCUS_VISIBLE]) {
+            tab.set_state_flags(state, false);
+            await wait(150);
+            const color = tab.get_child().get_color();
+            assert([color.red, color.green, color.blue].every((value, index) => Math.abs(value - rgb[index]) < 0.01),
+                'Selected and inactive tabs must retain their text colors at rest, on hover and keyboard focus');
+            tab.unset_state_flags(state);
+        }
+    }
     await testCompactLayout();
     for (const kind of ['output', 'input']) await testKind(kind);
     await testSelectorGuards();

@@ -5,7 +5,6 @@
   "modules-center": ["custom/media", "custom/lyrics"],
   "modules-right": [
     "custom/timer",
-    "custom/clipboard",
     "custom/clipboard-panel",
     "custom/audio",
     "custom/network",

@@ -8,6 +8,7 @@ import Astal from 'gi://Astal?version=4.0';
 import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { LauncherBackend, monitors, focusedMonitor } from './backend.js';
+import { loadPanelStyle } from '../panels/style.js';
 import { ANIMATION_MS, BAR_GAP, PANEL_LEFT, TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GRID_COLUMNS, SEARCH_HEIGHT, SEARCH_GAP,
     parseRequest, panelLayout, nextIndex } from './logic.js';
 
@@ -355,9 +356,7 @@ export async function main() {
         if (app.panel) return;
         try {
             const config = GLib.getenv('APP_LAUNCHER_CONFIG') || System.programPath;
-            provider = new Gtk.CssProvider();
-            provider.load_from_path(GLib.build_filenamev([GLib.path_get_dirname(config), 'style.css']));
-            Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
+            provider = loadPanelStyle({ entry: config, label: 'Launcher' });
             app.panel = new LauncherPanel(app);
         } catch (error) {
             console.error(`Launcher initialization: ${error.stack || error}`);

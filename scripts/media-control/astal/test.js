@@ -42,7 +42,7 @@ test('icon buttons retain accessible action labels and clicks without tooltips',
 });
 
 test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
-    const runtime = readFileSync(new URL('../../../niri/panels/media.nix', import.meta.url), 'utf8');
+    const runtime = readFileSync(new URL('../../../niri/panels.nix', import.meta.url), 'utf8');
     assert.match(runtime, /pkgs\.libavif/);
     assert.match(viewSource, /positionTimer = GLib\.timeout_add/);
     assert.match(viewSource, /GLib\.source_remove\(this\.positionTimer\)/);

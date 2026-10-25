@@ -14,15 +14,11 @@ let
 
   # <path under $XDG_CONFIG_HOME> = <path in this repository>
   configLinks = {
-
-    "preview-panel/preview-panel.css" = "themes/rofi/preview-panel.css";
-    "rofi/rofi-clipboard.rasi" = "themes/rofi/rofi-clipboard.rasi";
     "waybar/style.css" = "themes/waybar/waybar.css";
   };
 
   # <path under $XDG_DATA_HOME> = <path in this repository>
   dataLinks = {
-
     "fcitx5/themes/cyberpunk/theme.conf" = "themes/fcitx5.conf";
   };
 

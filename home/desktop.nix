@@ -290,27 +290,6 @@ in
     ];
   };
 
-  # Rofi's wrapper prepends its package to XDG_DATA_DIRS.
-  xdg.dataFile."applications/rofi.desktop".text = ''
-    [Desktop Entry]
-    Type=Application
-    Name=Rofi
-    NoDisplay=true
-    Exec=rofi -show
-    Icon=rofi
-    Terminal=false
-  '';
-
-  xdg.dataFile."applications/rofi-theme-selector.desktop".text = ''
-    [Desktop Entry]
-    Type=Application
-    Name=Rofi Theme Selector
-    NoDisplay=true
-    Exec=rofi-theme-selector
-    Icon=rofi
-    Terminal=false
-  '';
-
   xdg.desktopEntries.vim = {
     name = "Vim";
     noDisplay = true;

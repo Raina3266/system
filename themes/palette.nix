@@ -1,7 +1,6 @@
 # The one palette every toolkit shares. themes/default.nix patches Daemon's
-# KDE, GTK and VS Code themes; niri/panels/{media,audio,network,dashboard}.nix
-# export JSON for the AGS panels' GTK CSS.
-# Generated assets stay outside the live-linked presentation directories.
+# KDE, GTK and VS Code themes; niri/panels.nix exports JSON for the
+# AGS panels' GTK CSS. Generated palettes stay separate from live stylesheets.
 {
   red = "#D52C35";
   pink = "#D656C7";

@@ -1,6 +1,5 @@
 [package]
-# Preserve Cargo.lock's package identity; the QR-only executable is network-manager.
-name = "rofi-network"
+name = "network-manager"
 version.workspace = true
 edition.workspace = true
 

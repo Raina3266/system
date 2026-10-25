@@ -7,6 +7,7 @@ import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import Gtk4LayerShell from 'gi://Gtk4LayerShell';
 import type { DashboardBackend } from './power.ts';
+import { loadPanelStyle } from '../panels/style.js';
 
 export type NotificationRow = {
     id: string;
@@ -350,20 +351,10 @@ export function loadTheme(entry: string | null, palettePath: string | null) {
         'separator', 'cyan', 'pink', 'dimPink', 'yellow', 'red'] as const) {
         if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid dashboard palette colour: ${key}`);
     }
-    if (!entry) throw new Error('DASHBOARD_PANEL_CONFIG must name the dashboard entry file.');
     const definitions = Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
         .map(([key, value]) => `@define-color dp_${key} ${value};`).join('\n');
-    const provider = new Gtk.CssProvider();
-    const errors: string[] = [];
-    provider.connect('parsing-error', (_provider, _section, error) => errors.push(error.message));
-    provider.load_from_string(`${definitions}\n${read(GLib.build_filenamev([GLib.path_get_dirname(entry), 'style.css']))}`);
-    if (errors.length) throw new Error(`Dashboard stylesheet: ${errors.join('; ')}`);
-    const display = Gdk.Display.get_default();
-    if (!display) throw new Error('The dashboard needs a graphical display.');
-    // The desktop theme is installed at USER priority. Every selector in this
-    // provider is scoped to our windows, so it can safely take precedence.
-    Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
+    const provider = loadPanelStyle({ entry, definitions, label: 'Dashboard' });
     return { palette, provider };
 }
 
@@ -510,7 +501,7 @@ export class NotificationEntry {
         this.row = row;
         this.widget = new Gtk.Overlay({ css_classes: ['notification-entry', ...(popup ? ['popup-entry'] : [])],
             hexpand: true, height_request: 64, overflow: Gtk.Overflow.HIDDEN });
-        const artworkSize = popup ? 125 : 64;
+        const artworkSize = popup ? 100 : 64;
         this.artwork = new Gtk.Image({ pixel_size: artworkSize, width_request: artworkSize,
             height_request: artworkSize, valign: Gtk.Align.START });
         this.app = ellipsis('', ['notification-app']);

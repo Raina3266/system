@@ -322,8 +322,8 @@ binds {
     Alt+Print   { screenshot-window; }
     Shift+Print hotkey-overlay-title="OCR Screenshot" { spawn "ocr-screenshot"; }
 
-    // Clipboard history via rofi
-    Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn-sh "rofi-clipboard"; }
+    // Clipboard history and memos
+    Mod+Alt+V hotkey-overlay-title="Clipboard History" { spawn "clipboard-panel" "toggle"; }
 
     // Toggle speech-to-text (Handy)
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" {  spawn "pkill" "-USR2" "-n" "handy"; }

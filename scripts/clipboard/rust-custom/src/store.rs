@@ -1,5 +1,5 @@
-//! Adapted from rofi-clipboard's model/store and file-copy policy. Keep the
-//! version, filenames, flock, digest and limits compatible with that writer.
+//! Transactional clipboard history shared by background capture and the GTK panel.
+//! The on-disk version, digests and retention limits remain backward compatible.
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Kind {
     Memo,
@@ -61,21 +61,50 @@ pub struct Store {
     root: PathBuf,
 }
 
+pub enum Captured {
+    Text {
+        text: String,
+        mime: String,
+    },
+    File {
+        text: String,
+        mime: String,
+        name: Option<String>,
+    },
+    Image {
+        bytes: Vec<u8>,
+        mime: String,
+        name: Option<String>,
+    },
+}
+
+#[derive(Default)]
+struct PendingImages(Vec<PathBuf>);
+
+impl Drop for PendingImages {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
 
 impl Store {
     pub fn discover() -> Result<Self> {
-        let root = if let Some(path) = std::env::var_os("ROFI_CLIPBOARD_DATA_DIR") {
+        if let Some(path) = std::env::var_os("CLIPBOARD_DATA_DIR").filter(|p| !p.is_empty()) {
+            // Explicit stores are isolated: never import the user's default history.
+            return Ok(Self { root: path.into() });
+        }
+        let base = if let Some(path) = std::env::var_os("XDG_DATA_HOME").filter(|p| !p.is_empty()) {
             PathBuf::from(path)
-        } else if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
-            PathBuf::from(path).join("rofi-clipboard")
         } else {
-            PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?)
-                .join(".local/share/rofi-clipboard")
+            PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?).join(".local/share")
         };
-        Ok(Self { root })
+        Self::at_data_home(&base)
     }
 
     fn image_path(&self, item: &Item) -> Result<Option<PathBuf>> {
@@ -97,6 +126,14 @@ impl Store {
         write: bool,
         operation: impl FnOnce(&mut History) -> Result<Value>,
     ) -> Result<Value> {
+        self.transaction_with_images(write, |history, _| operation(history))
+    }
+
+    fn transaction_with_images(
+        &self,
+        write: bool,
+        operation: impl FnOnce(&mut History, &mut PendingImages) -> Result<Value>,
+    ) -> Result<Value> {
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -114,60 +151,99 @@ impl Store {
         }
         // Closing `lock` releases flock, including on every error path.
         let path = self.root.join("history.json");
-        let mut history: History = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).context("Invalid clipboard history")?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => History::default(),
+        let previous = match fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error).context("Read clipboard history"),
+        };
+        let mut history: History = match &previous {
+            Some(bytes) => serde_json::from_slice(bytes).context("Invalid clipboard history")?,
+            None => History::default(),
         };
         ensure!(
             history.version == 1,
             "Unsupported clipboard history version"
         );
-        let reply = operation(&mut history)?;
+        // Validate before doing any I/O on behalf of a mutation. In particular,
+        // an invalid cached filename must not cause an error after committing.
+        self.items(&history)?;
+        let previous_images: Vec<_> = history
+            .items
+            .iter()
+            .filter_map(|item| item.image_file.clone())
+            .collect();
+        let mut pending = PendingImages::default();
+        let mut reply = operation(&mut history, &mut pending)?;
         if write {
             history.items.sort_by_key(|item| !item.pinned);
-            let removed = trim(&mut history);
-            let temporary = self
-                .root
-                .join(format!(".clipboard-panel.{}.tmp", std::process::id()));
-            let result = (|| -> Result<()> {
-                let mut file = OpenOptions::new()
-                    .create_new(true)
-                    .write(true)
-                    .mode(0o600)
-                    .open(&temporary)?;
-                serde_json::to_writer_pretty(&mut file, &history)?;
-                file.write_all(b"\n")?;
-                file.sync_all()?;
-                fs::rename(&temporary, &path)?;
-                Ok(())
-            })();
-            if temporary.exists() {
-                let _ = fs::remove_file(&temporary);
+            trim(&mut history);
+            reply["items"] = self.items(&history)?;
+            let mut bytes = serde_json::to_vec_pretty(&history)?;
+            bytes.push(b'\n');
+            // Serialize once, then perform one buffered write. In particular,
+            // opening an unchanged history must not fsync it or wake watchers.
+            if previous.as_deref() != Some(bytes.as_slice()) {
+                let temporary = self
+                    .root
+                    .join(format!(".clipboard-panel.{}.tmp", std::process::id()));
+                let result = (|| -> Result<()> {
+                    let mut file = OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .mode(0o600)
+                        .open(&temporary)?;
+                    file.write_all(&bytes)?;
+                    file.sync_all()?;
+                    fs::rename(&temporary, &path)?;
+                    Ok(())
+                })();
+                if temporary.exists() {
+                    let _ = fs::remove_file(&temporary);
+                }
+                result?;
             }
-            result?;
-            for item in removed {
-                if let Ok(Some(path)) = self.image_path(&item) {
+            // Only delete unreferenced cache files after the history commits,
+            // while still holding the lock. A failed commit rolls new files back.
+            for filename in previous_images {
+                if !history
+                    .items
+                    .iter()
+                    .any(|item| item.image_file.as_ref() == Some(&filename))
+                {
+                    let _ = fs::remove_file(self.root.join("images").join(filename));
+                }
+            }
+            for path in &pending.0 {
+                if !history
+                    .items
+                    .iter()
+                    .any(|item| self.image_path(item).ok().flatten().as_ref() == Some(path))
+                {
                     let _ = fs::remove_file(path);
                 }
             }
+            pending.0.clear();
         }
         drop(lock);
         Ok(reply)
     }
 
+    fn items(&self, history: &History) -> Result<Value> {
+        let items: Result<Vec<_>> = history
+            .items
+            .iter()
+            .map(|item| {
+                let mut value = serde_json::to_value(item)?;
+                value["image_path"] = json!(self.image_path(item)?);
+                Ok(value)
+            })
+            .collect();
+        Ok(json!(items?))
+    }
+
     pub fn snapshot(&self) -> Result<Value> {
         self.transaction(false, |history| {
-            let items: Result<Vec<_>> = history
-                .items
-                .iter()
-                .map(|item| {
-                    let mut value = serde_json::to_value(item)?;
-                    value["image_path"] = json!(self.image_path(item)?);
-                    Ok(value)
-                })
-                .collect();
-            Ok(json!({ "items": items? }))
+            Ok(json!({ "items": self.items(history)? }))
         })
     }
 
@@ -198,17 +274,13 @@ impl Store {
     }
 
     pub fn delete(&self, id: u64) -> Result<Value> {
-        let mut removed = None;
-        let reply = self.transaction(true, |history| {
-            removed = Some(history.items.remove(position(history, id)?));
+        self.transaction(true, |history| {
+            let item = history.items.remove(position(history, id)?);
+            if matches!(item.kind, Kind::Memo) {
+                ensure_draft(history);
+            }
             Ok(json!({ "id": id }))
-        })?;
-        if let Some(item) = removed
-            && let Some(path) = self.image_path(&item)?
-        {
-            let _ = fs::remove_file(path);
-        }
-        Ok(reply)
+        })
     }
 
     pub fn save(&self, id: u64, base: &str, text: String) -> Result<Value> {
@@ -248,7 +320,6 @@ impl Store {
                 && let Some(path) = item
                     .name
                     .as_deref()
-                    .map(str::trim)
                     .map(Path::new)
                     .filter(|p| p.is_absolute())
             {
@@ -259,23 +330,100 @@ impl Store {
         })
     }
 
-    pub fn prepare(&self) -> Result<()> {
-        let mut removed = Vec::new();
+    pub fn prepare(&self) -> Result<Value> {
         self.transaction(true, |history| {
             history.items.retain(|item| {
                 let missing = matches!(item.kind, Kind::File)
                     && item.name.as_deref().map(Path::new).filter(|p| p.is_absolute())
                         .is_some_and(|p| matches!(fs::metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound));
-                if missing { removed.push(item.clone()); }
                 !missing
             });
-            Ok(Value::Null)
-        })?;
-        for item in removed {
-            if let Ok(Some(path)) = self.image_path(&item) {
-                let _ = fs::remove_file(path);
-            }
+            let id = ensure_draft(history);
+            Ok(json!({ "id": id }))
+        })
+    }
+
+    pub fn capture(&self, entries: Vec<Captured>) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
         }
+        self.transaction_with_images(true, |history, pending| {
+            for entry in entries {
+                let (kind, text, bytes, mime, name) = match entry {
+                    Captured::Text { text, mime } => (Kind::Text, Some(text), None, mime, None),
+                    Captured::File { text, mime, name } => {
+                        (Kind::File, Some(text), None, mime, name)
+                    }
+                    Captured::Image { bytes, mime, name } => {
+                        (Kind::File, None, Some(bytes), mime, name)
+                    }
+                };
+                let content = bytes
+                    .as_deref()
+                    .unwrap_or_else(|| text.as_deref().unwrap_or_default().as_bytes());
+                if content.is_empty() {
+                    continue;
+                }
+                let hash = digest(content);
+                let existing = history.items.iter().position(|item| {
+                    item.kind == kind
+                        && item.image_file.is_some() == bytes.is_some()
+                        && (item.digest == hash
+                            || (kind == Kind::File
+                                && bytes.is_none()
+                                && name
+                                    .as_ref()
+                                    .is_some_and(|name| item.name.as_ref() == Some(name))))
+                });
+                let mut item = if let Some(index) = existing {
+                    history.items.remove(index)
+                } else {
+                    let id = take_id(history)?;
+                    Item {
+                        id,
+                        kind,
+                        text: None,
+                        image_file: None,
+                        name: None,
+                        mime: String::new(),
+                        pinned: false,
+                        created_at: 0,
+                        digest: String::new(),
+                    }
+                };
+                if let Some(bytes) = bytes {
+                    let filename = item
+                        .image_file
+                        .clone()
+                        .unwrap_or_else(|| format!("{}.{}", item.id, extension_for_mime(&mime)));
+                    let path = self.root.join("images").join(&filename);
+                    if item.image_file.is_none() || !path.try_exists()? {
+                        fs::DirBuilder::new()
+                            .recursive(true)
+                            .mode(0o700)
+                            .create(self.root.join("images"))?;
+                        // Never replace an existing cache file, even if next_id
+                        // in a damaged history happens to point at it.
+                        let mut file = OpenOptions::new()
+                            .create_new(true)
+                            .write(true)
+                            .mode(0o600)
+                            .open(&path)?;
+                        pending.0.push(path);
+                        file.write_all(&bytes)?;
+                        file.sync_all()?;
+                    }
+                    item.image_file = Some(filename);
+                }
+                item.text = text;
+                item.name = name.or(item.name);
+                item.mime = mime;
+                item.digest = hash;
+                item.created_at = now();
+                history.items.insert(0, item);
+            }
+            Ok(json!({}))
+        })?;
         Ok(())
     }
 }
@@ -346,6 +494,28 @@ fn trim(history: &mut History) -> Vec<Item> {
     removed
 }
 
+fn take_id(history: &mut History) -> Result<u64> {
+    let id = history.next_id;
+    ensure!(
+        id > 0 && !history.items.iter().any(|item| item.id == id),
+        "Invalid next clipboard item ID"
+    );
+    history.next_id = id.checked_add(1).context("Clipboard item IDs exhausted")?;
+    Ok(id)
+}
+
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime.split(';').next().unwrap_or(mime) {
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        "image/tiff" => "tiff",
+        "image/svg+xml" => "svg",
+        _ => "png",
+    }
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -375,6 +545,8 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
+#[path = "migration.rs"]
+mod migration;
+
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+crate::clipboard_unit_tests!(store);

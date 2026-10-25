@@ -3,9 +3,11 @@
   pkgs,
   craneLib,
   kernelPackages ? pkgs.linuxPackages_latest,
+  repoRoot ? "/home/raina/System",
 }:
 let
   inherit (pkgs) lib;
+  panels = (import ../niri/panels.nix).packages;
 
   # Read from [workspace].members rather than repeated here: a member missing
   # from this list builds itself fine and breaks every other crate, because
@@ -22,14 +24,9 @@ let
     nativeBuildInputs = [
       pkgs.pkg-config
       pkgs.makeWrapper
-      pkgs.wrapGAppsHook4
     ];
 
-    buildInputs = [
-      pkgs.gtk4
-      pkgs.gtk4-layer-shell
-      pkgs.dbus
-    ];
+    buildInputs = [ pkgs.dbus ];
   };
 
   # Every member's dependencies, compiled once. Crane stubs the crates' own
@@ -53,7 +50,7 @@ let
       fileset = lib.fileset.unions [
         (craneLib.fileset.cargoTomlAndLock ./.)
         # Exclude UI/runtime assets (CSS, docs, screenshots) from the compiled
-        # package input. They are live-linked separately by Home Manager.
+        # package input. Panel code is packaged separately; CSS stays live.
         (craneLib.fileset.commonCargoSources (./. + "/${memberPath}"))
       ];
     };
@@ -68,9 +65,7 @@ let
       : > ${m}/src/main.rs
     '') (lib.remove memberPath workspaceMembers);
 
-  # `pname` is normally also Cargo's package id and the installed binary.
-  # network-manager is the exception: directory and binary were renamed, but
-  # its package id stays `rofi-network` so the shared Cargo.lock does not churn.
+  # Package and binary names match; nested helpers specify their workspace path.
   mkWorkspacePackage =
     pname: extra:
     let
@@ -138,7 +133,6 @@ rec {
   inherit withParentDeath;
 
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/ocr-screenshot" \
         --set OCR_SCREENSHOT_GNOME_SCREENSHOT "${pkgs.lib.getExe' pkgs.gnome-screenshot "gnome-screenshot"}" \
@@ -150,24 +144,12 @@ rec {
     '';
   };
 
-  # gtk4 and the hook that wraps it live in commonArgs now, so there is nothing
-  # left for this crate to add.
-  previewPanel = mkWorkspacePackage "preview-panel" { };
-
-  rofiClipboard = mkWorkspacePackage "rofi-clipboard" {
-    dontWrapGApps = true;
-    postInstall = ''
-      wrapProgram "$out/bin/rofi-clipboard" \
-        --set ROFI_CLIPBOARD_ROFI "${pkgs.lib.getExe pkgs.rofi}" \
-        --set ROFI_CLIPBOARD_PREVIEW_PANEL "${previewPanel}/bin/preview-panel" \
-        --set ROFI_CLIPBOARD_WL_COPY "${pkgs.lib.getExe' pkgs.wl-clipboard "wl-copy"}" \
-        --set ROFI_CLIPBOARD_WL_PASTE "${pkgs.lib.getExe' pkgs.wl-clipboard "wl-paste"}"
-    '';
-  };
-
   clipboardCustom = mkWorkspacePackage "clipboard-custom" {
     workspaceMember = "clipboard/rust-custom";
-    dontWrapGApps = true;
+    postInstall = ''
+      wrapProgram "$out/bin/clipboard-custom" \
+        --set CLIPBOARD_WL_PASTE "${lib.getExe' pkgs.wl-clipboard "wl-paste"}"
+    '';
     cargoArtifacts = craneLib.buildDepsOnly (
       commonArgs
       // {
@@ -179,70 +161,48 @@ rec {
     );
   };
 
-  clipboardPanel = import ../niri/panels/clipboard.nix {
-    inherit pkgs clipboardCustom;
-  };
+  inherit (panels {
+    inherit pkgs repoRoot audioControl mediaControl networkManager clipboardCustom;
+  }) clipboardPanel audioPanel mediaPanel networkPanel dashboardPanel appLauncher;
 
   networkManager = mkWorkspacePackage "network-manager" {
-    cargoPackage = "rofi-network";
     workspaceMember = "network-manager/rust-custom";
     # Build only this small JSON/QR helper's dependency graph, not the full
-    # desktop workspace's GTK/D-Bus dependencies.
+    # desktop workspace's D-Bus dependencies.
     cargoArtifacts = craneLib.buildDepsOnly (
       commonArgs
       // {
         pname = "network-manager-deps";
         version = "0.1.0";
         src = craneLib.cleanCargoSource ./.;
-        cargoExtraArgs = "--locked --package rofi-network";
+        cargoExtraArgs = "--locked --package network-manager";
       }
     );
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/network-manager" \
         --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
     '';
   };
 
-  # Headless audio compatibility, pairing, and HID++ battery publication only;
-  # AGS/Astal owns the visible UI, so this needs no GTK environment wrapper.
+  # Headless audio compatibility, pairing, and HID++ battery publication only.
   audioControl = mkWorkspacePackage "audio-control" {
     workspaceMember = "audio-control/rust-custom";
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/audio-control" \
         --set AUDIO_CONTROL_PW_DUMP "${lib.getExe' pkgs.pipewire "pw-dump"}"
     '';
   };
 
-  audioPanel = import ../niri/panels/audio.nix {
-    inherit pkgs audioControl;
-  };
-
   # Custom media policy/metadata only; AGS/Astal supplies the native services.
   mediaControl = mkWorkspacePackage "media-control" {
     workspaceMember = "media-control/rust-custom";
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/media-control" \
         --set MEDIA_CONTROL_CURL "${lib.getExe pkgs.curl}"
     '';
   };
 
-  mediaPanel = import ../niri/panels/media.nix {
-    inherit pkgs mediaControl;
-  };
-
-  networkPanel = import ../niri/panels/network.nix {
-    inherit pkgs networkManager;
-  };
-
-  dashboardPanel = import ../niri/panels/dashboard.nix { inherit pkgs; };
-
-  appLauncher = import ../niri/panels/app-launcher.nix { inherit pkgs; };
-
   waybarTimer = mkWorkspacePackage "waybar-timer" {
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/waybar-timer" \
         --set WAYBAR_TIMER_FFPLAY "${pkgs.ffmpeg-full}/bin/ffplay"
@@ -250,7 +210,6 @@ rec {
   };
 
   webcamCrop = mkWorkspacePackage "webcam-crop" {
-    dontWrapGApps = true;
     postInstall = ''
       wrapProgram "$out/bin/webcam-crop" \
         --set WEBCAM_CROP_FFMPEG "${pkgs.ffmpeg-full}/bin/ffmpeg" \

@@ -16,7 +16,6 @@ let
     packages = repoPackages;
   };
   utilities = import ./utilities.nix {
-    inherit pkgs;
     packages = repoPackages;
   };
   modules = system.modules // utilities.modules;
@@ -100,13 +99,23 @@ in
             ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
             Wants = [
               "waybar-timer.service"
-              "rofi-clipboard-collector.service"
+              "clipboard-collector.service"
               "ags-media.service"
+              "audio-control-ui.service"
+              "ags-dashboard.service"
+              "ags-network.service"
+              "ags-app-launcher.service"
+              "ags-clipboard.service"
             ];
             After = [
               "waybar-timer.service"
-              "rofi-clipboard-collector.service"
+              "clipboard-collector.service"
               "ags-media.service"
+              "audio-control-ui.service"
+              "ags-dashboard.service"
+              "ags-network.service"
+              "ags-app-launcher.service"
+              "ags-clipboard.service"
             ];
           };
           Service = {

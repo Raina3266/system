@@ -11,7 +11,7 @@ let
   # One canonical checkout path for every live-linked desktop configuration.
   repoRoot = "/home/raina/System";
   repoPackages = import ../scripts/packages.nix {
-    inherit pkgs kernelPackages;
+    inherit pkgs kernelPackages repoRoot;
     craneLib = inputs.crane.mkLib pkgs;
   };
 in
@@ -20,8 +20,6 @@ in
     inputs.home-manager.nixosModules.home-manager
     ./hardware.nix
     ./services.nix
-    ../niri/rofi
-
   ];
 
   config = {

@@ -8,8 +8,7 @@ window.clipboard-panel {
 .clipboard-panel .clipboard-card * { box-shadow: none; text-shadow: none; }
 .clipboard-panel .clipboard-content { padding: 16px; }
 .clipboard-panel label { background: transparent; }
-.clipboard-panel .title { color: @cp_cyan; font-size: 16px; font-weight: bold; }
-.clipboard-panel .metadata { color: @cp_foreground; font-size: 11px; }
+
 .clipboard-panel .failure { color: @cp_red; font-size: 12px; }
 .clipboard-panel .empty { color: @cp_separator; padding: 16px; }
 .clipboard-panel button {
@@ -30,22 +29,124 @@ window.clipboard-panel {
     background: alpha(@cp_pink, 0.333);
     border-color: @cp_yellow;
 }
-.clipboard-panel button:active,
-.clipboard-panel button.active { background: @cp_dimPink; border-color: @cp_yellow; }
+.clipboard-panel button:active { background: @cp_dimPink; border-color: @cp_yellow; }
 .clipboard-panel button:disabled { color: @cp_separator; border-color: alpha(@cp_foreground, 0.2); }
-.clipboard-panel entry {
+
+.clipboard-panel .clipboard-page-body {
+    padding: 8px;
+    border: 1px solid @cp_cyan;
+    border-top: none;
+    border-radius: 0 0 3px 3px;
+}
+
+/* Audio-panel tab styling, with the cyan page baseline on inactive tabs. */
+.clipboard-panel button.tab {
+    border: 1px solid alpha(@cp_pink, 0.7);
+    border-bottom-color: @cp_cyan;
+    border-radius: 3px 3px 0 0;
+    min-height: 38px;
+    padding: 0;
+    color: @cp_pink;
+}
+.clipboard-panel button.tab label { color: inherit; font-size: 13px; font-weight: bold; letter-spacing: 1px; }
+.clipboard-panel button.tab.selected {
+    border-color: @cp_cyan;
+    border-width: 1.5px;
+    border-bottom-color: transparent;
+    border-bottom-width: 1px;
+    min-height: 37px;
+    background: alpha(@cp_cyan, 0.08);
+    color: @cp_cyan;
+}
+.clipboard-panel button.tab:hover,
+.clipboard-panel button.tab:focus-visible {
+    border-color: @cp_pink;
+    border-width: 1px;
+    border-bottom-color: @cp_cyan;
+    min-height: 38px;
+    background: alpha(@cp_pink, 0.1);
+}
+.clipboard-panel button.tab.selected:hover,
+.clipboard-panel button.tab.selected:focus-visible {
+    border-color: @cp_cyan;
+    border-width: 1.5px;
+    border-bottom-color: transparent;
+    border-bottom-width: 1px;
+    min-height: 37px;
+    background: alpha(@cp_cyan, 0.08);
+}
+.clipboard-panel button.tab:active,
+.clipboard-panel button.tab.selected:active { background: alpha(@cp_cyan, 0.18); }
+
+.clipboard-panel entry,
+.clipboard-panel .clipboard-search {
     color: @cp_foreground;
     background: @cp_secondaryBackground;
     border: 1px solid alpha(@cp_separator, 0.5);
     border-radius: 3px;
     min-height: 32px;
     box-shadow: none;
+    outline: none;
 }
+.clipboard-panel .clipboard-search { background: transparent; }
 .clipboard-panel entry:focus-within { border-color: @cp_pink; }
+.clipboard-panel .clipboard-search:hover,
+.clipboard-panel .clipboard-search:focus-within,
+.clipboard-panel .clipboard-search:focus-visible {
+    border-color: alpha(@cp_separator, 0.5);
+    box-shadow: none;
+    outline: none;
+}
+.clipboard-panel .history,
+.clipboard-panel .editor { font-size: 15px; }
 .clipboard-panel .history { background: transparent; }
-.clipboard-panel .history row { min-height: 40px; border-radius: 3px; color: @cp_foreground; }
+.clipboard-panel .history row { min-height: 40px; padding: 0; border-radius: 3px; color: @cp_foreground; }
 .clipboard-panel .history row:hover { background: alpha(@cp_dimPink, 0.5); }
 .clipboard-panel .history row:selected { background: @cp_dimPink; color: @cp_cyan; }
+.clipboard-panel .history-item {
+    min-height: 40px;
+    padding: 0 8px;
+    border-left: 3px solid transparent;
+    border-radius: 3px;
+}
+.clipboard-panel .history-item.pinned {
+    border-left-color: @cp_red;
+    background: alpha(@cp_red, 0.06);
+}
+.clipboard-panel .history row:selected .history-item.pinned { background: transparent; }
+.clipboard-panel .pin-badge {
+    color: @cp_red;
+    background: alpha(@cp_red, 0.12);
+    border: 1px solid alpha(@cp_red, 0.55);
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+.clipboard-panel button.row-action {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    color: @cp_separator;
+}
+.clipboard-panel button.row-action label { font-size: 14px; color: inherit; }
+.clipboard-panel button.row-action:hover,
+.clipboard-panel button.row-action:focus-visible {
+    color: @cp_cyan;
+    background: alpha(@cp_cyan, 0.12);
+}
+.clipboard-panel button.row-pin.pinned {
+    color: @cp_red;
+    background: alpha(@cp_red, 0.12);
+}
+.clipboard-panel button.row-delete:hover,
+.clipboard-panel button.row-delete:focus-visible {
+    color: @cp_red;
+    background: alpha(@cp_red, 0.16);
+}
 .clipboard-panel .editor,
 .clipboard-panel .editor text { background: @cp_secondaryBackground; color: @cp_foreground; caret-color: @cp_cyan; }
 .clipboard-panel .editor text selection { background: @cp_dimPink; color: @cp_foreground; }

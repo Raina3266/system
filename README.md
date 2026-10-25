@@ -1,39 +1,39 @@
 # Custom Scripts
 
-This repository contains eight Rust packages used by the desktop configuration:
+This repository contains seven Rust packages used by the desktop configuration:
 
 - `audio-control` — headless audio compatibility policy, request-local PIN/passkey pairing, and HID++ battery publication
 - `media-control` — headless media grouping, conservative stream matching, artwork, and video-author metadata
 - `network-manager` — QR-only Wi-Fi share-code encoding; native network information, secrets, and WEP settings stay in GJS/libnm
 - `ocr-screenshot` — screenshot OCR and clipboard integration
-- `preview-panel` — the shared GTK4 preview surface
-- [`rofi-clipboard`](#rofi-clipboard) — clipboard history and memos
+- [`clipboard-custom`](#clipboard-panel) — clipboard capture, history, and memo policy for the GTK4 panel
 - [`waybar-timer`](#waybar-timer) — interactive Waybar countdown timer
 - `webcam-crop` — on-demand virtual webcam cropper and supervisor
 
 The Niri configuration uses **AGS 2.3/Astal GTK4 for media, audio, dashboard,
-notifications, and network**. The panel commands are Nix-packaged launchers,
-not additional Rust GUIs. The dashboard is TypeScript-only, with its application,
+notifications, network, clipboard, and the app launcher**. The panel commands are
+Nix-packaged launchers, not additional Rust GUIs. The dashboard is TypeScript-only, with its application,
 metrics, notifications, styles, and tests directly in `scripts/dashboard/`.
 
 ## Live desktop editing
 
-After one Home Manager/NixOS switch, presentation files are linked directly
-from `/home/raina/System`. They no longer need another system rebuild:
+After a Home Manager/NixOS rebuild and switch, the configuration and style files
+listed below are linked from or read directly from `/home/raina/System`. Panel
+CSS is read directly from the checkout; application code is packaged in the Nix
+store, not live-linked:
 
 | What to edit | When it takes effect |
 | --- | --- |
 | `niri/config.kdl` | Niri reloads it on save |
-| `niri/rofi/config.rasi`, `themes/rofi/*.rasi` | Next Rofi launch |
-| `scripts/dashboard/*.ts`, `style.css` | Live-linked AGS dashboard/notification sources; restart `ags-dashboard.service` to apply edits |
-| `scripts/network-manager/astal/*.js`, `style.css` | Live-linked AGS network sources; restart `ags-network.service` to apply edits |
-| `scripts/media-control/astal/*.js`, `style.css` | Live-linked AGS media sources; restart `ags-media.service` to apply edits |
+| `scripts/{dashboard,app-launcher}/style.css` | Running panels hot-reload CSS; no restart or rebuild |
+| `scripts/{audio-control,media-control,network-manager,clipboard}/astal/style.css` | Running panels hot-reload CSS; no restart or rebuild |
 | `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
 | `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
-| `themes/rofi/preview-panel.css` | Preview panel hot-reloads |
-| `scripts/audio-control/astal/*.js`, `style.css` | Live-linked AGS audio sources; restart `audio-control-ui.service` to apply edits |
 
-Rust, Nix module, package, service, and kernel changes still require a rebuild.
+Rust, JavaScript, TypeScript, packaged JSON, Nix module, package, service, and
+kernel changes require a rebuild and switch. Restarting a panel or closing and
+reopening it does not load edited checkout code. All six launchers enforce their
+store-backed entry points; panel `*_CONFIG` variables are not live-source overrides.
 Each Rust package now hashes only Cargo sources, so changing one UI stylesheet
 or sibling utility no longer invalidates every desktop helper.
 
@@ -171,9 +171,10 @@ Requests use `ags request --instance audio-panel -- <JSON>`:
 ```
 
 `command` is `status`, `toggle`, `close`, or `bluetoothPower`; only `toggle`
-accepts an optional monitor. Startup uses `ags run --gtk4 -- <entry>`, not a
-`run --instance` flag. The frontend's own `AudioApplication` subclasses native
-`Astal.Application`, sets `instance_name: "audio-panel"`, and uses `acquire_socket()`
+accepts an optional monitor. Startup bundles the immutable store entry with
+`ags bundle --gtk 4` and executes the panel-specific output through `panel-gjs`,
+not `ags run` or a `run --instance` flag. The frontend's own `AudioApplication`
+subclasses native `Astal.Application`, sets `instance_name: "audio-panel"`, and uses `acquire_socket()`
 and the native application lifecycle, independently of `media-panel`. Its public
 `vfunc_request(request, connection)` extension point replies with
 `AstalIO.write_sock` and closes the GIO connection after the async write completes,
@@ -186,40 +187,29 @@ alone cannot install those changes; let the generation manage the links and
 unit rather than repairing them manually.
 
 After the switch, the service starts with the graphical session and Waybar wants
-it. For development, stop the resident UI first and run the installed
-configuration with a locally built helper:
-
-```sh
-cargo build --manifest-path scripts/Cargo.toml --package audio-control --locked
-systemctl --user stop audio-control-ui.service
-GDK_BACKEND=wayland AUDIO_CONTROL_HELPER="$PWD/scripts/target/debug/audio-control" \
-  audio-panel run
-# In another terminal:
-audio-panel toggle eDP-1
-```
-
-After stopping the manual instance, restart `audio-control-ui.service`. For
-service/startup diagnostics:
+it. Rebuild and switch to install Rust or JavaScript changes; CSS reloads in the
+running panel without restarting it. For service/startup diagnostics:
 
 ```sh
 systemctl --user status audio-control-ui.service
 journalctl --user -u audio-control-ui.service -b -n 100 --no-pager
 ```
 
-`niri/panels/default.nix` live-links the audio directory to `~/.config/ags/audio`.
-The generated palette stays outside that link at `~/.config/ags/audio-palette.json`,
-so Home Manager never writes generated child links into the repository. Palette
-changes trigger a service restart on the next generation switch. JavaScript/CSS
-edits need only `systemctl --user restart audio-control-ui.service`; changes to
-Nix wiring or the Rust helper require a rebuild.
+`niri/panels.nix` packages the audio JavaScript/JSON and shared style
+helper into an immutable store source. CSS is read directly from the checkout,
+without installing links under legacy panel config directories. The generated palette remains at
+`~/.config/ags/audio-palette.json`. Palette changes retain their service restart
+trigger on the next generation switch.
 
-`AUDIO_PANEL_CONFIG` defaults to `$XDG_CONFIG_HOME/ags/audio/frontend.js` (or
-`~/.config/ags/audio/frontend.js`). `AUDIO_PANEL_PALETTE` selects the JSON palette;
-`AUDIO_CONTROL_HELPER` is an executable path, not a shell command. The launcher
-supplies store-backed palette/helper defaults, and the service explicitly sets
-the installed config/palette paths, helper, and `GDK_BACKEND=wayland`.
+`AUDIO_PANEL_CONFIG` is forced to the packaged store entry, even if supplied in
+the environment. `PANEL_CSS_FILE` defaults to
+`/home/raina/System/scripts/audio-control/astal/style.css` and is hot-reloaded.
+`AUDIO_PANEL_PALETTE` selects the JSON palette; `AUDIO_CONTROL_HELPER` is an
+executable path, not a shell command. The service uses the launcher's enforced
+store entry, supplies the installed palette link and packaged helper, and sets
+`GDK_BACKEND=wayland`.
 Graphical-session Wayland and D-Bus variables are inherited.
-`niri/panels/audio.nix` supplies GTK4, Graphene, GTK4 layer-shell,
+`niri/panels.nix` supplies GTK4, Graphene, GTK4 layer-shell,
 Astal WirePlumber, and Astal Bluetooth through AGS's generated runtime wrapper.
 Unlike the media artwork panel, audio needs no custom GdkPixbuf loader cache.
 `scripts/packages.nix` wraps the packaged helper with `AUDIO_CONTROL_PW_DUMP`
@@ -273,127 +263,275 @@ AUDIO_PANEL_LAUNCHER=/path/to/audio-panel \
 
 ---
 
-## rofi-clipboard
+## Clipboard panel
 
-`scripts/rofi-clipboard` is a clipboard history manager for Wayland and Rofi. It watches the clipboard with `wl-paste`, stores text, file references, and images locally, and presents the history through custom Rofi modes.
+`clipboard-panel toggle [monitor]` opens a single AGS/Astal GTK4 clipboard
+history and preview/editor window. `Mod+Alt+V` invokes `clipboard-panel toggle`;
+without a monitor argument it uses the focused monitor. Waybar uses the existing
+`custom/clipboard-panel` button on the clicked monitor; the legacy
+`custom/clipboard` module is removed.
 
-### Features
+### Interface
 
-- Separate modes for memos, captured text, and files
-- Editable memos with selection-change autosave
-- Text, file-reference, and image previews inside Rofi
-- Pin and delete actions
-- One Edit action for soft-wrapped text editing and full image preview in a companion panel
-- The open panel follows Rofi selection changes and saves modified text before switching items
-- Keeps the highlighted clipboard item selected when search text is shortened or cleared
-- Restores text, URL, and image MIME types; local files copy back as standard URI lists that Dolphin can paste
-- Detects local files copied from a file manager and keeps them in File mode
-- Detects standalone web URLs and keeps them in File mode
-- Shortens paths inside the home directory from `/home/raina/...` to `~/...`
-- Shows the saved file path for Niri screenshots
-- Removes missing linked local files and any cached image previews when Rofi next renders
-- Deduplicates repeated clipboard entries
-- Ignores empty and sensitive clipboard values
-- Keeps up to 2,000 history entries
-- Uses file locking and atomic writes to protect the history file
+The compact panel is 450 logical pixels wide, with history above the preview.
+History has room for exactly five complete rows; the preview uses the remaining
+height. Both sections scroll independently. It starts with search and tabs,
+without a title/header row, item-count footer, or bottom toolbar.
+
+- **Memo** — editable notes and an empty **New memo** creation row at the bottom.
+  Saving the draft turns it into a regular memo and keeps a fresh draft available.
+- **Text** — captured text, including remote URLs.
+- **Files** — copied local file references and captured images with previews.
+
+Each opening returns to Memo and reloads history with no selected item and an
+empty preview. Click an entry or use Up/Down to select one; background refreshes
+do not select an item. There is no Reload button; close and reopen to reload.
+Tabs follow the audio panel: inactive tabs have pink outlines, the active tab has
+a cyan outline open into the cyan-bordered content, and hover keeps text colors.
+Pinned entries have a red `PINNED` badge and left accent; the pink selection
+highlight is independent of pin status. Each row has compact pin/unpin and ×
+(delete) buttons on the right; the pin button also uses red when pinned. These
+buttons act on their own row without copying it.
+
+Paths within the home directory display as `~/...`. Named screenshots show their
+saved source paths. Copying restores the appropriate text or image MIME type;
+linked local files publish standard URI lists that file managers can paste.
+
+### Ownership and collection
+
+- `scripts/clipboard/astal/` owns presentation, the controller, native GDK
+  clipboard publication, GTK text editing/image previews, native Gio directory
+  monitoring, and native Gio Trash operations for linked local files.
+- `scripts/clipboard/rust-custom/` supplies `clipboard-custom`, the single helper
+  for capture and persisted history: memo lifecycle, pin/delete/edit transactions,
+  deduplication, pruning, retention, and MIME/file-reference payload policy. It
+  never opens a display, launches a UI, publishes a clipboard selection, invokes
+  a clipboard-copy command, or deletes linked source files.
+- `clipboard-collector.service` is the **only** background Wayland collector,
+  registered in `niri/panels.nix`. It runs:
+
+  ```sh
+  wl-paste --no-newline --watch clipboard-custom capture
+  ```
+
+GTK's focus-scoped clipboard API is not a global data-control watcher, so capture
+uses `wl-paste --watch`. Capture batches and panel changes use the same helper,
+store, and `history.lock`; there is no separate data writer or second database.
+The resident `ags-clipboard.service` application retains clipboard ownership
+when hidden; restarting it may lose the selection unless another clipboard
+manager has retained it. No clipboard text or image payload is logged.
 
 ### Controls
 
 | Action | Result |
 | --- | --- |
-| `Enter` | Copy the selected item |
-| `Alt+P` | Pin or unpin the selected item |
-| `Alt+D` | Delete the selected item |
-| `Alt+E` | Open text for editing or show the full image; press again to save and close the panel |
-| `Up` / `Down` while panel is open | Save modified text, then show the newly selected text or image |
+| Single-click a history entry | Select its preview |
+| Double-click a history entry | Copy that entry and close |
+| Row pin icon / × | Pin/unpin or immediately delete that row; linked files go to Trash |
+| `Escape` or outside click | Save pending edits and close |
+| `Enter` outside the editor / `Ctrl+Enter` in the editor | Save, copy, and close |
+| `Ctrl+S` | Save immediately, without waiting for autosave |
+| `Ctrl+N` / `Ctrl+F` | New memo / focus search |
+| `Alt+P` / `Alt+D` / `Alt+E` | Pin/unpin / delete / focus the editor |
+| Up/Down outside the editor | Select history entries, saving pending edits before switching |
 
-The interface contains three modes:
+### Autosave and deletion
 
-- **Memo** — editable notes plus a permanent empty creation row at the bottom; pinned memos stay at the top
-- **Text** — captured text entries
-- **Files** — copied local files, web URLs, and captured images with previews
+All Memo and Text preview edits autosave after 400 ms of idle typing. Each edit
+restarts that delay; `Ctrl+S` saves immediately. Selection/tab changes, copying,
+and closing also save pending edits. Searching alone does not switch the editor
+or force a save, but does not cancel an already scheduled autosave. File/image
+previews are read-only: preview editing changes clipboard history, never linked
+source files.
 
-Rofi opens in Memo mode with an empty **New memo** row at the bottom. Clicking
-**Edit** opens the currently selected memo in the companion editor. Saving text
-in the empty row turns it into a regular memo and immediately creates a new
-empty row at the bottom. While the editor is open, moving through the Memo list
-saves the previous memo and loads the newly selected one, matching the Text
-mode preview behavior.
+Saves compare the original buffer with the stored item while holding the lock.
+Typing can continue during autosave; newer text stays in the editor and is saved
+next against the just-saved version. Conflicts, external deletions, and disk write
+failures preserve unsaved text and show an inline error, rather than silently
+discarding it or retrying indefinitely. Another edit schedules a new attempt;
+`Ctrl+S` retries immediately. An unresolved save failure blocks
+switching/closing/copying. Delete is an explicit discard action.
 
-### Commands
+For a Files entry with an absolute local path in its `name`, Delete (`Alt+D` too)
+immediately moves the source file to Trash using Gio, then removes the history
+entry and its cached preview. There is no confirmation dialog. Named screenshot
+sources are included; cached-only images and text/memo entries only lose their
+history/cache data. A Trash failure keeps the entry and shows an inline error;
+there is no permanent-delete fallback. Missing files only lose the stale
+history entry. Folders are refused; symlinks are trashed without deleting their
+targets. Paths are never inferred from arbitrary clipboard text.
+
+Trash and history updates cannot be atomic: if the file is trashed but the history
+write fails, the panel reports the partial success so it can be retried. Deletion
+holds the controller's transaction lock and rechecks the history path before
+operating on disk.
+
+### Commands and helper contract
 
 ```text
-rofi-clipboard [run]
-rofi-clipboard status
-rofi-clipboard clear
-rofi-clipboard capture
-rofi-clipboard store --mime MIME
-rofi-clipboard script <memo|text|files>
+clipboard-panel run
+clipboard-panel status
+clipboard-panel toggle [monitor]
+clipboard-panel close
+clipboard-custom capture
+clipboard-custom store --mime MIME
 ```
 
-`status` is the Waybar `custom/clipboard` backend: a long-running process that keeps a `wl-paste --watch rofi-clipboard capture` child for event-driven capture and emits a JSON status line whenever the history changes. `clear` clears the current Wayland selection (stored history is untouched). `capture` receives clipboard data from `wl-paste --watch` and is what `status` drives internally. The `store` command reads an item from standard input and stores it with the supplied MIME type.
+With **no arguments**, `clipboard-custom` reads one JSON request on stdin and
+writes one JSON reply on stdout. The `prepare`, `snapshot`, `memo`, `pin`,
+`delete`, `save`, and `payload` requests retain their structured JSON errors.
 
-### Data storage
+`capture` reads the bytes supplied by `wl-paste --watch`, inspects the offered
+MIME targets with `wl-paste`, and commits the capture. `store --mime MIME` reads a
+payload directly from stdin without needing a display or `wl-paste`. Image MIME
+types store cached images; URI lists/GNOME copied-files split into individual
+file/image references and remote URLs; other UTF-8 input uses the normal
+text/local-path policy. Empty captures are ignored. The standard
+`CLIPBOARD_STATE` supplied by `wl-paste` is honored: `sensitive` and `nil` are
+discarded, as are KDE password-manager MIME hints. Binary image reads use
+`--no-newline`.
 
-By default, history is stored in:
+`capture` and `store` produce no stdout on success. Failures exit nonzero and
+report an error on stderr without printing clipboard contents or subprocess
+stderr. Stdin is limited to 64 MiB. Extra CLI arguments are rejected.
+
+### Storage and migration
+
+The default store is:
 
 ```text
-$XDG_DATA_HOME/rofi-clipboard/
+$XDG_DATA_HOME/clipboard/
 ├── history.json
 ├── history.lock
 └── images/
 ```
 
-If `XDG_DATA_HOME` is not set, the fallback is `~/.local/share/rofi-clipboard`.
+If `XDG_DATA_HOME` is unset/empty, the fallback is `$HOME/.local/share/clipboard`.
+History keeps its version-1 JSON format, IDs, FNV-1a/length digests, pin order,
+2,000-item limit, and independent 100-cached-image limit. Text, file-reference,
+and image captures deduplicate within their own kind while preserving IDs and
+pins; local file references also deduplicate by source path. An empty memo draft
+is retained during trimming. Writes use `history.lock` flock and atomic history
+replacement. Cache creation is rolled back if a transaction fails, and evicted
+images are deleted only after history commits.
+
+Default discovery automatically copies history and images from the former sibling
+`rofi-clipboard` directory **only when the new default `clipboard` directory does
+not exist**. Migration locks both migration and source history, validates the
+history/cache paths, copies into a private staging directory, and atomically
+publishes the copy without replacing an existing target. The source is retained
+as a backup. Invalid history, unsafe cache entries, or copy errors leave it intact
+and do not publish a partial store. Explicit `CLIPBOARD_DATA_DIR` stores are
+isolated and never import default history. Former environment variables and
+executables are not used.
+
+Rebuild and switch to install the replacement collector and panel wiring; any
+separately installed former collector must be stopped. Later writes to the
+retained backup are intentionally not merged. The helper discovers/migrates
+before returning any JSON snapshot. The GTK backend attaches its directory
+monitor only after a successful helper reply, then schedules one reconciliation
+to cover writes between snapshot and watch.
 
 ### Environment variables
 
-| Variable | Purpose |
+| Variable | Meaning / default |
 | --- | --- |
-| `ROFI_CLIPBOARD_DATA_DIR` | Override the history and image data directory |
-| `ROFI_CLIPBOARD_THEME` | Override the Rofi theme path |
-| `ROFI_CLIPBOARD_ROFI` | Override the `rofi` executable |
-| `ROFI_CLIPBOARD_WL_COPY` | Override the `wl-copy` executable |
-| `ROFI_CLIPBOARD_WL_PASTE` | Override the `wl-paste` executable |
-| `ROFI_CLIPBOARD_PREVIEW_PANEL` | Override the `preview-panel` executable |
-| `PREVIEW_PANEL_CSS` | Override the preview panel CSS/configuration path |
-| `ROFI_CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify and label saved screenshots (default: `~/Pictures/Screenshots`) |
-| `ROFI_CLIPBOARD_PREVIEW_WIDTH` | One-launch preview width override (configured default: `400`) |
-| `ROFI_CLIPBOARD_PREVIEW_HEIGHT` | Preview height in pixels (default: `615`) |
-| `ROFI_CLIPBOARD_PREVIEW_SIDE` | Place the preview to the `left` or `right` of Rofi (default: `left`) |
-| `ROFI_CLIPBOARD_PREVIEW_GAP` | Space between the preview and Rofi in pixels (default: `10`) |
-| `ROFI_CLIPBOARD_ROFI_WIDTH` | Rofi window width used for companion placement (default: `400`) |
+| `CLIPBOARD_DATA_DIR` | Explicit store root for capture and panel history; unset/empty uses the default above, with one-time migration. Explicit stores do not import default history. |
+| `CLIPBOARD_SCREENSHOT_DIR` | Directory used to identify pathless PNG captures by exact bytes; defaults to `$HOME/Pictures/Screenshots`. |
+| `CLIPBOARD_WL_PASTE` | Executable for MIME enumeration/reads; an unwrapped build defaults to `wl-paste`. Package wrappers set its absolute packaged path. |
+| `CLIPBOARD_CUSTOM_HELPER` | Helper executable used by GTK for JSON requests; the launcher supplies the packaged `clipboard-custom`. |
+| `CLIPBOARD_PANEL_CONFIG` | Enforced packaged Nix-store entry; cannot override the launcher with checkout application code. |
+| `CLIPBOARD_PANEL_PALETTE` | Generated JSON palette, with a packaged default and installed palette link. |
+| `PANEL_CSS_FILE` | Live stylesheet; defaults to `/home/raina/System/scripts/clipboard/astal/style.css`. |
 
-Default panel placement, size, and GTK styling come from
-`themes/rofi/preview-panel.css`. Home Manager links that file to
-`~/.config/preview-panel/preview-panel.css`, so valid saves hot-reload without
-rebuilding. The `preview-panel-settings` comment at the top controls `width`,
-`height`, `companion_width`, `side`, `gap`, `x`, and `y`; the rest is normal
-GTK4 CSS. Positive `x` moves right and positive `y` moves down.
+### Performance and file monitoring
 
-Each launcher's Rasi file can override any subset of those geometry settings
-with a `preview-panel-layout` comment. For example:
+GTK's native `ListView` virtualizes history, so a large clipboard does not create
+thousands of row widgets. Only changed list ranges are replaced, and typing or
+busy-state updates do not rebuild the list. Rendering avoids redundant copies of
+the native text buffer. Row previews are bounded to 160 Unicode characters;
+search, editing, and copying still use the complete content.
 
-```css
-/* preview-panel-layout
-width: 300px;
-height: 400px;
-companion-width: 375px;
-*/
+Opening prepares history and its memo draft in one helper request. Clean tab and
+selection changes use that snapshot without disk I/O or subprocesses. Mutations
+return their committed snapshot, and Gio monitoring refreshes external changes.
+While open, linked local files share native Gio monitors by parent directory.
+Deletion or moving a linked file away triggers locked missing-file cleanup,
+removing its history entry (even when pinned) and cached preview. This also works
+for named screenshot sources; cached-only images are unaffected. Replacing a file
+at the same path keeps the entry. Cleanup preserves the current tab, search, and
+unsaved editor text. Monitors are released when the panel hides; opening it again
+also cleans files deleted while hidden.
+
+Rust serializes writes into one buffer and skips replacing unchanged history,
+avoiding unnecessary fsyncs and self-generated file-watch refreshes without
+changing conflict detection, locking, file format, or retention rules.
+
+### Packaging and style reload
+
+The clipboard package specification, shared runtime/launcher builders, Home
+Manager registration, `ags-clipboard.service`, and `clipboard-collector.service`
+all live in `niri/panels.nix`. The panel service uses the launcher's enforced
+store entry and packaged helper default, with the installed palette link.
+Generated palettes remain separate from live CSS.
+
+Rust, JavaScript, and packaged JSON changes require a NixOS/Home Manager rebuild
+and switch. The launcher bundles an immutable Nix-store entry; restarting
+`ags-clipboard.service` or closing and reopening the panel does not load checkout
+code. CSS is read directly from the checkout, without Home Manager links under
+`~/.config/ags/clipboard/`. The shared native style helper hot-reloads
+`PANEL_CSS_FILE` without a rebuild or service restart.
+
+### Validation
+
+From the repository root:
+
+```sh
+cargo test --manifest-path scripts/Cargo.toml --locked --offline -p clipboard-custom
+cargo clippy --manifest-path scripts/Cargo.toml --locked --offline -p clipboard-custom --all-targets -- -D warnings
+npm --prefix scripts/clipboard/astal test
 ```
 
-Omitted fields inherit from `preview-panel.css`. The effective priority is
-environment/command-line override, then launcher Rasi, then the global CSS.
+All Rust policy, capture, migration, and real-binary CLI tests live in
+`scripts/clipboard/rust-custom/src/tests.rs`, registered as the Cargo test target
+`tests` (select it with `--test tests`). They use temporary stores and a fake
+`wl-paste`, not the live clipboard. The JavaScript tests also run with
+`node --test scripts/clipboard/astal/test.js`. Unit tests inject a deterministic
+autosave scheduler, without real timer waits. They cover debouncing and exact
+Memo/Text payloads, typing and undoing to the original base during slow saves,
+refresh deferral, conflict/write failures without retry loops, stale-timer
+cancellation on save/selection/deletion, undo, read-only previews, and cleanup.
 
-For a session-wide environment override, set values such as:
+Real UI and launcher checks:
 
-```nix
-home.sessionVariables = {
-  ROFI_CLIPBOARD_PREVIEW_WIDTH = "560";
-  ROFI_CLIPBOARD_PREVIEW_SIDE = "right";
-  ROFI_CLIPBOARD_PREVIEW_GAP = "10";
-};
+```sh
+node scripts/clipboard/astal/test.js --ui \
+  --runtime /nix/store/...-ags-2.3.0 \
+  --helper /nix/store/...-clipboard-custom-0.1.0/bin/clipboard-custom \
+  --palette /nix/store/...-clipboard-panel-palette.json \
+  --panel /nix/store/...-clipboard-panel
 ```
+
+Use the actual absolute store paths from the package's `ags`, `clipboardCustom`,
+`palette`, and panel outputs; `--panel` takes the package directory, not its
+executable. The runner needs `Xvfb`, `dbus-daemon`, `niri`, and `wl-paste` on PATH.
+It creates nested Niri on private Xvfb, a service-free D-Bus session, and temporary
+history, then tears them down. It never uses the live desktop's clipboard/history.
+It checks real imports and CSS, compact per-row actions, toolbar-free layout,
+400 ms GLib autosave with exact persisted preview text, Ctrl+S saves, exact-row
+copy activation, file URI policy, image previews, cross-client PNG clipboard
+bytes after hiding, and the packaged launcher/IPC.
+
+File deletion tests use only temporary fixtures and an isolated Trash, covering
+immediate Delete/Alt+D without dialogs, named screenshots, cached-only images,
+missing files, folder refusal, and symlink target preservation. Native monitoring
+checks cover external deletion/rename, pinned named-image cleanup, atomic
+replacement, draft preservation, and deletion while the panel is hidden.
+`--screenshot /absolute/path.png` optionally captures the fixture panel.
+Add `--benchmark` to the same `--ui` command to measure tab switching, filtering,
+and editing with 1,800 synthetic text entries on the private display. Timings
+include GTK frame processing; the check also verifies virtualization and that
+clean switches and typing do not launch helper processes.
 
 ---
 
@@ -462,7 +600,7 @@ now read from Astal rather than a parallel shell status reader.
   TypeScript supplies archive/popup policy, not another notification backend.
 
 Sources, tests, and runtime metadata live in `scripts/dashboard/`; the launcher
-is `niri/panels/dashboard.nix`. The `ags-dashboard` user service owns the
+is defined in `niri/panels.nix`. The `ags-dashboard` user service owns the
 resident `dashboard-panel` application, starting `power.ts`. `parameters.ts`
 contains metrics and `notification.ts` contains notification state and widgets.
 Run `npm test` in `scripts/dashboard/` for the consolidated `tests.ts` suite.
@@ -489,7 +627,7 @@ DND state is mirrored in the archive. Restarts do not replay popup windows;
 Astal-restored live actions are reattached only to matching archived rows.
 
 `F8` invokes `dashboard-panel toggleDnd`. Apply a normal NixOS/Home Manager
-switch before restarting the new service: the updated runtime, live links, and
+switch before restarting the new service: the updated runtime, packaged sources, and
 notification-bus ownership cannot be installed by a service restart alone.
 
 ### Network panel (AGS/Astal GTK4)
@@ -574,12 +712,11 @@ native actions, transport to the Rust helper), `logic.js` (GTK-independent
 presentation/controller utilities), `style.css`, and the consolidated
 cross-runtime `test.js`. The QR-only Rust helper and its protocol tests live in
 `scripts/network-manager/rust-custom/`. The launcher is
-`niri/panels/network.nix`, with the runtime typelibs and JSON palette generated
-from `themes/palette.nix`; `niri/panels/default.nix` provides the resident
-`ags-network.service` and live Home Manager links, with palette restart
-triggers. `scripts/Cargo.toml` and `scripts/packages.nix` integrate the
-workspace and packages; Cargo's package remains `rofi-network` to preserve
-`Cargo.lock`, while the installed helper executable is `network-manager`.
+`niri/panels.nix`, alongside the runtime typelibs, JSON palette generated
+from `themes/palette.nix`, and resident `ags-network.service`, with palette restart
+triggers. CSS is read directly from the checkout without Home Manager links. `scripts/Cargo.toml` and `scripts/packages.nix` integrate the
+workspace and packages; both the Cargo package and installed helper executable
+are named `network-manager`.
 
 ```sh
 network-panel run
@@ -587,14 +724,15 @@ network-panel status
 network-panel toggle eDP-1
 network-panel close
 network-panel toggleWifi  # Toggle the native Wi-Fi radio without changing panel visibility
-systemctl --user restart ags-network.service  # Apply live JS/CSS edits after installation
+systemctl --user restart ags-network.service  # Restart the installed generation, not checkout JS
 ```
 
 The native application owns the `network-panel` AGS instance. Requests are
 JSON; monitor names are transported without shell interpolation. Status
 polling is read-only and never dismisses panels or mutates network state.
 
-All four panel launchers compile with `ags bundle --gtk 4` into distinct files
+All six panel launchers bundle their immutable Nix-store entries with
+`ags bundle --gtk 4` into distinct files
 under `$XDG_RUNTIME_DIR/ags-panels/`, then execute their packaged `panel-gjs`
 wrapper. AGS 2.3's `run` command shares one `ags.js` output across instances,
 which can execute another panel's code during concurrent startup; the wrapper
@@ -606,10 +744,12 @@ uninitialized badge forever.
 
 Environment overrides:
 
-- `NETWORK_PANEL_CONFIG`: defaults to
-  `${XDG_CONFIG_HOME:-$HOME/.config}/ags/network/frontend.js`.
-- `NETWORK_PANEL_PALETTE`: generated JSON palette; the service uses its Home
-  Manager configuration link.
+- `NETWORK_PANEL_CONFIG`: enforced packaged Nix-store entry; environment values
+  cannot select checkout sources.
+- `PANEL_CSS_FILE`: defaults to
+  `/home/raina/System/scripts/network-manager/astal/style.css`; CSS hot-reloads.
+- `NETWORK_PANEL_PALETTE`: generated JSON palette, with a store-backed launcher
+  default.
 - `NETWORK_CUSTOM_HELPER`: QR-only `network-manager` executable.
 
 - `DASHBOARD_PANEL`/`MEDIA_PANEL`: peer launchers invoked by
@@ -670,24 +810,24 @@ bounded private cache under `$XDG_CACHE_HOME/media-control/`. Lookups use curl
 with a ten-second timeout; opening a supported video sends its video ID to that
 site's public metadata endpoint. No credentials or browser cookies are sent.
 
-`niri/panels/default.nix` links `scripts/media-control/astal/` to
-`~/.config/ags/media`, including `frontend.js`, `backend.js`, `logic.js`, and `style.css`.
-It does not install generated children into that live link. The palette is
-serialized from `themes/palette.nix` to the separate
+`niri/panels.nix` packages `scripts/media-control/astal/` JavaScript/JSON
+and the shared style helper into an immutable store source, preserving relative
+imports. CSS is read directly from the checkout through `PANEL_CSS_FILE`.
+The palette is serialized from `themes/palette.nix` to the separate
 `~/.config/ags/media-palette.json`; the frontend generates GTK `@define-color`
-rules programmatically from this JSON without writing generated CSS under the
-live link.
+rules programmatically from this JSON without writing generated CSS into the
+repository.
 
 The Niri-only `ags-media.service` runs `media-panel run`, restarts on failure,
 and is wanted by Waybar and the graphical session. The launcher uses the pinned
-AGS 2.3 compiler: `ags bundle --gtk 4 -- <entry> <output>`. All four panel
+AGS 2.3 bundler: `ags bundle --gtk 4 -- <store-entry> <output>`. All six panel
 launchers use distinct `$XDG_RUNTIME_DIR/ags-panels/<name>-panel.js` outputs;
 `ags run` would otherwise share a single `ags.js` file and race at login.
-`mkAgsRuntime` in `niri/panels/default.nix` adds a companion `panel-gjs` wrapper using each
+`mkAgsRuntime` in `niri/panels.nix` adds a companion `panel-gjs` wrapper using each
 AGS package's captured runtime environment and GTK4 layer-shell preload.
 Media retains GTK4, Graphene, Astal MPRIS and Astal WirePlumber; no manual
 `GI_TYPELIB_PATH` supplement is needed.
-`niri/panels/media.nix` also builds a combined native GdkPixbuf loader cache for
+`niri/panels.nix` also builds a combined native GdkPixbuf loader cache for
 standard formats, librsvg, and `webp-pixbuf-loader`, preserving PNG/JPEG/SVG while
 adding WebP artwork support. AGS's wrapper sets `GDK_PIXBUF_MODULE_FILE` to this
 cache rather than the default librsvg cache that omits WebP; no JavaScript
@@ -718,26 +858,28 @@ media-panel togglePauseAll
 media-panel cycleMedia
 media-panel pauseAll
 media-panel close
-systemctl --user restart ags-media.service  # Apply live JS/CSS edits
+systemctl --user restart ags-media.service  # Restart the installed generation, not checkout JS
 ```
 
-`MEDIA_PANEL_CONFIG` selects the entry file, defaulting to
-`$XDG_CONFIG_HOME/ags/media/frontend.js` (or `~/.config/ags/media/frontend.js`).
+`MEDIA_PANEL_CONFIG` is enforced to the packaged Nix-store entry, not a
+configurable checkout path. `PANEL_CSS_FILE` defaults to
+`/home/raina/System/scripts/media-control/astal/style.css` and is hot-reloaded.
 `MEDIA_PANEL_PALETTE` is a JSON file path; `MEDIA_CONTROL` and `NETWORK_PANEL`
-are executable paths, not shell commands. The launcher supplies store-backed
-defaults, and the service explicitly supplies these values plus
-`GDK_BACKEND=wayland`. Graphical-session Wayland and D-Bus variables are inherited.
+are executable paths, not shell commands. The service uses the launcher's
+store entry, supplies the installed palette link and packaged helper/peer launcher,
+and sets `GDK_BACKEND=wayland`. Graphical-session Wayland and D-Bus variables
+are inherited.
 
-Rebuild after changing Nix/service wiring or the Rust helper; JS/CSS changes
-only require restarting the media service. Network requests use the separate
-`network-panel` launcher.
+Rebuild and switch after changing JavaScript, packaged JSON, Nix/service wiring,
+or the Rust helper. CSS changes need neither a rebuild nor a service restart.
+Network requests use the separate `network-panel` launcher.
 
 ### Shared popup style
 
 The AGS/Astal GTK4 cards use per-panel GTK CSS for controls and Cairo-drawn
 chamfered frames for translucent backgrounds and yellow outlines.
 `themes/palette.nix` supplies the shared colors as generated JSON palettes,
-kept outside the live-linked source directories.
+kept separate from the CSS files read directly from the checkout.
 
 | Panel | Presentation sources |
 | --- | --- |
@@ -745,17 +887,26 @@ kept outside the live-linked source directories.
 | Media | `scripts/media-control/astal/`: `style.css`, frame in `frontend.js` |
 | Network | `scripts/network-manager/astal/`: `style.css`, frame in `frontend.js` |
 | Dashboard/notifications | `scripts/dashboard/`: `style.css`, frames and shared widgets in `notification.ts` |
+| App launcher | `scripts/app-launcher/`: `style.css`, frame in `frontend.js` |
+| Clipboard | `scripts/clipboard/astal/`: `style.css`, frame in `frontend.js` |
 
 Audio uses Bluetooth/Audio tabs and native services. Output volume
 still spans 0–150%; the separate media panel is limited to 100%.
 Popup sizes and placement remain specific to their content, not separate themes.
 
-After installing service/configuration links through Home Manager, restart
-the corresponding panel service to apply live JS/CSS edits. For network:
+After installing the generation through Home Manager, edit CSS in place; the
+shared native `scripts/panels/style.js` helper monitors the stylesheet and reloads
+it without a restart. `PANEL_CSS_FILE` defaults to the checkout's per-panel
+`style.css`. JavaScript/TypeScript, including that shared helper, and packaged
+JSON are filtered into per-panel Nix-store sources with the relative `scripts/`
+layout intact. Editing them requires a rebuild and switch. Runtime bundling
+still occurs at service startup, but reads only the immutable store entry; there
+is no opt-in environment override for live application sources.
 
-```sh
-systemctl --user restart ags-network.service
-```
+`niri/panels.nix` owns the `mkAgsRuntime`, `mkPanel`, and `packages`
+exports, per-panel package specifications, and Home Manager services. The
+`packages` function takes `pkgs`, `audioControl`, `mediaControl`,
+`networkManager`, `clipboardCustom`, and `repoRoot`.
 
 ### Audio panel
 
@@ -787,9 +938,10 @@ From the repository root, run the frontend and Rust policy/protocol checks:
 ```sh
 npm --prefix scripts/dashboard test
 npm --prefix scripts/network-manager/astal test
+node --test scripts/panels/test.js
 cargo test --manifest-path scripts/Cargo.toml --locked \
-  -p audio-control -p media-control -p rofi-network --all-targets
-cargo build --manifest-path scripts/Cargo.toml --locked -p rofi-network -p media-control
+  -p audio-control -p media-control -p network-manager --all-targets
+cargo build --manifest-path scripts/Cargo.toml --locked -p network-manager -p media-control
 ```
 
 The Rust tests for `audio-control` and `media-control` each live in that
@@ -842,14 +994,25 @@ entry point; the former `controller.js` and `runtime.js` were folded into
 `test.js`'s Node and GJS modes. `node --test test.js` exercises controller
 policy and formatting with simulated native dependencies — identity-pinned
 requests, cancellation races, launcher and startup checks — without GTK/GI or
-live NetworkManager state. Rust tests cover QR escaping, validation,
+live NetworkManager state. Its Node mode also runs the shared
+`scripts/panels/test.js` suite, which requires Nix and uses the root
+`nixpkgs` input pinned in `flake.lock` (fetching that input if it is not cached).
+This single shared test file covers CSS reloading, panel packaging, and launcher
+behavior. It evaluates the consolidated package specifications and executes
+launchers against fake AGS/GJS programs, checking immutable entries, source
+filtering, CSS-only overrides, native dependencies, per-panel bundles, compiler
+failures, commands, help/arity policy, JSON requests/replies, runtime isolation,
+exit statuses, and `exec` behavior. Its Node mode does not build Rust/AGS packages
+or contact desktop services. Its native GJS mode checks real GTK CSS reloading
+on a private X11 display, including atomic saves and invalid-CSS recovery.
+Rust tests cover QR escaping, validation,
 malformed/oversized input, output bounds, and rejected legacy arguments:
 
 ```sh
-cargo test --locked --manifest-path scripts/Cargo.toml -p rofi-network
-cargo fmt --manifest-path scripts/Cargo.toml -p rofi-network -- --check
-nix-instantiate --parse niri/panels/network.nix >/dev/null
-nix-instantiate --parse niri/panels/default.nix >/dev/null
+cargo test --locked --manifest-path scripts/Cargo.toml -p network-manager
+cargo fmt --manifest-path scripts/Cargo.toml -p network-manager -- --check
+
+nix-instantiate --parse niri/panels.nix >/dev/null
 nix-instantiate --parse scripts/packages.nix >/dev/null
 ```
 

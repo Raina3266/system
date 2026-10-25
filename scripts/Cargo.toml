@@ -5,8 +5,7 @@ members = [
   "media-control/rust-custom",
   "network-manager/rust-custom",
   "ocr-screenshot",
-  "preview-panel",
-  "rofi-clipboard",
+
   "waybar-timer",
   "webcam-crop",
 ]
@@ -17,7 +16,6 @@ version = "0.1.0"
 edition = "2024"
 
 # These crates sit blocked on a subprocess or a D-Bus round trip, so LTO buys
-# nothing at runtime and costs plenty at build time — 27s against 9s on
-# rofi-clipboard, worse on preview-panel and audio-control. Keep strip.
+# little at runtime and costs plenty at build time. Keep strip.
 [profile.release]
 strip = true

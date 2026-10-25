@@ -157,7 +157,6 @@ window.audio-panel {
     border-bottom: none;
     min-height: 39px;
     background: alpha(@ap_pink, 0.1);
-    color: @ap_cyan;
 }
 .audio-panel button.tab.selected:hover,
 .audio-panel button.tab.selected:focus-visible {

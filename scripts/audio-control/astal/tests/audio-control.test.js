@@ -18,13 +18,8 @@ import {
 const root = new URL('../../../../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 
-test('audio packaging uses unmodified Astal with only declared runtime dependencies', () => {
-    const source = read('niri/panels/audio.nix');
-    assert.match(source, /pkgs\.astal\.wireplumber/);
-    assert.match(source, /pkgs\.astal\.bluetooth/);
-    assert.doesNotMatch(source, /overrideAttrs|substituteInPlace|astalGjs|postPatch|patches\s*=/);
-    assert.doesNotMatch(source, /astal\s*=\s*pkgs\.astal/);
-});
+// Native package identity and dependencies are evaluated for all six panels in
+// scripts/panels/test.js, rather than inferred from per-file Nix syntax.
 
 test('audio application uses the public native request virtual and socket writer', () => {
     const source = read('scripts/audio-control/astal/frontend.js');
@@ -4617,7 +4612,7 @@ test('built audio launcher', {
 
     const root = mkdtempSync(join(tmpdir(), 'audio-launcher-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
-    const keys = ['AUDIO_PANEL_CONFIG', 'AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER', 'XDG_RUNTIME_DIR'];
+    const keys = ['AUDIO_PANEL_CONFIG', 'AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER', 'PANEL_CSS_FILE', 'XDG_RUNTIME_DIR'];
     const fakes = new Map();
     for (const [program, path] of [['ags', ags], ['panel-gjs', gjs]]) {
         const fake = join(root, program);
@@ -4680,7 +4675,9 @@ test('built audio launcher', {
         assert.equal(compiler.program, 'ags');
         assert.equal(runtime.program, 'panel-gjs');
         const runtimeDir = overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR;
-        const config = overrides.AUDIO_PANEL_CONFIG ?? `${env.XDG_CONFIG_HOME}/ags/audio/frontend.js`;
+        const config = compiler.env.AUDIO_PANEL_CONFIG;
+        assert.match(config, /^\/nix\/store\/[^/]+\/(?:scripts\/)?audio-control\/astal\/frontend\.js$/,
+            'the entry must come from the packaged source, never the checkout or XDG config');
         const bundle = join(runtimeDir, 'ags-panels', 'audio-panel.js');
         assert.deepEqual(compiler.argv, ['bundle', '--gtk', '4', '--', config, bundle]);
         assert.deepEqual(runtime.argv, ['-m', bundle]);
@@ -4733,17 +4730,23 @@ test('built audio launcher', {
         for (const data of [compiler, runtime]) {
             assert.match(data.env.AUDIO_PANEL_PALETTE, /^\/nix\/store\//);
             assert.match(data.env.AUDIO_CONTROL_HELPER, /\/bin\/audio-control$/);
+            assert.match(data.env.PANEL_CSS_FILE, /\/scripts\/audio-control\/astal\/style\.css$/);
+            assert.doesNotMatch(data.env.PANEL_CSS_FILE, /^\/nix\/store\//);
         }
     });
 
-    await t.test('preserves explicit overrides and passes paths as native arguments without shell evaluation', () => {
+    await t.test('ignores live-source overrides but preserves literal palette, helper and CSS overrides', () => {
         const marker = join(root, 'config-was-evaluated');
         const overrides = { AUDIO_PANEL_CONFIG: join(root, `custom '"; $(touch ${marker}); frontend.js`),
             AUDIO_PANEL_PALETTE: join(root, 'palette with spaces.json'), AUDIO_CONTROL_HELPER: join(root, 'custom helper'),
+            PANEL_CSS_FILE: join(root, 'custom style with spaces.css'),
             XDG_RUNTIME_DIR: join(root, 'isolated runtime $HOME with spaces') };
         mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
         const { compiler, runtime } = launch(overrides);
-        for (const data of [compiler, runtime]) assert.deepEqual(data.env, overrides);
+        for (const data of [compiler, runtime]) {
+            assert.notEqual(data.env.AUDIO_PANEL_CONFIG, overrides.AUDIO_PANEL_CONFIG);
+            assert.deepEqual(data.env, { ...overrides, AUDIO_PANEL_CONFIG: compiler.env.AUDIO_PANEL_CONFIG });
+        }
         assert.equal(existsSync(marker), false);
         assert.equal(existsSync(join(overrides.XDG_RUNTIME_DIR, 'ags.js')), false);
     });

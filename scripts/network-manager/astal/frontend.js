@@ -9,6 +9,7 @@ import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { NetworkBackend, controllerRuntime, dismissOtherPanels } from './backend.js';
 import { NetworkController, parseRequest } from './logic.js';
+import { loadPanelStyle } from '../../panels/style.js';
 
 function read(path) {
     if (!path) throw new Error('Run through network-panel, or set NETWORK_PANEL_CONFIG and NETWORK_PANEL_PALETTE.');
@@ -24,12 +25,7 @@ export function loadTheme(entry, palettePath) {
     const definitions = Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
         .map(([key, value]) => `@define-color np_${key} ${value};`).join('\n');
-    const provider = new Gtk.CssProvider();
-    const errors = [];
-    provider.connect('parsing-error', (_, section, error) => errors.push(error.message));
-    provider.load_from_string(`${definitions}\n${read(GLib.build_filenamev([GLib.path_get_dirname(entry), 'style.css']))}`);
-    if (errors.length) throw new Error(`Network stylesheet: ${errors.join('; ')}`);
-    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
+    loadPanelStyle({ entry, definitions, label: 'Network' });
     return palette;
 }
 

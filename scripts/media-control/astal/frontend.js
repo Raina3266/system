@@ -10,6 +10,7 @@ import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { MediaBackend } from './backend.js';
 import { formatTime } from './logic.js';
+import { loadPanelStyle } from '../../panels/style.js';
 
 // Theme and metadata presentation.
 function read(path) {
@@ -26,15 +27,7 @@ function loadTheme(entry, palettePath) {
     const definitions = Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
         .map(([key, value]) => `@define-color mp_${key} ${value};`).join('\n');
-    const css = `${definitions}\n${read(GLib.build_filenamev([GLib.path_get_dirname(entry), 'style.css']))}`;
-    const provider = new Gtk.CssProvider();
-    const errors = [];
-    provider.connect('parsing-error', (_, section, error) => errors.push(error.message));
-    provider.load_from_string(css);
-    if (errors.length) throw new Error(`Media stylesheet: ${errors.join('; ')}`);
-    // The desktop's gtk-4.0/gtk.css is USER priority. Scope our independent
-    // layer surface above it without changing themes for any other application.
-    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
+    loadPanelStyle({ entry, definitions, label: 'Media' });
     return { palette };
 }
 

@@ -7,7 +7,10 @@ import AstalIO from 'gi://AstalIO';
 import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { ClipboardBackend } from './backend.js';
-import { ClipboardModel, TABS, editable, isDraft, title } from './logic.js';
+import { ClipboardModel, TABS, editable, localFilePath, title } from './logic.js';
+import { loadPanelStyle } from '../../panels/style.js';
+
+const PANEL_WIDTH = 450;
 
 function read(path) {
     const [ok, bytes] = GLib.file_get_contents(path);
@@ -22,13 +25,16 @@ export function loadTheme(entry, palettePath) {
     const definitions = Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
         .map(([key, value]) => `@define-color cp_${key} ${value};`).join('\n');
-    const provider = new Gtk.CssProvider();
-    const errors = [];
-    provider.connect('parsing-error', (_, section, error) => errors.push(error.message));
-    provider.load_from_string(`${definitions}\n${read(GLib.build_filenamev([GLib.path_get_dirname(entry), 'style.css']))}`);
-    if (errors.length) throw new Error(`Clipboard stylesheet: ${errors.join('; ')}`);
-    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
+    loadPanelStyle({ entry, definitions, label: 'Clipboard' });
     return palette;
+}
+
+export function scheduleAutosave(callback) {
+    const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
+        void callback();
+        return GLib.SOURCE_REMOVE;
+    });
+    return () => GLib.source_remove(timer);
 }
 
 function box(vertical = false, spacing = 8) {
@@ -66,7 +72,11 @@ export class ClipboardPanel {
         Object.assign(this, { model, backend });
         this.opened = false;
         this.rendering = false;
-        this.rowWidgets = new Map();
+        this.viewRows = [];
+        this.rowTitles = [];
+        this.titleCache = new WeakMap();
+        this.home = GLib.get_home_dir();
+        this.bufferText = '';
         this.window = new Astal.Window({
             application: app, name: 'clipboard-panel', namespace: 'astal:clipboard',
             anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT,
@@ -77,13 +87,13 @@ export class ClipboardPanel {
         this.window.connect('close-request', () => { void this.close(); return true; });
         this.root = new Gtk.Overlay({ hexpand: true, vexpand: true });
         this.root.set_child(new Gtk.Box({ hexpand: true, vexpand: true }));
-        this.card = new Gtk.Overlay({ width_request: 900, height_request: 560,
-            halign: Gtk.Align.CENTER, valign: Gtk.Align.START, margin_top: 40, css_classes: ['clipboard-card'] });
+        this.card = new Gtk.Overlay({ width_request: PANEL_WIDTH, height_request: 560,
+            halign: Gtk.Align.END, valign: Gtk.Align.START, margin_top: 40, css_classes: ['clipboard-card'] });
         this.card.set_child(frame(palette));
         this.content = box(true, 12);
         this.content.add_css_class('clipboard-content');
         this.card.add_overlay(this.content);
-        this.revealer = new Gtk.Revealer({ child: this.card, halign: Gtk.Align.CENTER, valign: Gtk.Align.START,
+        this.revealer = new Gtk.Revealer({ child: this.card, halign: Gtk.Align.END, valign: Gtk.Align.START, margin_end: 16,
             transition_type: Gtk.RevealerTransitionType.CROSSFADE, transition_duration: 180 });
         this.revealer.connect('notify::child-revealed', () => {
             if (!this.opened && !this.revealer.child_revealed) this.window.visible = false;
@@ -104,53 +114,102 @@ export class ClipboardPanel {
         this.render();
     }
     build() {
-        const header = box();
-        const heading = label('󰅌  Clipboard', 'title');
-        heading.hexpand = true;
-        header.append(heading);
-        this.newButton = button('+ Memo', 'Create a memo (Ctrl+N)', () => void this.newMemo());
-        this.closeButton = button('󰅖', 'Save and close (Escape)', () => void this.close());
-        header.append(this.newButton);
-        header.append(this.closeButton);
-        this.content.append(header);
-
-        this.search = new Gtk.SearchEntry({ placeholder_text: 'Search clipboard history…', hexpand: true });
+        this.search = new Gtk.SearchEntry({ placeholder_text: 'Search clipboard history…', hexpand: true,
+            css_classes: ['clipboard-search'] });
         this.search.connect('search-changed', () => {
             if (!this.rendering) void this.model.filter(this.search.get_text());
         });
         this.content.append(this.search);
-        this.tabs = box();
+        this.tabs = box(false, 0);
+        this.tabs.homogeneous = true;
         this.tabButtons = TABS.map((tab, index) => {
-            const widget = button(['󰍩  Memo', '󰦨  Text', '󰈔  Files'][index], `Show ${tab} entries`,
+            const widget = button(['MEMO', 'TEXT', 'FILES'][index], `Show ${tab} entries`,
                 () => void this.model.changeTab(tab));
+            widget.add_css_class('tab');
             widget.hexpand = true;
+            widget.height_request = 40;
             this.tabs.append(widget);
             return widget;
         });
-        this.content.append(this.tabs);
-        this.body = box(false, 14);
+        const page = box(true, 0);
+        page.add_css_class('clipboard-page');
+        page.vexpand = true;
+        page.append(this.tabs);
+        this.content.append(page);
+        this.body = box(true, 0);
+        this.body.homogeneous = false;
+        this.body.add_css_class('clipboard-page-body');
         this.body.vexpand = true;
-        this.list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.SINGLE, css_classes: ['history'] });
-        this.list.connect('row-selected', (_, row) => {
-            if (!this.rendering && row && row.itemId !== this.model.editor?.id) void this.model.select(row.itemId);
+        this.strings = Gtk.StringList.new([]);
+        this.selection = new Gtk.SingleSelection({ model: this.strings, autoselect: false, can_unselect: true });
+        const factory = new Gtk.SignalListItemFactory();
+        factory.connect('setup', (_, item) => {
+            const row = box(false, 6);
+            row.add_css_class('history-item');
+            row.append(new Gtk.Label({ xalign: 0, use_markup: false, ellipsize: Pango.EllipsizeMode.END,
+                max_width_chars: 32, hexpand: true }));
+            row.append(new Gtk.Label({ label: 'PINNED', css_classes: ['pin-badge'],
+                valign: Gtk.Align.CENTER, tooltip_text: 'Pinned — kept at the top of history' }));
+            const actions = box(false, 2);
+            const action = (text, css, perform) => {
+                const control = button(text, '', () => {
+                    const entry = item.get_item() && this.viewRows[item.get_position()];
+                    if (entry) void perform(entry.id);
+                });
+                control.set_css_classes(['row-action', css]);
+                control.width_request = 22;
+                control.height_request = 22;
+                control.valign = Gtk.Align.CENTER;
+                actions.append(control);
+            };
+            action('󰐃', 'row-pin', id => this.model.pin(id));
+            action('×', 'row-delete', id => this.model.remove(id));
+            row.append(actions);
+            item.set_child(row);
         });
-        this.list.connect('row-activated', () => void this.copy());
-        this.listScroll = new Gtk.ScrolledWindow({ child: this.list, vexpand: true,
+        factory.connect('bind', (_, item) => {
+            const row = item.get_child();
+            const entry = this.viewRows[item.get_position()];
+            const pinned = Boolean(entry?.pinned);
+            const badge = row.get_first_child().get_next_sibling();
+            const pin = row.get_last_child().get_first_child();
+            const remove = row.get_last_child().get_last_child();
+            row.get_first_child().set_label(item.get_item().get_string());
+            badge.visible = pinned;
+            pin.tooltip_text = pinned ? 'Unpin this item' : 'Pin this item to the top';
+            pin.update_property([Gtk.AccessibleProperty.LABEL], [pinned ? 'Unpin item' : 'Pin item']);
+            remove.tooltip_text = localFilePath(entry) ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry';
+            remove.update_property([Gtk.AccessibleProperty.LABEL], ['Delete item']);
+            if (pinned) { row.add_css_class('pinned'); pin.add_css_class('pinned'); }
+            else { row.remove_css_class('pinned'); pin.remove_css_class('pinned'); }
+        });
+        this.list = new Gtk.ListView({ model: this.selection, factory, single_click_activate: false, css_classes: ['history'] });
+        this.selection.connect('notify::selected', () => {
+            const item = this.viewRows[this.selection.selected];
+            if (!this.rendering && item && item.id !== this.model.editor?.id) void this.model.select(item.id);
+        });
+        this.list.connect('activate', (_, position) => {
+            const entry = this.viewRows[position];
+            if (entry) void this.copy(entry.id);
+        });
+        // Match five 40px history rows; only the preview takes extra height.
+                this.listScroll = new Gtk.ScrolledWindow({ child: this.list, vexpand: false, height_request: 200,
             hscrollbar_policy: Gtk.PolicyType.NEVER, vscrollbar_policy: Gtk.PolicyType.AUTOMATIC });
         this.body.append(this.listScroll);
 
         const preview = box(true);
         preview.hexpand = true;
-        this.detail = label('', 'metadata');
-        this.detail.ellipsize = Pango.EllipsizeMode.MIDDLE;
-        preview.append(this.detail);
+        preview.vexpand = true;
+
         this.editor = new Gtk.TextView({ monospace: true, wrap_mode: Gtk.WrapMode.WORD_CHAR,
             accepts_tab: true, hexpand: true, vexpand: true, left_margin: 12, right_margin: 12,
-            top_margin: 12, bottom_margin: 12, css_classes: ['editor'] });
+            top_margin: 12, bottom_margin: 12, pixels_below_lines: 2, pixels_inside_wrap: 2,
+                        css_classes: ['editor'] });
         this.editor.buffer.connect('changed', () => {
             if (!this.rendering) {
                 const buffer = this.editor.buffer;
-                this.model.edit(buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), true));
+                this.bufferText = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), true);
+                this.model.edit(this.bufferText);
             }
         });
         this.picture = new Gtk.Picture({ can_shrink: true, content_fit: Gtk.ContentFit.CONTAIN,
@@ -162,70 +221,53 @@ export class ClipboardPanel {
         this.preview.add_named(label('Select an item to preview', 'empty'), 'empty');
         preview.append(this.preview);
         this.body.append(preview);
-        this.content.append(this.body);
-        const toolbar = box();
-        this.pinButton = button('󰐃 Pin', 'Pin/unpin (Alt+P)', () => void this.model.pin());
-        this.deleteButton = button('󰆴 Delete', 'Delete this item (Alt+D); discards its unsaved draft',
-            () => void this.model.remove());
-        this.reloadButton = button('Reload', 'Discard your draft and reload this item', () => {
-            if (!this.model.dirty) { void this.model.reload(); return; }
-            const dialog = new Gtk.AlertDialog({ message: 'Discard your unsaved changes?',
-                detail: 'Reload the stored item without saving your draft.',
-                buttons: ['Cancel', 'Discard and reload'], cancel_button: 0, default_button: 0 });
-            dialog.choose(this.window, null, (source, result) => {
-                try { if (source.choose_finish(result) === 1) void this.model.reload(); } catch (_) { /* Cancelled. */ }
-            });
-        });
-        this.saveButton = button('Save', 'Save changes (Ctrl+S)', () => void this.model.save());
-        this.copyButton = button('󰅍 Copy', 'Copy and close (Enter; Ctrl+Enter in the editor)', () => void this.copy());
-        const spacer = new Gtk.Box({ hexpand: true });
-        for (const child of [this.pinButton, this.deleteButton, this.reloadButton, spacer, this.saveButton, this.copyButton])
-            toolbar.append(child);
-        this.content.append(toolbar);
-        this.status = label('', 'metadata');
+        page.append(this.body);
+
         this.failure = label('', 'failure');
         this.failure.wrap = true;
-        this.failure.max_width_chars = 80;
-        this.content.append(this.status);
+        this.failure.max_width_chars = 40;
         this.content.append(this.failure);
+    }
+    renderRows(rows) {
+        if (rows === this.viewRows) return;
+        // Snapshot records are immutable; reuse previews when revisiting a tab.
+        const titles = rows.map(item => {
+            if (!this.titleCache.has(item))
+                this.titleCache.set(item, title(item, this.home));
+            return this.titleCache.get(item);
+        });
+        let start = 0, oldEnd = this.viewRows.length, newEnd = rows.length;
+        const same = (oldIndex, newIndex) => this.viewRows[oldIndex].id === rows[newIndex].id
+            && this.viewRows[oldIndex].pinned === rows[newIndex].pinned
+            && this.rowTitles[oldIndex] === titles[newIndex];
+        while (start < oldEnd && start < newEnd && same(start, start)) start++;
+        while (oldEnd > start && newEnd > start && same(oldEnd - 1, newEnd - 1)) { oldEnd--; newEnd--; }
+        this.viewRows = rows;
+        this.rowTitles = titles;
+        if (oldEnd > start || newEnd > start)
+            this.strings.splice(start, oldEnd - start, titles.slice(start, newEnd));
     }
     render() {
         this.rendering = true;
         try {
             const model = this.model, item = model.editor;
-            const rows = model.rows, wanted = new Set(rows.map(row => row.id));
-            for (const [id, row] of this.rowWidgets) {
-                if (!wanted.has(id)) { this.list.remove(row); this.rowWidgets.delete(id); }
+            if (this.opened) this.backend.watchFiles(model.items);
+            const rows = model.rows;
+            this.renderRows(rows);
+            const index = rows.findIndex(row => row.id === item?.id);
+            const selected = index < 0 ? Gtk.INVALID_LIST_POSITION : index;
+            if (this.selection.selected !== selected) {
+                this.selection.selected = selected;
+                if (index >= 0) this.list.scroll_to(index, Gtk.ListScrollFlags.NONE, null);
             }
-            rows.forEach((item, index) => {
-                let row = this.rowWidgets.get(item.id);
-                if (!row) {
-                    row = new Gtk.ListBoxRow();
-                    row.itemId = item.id;
-                    const text = label();
-                    text.ellipsize = Pango.EllipsizeMode.END;
-                    text.max_width_chars = 32;
-                    text.set_margin_start(8);
-                    text.set_margin_end(8);
-                    row.set_child(text);
-                    this.rowWidgets.set(item.id, row);
-                }
-                const text = `${item.pinned ? '󰐃 ' : ''}${title(item, GLib.get_home_dir())}`;
-                if (row.get_child().label !== text) row.get_child().set_label(text);
-                if (row.get_index() !== index) {
-                    if (row.get_parent()) this.list.remove(row);
-                    this.list.insert(row, index);
-                }
-            });
-            this.list.select_row(this.rowWidgets.get(item?.id) || null);
             this.list.sensitive = !model.busy;
             this.tabButtons.forEach((button, index) => {
                 button.sensitive = !model.busy;
-                if (TABS[index] === model.tab) button.add_css_class('active');
-                else button.remove_css_class('active');
+                if (TABS[index] === model.tab) button.add_css_class('selected');
+                else button.remove_css_class('selected');
             });
             if (this.search.get_text() !== model.query) this.search.set_text(model.query);
-            this.detail.set_label(item ? `${isDraft(item) ? 'New memo' : item.mime}${model.dirty ? ' · Unsaved' : ''}` : 'Preview');
+
             if (item?.image_path) {
                 if (this.imagePath !== item.image_path) this.picture.set_filename(item.image_path);
                 this.imagePath = item.image_path;
@@ -234,20 +276,15 @@ export class ClipboardPanel {
                 this.picture.set_paintable(null);
                 this.imagePath = null;
                 const text = item ? (editable(item) ? item.text : item.name || item.text || '') : '';
-                const buffer = this.editor.buffer;
-                if (buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), true) !== text) buffer.set_text(text, -1);
+                if (this.bufferText !== text) {
+                    this.bufferText = text;
+                    this.editor.buffer.set_text(text, -1);
+                }
                 this.preview.visible_child_name = item ? 'text' : 'empty';
             }
             this.editor.editable = Boolean(editable(item) && model.activity !== 'action');
             this.editor.cursor_visible = Boolean(editable(item));
-            this.pinButton.set_label(item?.pinned ? '󰐃 Unpin' : '󰐃 Pin');
-            for (const widget of [this.pinButton, this.deleteButton, this.copyButton])
-                widget.sensitive = Boolean(item && !model.busy);
-            this.saveButton.sensitive = Boolean(model.dirty && !model.busy);
-            this.reloadButton.sensitive = Boolean(item && !model.busy);
-            this.newButton.sensitive = !model.busy;
-            this.closeButton.sensitive = !model.busy;
-            this.status.set_label(model.busy ? 'Working…' : `${rows.length} ${rows.length === 1 ? 'item' : 'items'} · Changes save on selection or close`);
+
             this.failure.set_label(model.failure);
             this.failure.visible = Boolean(model.failure);
         } finally { this.rendering = false; }
@@ -266,6 +303,8 @@ export class ClipboardPanel {
         const focus = this.window.get_focus();
         const inEditor = focus === this.editor || focus?.is_ancestor(this.editor);
         if ([Gdk.KEY_Return, Gdk.KEY_KP_Enter].includes(key) && (ctrl || !inEditor)) {
+            for (let target = focus; target && target !== this.list; target = target.get_parent())
+                if (target instanceof Gtk.Button && target.has_css_class('row-action')) return false;
             void this.copy();
             return true;
         }
@@ -278,11 +317,12 @@ export class ClipboardPanel {
         }
         return false;
     }
+
     async newMemo() {
         if (await this.model.newMemo()) this.editor.grab_focus();
     }
-    async copy() {
-        if (await this.model.copy()) this.hide();
+    async copy(id) {
+        if (await this.model.copy(id)) this.hide();
     }
     async toggle(monitor) {
         if (this.opened && this.monitor === monitor) return this.close();
@@ -290,12 +330,14 @@ export class ClipboardPanel {
         this.monitor = monitor;
         this.window.gdkmonitor = monitor;
         const geometry = monitor.get_geometry();
-        const width = Math.max(280, Math.min(900, geometry.width - 32));
+        const width = Math.max(280, Math.min(PANEL_WIDTH, geometry.width - 32));
         this.card.width_request = width;
-        this.card.height_request = Math.max(280, Math.min(600, geometry.height - 80));
-        this.body.orientation = width >= 740 ? Gtk.Orientation.HORIZONTAL : Gtk.Orientation.VERTICAL;
-        this.listScroll.width_request = width >= 740 ? Math.floor(width * 0.34) : -1;
-        this.listScroll.height_request = width >= 740 ? -1 : 120;
+        const height = Math.max(280, Math.min(600, geometry.height - 80));
+                const [contentHeight] = this.content.measure(Gtk.Orientation.VERTICAL, width);
+        const [previewHeight] = this.preview.get_parent().measure(Gtk.Orientation.VERTICAL, width);
+        const fixedHeight = contentHeight - previewHeight;
+        // Two successive 20% preview reductions preserve the search, tabs and five-row list.
+        this.card.height_request = Math.max(contentHeight, fixedHeight + Math.round((height - fixedHeight) * 0.64));
         this.opened = true;
         this.window.keymode = Astal.Keymode.EXCLUSIVE;
         this.window.visible = true;
@@ -306,6 +348,7 @@ export class ClipboardPanel {
     }
     hide() {
         this.opened = false;
+        this.backend.unwatchFiles();
         this.window.keymode = Astal.Keymode.NONE;
         this.revealer.reveal_child = false;
     }
@@ -315,7 +358,10 @@ export class ClipboardPanel {
         this.hide();
         return true;
     }
-    dispose() { this.window.destroy(); }
+    dispose() {
+            this.model.dispose();
+            this.window.destroy();
+        }
 }
 
 export function createApplication() {
@@ -368,9 +414,11 @@ export function main() {
         if (app.panel) return;
         try {
             const palette = loadTheme(GLib.getenv('CLIPBOARD_PANEL_CONFIG'), GLib.getenv('CLIPBOARD_PANEL_PALETTE'));
-            app.backend = new ClipboardBackend({ onChange: () => { if (app.panel.opened) void app.model.refresh(); } });
+            app.backend = new ClipboardBackend({ onChange: options => { if (app.panel.opened) void app.model.refresh(options); } });
             app.model = new ClipboardModel({ request: message => app.backend.request(message),
-                publish: payload => app.backend.publish(payload), onChange: () => app.panel?.render() });
+                publish: payload => app.backend.publish(payload), scheduleAutosave,
+
+                trashFile: path => app.backend.trashFile(path), onChange: () => app.panel?.render() });
             app.panel = new ClipboardPanel({ app, model: app.model, backend: app.backend, palette });
             app.connect('notify::monitors', () => {
                 if (app.panel.monitor && !app.get_monitors().includes(app.panel.monitor)) void app.panel.close();

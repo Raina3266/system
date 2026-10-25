@@ -42,12 +42,9 @@ let
 in
 {
   imports = [
-    (import ./panels).module
+    (import ./panels.nix).module
     ./waybar
   ];
-
-  # Rofi's shared package override and Home Manager settings are registered
-  # together by ../nixos/default.nix through ./rofi.
 
   xdg.configFile."niri/config.kdl".source =
     config.lib.file.mkOutOfStoreSymlink "${repoRoot}/niri/config.kdl";
@@ -79,7 +76,7 @@ in
     mediactl
   ];
 
-  # fcitx5 theme: cyberpunk color palette matching waybar/rofi.
+  # fcitx5 theme: cyberpunk color palette matching Waybar and the panels.
   # The theme file itself is linked from ../themes/default.nix.
   xdg.configFile."fcitx5/conf/classicui.conf".text = ''
     Vertical Center=False

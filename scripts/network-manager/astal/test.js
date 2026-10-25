@@ -1683,50 +1683,16 @@ async function nodeLauncherTests() {
 
     const root = new URL('../../../', import.meta.url);
     const read = path => readFileSync(new URL(path, root), 'utf8');
-    const panels = ['network', 'audio', 'media', 'dashboard'];
-
-    test('panel module exports the shared runtime helper once and removes the old helper file', () => {
-        const source = read('niri/panels/default.nix');
-        assert.equal(existsSync(new URL('niri/panels/ags-runtime.nix', root)), false);
-        assert.match(source, /mkAgsRuntime\s*=\s*\{\s*pkgs,\s*ags,?\s*\}:/);
-        assert.equal((source.match(/\bmkAgsRuntime\s*=/g) ?? []).length, 1);
-        assert.equal((source.match(/makeWrapper\s+\$\{lib\.getExe pkgs\.gjs\}\s+"\$out\/bin\/panel-gjs"/g) ?? []).length, 1);
-        assert.match(source, /module\s*=\s*\{[\s\S]*?\}:\s*\{/);
-    });
+    // Exercise the shared launcher with evaluated package specs, not one regex
+    // copy per obsolete panel Nix file. This also covers app-launcher/clipboard.
+    await import('../../panels/test.js');
 
     test('Niri imports the exported panel Home Manager module', () => {
         const source = read('niri/default.nix');
-        assert.match(source, /imports = \[\s*\(import \.\/panels\)\.module\b/);
+        assert.match(source, /imports = \[\s*\(import \.\/panels\.nix\)\.module\b/);
         assert.doesNotMatch(source, /(?:^|\n)\s*\.\/panels\s*(?:\n|$)/);
     });
 
-    for (const panel of [...panels, 'app-launcher']) {
-        test(`${panel} uses the shared runtime helper without defining a second wrapper`, () => {
-            const source = read(`niri/panels/${panel}.nix`);
-            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{\s*inherit pkgs;\s*ags = /);
-            assert.doesNotMatch(source, /ags-runtime\.nix|\bmkAgsRuntime\s*=|makeWrapper|\$out\/bin\/panel-gjs/);
-        });
-    }
-
-    // AGS 2.3 run shares $XDG_RUNTIME_DIR/ags.js across every instance. Keep the
-    // original runtime directory for IPC, but compile to an explicit panel file.
-    for (const panel of panels) {
-        test(`${panel} launcher bundles to its own GTK4 file without changing the IPC namespace`, () => {
-            const source = read(`niri/panels/${panel}.nix`);
-            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{/);
-            assert.doesNotMatch(source, /\$\{(?:lib\.getExe ags|ags)\}(?:\/bin\/ags)?\s+run\b/);
-            assert.doesNotMatch(source, /--gtk4\b/, 'the bundle command takes --gtk 4, not run\'s --gtk4');
-            assert.doesNotMatch(source, /(?:^|\n)\s*(?:export\s+)?XDG_RUNTIME_DIR=/);
-            assert.doesNotMatch(source, /(?:^|[\s/])ags\.js\b/, 'never use AGS\'s shared temporary filename');
-            assert.match(source, /runtime_dir="''\$\{XDG_RUNTIME_DIR:\?[^}]+\}\/ags-panels"/);
-            assert.match(source, /\$\{pkgs\.coreutils\}\/bin\/install -d -m 700 "\$runtime_dir"/);
-            assert.ok(source.includes(`bundle="$runtime_dir/${panel}-panel.js"`), 'bundle filenames must be panel-specific');
-            assert.ok(source.includes('${lib.getExe ags} bundle --gtk 4 -- "$'
-                + `${panel.toUpperCase()}_PANEL_CONFIG" "$bundle"`), 'compile the configured entry point as a single native argument');
-            assert.match(source, /exec \$\{ags\}\/bin\/panel-gjs -m "\$bundle"/);
-            assert.ok(source.includes(`request --instance ${panel}-panel -- "$request"`), 'requests still target the native instance');
-        });
-    }
 
     test('Waybar network middle-click toggles Wi-Fi without a monitor or a panel visibility command', () => {
         const source = read('niri/waybar/system.nix');
@@ -1737,28 +1703,6 @@ async function nodeLauncherTests() {
             'Left-click still opens or closes the panel on its monitor');
     });
 
-    test('companion GJS wrapper reuses the customized AGS GI/pixbuf environment and GTK4 layer shell', () => {
-        const source = read('niri/panels/default.nix');
-        assert.match(source, /ags\.overrideAttrs\s*\(old:/, 'extend the supplied per-panel AGS package');
-        assert.match(source, /postFixup = \(old\.postFixup or ""\) \+/);
-        assert.match(source, /makeWrapper \$\{lib\.getExe pkgs\.gjs\} "\$out\/bin\/panel-gjs"/);
-        assert.ok(source.includes('"\'\'${gappsWrapperArgs[@]}"'), 'inherit the generated GI, library and pixbuf wrapper arguments');
-        assert.match(source, /--set LD_PRELOAD "\$\{pkgs\.gtk4-layer-shell\}\/lib\/libgtk4-layer-shell\.so"/);
-        assert.doesNotMatch(source, /(?:^|\n)\s*(?:export\s+)?XDG_RUNTIME_DIR=/);
-    });
-
-    for (const panel of ['media', 'dashboard']) {
-        test(`${panel} passes its custom union of pixbuf loaders into the companion runtime`, () => {
-            const source = read(`niri/panels/${panel}.nix`);
-            for (const loader of ['pkgs.gdk-pixbuf', 'pkgs.librsvg', 'pkgs.webp-pixbuf-loader', 'pkgs.libavif']) {
-                assert.ok(source.includes(loader), `${loader} stays in the loader cache`);
-            }
-            assert.match(source, /GDK_PIXBUF_MODULEDIR="\$module_dir"/);
-            assert.match(source, /\$\{lib\.getDev pkgs\.gdk-pixbuf\}\/bin\/gdk-pixbuf-query-loaders/);
-            assert.match(source, /ags = \(import \.\/default\.nix\)\.mkAgsRuntime\s*\{\s*inherit pkgs;\s*ags = \(pkgs\.ags\.override/);
-            assert.match(source, /postInstall = \(old\.postInstall or ""\) \+ ''\s*export GDK_PIXBUF_MODULE_FILE=\$\{pixbufLoaders\}/);
-        });
-    }
 
     const launcherPath = process.env.NETWORK_PANEL_LAUNCHER;
 
@@ -1777,7 +1721,7 @@ async function nodeLauncherTests() {
         const fixture = mkdtempSync(join(tmpdir(), 'network-launcher-'));
         t.after(() => rmSync(fixture, { recursive: true, force: true }));
         const keys = ['NETWORK_PANEL_CONFIG', 'NETWORK_PANEL_PALETTE', 'NETWORK_CUSTOM_HELPER',
-            'DASHBOARD_PANEL', 'MEDIA_PANEL', 'XDG_RUNTIME_DIR'];
+            'DASHBOARD_PANEL', 'MEDIA_PANEL', 'PANEL_CSS_FILE', 'XDG_RUNTIME_DIR'];
         const fakes = new Map();
         // Neither executable imports GTK, Astal or NetworkManager. The fake compiler
         // writes an identity marker so the fake GJS can verify which file it read.
@@ -1833,7 +1777,9 @@ async function nodeLauncherTests() {
             assert.equal(compiler.program, 'ags');
             assert.equal(runtime.program, 'panel-gjs');
             const runtimeDir = overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR;
-            const config = overrides.NETWORK_PANEL_CONFIG ?? `${env.XDG_CONFIG_HOME}/ags/network/frontend.js`;
+            const config = compiler.env.NETWORK_PANEL_CONFIG;
+            assert.match(config, /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/astal\/frontend\.js$/,
+                'the entry must come from the packaged source, never the checkout or XDG config');
             const bundle = join(runtimeDir, 'ags-panels', 'network-panel.js');
             assert.deepEqual(compiler.argv, ['bundle', '--gtk', '4', '--', config, bundle]);
             assert.deepEqual(runtime.argv, ['-m', bundle]);
@@ -1886,21 +1832,27 @@ async function nodeLauncherTests() {
             for (const data of [compiler, runtime]) {
                 assert.match(data.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
                 assert.match(data.env.NETWORK_CUSTOM_HELPER, /\/bin\/network-manager$/);
+                assert.match(data.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/astal\/style\.css$/);
+                assert.doesNotMatch(data.env.PANEL_CSS_FILE, /^\/nix\/store\//);
 
                 assert.equal(data.env.DASHBOARD_PANEL, 'dashboard-panel');
                 assert.equal(data.env.MEDIA_PANEL, 'media-panel');
             }
         });
 
-        await t.test('preserves overrides and passes shell metacharacters as literal path arguments', () => {
+        await t.test('ignores live-source overrides but preserves literal palette, helper, peer and CSS overrides', () => {
             const marker = join(fixture, 'config-was-evaluated');
             const overrides = { NETWORK_PANEL_CONFIG: join(fixture, `custom '"; $(touch ${marker}); frontend.js`),
                 NETWORK_PANEL_PALETTE: join(fixture, 'custom palette.json'), NETWORK_CUSTOM_HELPER: join(fixture, 'custom helper'),
+                PANEL_CSS_FILE: join(fixture, 'custom style with spaces.css'),
                 DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
                 MEDIA_PANEL: join(fixture, 'custom media'), XDG_RUNTIME_DIR: join(fixture, 'isolated runtime $HOME with spaces') };
             mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
             const { compiler, runtime } = launch(overrides);
-            for (const data of [compiler, runtime]) assert.deepEqual(data.env, overrides);
+            for (const data of [compiler, runtime]) {
+                assert.notEqual(data.env.NETWORK_PANEL_CONFIG, overrides.NETWORK_PANEL_CONFIG);
+                assert.deepEqual(data.env, { ...overrides, NETWORK_PANEL_CONFIG: compiler.env.NETWORK_PANEL_CONFIG });
+            }
             assert.equal(existsSync(marker), false);
             assert.equal(existsSync(join(overrides.XDG_RUNTIME_DIR, 'ags.js')), false);
         });
