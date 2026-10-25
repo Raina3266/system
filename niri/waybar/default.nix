@@ -31,12 +31,19 @@ let
 
   # ------------ TopBar -------------
 
-  topBar =
-    common
-    // {
-      include = [ "${repoRoot}/themes/waybar/top.jsonc" ];
-    }
-    // modules;
+  topBar = common // modules // {
+    position = "top";
+    expand-center = true;
+    modules-left = [ "custom/ycal" "tray" ];
+    modules-center = [ "custom/media" "custom/lyrics" ];
+    modules-right = [
+      "custom/timer"
+      "custom/clipboard-panel"
+      "custom/audio"
+      "custom/network"
+      "custom/dashboard"
+    ];
+  };
 
   panelOutputs = [
     "eDP-1"
@@ -62,12 +69,61 @@ let
 
   # No `output`: one config shown on every monitor. The taskbar sizes itself
   # per monitor through max_taskbar_width_per_output.
-  bottomBar =
-    common
-    // {
-      include = [ "${repoRoot}/themes/waybar/bottom.jsonc" ];
-    }
-    // taskbar;
+  bottomBar = common // taskbar // {
+    position = "bottom";
+    modules-left = [
+      "niri/workspaces"
+      "custom/obsidian"
+      "custom/gcal"
+      "custom/gkeep"
+      "custom/gphotos"
+      "custom/whatsapp"
+      "custom/anki"
+      "cffi/niri_window_buttons"
+    ];
+    "niri/workspaces" = {
+      format = "{index}";
+      tooltip-format = "Middle-click: move up  |  Right-click: move down";
+      on-click-middle = "niri msg action focus-workspace {index} && niri msg action move-workspace-up";
+      on-click-right = "niri msg action focus-workspace {index} && niri msg action move-workspace-down";
+    };
+    "custom/obsidian" = {
+      format = "💎";
+      tooltip = true;
+      tooltip-format = "Obsidian";
+      on-click = "obsidian &";
+    };
+    "custom/anki" = {
+      format = "🧠";
+      tooltip = true;
+      tooltip-format = "Anki";
+      on-click = "anki &";
+    };
+    "custom/whatsapp" = {
+      format = "💬";
+      tooltip = true;
+      tooltip-format = "WhatsApp";
+      on-click = "whatsie &";
+    };
+    "custom/gkeep" = {
+      format = "📝";
+      tooltip = true;
+      tooltip-format = "Google Keep";
+      on-click = "google-chrome-stable --profile-directory=Default --app-id=eilembjdkfgodjkcjnpgpaenohkicgjd &";
+    };
+    "custom/gcal" = {
+      format = "📅";
+      tooltip = true;
+      tooltip-format = "Google Calendar";
+      on-click = "google-chrome-stable --profile-directory=Default --app-id=kjbdgfilnfhdoflbpgamdcdgpehopbep &";
+    };
+    "custom/gphotos" = {
+      format = "🖼️";
+      tooltip = true;
+      tooltip-format = "Google Photos";
+      on-click = "google-chrome-stable --profile-directory=Default --app-id=ncmjhecbjeaamljdfahankockkkdmedg &";
+    };
+  };
 in
 {
   options.programs'.waybar.enable = lib.mkEnableOption "waybar";
@@ -78,6 +134,9 @@ in
       utilities.homeConfig
 
       {
+        xdg.configFile."waybar/style.css".source =
+          config.lib.file.mkOutOfStoreSymlink "${repoRoot}/niri/waybar/waybar.css";
+
         home.packages = with pkgs; [
           waybar-lyric
           jq
@@ -124,28 +183,6 @@ in
           };
         };
 
-        # Waybar does not watch its JSON configuration. Restart it whenever a
-        # live layout fragment is saved; CSS reloads natively via the setting
-        # above and does not need a system rebuild either.
-        systemd.user.paths.waybar-live-layout = {
-          Unit.Description = "Watch live Waybar layout files";
-          Path = {
-            PathChanged = [
-              "${repoRoot}/themes/waybar/top.jsonc"
-              "${repoRoot}/themes/waybar/bottom.jsonc"
-            ];
-            Unit = "waybar-live-layout.service";
-          };
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-
-        systemd.user.services.waybar-live-layout = {
-          Unit.Description = "Apply live Waybar layout changes";
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${pkgs.systemd}/bin/systemctl --user try-restart waybar.service";
-          };
-        };
       })
     ]
   );

@@ -8,7 +8,7 @@ import Astal from 'gi://Astal?version=4.0';
 import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { LauncherBackend, monitors, focusedMonitor } from './backend.js';
-import { loadPanelStyle } from '../panels/style.js';
+import { loadPanelStyle } from '../live-style.js';
 import { ANIMATION_MS, BAR_GAP, PANEL_LEFT, TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GRID_COLUMNS, SEARCH_HEIGHT, SEARCH_GAP,
     parseRequest, panelLayout, nextIndex } from './logic.js';
 

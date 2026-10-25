@@ -10,6 +10,7 @@ import Battery from 'gi://AstalBattery';
 import PowerProfiles from 'gi://AstalPowerProfiles';
 import Network from 'gi://AstalNetwork';
 import Bluetooth from 'gi://AstalBluetooth';
+import type Cairo from 'cairo';
 import { MetricBar, MetricsSampler, type Metrics } from './parameters.ts';
 import {
     NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
@@ -212,7 +213,7 @@ export class ButtonSwitcher {
         const colour = (hex: string) => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
         const [red, green, blue] = colour(palette.foreground);
 
-        drawing.set_draw_func((_area, cr, width, height) => {
+        drawing.set_draw_func((_area: Gtk.DrawingArea, cr: Cairo.Context, width: number, height: number) => {
             const right = width - 0.5, bottom = height - 0.5, cut = Math.min(9, width / 2, height / 2);
             cr.moveTo(0.5, 0.5);
             cr.lineTo(right, 0.5);
@@ -269,11 +270,11 @@ function sameMonitor(left: Gdk.Monitor | null, right: Gdk.Monitor | null): boole
 
 export function closeNetwork(): void {
     try {
-        AstalIO.Process.exec_asyncv([GLib.getenv('NETWORK_PANEL') || 'network-panel', 'close'], (_process, result) => {
+        AstalIO.Process.exec_asyncv([GLib.getenv('NETWORK_PANEL') || 'network-panel', 'close'], (_process: GObject.Object | null, result: Gio.AsyncResult) => {
             try { AstalIO.Process.exec_asyncv_finish(result); }
-            catch (error) { console.warn(`Could not dismiss the network panel: ${error.message || error}`); }
+            catch (error) { console.warn(`Could not dismiss the network panel: ${String(error)}`); }
         });
-    } catch (error) { console.warn(`Could not dismiss the network panel: ${error.message || error}`); }
+    } catch (error) { console.warn(`Could not dismiss the network panel: ${String(error)}`); }
 }
 
 export class DashboardPanel {
@@ -305,7 +306,7 @@ export class DashboardPanel {
             keymode: Astal.Keymode.NONE, visible: false, css_classes: ['dashboard-ui', 'dashboard-panel'] });
         this.window.connect('close-request', () => { this.close(); return true; });
         const keys = new Gtk.EventControllerKey({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
-        keys.connect('key-pressed', (_controller, key) => {
+        keys.connect('key-pressed', (_controller: Gtk.EventControllerKey, key: number) => {
             if (!this.opened || key !== Gdk.KEY_Escape) return false;
             this.close();
             return true;
@@ -362,7 +363,7 @@ export class DashboardPanel {
         this.card.opacity = 0;
         this.root.add_overlay(this.card);
         const outside = new Gtk.GestureClick({ propagation_phase: Gtk.PropagationPhase.CAPTURE, button: 0 });
-        outside.connect('released', (_gesture, _count, x, y) => {
+        outside.connect('released', (_gesture: Gtk.GestureClick, _count: number, x: number, y: number) => {
             if (!this.opened) return;
             const [ok, bounds] = this.card.compute_bounds(this.root);
             if (ok && (x < bounds.get_x() + CARD_GLOW || x > bounds.get_x() + bounds.get_width() - CARD_GLOW
@@ -514,24 +515,24 @@ export const DashboardApplication = GObject.registerClass({ GTypeName: 'Dashboar
         vfunc_request(request: string, connection: Gio.SocketConnection): void {
             let response: string;
             try { response = this.handleRequest(request); }
-            catch (error) { response = JSON.stringify({ error: error.message || String(error) }); }
+            catch (error) { response = JSON.stringify({ error: error instanceof Error ? error.message : String(error) }); }
             const close = () => {
                 try {
-                    connection.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                        try { source.close_finish(result); }
-                        catch (error) { console.warn(`Dashboard request close: ${error.message || error}`); }
+                    connection.close_async(GLib.PRIORITY_DEFAULT, null, (_source: Gio.IOStream | null, result: Gio.AsyncResult) => {
+                        try { connection.close_finish(result); }
+                        catch (error) { console.warn(`Dashboard request close: ${String(error)}`); }
                     });
-                } catch (error) { console.warn(`Dashboard request close: ${error.message || error}`); }
+                } catch (error) { console.warn(`Dashboard request close: ${String(error)}`); }
             };
             try {
-                AstalIO.write_sock(connection, response, (_source, result) => {
+                AstalIO.write_sock(connection, response, (_source: GObject.Object | null, result: Gio.AsyncResult) => {
                     try { AstalIO.write_sock_finish(result); }
-                    catch (error) { console.warn(`Dashboard request reply: ${error.message || error}`); }
+                    catch (error) { console.warn(`Dashboard request reply: ${String(error)}`); }
                     finally { close(); }
                 });
             } catch (error) {
                 close();
-                console.warn(`Dashboard request reply: ${error.message || error}`);
+                console.warn(`Dashboard request reply: ${String(error)}`);
             }
         }
 
@@ -600,7 +601,7 @@ export async function main(): Promise<number> {
     app.connect('activate', () => {
         try { app.startPanel(); }
         catch (error) {
-            console.error(`Dashboard initialization: ${error.message || error}`);
+            console.error(`Dashboard initialization: ${String(error)}`);
             exitCode = 1;
             app.quit();
         }
@@ -608,7 +609,7 @@ export async function main(): Promise<number> {
     app.connect('shutdown', () => app.disposePanel());
     try { app.acquire_socket(); }
     catch (error) {
-        console.error(`Dashboard startup: ${error.message || error}`);
+        console.error(`Dashboard startup: ${String(error)}`);
         return 1;
     }
     app.hold();

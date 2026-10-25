@@ -9,7 +9,7 @@ import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { NetworkBackend, controllerRuntime, dismissOtherPanels } from './backend.js';
 import { NetworkController, parseRequest } from './logic.js';
-import { loadPanelStyle } from '../../panels/style.js';
+import { loadPanelStyle } from '../../live-style.js';
 
 function read(path) {
     if (!path) throw new Error('Run through network-panel, or set NETWORK_PANEL_CONFIG and NETWORK_PANEL_PALETTE.');

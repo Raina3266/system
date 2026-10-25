@@ -1,9 +1,10 @@
 { inputs, pkgs, ... }:
 let
-  # Provide python3 with ytmusicapi for music-tag-transfer. SpotDL is a
-  # top-level Nixpkgs application rather than a python3Packages attribute.
+  # Share Python dependencies between local scripts and editor tooling.
+  # SpotDL is a top-level Nixpkgs application, not a python3Packages attribute.
   music-python = pkgs.python3.withPackages (ps: [
     ps.ytmusicapi
+    ps.pillow
   ]);
 
   # Link only this wrapper into the Home Manager profile. Adding pkgs.spotdl

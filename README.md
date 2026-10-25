@@ -27,8 +27,8 @@ store, not live-linked:
 | `niri/config.kdl` | Niri reloads it on save |
 | `scripts/{dashboard,app-launcher}/style.css` | Running panels hot-reload CSS; no restart or rebuild |
 | `scripts/{audio-control,media-control,network-manager,clipboard}/astal/style.css` | Running panels hot-reload CSS; no restart or rebuild |
-| `themes/waybar/top.jsonc`, `bottom.jsonc` | Waybar restarts automatically |
-| `themes/waybar/waybar.css` | Waybar reloads CSS automatically |
+| `niri/waybar/default.nix` | Waybar layout changes require a rebuild and switch |
+| `niri/waybar/waybar.css` | Waybar reloads CSS automatically |
 
 Rust, JavaScript, TypeScript, packaged JSON, Nix module, package, service, and
 kernel changes require a rebuild and switch. Restarting a panel or closing and
@@ -36,6 +36,14 @@ reopening it does not load edited checkout code. All six launchers enforce their
 store-backed entry points; panel `*_CONFIG` variables are not live-source overrides.
 Each Rust package now hashes only Cargo sources, so changing one UI stylesheet
 or sibling utility no longer invalidates every desktop helper.
+
+Editor types are generated from the dashboard's pinned GTK/Astal GIR metadata,
+with Node 24 declarations for its tests. Home Manager links these Nix-store
+packages into `~/node_modules/@types`, where inferred TypeScript projects can
+find them without adding a `tsconfig.json` or dependencies to this checkout.
+They also apply to other inferred projects under the home directory; projects
+with explicit `types`/`typeRoots` settings retain their own selection. After
+switching generations, restart the language servers if old diagnostics remain.
 
 ## audio-control
 
@@ -163,7 +171,8 @@ audio-panel close
 audio-panel bluetoothPower
 ```
 
-The launcher validates command arity and constructs JSON with `jq --arg`.
+The shared Rust launcher in `scripts/panel-launcher` validates command arity
+and serializes requests with `serde_json`, without shell evaluation or `jq`.
 Requests use `ags request --instance audio-panel -- <JSON>`:
 
 ```json
@@ -171,8 +180,8 @@ Requests use `ags request --instance audio-panel -- <JSON>`:
 ```
 
 `command` is `status`, `toggle`, `close`, or `bluetoothPower`; only `toggle`
-accepts an optional monitor. Startup bundles the immutable store entry with
-`ags bundle --gtk 4` and executes the panel-specific output through `panel-gjs`,
+accepts an optional monitor. Nix bundles the immutable store entry at build time
+with `ags bundle --gtk 4`; startup executes that store-backed bundle through `panel-gjs`,
 not `ags run` or a `run --instance` flag. The frontend's own `AudioApplication`
 subclasses native `Astal.Application`, sets `instance_name: "audio-panel"`, and uses `acquire_socket()`
 and the native application lifecycle, independently of `media-panel`. Its public
@@ -254,10 +263,11 @@ Do not run this UI entry point against the desktop display or buses.
 
 The consolidated `tests/audio-control.test.js` includes launcher coverage. The
 built-launcher test uses an isolated fake AGS executable, without desktop IPC,
-and is skipped unless the built executable is supplied:
+and is skipped unless both the built wrapper and shared Rust executable are supplied:
 
 ```sh
 AUDIO_PANEL_LAUNCHER=/path/to/audio-panel \
+PANEL_LAUNCHER=/path/to/panel-launcher \
   node --test scripts/audio-control/astal/tests/audio-control.test.js
 ```
 
@@ -476,7 +486,7 @@ store entry and packaged helper default, with the installed palette link.
 Generated palettes remain separate from live CSS.
 
 Rust, JavaScript, and packaged JSON changes require a NixOS/Home Manager rebuild
-and switch. The launcher bundles an immutable Nix-store entry; restarting
+and switch. Nix builds an immutable JavaScript bundle; restarting
 `ags-clipboard.service` or closing and reopening the panel does not load checkout
 code. CSS is read directly from the checkout, without Home Manager links under
 `~/.config/ags/clipboard/`. The shared native style helper hot-reloads
@@ -713,7 +723,7 @@ presentation/controller utilities), `style.css`, and the consolidated
 cross-runtime `test.js`. The QR-only Rust helper and its protocol tests live in
 `scripts/network-manager/rust-custom/`. The launcher is
 `niri/panels.nix`, alongside the runtime typelibs, JSON palette generated
-from `themes/palette.nix`, and resident `ags-network.service`, with palette restart
+from the `palette` export in `themes/default.nix`, and resident `ags-network.service`, with palette restart
 triggers. CSS is read directly from the checkout without Home Manager links. `scripts/Cargo.toml` and `scripts/packages.nix` integrate the
 workspace and packages; both the Cargo package and installed helper executable
 are named `network-manager`.
@@ -731,13 +741,15 @@ The native application owns the `network-panel` AGS instance. Requests are
 JSON; monitor names are transported without shell interpolation. Status
 polling is read-only and never dismisses panels or mutates network state.
 
-All six panel launchers bundle their immutable Nix-store entries with
-`ags bundle --gtk 4` into distinct files
-under `$XDG_RUNTIME_DIR/ags-panels/`, then execute their packaged `panel-gjs`
-wrapper. AGS 2.3's `run` command shares one `ags.js` output across instances,
-which can execute another panel's code during concurrent startup; the wrapper
-preserves each panel's native GI environment and GTK4 layer-shell preload,
-while `XDG_RUNTIME_DIR` itself stays unchanged so Astal IPC sockets remain
+Nix builds all six panels from immutable source entries with
+`ags bundle --gtk 4`, producing separate bundles in the Nix store without a
+Wayland display or session bus. Each panel name is a native wrapper around the
+shared Rust `panel-launcher`, with a fixed JSON manifest describing commands,
+runtime paths, and environment defaults. Startup only executes the prebuilt
+bundle through the packaged `panel-gjs` wrapper; it never invokes the bundler or
+writes JavaScript under `$XDG_RUNTIME_DIR`. This avoids AGS 2.3's shared `ags.js`
+startup race. Each panel retains its native GI environment and GTK4 layer-shell
+preload, while `XDG_RUNTIME_DIR` stays unchanged so Astal IPC sockets remain
 accessible. The network application checks native registration before holding
 its event loop, so registration failure exits instead of serving an
 uninitialized badge forever.
@@ -813,16 +825,16 @@ site's public metadata endpoint. No credentials or browser cookies are sent.
 `niri/panels.nix` packages `scripts/media-control/astal/` JavaScript/JSON
 and the shared style helper into an immutable store source, preserving relative
 imports. CSS is read directly from the checkout through `PANEL_CSS_FILE`.
-The palette is serialized from `themes/palette.nix` to the separate
+The `palette` export in `themes/default.nix` is serialized to the separate
 `~/.config/ags/media-palette.json`; the frontend generates GTK `@define-color`
 rules programmatically from this JSON without writing generated CSS into the
 repository.
 
 The Niri-only `ags-media.service` runs `media-panel run`, restarts on failure,
-and is wanted by Waybar and the graphical session. The launcher uses the pinned
-AGS 2.3 bundler: `ags bundle --gtk 4 -- <store-entry> <output>`. All six panel
-launchers use distinct `$XDG_RUNTIME_DIR/ags-panels/<name>-panel.js` outputs;
-`ags run` would otherwise share a single `ags.js` file and race at login.
+and is wanted by Waybar and the graphical session. Nix uses the pinned
+AGS 2.3 bundler at build time: `ags bundle --gtk 4 -- <store-entry> <output>`.
+All six panels execute distinct immutable store bundles, with no startup
+compilation or writable runtime bundle that could race at login.
 `mkAgsRuntime` in `niri/panels.nix` adds a companion `panel-gjs` wrapper using each
 AGS package's captured runtime environment and GTK4 layer-shell preload.
 Media retains GTK4, Graphene, Astal MPRIS and Astal WirePlumber; no manual
@@ -843,7 +855,7 @@ native request socket through
 
 `command` is one of `status`, `toggle`, `togglePauseAll`, `cycleMedia`, `pauseAll`,
 or `close`; `monitor` is optional. `status` returns Waybar JSON on stdout. The
-launcher constructs JSON with `jq --arg`, never shell-evaluated JSON. The
+shared Rust launcher constructs JSON with `serde_json`, never shell-evaluated JSON. The
 frontend implements the native `vfunc_request(request, connection)` extension
 point, writes replies with `AstalIO.write_sock`, and closes the connection through
 GIO after the async write completes, including on errors. This avoids the GJS
@@ -878,8 +890,9 @@ Network requests use the separate `network-panel` launcher.
 
 The AGS/Astal GTK4 cards use per-panel GTK CSS for controls and Cairo-drawn
 chamfered frames for translucent backgrounds and yellow outlines.
-`themes/palette.nix` supplies the shared colors as generated JSON palettes,
-kept separate from the CSS files read directly from the checkout.
+`themes/default.nix` exports the shared `palette` and the Home Manager theme
+`module`. The colors become generated JSON palettes, kept separate from the CSS
+files read directly from the checkout.
 
 | Panel | Presentation sources |
 | --- | --- |
@@ -895,18 +908,22 @@ still spans 0–150%; the separate media panel is limited to 100%.
 Popup sizes and placement remain specific to their content, not separate themes.
 
 After installing the generation through Home Manager, edit CSS in place; the
-shared native `scripts/panels/style.js` helper monitors the stylesheet and reloads
+shared native `scripts/live-style.js` helper monitors the stylesheet and reloads
 it without a restart. `PANEL_CSS_FILE` defaults to the checkout's per-panel
 `style.css`. JavaScript/TypeScript, including that shared helper, and packaged
 JSON are filtered into per-panel Nix-store sources with the relative `scripts/`
-layout intact. Editing them requires a rebuild and switch. Runtime bundling
-still occurs at service startup, but reads only the immutable store entry; there
-is no opt-in environment override for live application sources.
+layout intact. Editing them requires a rebuild and switch, which also builds
+the panel bundles. CSS stays outside those bundles and still reloads live;
+there is no opt-in environment override for live application sources or bundles.
 
 `niri/panels.nix` owns the `mkAgsRuntime`, `mkPanel`, and `packages`
 exports, per-panel package specifications, and Home Manager services. The
-`packages` function takes `pkgs`, `audioControl`, `mediaControl`,
-`networkManager`, `clipboardCustom`, and `repoRoot`.
+`packages` function takes `pkgs`, `panelLauncher`, `audioControl`, `mediaControl`,
+`networkManager`, `clipboardCustom`, and `repoRoot`. `scripts/packages.nix`
+builds `panelLauncher` from the shared Rust workspace. Each panel installs its
+manifest under `share/<panel-name>/launcher.json`; command parsing, JSON
+serialization, environment defaults, and clipboard response-error checks live
+in Rust rather than generated shell scripts.
 
 ### Audio panel
 
@@ -938,9 +955,8 @@ From the repository root, run the frontend and Rust policy/protocol checks:
 ```sh
 npm --prefix scripts/dashboard test
 npm --prefix scripts/network-manager/astal test
-node --test scripts/panels/test.js
 cargo test --manifest-path scripts/Cargo.toml --locked \
-  -p audio-control -p media-control -p network-manager --all-targets
+  -p audio-control -p media-control -p network-manager -p panel-launcher --all-targets
 cargo build --manifest-path scripts/Cargo.toml --locked -p network-manager -p media-control
 ```
 
@@ -994,17 +1010,13 @@ entry point; the former `controller.js` and `runtime.js` were folded into
 `test.js`'s Node and GJS modes. `node --test test.js` exercises controller
 policy and formatting with simulated native dependencies — identity-pinned
 requests, cancellation races, launcher and startup checks — without GTK/GI or
-live NetworkManager state. Its Node mode also runs the shared
-`scripts/panels/test.js` suite, which requires Nix and uses the root
-`nixpkgs` input pinned in `flake.lock` (fetching that input if it is not cached).
-This single shared test file covers CSS reloading, panel packaging, and launcher
-behavior. It evaluates the consolidated package specifications and executes
-launchers against fake AGS/GJS programs, checking immutable entries, source
-filtering, CSS-only overrides, native dependencies, per-panel bundles, compiler
-failures, commands, help/arity policy, JSON requests/replies, runtime isolation,
-exit statuses, and `exec` behavior. Its Node mode does not build Rust/AGS packages
-or contact desktop services. Its native GJS mode checks real GTK CSS reloading
-on a private X11 display, including atomic saves and invalid-CSS recovery.
+live NetworkManager state. For the built-wrapper and manifest tests, supply
+`NETWORK_PANEL_LAUNCHER` and `PANEL_LAUNCHER`, analogous to the audio launcher
+check above. Both suites use fake AGS/GJS processes to verify prebuilt-bundle
+execution, immutable source selection, environment overrides, JSON escaping,
+unchanged IPC runtime directories, and no runtime bundle writes. The Rust
+launcher's own tests additionally cover help policy, exec/signal and exit-status
+propagation, and clipboard error responses without desktop services.
 Rust tests cover QR escaping, validation,
 malformed/oversized input, output bounds, and rejected legacy arguments:
 

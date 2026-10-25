@@ -18,8 +18,6 @@ import {
 const root = new URL('../../../../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 
-// Native package identity and dependencies are evaluated for all six panels in
-// scripts/panels/test.js, rather than inferred from per-file Nix syntax.
 
 test('audio application uses the public native request virtual and socket writer', () => {
     const source = read('scripts/audio-control/astal/frontend.js');
@@ -38,14 +36,45 @@ test('inline audio device choices have a quiet transparent trigger and row-only 
     assert.ok(trigger, 'the inline toggle has its own style, not control-button highlights');
     assert.match(trigger, /background: transparent;/);
     assert.match(trigger, /background-image: none;/);
-    assert.match(trigger, /border: 0\.35px solid alpha\(@ap_foreground, 0\.5\);/);
-    assert.doesNotMatch(trigger, /@ap_yellow|lighter\(/);
+    assert.match(trigger, /border: 0\.35px solid color-mix\(in srgb, var\(--ap_foreground\) 50%, transparent\);/);
+    assert.doesNotMatch(trigger, /--ap_yellow|lighter\(/);
     const options = css.match(/\.audio-panel (?:scrolledwindow)?\.device-options \{([^}]+)\}/)?.[1];
     assert.ok(options, 'inline options have a dedicated container style');
     assert.match(options, /background: transparent;/);
-    assert.match(options, /border: 0\.35px solid alpha\(@ap_foreground, 0\.5\);/);
-    assert.match(css, /\.audio-panel listview\.device-list row:selected \{\s*background: alpha\(@ap_dimPink, 0\.7\);\s*\}/);
-    assert.match(css, /\.audio-panel listview\.device-list row:hover \{\s*background: alpha\(@ap_pink, 0\.333\);\s*\}/);
+    assert.match(options, /border: 0\.35px solid color-mix\(in srgb, var\(--ap_foreground\) 50%, transparent\);/);
+    assert.match(css, /\.audio-panel listview\.device-list row:selected \{\s*background: color-mix\(in srgb, var\(--ap_dimPink\) 70%, transparent\);\s*\}/);
+    assert.match(css, /\.audio-panel listview\.device-list row:hover \{\s*background: color-mix\(in srgb, var\(--ap_pink\) 33\.3%, transparent\);\s*\}/);
+});
+
+test('audio theme generates scoped CSS variables for every stylesheet color', () => {
+    const source = read('scripts/audio-control/astal/frontend.js');
+    const css = read('scripts/audio-control/astal/style.css');
+    const palette = Object.fromEntries(['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator',
+        'foreground', 'background', 'secondaryBackground', 'chromeBackground', 'extraColor']
+        .map((key, index) => [key, `#${(index + 1).toString(16).padStart(6, '0')}`]));
+    const input = { ...palette, 'bad-key': '#123456', notColor: 'transparent' };
+    const calls = [];
+    const theme = source.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
+    assert.ok(theme);
+    const loadTheme = vm.runInNewContext(`${theme}\nloadTheme;`, {
+        read: () => JSON.stringify(input),
+        loadPanelStyle: options => calls.push(options),
+    });
+    const loaded = loadTheme('fixture/frontend.js', 'fixture/palette.json');
+    assert.equal(JSON.stringify(loaded), JSON.stringify(input));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].entry, 'fixture/frontend.js');
+    assert.equal(calls[0].label, 'Audio');
+    assert.equal(calls[0].definitions, '.audio-panel {\n' + Object.entries(palette)
+        .map(([key, value]) => `    --ap_${key}: ${value};`).join('\n') + '\n}');
+    assert.doesNotMatch(source, /@define-color/);
+    assert.doesNotMatch(css, /@ap_|\balpha\(|#[a-f\d]{3,8}\b/i);
+    const references = [...css.matchAll(/var\(--ap_([a-zA-Z]+)\)/g)];
+    assert.ok(references.length > 0);
+    for (const [, key] of references) assert.ok(Object.hasOwn(palette, key), key);
+    input.cyan = 'transparent';
+    assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/palette.json'), /Invalid audio palette colour: cyan/);
+    assert.equal(calls.length, 1, 'invalid palettes never reach the stylesheet loader');
 });
 
 test('Rust has no second native audio mutation backend or post-pair Bluetooth controls', () => {
@@ -4597,59 +4626,100 @@ for (const kind of ['output', 'input']) {
 // Tests consolidated from launcher.test.js.
 {
 const launcherPath = process.env.AUDIO_PANEL_LAUNCHER;
+const panelLauncherPath = process.env.PANEL_LAUNCHER;
 
 test('built audio launcher', {
-    skip: launcherPath ? false : 'Set AUDIO_PANEL_LAUNCHER to the built audio-panel executable.',
+    skip: launcherPath && panelLauncherPath ? false
+        : 'Set AUDIO_PANEL_LAUNCHER to the built audio-panel wrapper and PANEL_LAUNCHER to the shared Rust executable; both are required.',
 }, async t => {
-    const source = readFileSync(launcherPath, 'utf8');
-    const calls = [...source.matchAll(/(?:^|\s)(\/[^\s"']+\/bin\/ags) (bundle|request|run)\b/g)];
-    const runtimes = new Set(calls.map(match => match[1]));
-    assert.equal(runtimes.size, 1, 'launcher must use one explicit AGS runtime');
-    assert.deepEqual(calls.map(match => match[2]).sort(), ['bundle', 'request']);
-    const [ags] = runtimes;
-    const gjs = ags.replace(/\/ags$/, '/panel-gjs');
-    assert.ok(source.includes(`exec ${gjs} -m "$bundle"`), 'run must exec the companion GJS wrapper');
-
+    const { readdirSync, realpathSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
     const root = mkdtempSync(join(tmpdir(), 'audio-launcher-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
-    const keys = ['AUDIO_PANEL_CONFIG', 'AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER', 'PANEL_CSS_FILE', 'XDG_RUNTIME_DIR'];
-    const fakes = new Map();
-    for (const [program, path] of [['ags', ags], ['panel-gjs', gjs]]) {
-        const fake = join(root, program);
+
+    function invoke(executable, args, env = process.env) {
+        const result = spawnSync(executable, args, { env, encoding: 'utf8',
+            timeout: 5000, maxBuffer: 1024 * 1024 });
+        assert.ifError(result.error);
+        assert.equal(result.signal, null);
+        return result;
+    }
+
+    function checkUsage(run) {
+        for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'],
+            ['bluetoothPower', 'extra'], ['bluetoothPower', ''], ['toggle', 'DP-1', 'extra'], ['--help', 'extra'], ['-h', 'extra']]) {
+            const result = run(args);
+            assert.equal(result.status, 2, JSON.stringify(args));
+            assert.match(result.stderr, /Usage:/);
+            assert.equal(result.stdout, '');
+        }
+        for (const command of ['--help', '-h']) {
+            const result = run([command]);
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /^Usage: audio-panel/);
+            assert.match(result.stdout, /bluetoothPower/);
+        }
+    }
+
+    await t.test('installed wrapper validates command arity and help', () => {
+        checkUsage(args => invoke(launcherPath, args));
+    });
+
+    const manifestPath = join(dirname(realpathSync(launcherPath)), '..', 'share', 'audio-panel', 'launcher.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    assert.equal(manifest.name, 'audio-panel');
+    assert.match(manifest.bundle, /^\/nix\/store\/[a-z0-9]{32}-[^/]+(?:\/|$)/, 'the prebuilt bundle must be immutable');
+    assert.ok(statSync(manifest.bundle).isFile());
+    assert.match(manifest.forced_environment.AUDIO_PANEL_CONFIG,
+        /^\/nix\/store\/[^/]+\/(?:scripts\/)?audio-control\/astal\/frontend\.js$/,
+        'the entry must come from the packaged source, never the checkout or XDG config');
+    for (const key of ['AUDIO_PANEL_PALETTE', 'AUDIO_CONTROL_HELPER', 'PANEL_CSS_FILE']) {
+        assert.equal(typeof manifest.environment[key], 'string', `${key} must have a manifest default`);
+        assert.notEqual(manifest.environment[key], '');
+    }
+    const keys = [...new Set([...Object.keys(manifest.environment), ...Object.keys(manifest.forced_environment), 'XDG_RUNTIME_DIR'])];
+    const fixtureManifest = { ...manifest, ags: join(root, 'ags'), gjs: join(root, 'panel-gjs') };
+    // Read the real prebuilt JavaScript without importing GTK or Astal.
+    for (const [program, fake] of [['ags', fixtureManifest.ags], ['panel-gjs', fixtureManifest.gjs]]) {
         writeFileSync(fake, `#!${process.execPath}\n`
             + 'const fs = require("node:fs");\n'
             + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
             + 'const argv = process.argv.slice(2);\n'
             + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
-            + 'if (program === "ags" && argv[0] === "bundle") {\n'
-            + '  console.log(JSON.stringify(data));\n'
-            + '  if (process.env.PANEL_TEST_BUNDLE_STATUS) {\n'
-            + '    console.error("fixture compiler failed");\n'
-            + '    process.exit(Number(process.env.PANEL_TEST_BUNDLE_STATUS));\n'
-            + '  }\n'
-            + '  fs.writeFileSync(argv.at(-1), JSON.stringify({config: argv.at(-2)}));\n'
-            + '} else {\n'
-            + '  if (program === "panel-gjs") data.bundle = JSON.parse(fs.readFileSync(argv.at(-1), "utf8"));\n'
-            + '  console.log(JSON.stringify(data));\n'
+            + 'if (program === "panel-gjs") {\n'
+            + '  data.bundle = argv.at(-1);\n'
+            + '  fs.readFileSync(data.bundle);\n'
+            + '}\n'
+            + 'console.log(JSON.stringify(data));\n'
+            + 'if (program === "ags" && argv[0] !== "request") {\n'
+            + '  console.error("AGS may only request: runtime bundling and AGS run are forbidden");\n'
+            + '  process.exit(41);\n'
             + '}\n');
         chmodSync(fake, 0o700);
-        fakes.set(path, fake);
     }
-    const launcher = join(root, 'audio-panel');
-    writeFileSync(launcher, source.replaceAll(gjs, () => fakes.get(gjs)).replaceAll(ags, () => fakes.get(ags)));
-    chmodSync(launcher, 0o700);
+    const configPath = join(root, 'launcher fixture.json');
+    writeFileSync(configPath, JSON.stringify(fixtureManifest));
     const env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config with spaces'),
         XDG_RUNTIME_DIR: join(root, 'runtime with spaces') };
+    for (const key of keys.filter(key => key !== 'XDG_RUNTIME_DIR')) delete env[key];
     mkdirSync(env.XDG_RUNTIME_DIR, { mode: 0o700 });
     const sharedBundle = join(env.XDG_RUNTIME_DIR, 'ags.js');
     writeFileSync(sharedBundle, 'another panel owns this shared-path sentinel');
-    for (const key of [...keys.filter(key => key !== 'XDG_RUNTIME_DIR'), 'PANEL_TEST_BUNDLE_STATUS']) delete env[key];
+
+    function runtimeState(path) {
+        const stat = statSync(path);
+        return { mode: stat.mode, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
+            content: stat.isDirectory()
+                ? readdirSync(path).sort().map(name => [name, runtimeState(join(path, name))])
+                : readFileSync(path, 'utf8') };
+    }
 
     function run(args, overrides = {}) {
-        const result = spawnSync(launcher, args, { env: { ...env, ...overrides }, encoding: 'utf8',
-            timeout: 5000, maxBuffer: 1024 * 1024 });
-        assert.ifError(result.error);
-        assert.equal(result.signal, null);
+        const childEnv = { ...env, ...overrides };
+        const runtimeDir = childEnv.XDG_RUNTIME_DIR;
+        const before = runtimeDir ? runtimeState(runtimeDir) : null;
+        const result = invoke(panelLauncherPath, ['--config', configPath, ...args], childEnv);
+        if (runtimeDir) assert.deepEqual(runtimeState(runtimeDir), before, 'the launcher must not write runtime files');
         return result;
     }
 
@@ -4659,65 +4729,48 @@ test('built audio launcher', {
         return result.stdout.trim().split('\n').map(line => JSON.parse(line));
     }
 
-    function request(args) {
-        const records = success(args);
+    function request(args, overrides = {}) {
+        const records = success(args, overrides);
         assert.equal(records.length, 1, 'requests must not compile or start GJS');
         const [data] = records;
         assert.equal(data.program, 'ags');
-        assert.equal(data.env.XDG_RUNTIME_DIR, env.XDG_RUNTIME_DIR, 'IPC uses the original runtime directory');
+        assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'audio-panel', '--']);
+        assert.equal(data.argv.length, 5);
+        assert.equal(data.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
+            'IPC uses the original runtime directory');
+        assert.equal(data.env.AUDIO_PANEL_CONFIG, manifest.forced_environment.AUDIO_PANEL_CONFIG);
         return data;
     }
 
     function launch(overrides = {}) {
         const records = success(['run'], overrides);
-        assert.equal(records.length, 2, 'compile once, then start GJS once');
-        const [compiler, runtime] = records;
-        assert.equal(compiler.program, 'ags');
+        assert.equal(records.length, 1, 'start GJS exactly once without invoking AGS');
+        const [runtime] = records;
         assert.equal(runtime.program, 'panel-gjs');
-        const runtimeDir = overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR;
-        const config = compiler.env.AUDIO_PANEL_CONFIG;
-        assert.match(config, /^\/nix\/store\/[^/]+\/(?:scripts\/)?audio-control\/astal\/frontend\.js$/,
-            'the entry must come from the packaged source, never the checkout or XDG config');
-        const bundle = join(runtimeDir, 'ags-panels', 'audio-panel.js');
-        assert.deepEqual(compiler.argv, ['bundle', '--gtk', '4', '--', config, bundle]);
-        assert.deepEqual(runtime.argv, ['-m', bundle]);
-        assert.deepEqual(runtime.bundle, { config }, 'GJS reads the output of this compilation');
-        assert.equal(statSync(join(runtimeDir, 'ags-panels')).mode & 0o777, 0o700);
-        for (const data of records) {
-            assert.equal(data.env.XDG_RUNTIME_DIR, runtimeDir, 'bundling must not change the IPC namespace');
-            assert.equal(data.env.AUDIO_PANEL_CONFIG, config);
-        }
+        assert.deepEqual(runtime.argv, ['-m', manifest.bundle]);
+        assert.equal(runtime.bundle, manifest.bundle, 'GJS reads only the installed immutable bundle');
+        assert.equal(runtime.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
+            'the native socket namespace must not change');
+        assert.equal(runtime.env.AUDIO_PANEL_CONFIG, manifest.forced_environment.AUDIO_PANEL_CONFIG);
         assert.equal(readFileSync(sharedBundle, 'utf8'), 'another panel owns this shared-path sentinel');
-        return { compiler, runtime };
+        return runtime;
     }
 
     await t.test('validates command arity and help without invoking AGS or GJS', () => {
-        for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'],
-            ['bluetoothPower', 'extra'], ['toggle', 'DP-1', 'extra'], ['--help', 'extra'], ['-h', 'extra']]) {
-            const result = run(args);
-            assert.equal(result.status, 2, JSON.stringify(args));
-            assert.match(result.stderr, /Usage:/);
-            assert.equal(result.stdout, '');
-        }
-        for (const command of ['--help', '-h']) {
-            const result = run([command]);
-            assert.equal(result.status, 0);
-            assert.match(result.stdout, /Usage:/);
-        }
+        checkUsage(run);
     });
 
     await t.test('targets the audio instance with typed JSON requests', () => {
         for (const command of ['status', 'close', 'bluetoothPower', 'toggle']) {
             const data = request([command]);
-            assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'audio-panel', '--']);
-            assert.equal(data.argv.length, 5);
             assert.deepEqual(JSON.parse(data.argv[4]), { command });
         }
     });
 
     await t.test('escapes monitor arguments without interpreting shell syntax', () => {
         const marker = join(root, 'monitor-was-evaluated');
-        for (const monitor of ['', 'eDP-1', 'Display with spaces', `DP-'"; touch ${marker}; $(touch ${marker}); 🎧`]) {
+        for (const monitor of ['', 'eDP-1', 'Display with spaces', 'Display "quoted" \\ with\nnewlines\tand tabs',
+            `DP-'"; touch ${marker}; $(touch ${marker}); 🎧`]) {
             const data = request(['toggle', monitor]);
             assert.deepEqual(JSON.parse(data.argv[4]), { command: 'toggle', ...(monitor ? { monitor } : {}) });
         }
@@ -4725,13 +4778,23 @@ test('built audio launcher', {
         assert.equal(existsSync(join(env.XDG_RUNTIME_DIR, 'ags-panels')), false, 'requests do not create bundles');
     });
 
-    await t.test('bundles GTK4 to the audio-specific file before executing GJS with store-backed defaults', () => {
-        const { compiler, runtime } = launch();
-        for (const data of [compiler, runtime]) {
-            assert.match(data.env.AUDIO_PANEL_PALETTE, /^\/nix\/store\//);
-            assert.match(data.env.AUDIO_CONTROL_HELPER, /\/bin\/audio-control$/);
-            assert.match(data.env.PANEL_CSS_FILE, /\/scripts\/audio-control\/astal\/style\.css$/);
-            assert.doesNotMatch(data.env.PANEL_CSS_FILE, /^\/nix\/store\//);
+    await t.test('runs the prebuilt bundle with store-backed defaults and live CSS', () => {
+        const runtime = launch();
+        assert.deepEqual(runtime.env, { ...manifest.environment, ...manifest.forced_environment,
+            XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
+        assert.match(runtime.env.AUDIO_PANEL_PALETTE, /^\/nix\/store\//);
+        assert.match(runtime.env.AUDIO_CONTROL_HELPER, /\/bin\/audio-control$/);
+        assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/audio-control\/astal\/style\.css$/);
+        assert.doesNotMatch(runtime.env.PANEL_CSS_FILE, /^\/nix\/store\//);
+    });
+
+    await t.test('missing and empty environment variables use manifest defaults for runs and requests', () => {
+        const empty = Object.fromEntries(Object.keys(manifest.environment).map(key => [key, '']));
+        for (const overrides of [{}, { ...empty, AUDIO_PANEL_CONFIG: '' }]) {
+            for (const data of [launch(overrides), request(['status'], overrides)]) {
+                assert.deepEqual(data.env, { ...manifest.environment, ...manifest.forced_environment,
+                    XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
+            }
         }
     });
 
@@ -4742,29 +4805,30 @@ test('built audio launcher', {
             PANEL_CSS_FILE: join(root, 'custom style with spaces.css'),
             XDG_RUNTIME_DIR: join(root, 'isolated runtime $HOME with spaces') };
         mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
-        const { compiler, runtime } = launch(overrides);
-        for (const data of [compiler, runtime]) {
+        for (const data of [launch(overrides), request(['status'], overrides)]) {
             assert.notEqual(data.env.AUDIO_PANEL_CONFIG, overrides.AUDIO_PANEL_CONFIG);
-            assert.deepEqual(data.env, { ...overrides, AUDIO_PANEL_CONFIG: compiler.env.AUDIO_PANEL_CONFIG });
+            assert.deepEqual(data.env, { ...manifest.environment, ...overrides, ...manifest.forced_environment });
         }
         assert.equal(existsSync(marker), false);
         assert.equal(existsSync(join(overrides.XDG_RUNTIME_DIR, 'ags.js')), false);
     });
 
-    await t.test('compiler failure cannot execute GJS, even when a stale audio bundle exists', () => {
-        const runtimeDir = join(root, 'failed compilation runtime');
+    await t.test('ignores stale runtime bundles without compiling or writing runtime files', () => {
+        const runtimeDir = join(root, 'stale bundle runtime');
         const bundleDir = join(runtimeDir, 'ags-panels');
         mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
-        const bundle = join(bundleDir, 'audio-panel.js');
-        writeFileSync(bundle, JSON.stringify({ config: 'stale frontend.js' }));
-        const result = run(['run'], { XDG_RUNTIME_DIR: runtimeDir, PANEL_TEST_BUNDLE_STATUS: '41' });
-        assert.equal(result.status, 41, result.stderr);
-        assert.match(result.stderr, /fixture compiler failed/);
-        const records = result.stdout.trim().split('\n').map(line => JSON.parse(line));
-        assert.equal(records.length, 1, 'a stale bundle is never executed after compilation fails');
-        assert.equal(records[0].program, 'ags');
-        assert.equal(records[0].argv[0], 'bundle');
-        assert.equal(records[0].env.XDG_RUNTIME_DIR, runtimeDir);
+        writeFileSync(join(bundleDir, 'audio-panel.js'), 'throw new Error("stale runtime bundle was executed");\n');
+        writeFileSync(join(runtimeDir, 'ags.js'), 'another panel owns this stale shared bundle');
+        launch({ XDG_RUNTIME_DIR: runtimeDir });
+    });
+
+    await t.test('a missing or empty runtime directory fails before any AGS or GJS invocation', () => {
+        for (const XDG_RUNTIME_DIR of [undefined, '']) {
+            const result = run(['run'], { XDG_RUNTIME_DIR });
+            assert.notEqual(result.status, 0);
+            assert.match(result.stderr, /XDG_RUNTIME_DIR/);
+            assert.equal(result.stdout, '');
+        }
     });
 });
 }

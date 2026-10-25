@@ -1,6 +1,6 @@
 window.clipboard-panel {
     background: transparent;
-    color: @cp_cyan;
+    color: var(--cp_cyan);
     font-family: "Noto Sans", sans-serif;
     font-size: 12px;
 }
@@ -9,13 +9,13 @@ window.clipboard-panel {
 .clipboard-panel .clipboard-content { padding: 16px; }
 .clipboard-panel label { background: transparent; }
 
-.clipboard-panel .failure { color: @cp_red; font-size: 12px; }
-.clipboard-panel .empty { color: @cp_separator; padding: 16px; }
+.clipboard-panel .failure { color: var(--cp_red); font-size: 12px; }
+.clipboard-panel .empty { color: var(--cp_separator); padding: 16px; }
 .clipboard-panel button {
     background: transparent;
     background-image: none;
-    color: @cp_cyan;
-    border: 0.35px solid alpha(@cp_foreground, 0.5);
+    color: var(--cp_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--cp_foreground) 50%, transparent);
     border-radius: 3px;
     min-width: 0;
     min-height: 0;
@@ -26,83 +26,83 @@ window.clipboard-panel {
 }
 .clipboard-panel button:hover,
 .clipboard-panel button:focus-visible {
-    background: alpha(@cp_pink, 0.333);
-    border-color: @cp_yellow;
+    background: color-mix(in srgb, var(--cp_pink) 33.3%, transparent);
+    border-color: var(--cp_yellow);
 }
-.clipboard-panel button:active { background: @cp_dimPink; border-color: @cp_yellow; }
-.clipboard-panel button:disabled { color: @cp_separator; border-color: alpha(@cp_foreground, 0.2); }
+.clipboard-panel button:active { background: var(--cp_dimPink); border-color: var(--cp_yellow); }
+.clipboard-panel button:disabled { color: var(--cp_separator); border-color: color-mix(in srgb, var(--cp_foreground) 20%, transparent); }
 
 .clipboard-panel .clipboard-page-body {
     padding: 8px;
-    border: 1px solid @cp_cyan;
+    border: 1px solid var(--cp_cyan);
     border-top: none;
     border-radius: 0 0 3px 3px;
 }
 
 /* Audio-panel tab styling, with the cyan page baseline on inactive tabs. */
 .clipboard-panel button.tab {
-    border: 1px solid alpha(@cp_pink, 0.7);
-    border-bottom-color: @cp_cyan;
+    border: 1px solid color-mix(in srgb, var(--cp_pink) 70%, transparent);
+    border-bottom-color: var(--cp_cyan);
     border-radius: 3px 3px 0 0;
     min-height: 38px;
     padding: 0;
-    color: @cp_pink;
+    color: var(--cp_pink);
 }
 .clipboard-panel button.tab label { color: inherit; font-size: 13px; font-weight: bold; letter-spacing: 1px; }
 .clipboard-panel button.tab.selected {
-    border-color: @cp_cyan;
+    border-color: var(--cp_cyan);
     border-width: 1.5px;
     border-bottom-color: transparent;
     border-bottom-width: 1px;
     min-height: 37px;
-    background: alpha(@cp_cyan, 0.08);
-    color: @cp_cyan;
+    background: color-mix(in srgb, var(--cp_cyan) 8%, transparent);
+    color: var(--cp_cyan);
 }
 .clipboard-panel button.tab:hover,
 .clipboard-panel button.tab:focus-visible {
-    border-color: @cp_pink;
+    border-color: var(--cp_pink);
     border-width: 1px;
-    border-bottom-color: @cp_cyan;
+    border-bottom-color: var(--cp_cyan);
     min-height: 38px;
-    background: alpha(@cp_pink, 0.1);
+    background: color-mix(in srgb, var(--cp_pink) 10%, transparent);
 }
 .clipboard-panel button.tab.selected:hover,
 .clipboard-panel button.tab.selected:focus-visible {
-    border-color: @cp_cyan;
+    border-color: var(--cp_cyan);
     border-width: 1.5px;
     border-bottom-color: transparent;
     border-bottom-width: 1px;
     min-height: 37px;
-    background: alpha(@cp_cyan, 0.08);
+    background: color-mix(in srgb, var(--cp_cyan) 8%, transparent);
 }
 .clipboard-panel button.tab:active,
-.clipboard-panel button.tab.selected:active { background: alpha(@cp_cyan, 0.18); }
+.clipboard-panel button.tab.selected:active { background: color-mix(in srgb, var(--cp_cyan) 18%, transparent); }
 
 .clipboard-panel entry,
 .clipboard-panel .clipboard-search {
-    color: @cp_foreground;
-    background: @cp_secondaryBackground;
-    border: 1px solid alpha(@cp_separator, 0.5);
+    color: var(--cp_foreground);
+    background: var(--cp_secondaryBackground);
+    border: 1px solid color-mix(in srgb, var(--cp_separator) 50%, transparent);
     border-radius: 3px;
     min-height: 32px;
     box-shadow: none;
     outline: none;
 }
 .clipboard-panel .clipboard-search { background: transparent; }
-.clipboard-panel entry:focus-within { border-color: @cp_pink; }
+.clipboard-panel entry:focus-within { border-color: var(--cp_pink); }
 .clipboard-panel .clipboard-search:hover,
 .clipboard-panel .clipboard-search:focus-within,
 .clipboard-panel .clipboard-search:focus-visible {
-    border-color: alpha(@cp_separator, 0.5);
+    border-color: color-mix(in srgb, var(--cp_separator) 50%, transparent);
     box-shadow: none;
     outline: none;
 }
 .clipboard-panel .history,
 .clipboard-panel .editor { font-size: 15px; }
 .clipboard-panel .history { background: transparent; }
-.clipboard-panel .history row { min-height: 40px; padding: 0; border-radius: 3px; color: @cp_foreground; }
-.clipboard-panel .history row:hover { background: alpha(@cp_dimPink, 0.5); }
-.clipboard-panel .history row:selected { background: @cp_dimPink; color: @cp_cyan; }
+.clipboard-panel .history row { min-height: 40px; padding: 0; border-radius: 3px; color: var(--cp_foreground); }
+.clipboard-panel .history row:hover { background: color-mix(in srgb, var(--cp_dimPink) 50%, transparent); }
+.clipboard-panel .history row:selected { background: var(--cp_dimPink); color: var(--cp_cyan); }
 .clipboard-panel .history-item {
     min-height: 40px;
     padding: 0 8px;
@@ -110,14 +110,14 @@ window.clipboard-panel {
     border-radius: 3px;
 }
 .clipboard-panel .history-item.pinned {
-    border-left-color: @cp_red;
-    background: alpha(@cp_red, 0.06);
+    border-left-color: var(--cp_red);
+    background: color-mix(in srgb, var(--cp_red) 6%, transparent);
 }
 .clipboard-panel .history row:selected .history-item.pinned { background: transparent; }
 .clipboard-panel .pin-badge {
-    color: @cp_red;
-    background: alpha(@cp_red, 0.12);
-    border: 1px solid alpha(@cp_red, 0.55);
+    color: var(--cp_red);
+    background: color-mix(in srgb, var(--cp_red) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cp_red) 55%, transparent);
     border-radius: 3px;
     padding: 2px 5px;
     font-size: 9px;
@@ -130,31 +130,31 @@ window.clipboard-panel {
     padding: 0;
     border: none;
     border-radius: 3px;
-    color: @cp_separator;
+    color: var(--cp_separator);
 }
 .clipboard-panel button.row-action label { font-size: 14px; color: inherit; }
 .clipboard-panel button.row-action:hover,
 .clipboard-panel button.row-action:focus-visible {
-    color: @cp_cyan;
-    background: alpha(@cp_cyan, 0.12);
+    color: var(--cp_cyan);
+    background: color-mix(in srgb, var(--cp_cyan) 12%, transparent);
 }
 .clipboard-panel button.row-pin.pinned {
-    color: @cp_red;
-    background: alpha(@cp_red, 0.12);
+    color: var(--cp_red);
+    background: color-mix(in srgb, var(--cp_red) 12%, transparent);
 }
 .clipboard-panel button.row-delete:hover,
 .clipboard-panel button.row-delete:focus-visible {
-    color: @cp_red;
-    background: alpha(@cp_red, 0.16);
+    color: var(--cp_red);
+    background: color-mix(in srgb, var(--cp_red) 16%, transparent);
 }
 .clipboard-panel .editor,
-.clipboard-panel .editor text { background: @cp_secondaryBackground; color: @cp_foreground; caret-color: @cp_cyan; }
-.clipboard-panel .editor text selection { background: @cp_dimPink; color: @cp_foreground; }
-.clipboard-panel .image-preview { background: @cp_secondaryBackground; }
+.clipboard-panel .editor text { background: var(--cp_secondaryBackground); color: var(--cp_foreground); caret-color: var(--cp_cyan); }
+.clipboard-panel .editor text selection { background: var(--cp_dimPink); color: var(--cp_foreground); }
+.clipboard-panel .image-preview { background: var(--cp_secondaryBackground); }
 .clipboard-panel scrolledwindow { background: transparent; border: none; }
 .clipboard-panel scrollbar { background: transparent; }
 .clipboard-panel scrollbar slider {
-    background: alpha(@cp_pink, 0.5);
+    background: color-mix(in srgb, var(--cp_pink) 50%, transparent);
     min-width: 3px;
     border: none;
     border-radius: 2px;

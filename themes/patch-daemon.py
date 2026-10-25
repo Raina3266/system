@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Build the local Daemon 2.0 desktop, GTK and VS Code themes.
 
 ``desktop`` changes Dolphin-facing icons plus normal and interactive backgrounds.
@@ -17,7 +16,8 @@ import re
 import shutil
 import stat
 import xml.etree.ElementTree as ET
-
+from collections.abc import Iterable
+from typing import Any, cast
 
 SVG_NAMESPACES = {
     "": "http://www.w3.org/2000/svg",
@@ -153,7 +153,8 @@ def hex_rgb(value: str) -> tuple[int, int, int]:
     value = value.removeprefix("#")
     if len(value) != 6:
         raise ValueError(f"expected #RRGGBB colour, got {value!r}")
-    return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
+    red, green, blue = (int(value[index : index + 2], 16) for index in (0, 2, 4))
+    return red, green, blue
 
 
 def css_rgba(value: str, alpha: float) -> str:
@@ -164,10 +165,11 @@ def css_rgba(value: str, alpha: float) -> str:
 def blend(foreground: str, background: str, ratio: float) -> tuple[int, int, int]:
     front = hex_rgb(foreground)
     back = hex_rgb(background)
-    return tuple(
+    red, green, blue = (
         round(front[index] * ratio + back[index] * (1 - ratio))
         for index in range(3)
     )
+    return red, green, blue
 
 
 def gtk_named_palette(args: argparse.Namespace) -> dict[str, str]:
@@ -425,7 +427,9 @@ def recolour_gtk_png(path: pathlib.Path, args: argparse.Namespace) -> bool:
         if hasattr(image, "get_flattened_data")
         else image.getdata()
     )
-    pixels = list(pixel_data)
+    # RGBA conversion guarantees four integer channels, including the legacy
+    # ImagingCore path whose Pillow annotation does not expose iteration.
+    pixels = list(cast(Iterable[tuple[int, int, int, int]], pixel_data))
     targets = {
         "main": hex_rgb(args.main_background),
         "alternate": hex_rgb(args.alternate_background),
@@ -1258,7 +1262,7 @@ def strip_jsonc(text: str) -> str:
     return "".join(output)
 
 
-def load_jsonc(path: pathlib.Path) -> dict:
+def load_jsonc(path: pathlib.Path) -> dict[str, Any]:
     return json.loads(strip_jsonc(path.read_text()))
 
 

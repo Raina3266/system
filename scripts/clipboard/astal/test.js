@@ -1076,6 +1076,39 @@ async function unitTests() {
         assert.equal(visibleItems([entry], 'text', 'needle end').length, 1);
         assert.equal(entry.text, text);
     });
+    test('clipboard theme generates scoped CSS variables for every stylesheet color', async () => {
+        const { readFile } = await import('node:fs/promises');
+        const { runInNewContext } = await import('node:vm');
+        const source = await readFile(new URL('./frontend.js', import.meta.url), 'utf8');
+        const css = await readFile(new URL('./style.css', import.meta.url), 'utf8');
+        const palette = Object.fromEntries(['yellow', 'cyan', 'pink', 'red', 'separator',
+            'foreground', 'secondaryBackground', 'dimPink', 'extraColor']
+            .map((key, index) => [key, `#${(index + 1).toString(16).padStart(6, '0')}`]));
+        const input = { ...palette, 'bad-key': '#123456', notColor: 'transparent' };
+        const calls = [];
+        const theme = source.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
+        assert.ok(theme);
+        const loadTheme = runInNewContext(`${theme}\nloadTheme;`, {
+            read: () => JSON.stringify(input),
+            loadPanelStyle: options => calls.push(options),
+        });
+        const loaded = loadTheme('fixture/frontend.js', 'fixture/palette.json');
+        assert.equal(JSON.stringify(loaded), JSON.stringify(input));
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].entry, 'fixture/frontend.js');
+        assert.equal(calls[0].label, 'Clipboard');
+        assert.equal(calls[0].definitions, '.clipboard-panel {\n' + Object.entries(palette)
+            .map(([key, value]) => `    --cp_${key}: ${value};`).join('\n') + '\n}');
+        assert.doesNotMatch(source, /@define-color/);
+        assert.doesNotMatch(css, /@cp_|\balpha\(|#[a-f\d]{3,8}\b/i);
+        assert.match(css, /color-mix\(in srgb, var\(--cp_pink\) 33\.3%, transparent\)/);
+        const references = [...css.matchAll(/var\(--cp_([a-zA-Z]+)\)/g)];
+        assert.ok(references.length > 0);
+        for (const [, key] of references) assert.ok(Object.hasOwn(palette, key), key);
+        input.cyan = 'transparent';
+        assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/palette.json'), /Invalid clipboard palette: cyan/);
+        assert.equal(calls.length, 1, 'invalid palettes never reach the stylesheet loader');
+    });
     rowActionTests(test, assert, ClipboardModel);
     await backendTests(test, assert);
 }

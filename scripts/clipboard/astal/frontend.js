@@ -8,7 +8,7 @@ import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { ClipboardBackend } from './backend.js';
 import { ClipboardModel, TABS, editable, localFilePath, title } from './logic.js';
-import { loadPanelStyle } from '../../panels/style.js';
+import { loadPanelStyle } from '../../live-style.js';
 
 const PANEL_WIDTH = 450;
 
@@ -22,9 +22,9 @@ export function loadTheme(entry, palettePath) {
     const palette = JSON.parse(read(palettePath));
     for (const key of ['yellow', 'cyan', 'pink', 'red', 'separator', 'foreground', 'secondaryBackground', 'dimPink'])
         if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid clipboard palette: ${key}`);
-    const definitions = Object.entries(palette)
+    const definitions = '.clipboard-panel {\n' + Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `@define-color cp_${key} ${value};`).join('\n');
+        .map(([key, value]) => `    --cp_${key}: ${value};`).join('\n') + '\n}';
     loadPanelStyle({ entry, definitions, label: 'Clipboard' });
     return palette;
 }

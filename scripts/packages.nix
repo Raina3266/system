@@ -12,7 +12,8 @@ let
   # Read from [workspace].members rather than repeated here: a member missing
   # from this list builds itself fine and breaks every other crate, because
   # cargo will not load a workspace whose members are absent from disk.
-  workspaceMembers = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.members;
+  workspace = (lib.importTOML ./Cargo.toml).workspace;
+  workspaceMembers = workspace.members;
 
   # One build environment for the dependency artifact and every crate reusing
   # it. Cargo only reuses a compiled dependency when the environment matches,
@@ -29,17 +30,22 @@ let
     buildInputs = [ pkgs.dbus ];
   };
 
+  mkCargoArtifacts =
+    pname: extra:
+    craneLib.buildDepsOnly (
+      commonArgs
+      // {
+        inherit pname;
+        version = workspace.package.version;
+        src = craneLib.cleanCargoSource ./.;
+      }
+      // extra
+    );
+
   # Every member's dependencies, compiled once. Crane stubs the crates' own
   # sources first, so editing any .rs leaves this alone; only a dependency or
   # Cargo.lock change rebuilds it. doCheck is on so dev-deps land here too.
-  cargoArtifacts = craneLib.buildDepsOnly (
-    commonArgs
-    // {
-      pname = "desktop-scripts";
-      version = "0.1.0";
-      src = craneLib.cleanCargoSource ./.;
-    }
-  );
+  cargoArtifacts = mkCargoArtifacts "desktop-scripts" { };
 
   # Each member's source includes every workspace manifest but only that
   # member's Cargo sources, so unrelated source edits do not rebuild it.
@@ -72,7 +78,7 @@ let
       cargoPackage = extra.cargoPackage or pname;
       mainProgram = extra.mainProgram or pname;
       workspaceMember = extra.workspaceMember or pname;
-      packageExtra = builtins.removeAttrs extra [
+      packageExtra = removeAttrs extra [
         "cargoPackage"
         "mainProgram"
         "workspaceMember"
@@ -84,7 +90,7 @@ let
       // {
         inherit pname;
         cargoArtifacts = extra.cargoArtifacts or cargoArtifacts;
-        version = "0.1.0";
+        version = workspace.package.version;
         src = memberSrc workspaceMember;
         # Feeds both the build and the test phase, so tests stay scoped to the
         # one member as well.
@@ -100,6 +106,78 @@ let
         };
       }
     );
+
+  # Use AGS 2.3's generator revision and upstream lock, not npx's mutable
+  # dependency resolution. Only generator workspaces are needed from this repo.
+  tsForGir = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+    pname = "ts-for-gir";
+    version = "4.0.0-beta.19";
+    src = pkgs.fetchFromGitHub {
+      owner = "gjsify";
+      repo = "ts-for-gir";
+      rev = "f1b7e7f5d158ad4a36815d6620aaec28486a0304";
+      hash = "sha256-0yDAO1EC32TN+9rFiTHlw1jNV08m0Uiaq8DHD8Wh7v8=";
+    };
+
+    # Yarn omits checksums for optional platform dependencies. Keep the
+    # supplemental metadata content-addressed without adding a checkout file.
+    missingHashes = pkgs.runCommand "ts-for-gir-missing-hashes.json" {
+      nativeBuildInputs = [ pkgs.yarn-berry.yarn-berry-fetcher ];
+      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+      outputHashMode = "flat";
+      outputHashAlgo = "sha256";
+      outputHash = "sha256-6kswIcTpVh9l4W+u7jxPtSSjuJVnNwgIrtl4CpbRAck=";
+    } ''
+      yarn-berry-fetcher missing-hashes ${finalAttrs.src}/yarn.lock > "$out"
+    '';
+    offlineCache = pkgs.yarn-berry.fetchYarnBerryDeps {
+      inherit (finalAttrs) src missingHashes;
+      hash = "sha256-GY09M2yc9ONAc+cri0QnALosh8nBTOJ3tmHRuoS1HuY=";
+    };
+
+    nativeBuildInputs = [ pkgs.nodejs pkgs.makeWrapper ];
+    YARN_NODE_LINKER = "node-modules";
+    YARN_ENABLE_SCRIPTS = "false";
+    YARN_ENABLE_NETWORK = "false";
+    YARN_ENABLE_TELEMETRY = "false";
+    YARN_ENABLE_GLOBAL_CACHE = "false";
+    # Prune the example/type workspaces while retaining all locked versions.
+    YARN_ENABLE_IMMUTABLE_INSTALLS = "false";
+    postPatch = ''
+      node --input-type=commonjs -e '
+        const fs = require("node:fs");
+        const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+        pkg.workspaces = ["packages/*"];
+        fs.writeFileSync("package.json", JSON.stringify(pkg));
+      '
+    '';
+    # The source vendors Yarn 4.5.1; newer Nixpkgs Yarn hooks reject its v8 lock.
+    configurePhase = ''
+      runHook preConfigure
+      export HOME="$TMPDIR"
+      cp -R ${finalAttrs.offlineCache}/cache .yarn/cache
+      chmod -R u+w .yarn/cache
+      node .yarn/releases/yarn-4.5.1.cjs install --mode=skip-build
+      patchShebangs node_modules
+      runHook postConfigure
+    '';
+    buildPhase = ''
+      runHook preBuild
+      for package in parser lib generator-base generator-typescript generator-html-doc cli; do
+        node node_modules/typescript/bin/tsc -p "packages/$package"
+      done
+      runHook postBuild
+    '';
+    installPhase = ''
+      runHook preInstall
+      mkdir -p "$out/lib/ts-for-gir" "$out/bin"
+      cp -R node_modules packages package.json "$out/lib/ts-for-gir/"
+      makeWrapper ${lib.getExe pkgs.nodejs} "$out/bin/ts-for-gir" \
+        --add-flags "$out/lib/ts-for-gir/packages/cli/lib/start.js"
+      runHook postInstall
+    '';
+    meta.mainProgram = "ts-for-gir";
+  });
 
   withParentDeath =
     pkgs.runCommandCC "with-parent-death"
@@ -150,34 +228,85 @@ rec {
       wrapProgram "$out/bin/clipboard-custom" \
         --set CLIPBOARD_WL_PASTE "${lib.getExe' pkgs.wl-clipboard "wl-paste"}"
     '';
-    cargoArtifacts = craneLib.buildDepsOnly (
-      commonArgs
-      // {
-        pname = "clipboard-custom-deps";
-        version = "0.1.0";
-        src = craneLib.cleanCargoSource ./.;
-        cargoExtraArgs = "--locked --package clipboard-custom";
-      }
-    );
+    cargoArtifacts = mkCargoArtifacts "clipboard-custom-deps" {
+      cargoExtraArgs = "--locked --package clipboard-custom";
+    };
+  };
+
+  panelLauncher = mkWorkspacePackage "panel-launcher" {
+    cargoArtifacts = mkCargoArtifacts "panel-launcher-deps" {
+      cargoExtraArgs = "--locked --package panel-launcher";
+    };
   };
 
   inherit (panels {
-    inherit pkgs repoRoot audioControl mediaControl networkManager clipboardCustom;
+    inherit pkgs repoRoot panelLauncher audioControl mediaControl networkManager clipboardCustom;
   }) clipboardPanel audioPanel mediaPanel networkPanel dashboardPanel appLauncher;
+
+  dashboardTypeEnvironment =
+    let
+      # Match AGS's GIR search path, including propagated dev outputs. Avoid
+      # GTK3 roots even though the runtime wrapper supports both GTK versions.
+      depsOf = pkg: [ (pkg.dev or pkg) ] ++ map depsOf (pkg.propagatedBuildInputs or [ ]);
+      girDirs = pkgs.symlinkJoin {
+        name = "gir-dirs";
+        paths = lib.flatten (map depsOf dashboardPanel.ags.buildInputs);
+      };
+      modules = [
+        "GLib-2.0" "Gio-2.0" "GObject-2.0" "Gtk-4.0" "Gdk-4.0"
+        "Astal-4.0" "AstalIO-0.1" "AstalBattery-0.1" "AstalPowerProfiles-0.1"
+        "AstalNetwork-0.1" "AstalBluetooth-0.1" "AstalNotifd-0.1"
+        "Gtk4LayerShell-1.0" "Pango-1.0" "cairo-1.0"
+      ];
+      nodeTypes = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/@types/node/-/node-24.0.0.tgz";
+        hash = "sha256-Jf0KcgqaKYySA9NasX0HFOP5Zc3lq7Cp6OBheofolZY=";
+      };
+      undiciTypes = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/undici-types/-/undici-types-7.8.0.tgz";
+        hash = "sha256-lkv9/F7dwcBQcdlc7Tsd6VJtCgaHlFEhTorC1x8ubYo=";
+      };
+    in
+    pkgs.runCommand "dashboard-type-environment" {
+      nativeBuildInputs = [ tsForGir ];
+      passthru = {
+        generator = tsForGir;
+        typescript = pkgs.typescript_5;
+        inherit girDirs modules;
+      };
+    } ''
+      mkdir -p "$out/node_modules/@types/node" "$out/node_modules/undici-types"
+      # Copy, rather than symlink, so realpath-based dependency resolution finds
+      # undici-types beside @types/node inside the same store environment.
+      tar -xf ${nodeTypes} --strip-components=1 -C "$out/node_modules/@types/node"
+      tar -xf ${undiciTypes} --strip-components=1 -C "$out/node_modules/undici-types"
+      ts-for-gir generate ${lib.escapeShellArgs modules} \
+        -g ${girDirs}/share/gir-1.0 \
+        --outdir "$out/node_modules/@types/dashboard-gi"
+      # This inferred project also loads Node types. Keep GJS's optional DOM
+      # globals and bare console module available, but do not auto-load their
+      # incompatible duplicates of Node/browser globals in the shared entry.
+      substituteInPlace "$out/node_modules/@types/dashboard-gi/index.d.ts" \
+        --replace-fail "import './dom.d.ts';" "" \
+        --replace-fail "import './console.d.ts';" ""
+      # GJS supplies its Cairo wrapper to GTK draw callbacks, not the opaque
+      # GIR cairo.Context emitted by this generator revision.
+      substituteInPlace "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts" \
+        --replace-fail "import type cairo from 'gi://cairo?version=1.0';" \
+          "import type cairo from 'gi://cairo?version=1.0'; import type GjsCairo from 'cairo';" \
+        --replace-fail "(drawing_area: DrawingArea, cr: cairo.Context, width: number, height: number): void;" \
+          "(drawing_area: DrawingArea, cr: GjsCairo.Context, width: number, height: number): void;"
+      test -s "$out/node_modules/@types/dashboard-gi/index.d.ts"
+      test -s "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts"
+    '';
 
   networkManager = mkWorkspacePackage "network-manager" {
     workspaceMember = "network-manager/rust-custom";
     # Build only this small JSON/QR helper's dependency graph, not the full
     # desktop workspace's D-Bus dependencies.
-    cargoArtifacts = craneLib.buildDepsOnly (
-      commonArgs
-      // {
-        pname = "network-manager-deps";
-        version = "0.1.0";
-        src = craneLib.cleanCargoSource ./.;
-        cargoExtraArgs = "--locked --package network-manager";
-      }
-    );
+    cargoArtifacts = mkCargoArtifacts "network-manager-deps" {
+      cargoExtraArgs = "--locked --package network-manager";
+    };
     postInstall = ''
       wrapProgram "$out/bin/network-manager" \
         --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"

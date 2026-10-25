@@ -5,6 +5,7 @@ members = [
   "media-control/rust-custom",
   "network-manager/rust-custom",
   "ocr-screenshot",
+  "panel-launcher",
 
   "waybar-timer",
   "webcam-crop",

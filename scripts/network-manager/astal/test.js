@@ -1683,9 +1683,6 @@ async function nodeLauncherTests() {
 
     const root = new URL('../../../', import.meta.url);
     const read = path => readFileSync(new URL(path, root), 'utf8');
-    // Exercise the shared launcher with evaluated package specs, not one regex
-    // copy per obsolete panel Nix file. This also covers app-launcher/clipboard.
-    await import('../../panels/test.js');
 
     test('Niri imports the exported panel Home Manager module', () => {
         const source = read('niri/default.nix');
@@ -1705,95 +1702,26 @@ async function nodeLauncherTests() {
 
 
     const launcherPath = process.env.NETWORK_PANEL_LAUNCHER;
+    const panelLauncherPath = process.env.PANEL_LAUNCHER;
 
     test('built network launcher', {
-        skip: launcherPath ? false : 'Set NETWORK_PANEL_LAUNCHER to the built network-panel executable.',
+        skip: launcherPath && panelLauncherPath ? false
+            : 'Set NETWORK_PANEL_LAUNCHER to the built network-panel wrapper and PANEL_LAUNCHER to the shared Rust executable; both are required.',
     }, async t => {
-        const source = readFileSync(launcherPath, 'utf8');
-        const calls = [...source.matchAll(/(?:^|\s)(\/[^\s"']+\/bin\/ags) (bundle|request|run)\b/g)];
-        const runtimes = new Set(calls.map(match => match[1]));
-        assert.equal(runtimes.size, 1, 'bundle and request must use the same explicit AGS package');
-        assert.deepEqual(calls.map(match => match[2]).sort(), ['bundle', 'request']);
-        const [ags] = runtimes;
-        const gjs = ags.replace(/\/ags$/, '/panel-gjs');
-        assert.ok(source.includes(`exec ${gjs} -m "$bundle"`));
-
+        const { readdirSync, realpathSync } = await import('node:fs');
+        const { dirname } = await import('node:path');
         const fixture = mkdtempSync(join(tmpdir(), 'network-launcher-'));
         t.after(() => rmSync(fixture, { recursive: true, force: true }));
-        const keys = ['NETWORK_PANEL_CONFIG', 'NETWORK_PANEL_PALETTE', 'NETWORK_CUSTOM_HELPER',
-            'DASHBOARD_PANEL', 'MEDIA_PANEL', 'PANEL_CSS_FILE', 'XDG_RUNTIME_DIR'];
-        const fakes = new Map();
-        // Neither executable imports GTK, Astal or NetworkManager. The fake compiler
-        // writes an identity marker so the fake GJS can verify which file it read.
-        for (const [program, path] of [['ags', ags], ['panel-gjs', gjs]]) {
-            const fake = join(fixture, program);
-            writeFileSync(fake, `#!${process.execPath}\n`
-                + 'const fs = require("node:fs");\n'
-                + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
-                + 'const argv = process.argv.slice(2);\n'
-                + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
-                + 'if (program === "ags" && argv[0] === "bundle") {\n'
-                + '  console.log(JSON.stringify(data));\n'
-                + '  if (process.env.PANEL_TEST_BUNDLE_STATUS) {\n'
-                + '    console.error("fixture compiler failed");\n'
-                + '    process.exit(Number(process.env.PANEL_TEST_BUNDLE_STATUS));\n'
-                + '  }\n'
-                + '  fs.writeFileSync(argv.at(-1), JSON.stringify({config: argv.at(-2)}));\n'
-                + '} else {\n'
-                + '  if (program === "panel-gjs") data.bundle = JSON.parse(fs.readFileSync(argv.at(-1), "utf8"));\n'
-                + '  console.log(JSON.stringify(data));\n'
-                + '}\n');
-            chmodSync(fake, 0o700);
-            fakes.set(path, fake);
-        }
-        const launcher = join(fixture, 'network-panel');
-        writeFileSync(launcher, source.replaceAll(gjs, () => fakes.get(gjs)).replaceAll(ags, () => fakes.get(ags)));
-        chmodSync(launcher, 0o700);
-        const env = { ...process.env, XDG_CONFIG_HOME: join(fixture, 'config with spaces'),
-            XDG_RUNTIME_DIR: join(fixture, 'runtime with spaces') };
-        for (const key of [...keys.filter(key => key !== 'XDG_RUNTIME_DIR'), 'PANEL_TEST_BUNDLE_STATUS']) delete env[key];
-        mkdirSync(env.XDG_RUNTIME_DIR, { mode: 0o700 });
-        const sharedBundle = join(env.XDG_RUNTIME_DIR, 'ags.js');
-        writeFileSync(sharedBundle, 'another panel owns this shared-path sentinel');
 
-        function run(args, overrides = {}) {
-            const result = spawnSync(launcher, args, { env: { ...env, ...overrides }, encoding: 'utf8',
+        function invoke(executable, args, env = process.env) {
+            const result = spawnSync(executable, args, { env, encoding: 'utf8',
                 timeout: 5000, maxBuffer: 1024 * 1024 });
             assert.ifError(result.error);
             assert.equal(result.signal, null);
             return result;
         }
 
-        function success(args, overrides) {
-            const result = run(args, overrides);
-            assert.equal(result.status, 0, result.stderr);
-            return result.stdout.trim().split('\n').map(line => JSON.parse(line));
-        }
-
-        function launch(overrides = {}) {
-            const records = success(['run'], overrides);
-            assert.equal(records.length, 2, 'compile once, then start GJS once');
-            const [compiler, runtime] = records;
-            assert.equal(compiler.program, 'ags');
-            assert.equal(runtime.program, 'panel-gjs');
-            const runtimeDir = overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR;
-            const config = compiler.env.NETWORK_PANEL_CONFIG;
-            assert.match(config, /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/astal\/frontend\.js$/,
-                'the entry must come from the packaged source, never the checkout or XDG config');
-            const bundle = join(runtimeDir, 'ags-panels', 'network-panel.js');
-            assert.deepEqual(compiler.argv, ['bundle', '--gtk', '4', '--', config, bundle]);
-            assert.deepEqual(runtime.argv, ['-m', bundle]);
-            assert.deepEqual(runtime.bundle, { config });
-            assert.equal(statSync(join(runtimeDir, 'ags-panels')).mode & 0o777, 0o700);
-            for (const data of records) {
-                assert.equal(data.env.XDG_RUNTIME_DIR, runtimeDir, 'the native socket namespace must not change');
-                assert.equal(data.env.NETWORK_PANEL_CONFIG, config);
-            }
-            assert.equal(readFileSync(sharedBundle, 'utf8'), 'another panel owns this shared-path sentinel');
-            return { compiler, runtime };
-        }
-
-        await t.test('validates commands and help without invoking the compiler or GJS', () => {
+        function checkUsage(run) {
             for (const args of [[], ['unknown'], ['run', 'extra'], ['status', 'extra'], ['close', 'extra'], ['toggleWifi', 'DP-1'], ['toggleWifi', ''],
                 ['toggle', 'DP-1', 'extra'], ['--help', 'extra'], ['-h', 'extra']]) {
                 const result = run(args);
@@ -1803,40 +1731,142 @@ async function nodeLauncherTests() {
             }
             for (const command of ['--help', '-h']) {
                 const result = run([command]);
-                assert.equal(result.status, 0);
+                assert.equal(result.status, 0, result.stderr);
                 assert.match(result.stdout, /^Usage: network-panel/);
                 assert.match(result.stdout, /toggleWifi/);
             }
-            assert.equal(existsSync(join(env.XDG_RUNTIME_DIR, 'ags-panels')), false);
+        }
+
+        await t.test('installed wrapper validates command arity and help', () => {
+            checkUsage(args => invoke(launcherPath, args));
+        });
+
+        const manifestPath = join(dirname(realpathSync(launcherPath)), '..', 'share', 'network-panel', 'launcher.json');
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+        assert.equal(manifest.name, 'network-panel');
+        assert.match(manifest.bundle, /^\/nix\/store\/[a-z0-9]{32}-[^/]+(?:\/|$)/, 'the prebuilt bundle must be immutable');
+        assert.ok(statSync(manifest.bundle).isFile());
+        assert.match(manifest.forced_environment.NETWORK_PANEL_CONFIG,
+            /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/astal\/frontend\.js$/,
+            'the entry must come from the packaged source, never the checkout or XDG config');
+        for (const key of ['NETWORK_PANEL_PALETTE', 'NETWORK_CUSTOM_HELPER', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) {
+            assert.equal(typeof manifest.environment[key], 'string', `${key} must have a manifest default`);
+            assert.notEqual(manifest.environment[key], '');
+        }
+        const keys = [...new Set([...Object.keys(manifest.environment), ...Object.keys(manifest.forced_environment), 'XDG_RUNTIME_DIR'])];
+        const fixtureManifest = { ...manifest, ags: join(fixture, 'ags'), gjs: join(fixture, 'panel-gjs') };
+        // Read the real prebuilt JavaScript without importing GTK, Astal or NetworkManager.
+        for (const [program, fake] of [['ags', fixtureManifest.ags], ['panel-gjs', fixtureManifest.gjs]]) {
+            writeFileSync(fake, `#!${process.execPath}\n`
+                + 'const fs = require("node:fs");\n'
+                + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
+                + 'const argv = process.argv.slice(2);\n'
+                + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
+                + 'if (program === "panel-gjs") {\n'
+                + '  data.bundle = argv.at(-1);\n'
+                + '  fs.readFileSync(data.bundle);\n'
+                + '}\n'
+                + 'console.log(JSON.stringify(data));\n'
+                + 'if (program === "ags" && argv[0] !== "request") {\n'
+                + '  console.error("AGS may only request: runtime bundling and AGS run are forbidden");\n'
+                + '  process.exit(41);\n'
+                + '}\n');
+            chmodSync(fake, 0o700);
+        }
+        const configPath = join(fixture, 'launcher fixture.json');
+        writeFileSync(configPath, JSON.stringify(fixtureManifest));
+        const env = { ...process.env, XDG_CONFIG_HOME: join(fixture, 'config with spaces'),
+            XDG_RUNTIME_DIR: join(fixture, 'runtime with spaces') };
+        for (const key of keys.filter(key => key !== 'XDG_RUNTIME_DIR')) delete env[key];
+        mkdirSync(env.XDG_RUNTIME_DIR, { mode: 0o700 });
+        const sharedBundle = join(env.XDG_RUNTIME_DIR, 'ags.js');
+        writeFileSync(sharedBundle, 'another panel owns this shared-path sentinel');
+
+        function runtimeState(path) {
+            const stat = statSync(path);
+            return { mode: stat.mode, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
+                content: stat.isDirectory()
+                    ? readdirSync(path).sort().map(name => [name, runtimeState(join(path, name))])
+                    : readFileSync(path, 'utf8') };
+        }
+
+        function run(args, overrides = {}) {
+            const childEnv = { ...env, ...overrides };
+            const runtimeDir = childEnv.XDG_RUNTIME_DIR;
+            const before = runtimeDir ? runtimeState(runtimeDir) : null;
+            const result = invoke(panelLauncherPath, ['--config', configPath, ...args], childEnv);
+            if (runtimeDir) assert.deepEqual(runtimeState(runtimeDir), before, 'the launcher must not write runtime files');
+            return result;
+        }
+
+        function success(args, overrides) {
+            const result = run(args, overrides);
+            assert.equal(result.status, 0, result.stderr);
+            return result.stdout.trim().split('\n').map(line => JSON.parse(line));
+        }
+
+        function request(args, overrides = {}) {
+            const records = success(args, overrides);
+            assert.equal(records.length, 1, 'requests neither compile nor launch GJS');
+            const [data] = records;
+            assert.equal(data.program, 'ags');
+            assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'network-panel', '--']);
+            assert.equal(data.argv.length, 5);
+            assert.equal(data.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
+                'IPC uses the original runtime directory');
+            assert.equal(data.env.NETWORK_PANEL_CONFIG, manifest.forced_environment.NETWORK_PANEL_CONFIG);
+            return data;
+        }
+
+        function launch(overrides = {}) {
+            const records = success(['run'], overrides);
+            assert.equal(records.length, 1, 'start GJS exactly once without invoking AGS');
+            const [runtime] = records;
+            assert.equal(runtime.program, 'panel-gjs');
+            assert.deepEqual(runtime.argv, ['-m', manifest.bundle]);
+            assert.equal(runtime.bundle, manifest.bundle, 'GJS reads only the installed immutable bundle');
+            assert.equal(runtime.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
+                'the native socket namespace must not change');
+            assert.equal(runtime.env.NETWORK_PANEL_CONFIG, manifest.forced_environment.NETWORK_PANEL_CONFIG);
+            assert.equal(readFileSync(sharedBundle, 'utf8'), 'another panel owns this shared-path sentinel');
+            return runtime;
+        }
+
+        await t.test('validates commands and help without invoking AGS or GJS', () => {
+            checkUsage(run);
         });
 
         await t.test('requests retain the network instance, JSON payload and original runtime directory', () => {
             const marker = join(fixture, 'monitor-was-evaluated');
             for (const args of [['status'], ['close'], ['toggleWifi'], ['toggle'], ['toggle', ''], ['toggle', 'eDP-1'],
-                ['toggle', 'Display with spaces'], ['toggle', `DP-'"; touch ${marker}; $(touch ${marker}); 🌐`]]) {
-                const records = success(args);
-                assert.equal(records.length, 1, 'requests neither compile nor launch GJS');
-                const [data] = records;
-                assert.equal(data.program, 'ags');
-                assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'network-panel', '--']);
-                assert.equal(data.argv.length, 5);
+                ['toggle', 'Display with spaces'], ['toggle', 'Display "quoted" \\ with\nnewlines\tand tabs'],
+                ['toggle', `DP-'"; touch ${marker}; $(touch ${marker}); 🌐`]]) {
+                const data = request(args);
                 assert.deepEqual(JSON.parse(data.argv[4]), { command: args[0], ...(args[1] ? { monitor: args[1] } : {}) });
-                assert.equal(data.env.XDG_RUNTIME_DIR, env.XDG_RUNTIME_DIR);
             }
             assert.equal(existsSync(marker), false);
             assert.equal(existsSync(join(env.XDG_RUNTIME_DIR, 'ags-panels')), false);
         });
 
-        await t.test('compiles the GTK4 frontend into the network-only bundle with store-backed defaults', () => {
-            const { compiler, runtime } = launch();
-            for (const data of [compiler, runtime]) {
-                assert.match(data.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
-                assert.match(data.env.NETWORK_CUSTOM_HELPER, /\/bin\/network-manager$/);
-                assert.match(data.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/astal\/style\.css$/);
-                assert.doesNotMatch(data.env.PANEL_CSS_FILE, /^\/nix\/store\//);
+        await t.test('runs the prebuilt bundle with store-backed defaults and live CSS', () => {
+            const runtime = launch();
+            assert.deepEqual(runtime.env, { ...manifest.environment, ...manifest.forced_environment,
+                XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
+            assert.match(runtime.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
+            assert.match(runtime.env.NETWORK_CUSTOM_HELPER, /\/bin\/network-manager$/);
+            assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/astal\/style\.css$/);
+            assert.doesNotMatch(runtime.env.PANEL_CSS_FILE, /^\/nix\/store\//);
+            assert.equal(runtime.env.DASHBOARD_PANEL, 'dashboard-panel');
+            assert.equal(runtime.env.MEDIA_PANEL, 'media-panel');
+        });
 
-                assert.equal(data.env.DASHBOARD_PANEL, 'dashboard-panel');
-                assert.equal(data.env.MEDIA_PANEL, 'media-panel');
+        await t.test('missing and empty environment variables use manifest defaults for runs and requests', () => {
+            const empty = Object.fromEntries(Object.keys(manifest.environment).map(key => [key, '']));
+            for (const overrides of [{}, { ...empty, NETWORK_PANEL_CONFIG: '' }]) {
+                for (const data of [launch(overrides), request(['status'], overrides)]) {
+                    assert.deepEqual(data.env, { ...manifest.environment, ...manifest.forced_environment,
+                        XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
+                }
             }
         });
 
@@ -1848,35 +1878,30 @@ async function nodeLauncherTests() {
                 DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
                 MEDIA_PANEL: join(fixture, 'custom media'), XDG_RUNTIME_DIR: join(fixture, 'isolated runtime $HOME with spaces') };
             mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
-            const { compiler, runtime } = launch(overrides);
-            for (const data of [compiler, runtime]) {
+            for (const data of [launch(overrides), request(['status'], overrides)]) {
                 assert.notEqual(data.env.NETWORK_PANEL_CONFIG, overrides.NETWORK_PANEL_CONFIG);
-                assert.deepEqual(data.env, { ...overrides, NETWORK_PANEL_CONFIG: compiler.env.NETWORK_PANEL_CONFIG });
+                assert.deepEqual(data.env, { ...manifest.environment, ...overrides, ...manifest.forced_environment });
             }
             assert.equal(existsSync(marker), false);
             assert.equal(existsSync(join(overrides.XDG_RUNTIME_DIR, 'ags.js')), false);
         });
 
-        await t.test('compiler failure never executes GJS or a stale network bundle', () => {
-            const runtimeDir = join(fixture, 'failed compilation runtime');
+        await t.test('ignores stale runtime bundles without compiling or writing runtime files', () => {
+            const runtimeDir = join(fixture, 'stale bundle runtime');
             const bundleDir = join(runtimeDir, 'ags-panels');
             mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
-            writeFileSync(join(bundleDir, 'network-panel.js'), JSON.stringify({ config: 'stale frontend.js' }));
-            const result = run(['run'], { XDG_RUNTIME_DIR: runtimeDir, PANEL_TEST_BUNDLE_STATUS: '41' });
-            assert.equal(result.status, 41, result.stderr);
-            assert.match(result.stderr, /fixture compiler failed/);
-            const records = result.stdout.trim().split('\n').map(line => JSON.parse(line));
-            assert.equal(records.length, 1, 'no GJS execution follows a failed compilation');
-            assert.equal(records[0].program, 'ags');
-            assert.equal(records[0].argv[0], 'bundle');
-            assert.equal(records[0].env.XDG_RUNTIME_DIR, runtimeDir);
+            writeFileSync(join(bundleDir, 'network-panel.js'), 'throw new Error("stale runtime bundle was executed");\n');
+            writeFileSync(join(runtimeDir, 'ags.js'), 'another panel owns this stale shared bundle');
+            launch({ XDG_RUNTIME_DIR: runtimeDir });
         });
 
-        await t.test('an unavailable runtime directory fails before any compiler or GJS invocation', () => {
-            const result = run(['run'], { XDG_RUNTIME_DIR: '' });
-            assert.notEqual(result.status, 0);
-            assert.match(result.stderr, /XDG_RUNTIME_DIR/);
-            assert.equal(result.stdout, '');
+        await t.test('a missing or empty runtime directory fails before any AGS or GJS invocation', () => {
+            for (const XDG_RUNTIME_DIR of [undefined, '']) {
+                const result = run(['run'], { XDG_RUNTIME_DIR });
+                assert.notEqual(result.status, 0);
+                assert.match(result.stderr, /XDG_RUNTIME_DIR/);
+                assert.equal(result.stdout, '');
+            }
         });
     });
 }

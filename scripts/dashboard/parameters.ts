@@ -82,7 +82,8 @@ type DiskOperation = { io: Gio.Cancellable; child: Gio.Subprocess; timeout: numb
 
 function readText(path: string, cancellable: Gio.Cancellable): Promise<string> {
     return new Promise((resolve, reject) => {
-        Gio.File.new_for_path(path).load_contents_async(cancellable, (file: Gio.File, result: Gio.AsyncResult) => {
+        const file = Gio.File.new_for_path(path);
+                file.load_contents_async(cancellable, (_file: Gio.File | null, result: Gio.AsyncResult) => {
             try {
                 const [ok, bytes] = file.load_contents_finish(result);
                 if (!ok) throw new Error(`Could not read ${path}`);
@@ -175,12 +176,12 @@ export class MetricsSampler {
                 return GLib.SOURCE_REMOVE;
             });
             // Waiting is never cancelled: force-exited children are still reaped.
-            const waited = new Promise<void>((resolve, reject) => child.wait_async(null, (process: Gio.Subprocess, result: Gio.AsyncResult) => {
-                try { process.wait_finish(result); resolve(); } catch (error) { reject(error); }
+            const waited = new Promise<void>((resolve, reject) => child.wait_async(null, (_process: Gio.Subprocess | null, result: Gio.AsyncResult) => {
+                try { child.wait_finish(result); resolve(); } catch (error) { reject(error); }
             }));
-            const output = new Promise<string>((resolve, reject) => child.communicate_utf8_async(null, operation!.io, (process: Gio.Subprocess, result: Gio.AsyncResult) => {
+            const output = new Promise<string>((resolve, reject) => child.communicate_utf8_async(null, operation!.io, (_process: Gio.Subprocess | null, result: Gio.AsyncResult) => {
                 try {
-                    const [ok, stdout] = process.communicate_utf8_finish(result);
+                    const [ok, stdout] = child.communicate_utf8_finish(result);
                     if (!ok) throw new Error('df communication failed');
                     resolve(stdout || '');
                 } catch (error) { reject(error); }

@@ -6,8 +6,9 @@ import Gdk from 'gi://Gdk?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import Gtk4LayerShell from 'gi://Gtk4LayerShell';
+import type Cairo from 'cairo';
 import type { DashboardBackend } from './power.ts';
-import { loadPanelStyle } from '../panels/style.js';
+import { loadPanelStyle } from '../live-style.js';
 
 export type NotificationRow = {
     id: string;
@@ -393,14 +394,14 @@ export function style(widget: Gtk.Widget, name: string, enabled: boolean): void 
 
 export function invoke(action: () => unknown): void {
     try {
-        void Promise.resolve(action()).catch(error => console.warn(`Dashboard action: ${error.message || error}`));
-    } catch (error) { console.warn(`Dashboard action: ${error.message || error}`); }
+        void Promise.resolve(action()).catch((error: unknown) => console.warn(`Dashboard action: ${String(error)}`));
+    } catch (error) { console.warn(`Dashboard action: ${String(error)}`); }
 }
 
 export function iconButton(glyph: string, tooltip: string | null, clicked: () => unknown, size = 28): Gtk.Button {
     const child = label(glyph, ['icon-glyph']);
     child.xalign = 0.5;
-    const widget = new Gtk.Button({ child, tooltip_text: tooltip, css_classes: ['icon-button'],
+    const widget = new Gtk.Button({ child, tooltip_text: tooltip ?? undefined, css_classes: ['icon-button'],
         width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
     widget.connect('clicked', () => invoke(clicked));
     return widget;
@@ -434,7 +435,7 @@ export class CutCornerFrame {
         this.widget = new Gtk.Overlay({ css_classes: ['cut-frame'], overflow: Gtk.Overflow.VISIBLE });
         if (width) this.widget.width_request = width + glow * 2;
         this.drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
-        this.drawing.set_draw_func((_area, cr, allocatedWidth, allocatedHeight) => {
+        this.drawing.set_draw_func((_area: Gtk.DrawingArea, cr: Cairo.Context, allocatedWidth: number, allocatedHeight: number) => {
             const x = glow + 0.5, y = glow + 0.5;
             const width = allocatedWidth - glow * 2 - 1, height = allocatedHeight - glow * 2 - 1;
             if (width <= 0 || height <= 0) return;
@@ -526,7 +527,7 @@ export class NotificationEntry {
         this.close.margin_end = 3;
         this.widget.add_overlay(this.close);
         const click = new Gtk.GestureClick({ button: Gdk.BUTTON_PRIMARY, propagation_phase: Gtk.PropagationPhase.BUBBLE });
-        click.connect('released', (_gesture, count, x, y) => {
+        click.connect('released', (_gesture: Gtk.GestureClick, count: number, x: number, y: number) => {
             if (count !== 1) return;
             // A click on a close/action button must never also invoke default.
             for (let target = this.widget.pick(x, y, Gtk.PickFlags.DEFAULT); target && target !== this.widget; target = target.get_parent()) {
@@ -536,7 +537,7 @@ export class NotificationEntry {
         });
         this.widget.add_controller(click);
         const keys = new Gtk.EventControllerKey();
-        keys.connect('key-pressed', (_controller, key) => {
+        keys.connect('key-pressed', (_controller: Gtk.EventControllerKey, key: number) => {
             if (!this.widget.has_focus || ![Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space].includes(key)) return false;
             this.activateDefault();
             return true;
@@ -577,7 +578,7 @@ export class NotificationEntry {
                 try { this.artwork.set_from_gicon(Gio.Icon.new_for_string(row.icon)); }
                 catch (error) {
                     this.artwork.visible = false;
-                    console.warn(`Dashboard notification icon: ${error.message || error}`);
+                    console.warn(`Dashboard notification icon: ${String(error)}`);
                 }
             }
         }

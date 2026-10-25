@@ -1,6 +1,6 @@
 window.audio-panel {
     background: transparent;
-    color: @ap_cyan;
+    color: var(--ap_cyan);
     font-family: "Noto Sans", sans-serif;
     font-size: 13px;
 }
@@ -16,14 +16,14 @@ window.audio-panel {
 .audio-panel .audio-content { padding: 11px; }
 .audio-panel label { background: transparent; }
 .audio-panel .audio-heading,
-.audio-panel .device-name { color: @ap_cyan; font-weight: bold; }
-.audio-panel .muted { color: @ap_separator; }
-.audio-panel .section-heading { color: @ap_pink; font-weight: bold; }
-.audio-panel .device-status { color: @ap_foreground; font-size: 11px; }
-.audio-panel .failure { color: @ap_red; }
+.audio-panel .device-name { color: var(--ap_cyan); font-weight: bold; }
+.audio-panel .muted { color: var(--ap_separator); }
+.audio-panel .section-heading { color: var(--ap_pink); font-weight: bold; }
+.audio-panel .device-status { color: var(--ap_foreground); font-size: 11px; }
+.audio-panel .failure { color: var(--ap_red); }
 .audio-panel .audio-divider {
     min-height: 1px;
-    background: @ap_separator;
+    background: var(--ap_separator);
     border: none;
     padding: 0;
     margin: 0;
@@ -32,8 +32,8 @@ window.audio-panel {
 .audio-panel button.control-button {
     background: transparent;
     background-image: none;
-    color: @ap_cyan;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    color: var(--ap_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 3px;
     min-height: 31.3px;
     min-width: 0;
@@ -50,26 +50,26 @@ window.audio-panel {
     margin: 0;
 }
 
-.audio-panel button.control-button.selected { background: alpha(@ap_dimPink, 0.35); }
+.audio-panel button.control-button.selected { background: color-mix(in srgb, var(--ap_dimPink) 35%, transparent); }
 .audio-panel button.control-button:hover,
 .audio-panel button.control-button:focus-visible {
-    background: alpha(@ap_pink, 0.333);
-    border-color: @ap_yellow;
+    background: color-mix(in srgb, var(--ap_pink) 33.3%, transparent);
+    border-color: var(--ap_yellow);
     border-width: 1.5px;
     min-height: 29px;
 }
-.audio-panel button.control-button:active { background: alpha(@ap_pink, 0.45); }
+.audio-panel button.control-button:active { background: color-mix(in srgb, var(--ap_pink) 45%, transparent); }
 .audio-panel button.control-button:disabled {
-    color: @ap_separator;
+    color: var(--ap_separator);
     background: transparent;
-    border-color: alpha(@ap_foreground, 0.25);
+    border-color: color-mix(in srgb, var(--ap_foreground) 25%, transparent);
 }
 
 .audio-panel button.device-dropdown {
     background: transparent;
     background-image: none;
-    color: @ap_foreground;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    color: var(--ap_foreground);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 3px;
     min-height: 31.3px;
     padding: 0 8px;
@@ -78,18 +78,18 @@ window.audio-panel {
     transition: none;
 }
 
-.audio-panel button.device-dropdown:disabled { color: @ap_separator; }
+.audio-panel button.device-dropdown:disabled { color: var(--ap_separator); }
 .audio-panel button.device-dropdown label,
 .audio-panel listview.device-list label { color: inherit; font-size: 12px; font-weight: bold; }
 .audio-panel .device-options {
     background: transparent;
     background-image: none;
-    color: @ap_foreground;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    color: var(--ap_foreground);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 3px;
     padding: 4px;
 }
-.audio-panel listview.device-list { background: transparent; color: @ap_foreground; }
+.audio-panel listview.device-list { background: transparent; color: var(--ap_foreground); }
 .audio-panel listview.device-list row {
     padding: 6px 8px;
     border: none;
@@ -97,16 +97,16 @@ window.audio-panel {
     background: transparent;
     background-image: none;
 }
-.audio-panel listview.device-list row:selected { background: alpha(@ap_dimPink, 0.7); }
-.audio-panel listview.device-list row:hover { background: alpha(@ap_pink, 0.333); }
+.audio-panel listview.device-list row:selected { background: color-mix(in srgb, var(--ap_dimPink) 70%, transparent); }
+.audio-panel listview.device-list row:hover { background: color-mix(in srgb, var(--ap_pink) 33.3%, transparent); }
 
 .audio-panel button.icon-button {
     border-radius: 999px;
     min-width: 15.3px;
     padding: 0 8px;
 }
-.audio-panel button.icon-button label { color: @ap_red; font-size: 16px; font-weight: normal; }
-.audio-panel button.icon-button:disabled label { color: @ap_separator; }
+.audio-panel button.icon-button label { color: var(--ap_red); font-size: 16px; font-weight: normal; }
+.audio-panel button.icon-button:disabled label { color: var(--ap_separator); }
 .audio-panel button.mute-button {
     border: none;
     min-width: 32px;
@@ -134,46 +134,46 @@ window.audio-panel {
 .audio-panel button.pairing-dismiss label { font-size: 12px; }
 
 .audio-panel button.tab {
-    border: 1px solid alpha(@ap_pink, 0.7);
+    border: 1px solid color-mix(in srgb, var(--ap_pink) 70%, transparent);
     border-bottom: none;
     border-radius: 3px 3px 0 0;
     min-height: 39px;
     padding: 0;
-    color: @ap_pink;
+    color: var(--ap_pink);
 }
 .audio-panel button.tab label { font-size: 13px; letter-spacing: 1px; }
 .audio-panel button.tab.selected {
-    border-color: @ap_cyan;
+    border-color: var(--ap_cyan);
     border-width: 1.5px;
     border-bottom: none;
     min-height: 38.5px;
-    background: alpha(@ap_cyan, 0.08);
-    color: @ap_cyan;
+    background: color-mix(in srgb, var(--ap_cyan) 8%, transparent);
+    color: var(--ap_cyan);
 }
 .audio-panel button.tab:hover,
 .audio-panel button.tab:focus-visible {
-    border-color: @ap_pink;
+    border-color: var(--ap_pink);
     border-width: 1px;
     border-bottom: none;
     min-height: 39px;
-    background: alpha(@ap_pink, 0.1);
+    background: color-mix(in srgb, var(--ap_pink) 10%, transparent);
 }
 .audio-panel button.tab.selected:hover,
 .audio-panel button.tab.selected:focus-visible {
-    border-color: @ap_cyan;
+    border-color: var(--ap_cyan);
     border-width: 1.5px;
     border-bottom: none;
     min-height: 38.5px;
-    background: alpha(@ap_cyan, 0.08);
+    background: color-mix(in srgb, var(--ap_cyan) 8%, transparent);
 }
 .audio-panel button.tab:active,
-.audio-panel button.tab.selected:active { background: alpha(@ap_cyan, 0.18); }
+.audio-panel button.tab.selected:active { background: color-mix(in srgb, var(--ap_cyan) 18%, transparent); }
 
 .audio-panel .volume-bar {
     min-height: 20px;
     padding: 0;
     margin: 0;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 0;
     background: transparent;
 }
@@ -189,7 +189,7 @@ window.audio-panel {
     box-shadow: none;
     outline: none;
     transition: none;
-    color: @ap_cyan;
+    color: var(--ap_cyan);
 }
 .audio-panel .volume-bar button.volume-step label {
     color: inherit;
@@ -198,7 +198,7 @@ window.audio-panel {
     margin: 0;
 }
 .audio-panel .volume-bar button.volume-step:hover,
-.audio-panel .volume-bar button.volume-step:focus-visible { color: @ap_yellow; }
+.audio-panel .volume-bar button.volume-step:focus-visible { color: var(--ap_yellow); }
 .audio-panel .volume-bar scale.volume-track {
     min-height: 20px;
     padding: 0;
@@ -206,7 +206,7 @@ window.audio-panel {
     border: none;
     border-radius: 0;
     background: transparent;
-    background-image: linear-gradient(@ap_separator, @ap_separator);
+    background-image: linear-gradient(var(--ap_separator), var(--ap_separator));
     background-position: center;
     background-size: 100% 2px;
     background-repeat: no-repeat;
@@ -229,7 +229,7 @@ window.audio-panel {
     min-height: 18px;
     padding: 0;
     margin: -9px 0;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 0;
     background: transparent;
     box-shadow: none;
@@ -242,27 +242,27 @@ window.audio-panel {
     margin: 0 0 -20px;
     border: none;
     border-radius: 0;
-    background: alpha(@ap_chromeBackground, 0.5);
-    color: @ap_cyan;
+    background: color-mix(in srgb, var(--ap_chromeBackground) 50%, transparent);
+    color: var(--ap_cyan);
     font-size: 12px;
     font-weight: bold;
 }
 
 
 .audio-panel .volume-bar:disabled,
-.audio-panel .volume-bar:disabled scale.volume-track slider { border-color: alpha(@ap_foreground, 0.25); }
+.audio-panel .volume-bar:disabled scale.volume-track slider { border-color: color-mix(in srgb, var(--ap_foreground) 25%, transparent); }
 .audio-panel .volume-bar:disabled button.volume-step,
-.audio-panel .volume-bar:disabled scale.volume-track value { color: @ap_separator; }
+.audio-panel .volume-bar:disabled scale.volume-track value { color: var(--ap_separator); }
 
 .audio-panel .bluetooth-device { padding: 6px; border-radius: 3px; }
-.audio-panel .bluetooth-device.connected { background: alpha(@ap_dimPink, 0.35); }
-.audio-panel .pairing-card { padding: 10px; border-radius: 3px; background: alpha(@ap_chromeBackground, 0.5); }
+.audio-panel .bluetooth-device.connected { background: color-mix(in srgb, var(--ap_dimPink) 35%, transparent); }
+.audio-panel .pairing-card { padding: 10px; border-radius: 3px; background: color-mix(in srgb, var(--ap_chromeBackground) 50%, transparent); }
 .audio-panel entry.pairing-answer {
-    background: alpha(@ap_chromeBackground, 0.8);
+    background: color-mix(in srgb, var(--ap_chromeBackground) 80%, transparent);
     background-image: none;
-    color: @ap_cyan;
-    caret-color: @ap_cyan;
-    border: 0.35px solid alpha(@ap_foreground, 0.5);
+    color: var(--ap_cyan);
+    caret-color: var(--ap_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--ap_foreground) 50%, transparent);
     border-radius: 3px;
     padding: 4px 6px;
     min-height: 23.3px;
@@ -271,9 +271,9 @@ window.audio-panel {
     font-size: 13px;
     transition: border-color 120ms ease-out;
 }
-.audio-panel entry.pairing-answer:focus-within { border: 1.5px solid @ap_yellow; min-height: 21px; }
-.audio-panel entry.pairing-answer placeholder { color: @ap_separator; }
-.audio-panel entry.pairing-answer selection { color: @ap_background; background: @ap_pink; }
+.audio-panel entry.pairing-answer:focus-within { border: 1.5px solid var(--ap_yellow); min-height: 21px; }
+.audio-panel entry.pairing-answer placeholder { color: var(--ap_separator); }
+.audio-panel entry.pairing-answer selection { color: var(--ap_background); background: var(--ap_pink); }
 
 .audio-panel scrolledwindow,
 .audio-panel viewport { background: transparent; border: none; padding: 0; margin: 0; }
@@ -281,7 +281,7 @@ window.audio-panel {
 .audio-panel scrolledwindow > undershoot { background: transparent; background-image: none; border: none; }
 .audio-panel scrollbar { background: transparent; border: none; padding: 0; }
 .audio-panel scrollbar slider {
-    background: alpha(@ap_pink, 0.5);
+    background: color-mix(in srgb, var(--ap_pink) 50%, transparent);
     min-width: 3px;
     min-height: 12px;
     padding: 0;

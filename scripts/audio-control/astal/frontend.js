@@ -8,7 +8,7 @@ import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { AudioBackend } from './backend.js';
 import { parseRequest } from './logic.js';
-import { loadPanelStyle } from '../../panels/style.js';
+import { loadPanelStyle } from '../../live-style.js';
 
 function read(path) {
     if (!path) throw new Error('Run through audio-panel, or set AUDIO_PANEL_CONFIG and AUDIO_PANEL_PALETTE.');
@@ -21,9 +21,9 @@ function loadTheme(entry, palettePath) {
     const palette = JSON.parse(read(palettePath));
     for (const key of ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'secondaryBackground', 'chromeBackground'])
         if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid audio palette colour: ${key}`);
-    const definitions = Object.entries(palette)
+    const definitions = '.audio-panel {\n' + Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `@define-color ap_${key} ${value};`).join('\n');
+        .map(([key, value]) => `    --ap_${key}: ${value};`).join('\n') + '\n}';
     loadPanelStyle({ entry, definitions, label: 'Audio' });
     return palette;
 }

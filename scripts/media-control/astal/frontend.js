@@ -10,7 +10,7 @@ import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { MediaBackend } from './backend.js';
 import { formatTime } from './logic.js';
-import { loadPanelStyle } from '../../panels/style.js';
+import { loadPanelStyle } from '../../live-style.js';
 
 // Theme and metadata presentation.
 function read(path) {

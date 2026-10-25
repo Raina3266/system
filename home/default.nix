@@ -6,7 +6,7 @@
 {
   imports = [
     ../niri
-    ../themes
+    (import ../themes).module
     ./shell
     ./cloud.nix
     ./desktop.nix

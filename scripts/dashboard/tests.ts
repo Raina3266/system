@@ -4,6 +4,7 @@ import { beforeEach, test } from 'node:test';
 import { registerHooks } from 'node:module';
 import path from 'node:path';
 import type { NotificationRow, Palette } from './notification.ts';
+import type { DashboardPanel } from './power.ts';
 
 class Signals {
     private handlers = new Map<number, { signal: string; callback: (...args: any[]) => void }>();
@@ -238,7 +239,7 @@ const hooks = registerHooks({
 });
 const {
     NotificationCenter, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
-    notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive,
+    notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke,
 } = await import('./notification.ts');
 const {
     MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
@@ -458,6 +459,25 @@ test('switcher shows Airplane mode On/Off inside and cycles without optimistic t
     assert.deepEqual(requests, ['yes', 'yes', 'no', 'no']);
     assert.equal(value.label, 'Airplane mode: On');
     assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Airplane mode: On');
+});
+
+test('dashboard actions safely report thrown and rejected non-Error values', async () => {
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (message: unknown) => { warnings.push(String(message)); };
+    try {
+        for (const error of [new Error('failed'), 'failed', null, undefined]) {
+            invoke(() => { throw error; });
+            invoke(() => Promise.reject(error));
+        }
+        await delay();
+        assert.deepEqual(warnings, [
+            'Dashboard action: Error: failed', 'Dashboard action: failed',
+            'Dashboard action: null', 'Dashboard action: undefined',
+            'Dashboard action: Error: failed', 'Dashboard action: failed',
+            'Dashboard action: null', 'Dashboard action: undefined',
+        ]);
+    } finally { console.warn = warn; }
 });
 
 test('strict JSON request envelope and command arity', () => {
@@ -759,14 +779,15 @@ test('status keeps notification metadata without changing the battery badge or m
 });
 
 test('application status serializes the native status object with panel visibility and monitor', () => {
+    const panelDouble = (state: Pick<DashboardPanel, 'opened' | 'connector'>): DashboardPanel => state as DashboardPanel;
     const backend = new DashboardBackend();
     const app = new DashboardApplication();
     app.backend = backend;
-    app.panel = { opened: true, connector: 'DP-1' };
+    app.panel = panelDouble({ opened: true, connector: 'DP-1' });
     assert.deepEqual(JSON.parse(app.handleRequest('{"command":"status"}')), {
         ...backend.status(), opened: true, monitor: 'DP-1',
     });
-    app.panel = { opened: false, connector: '' };
+    app.panel = panelDouble({ opened: false, connector: '' });
     assert.deepEqual(JSON.parse(app.handleRequest('{"command":"status"}')), {
         ...backend.status(), opened: false, monitor: null,
     });

@@ -20,6 +20,7 @@ rec {
     {
       pkgs,
       repoRoot,
+      panelLauncher,
       name,
       prefix,
       sourceDir,
@@ -40,7 +41,7 @@ rec {
       source = lib.fileset.toSource {
         root = ../scripts;
         fileset = lib.fileset.unions [
-          ../scripts/panels/style.js
+          ../scripts/live-style.js
           (lib.fileset.fileFilter
             (file: file.hasExt "js" || file.hasExt "ts" || file.hasExt "json")
             (../scripts + "/${sourceDir}"))
@@ -67,70 +68,51 @@ rec {
           '';
         });
       };
+      # Bundle immutable application code once, without a display or session bus.
+      # CSS is excluded from source and remains live through PANEL_CSS_FILE.
+      bundle = pkgs.runCommand "${name}-bundle.js" { } ''
+        ${lib.getExe ags} bundle --gtk 4 -- ${lib.escapeShellArg entry} "$out"
+      '';
       # --- Generated palette --------------------------------------------------
       palette = pkgs.writeText "${name}-palette.json" (
-        builtins.toJSON (import ../themes/palette.nix)
+        builtins.toJSON (import ../themes).palette
       );
+      launcherConfig = pkgs.writeText "${name}-launcher.json" (builtins.toJSON {
+        inherit name commands;
+        strict_help = strictHelp;
+        check_response = checkResponse;
+        ags = lib.getExe ags;
+        gjs = "${ags}/bin/panel-gjs";
+        inherit bundle;
+        environment = {
+          PANEL_CSS_FILE = "${repoRoot}/scripts/${sourceDir}/style.css";
+        } // lib.optionalAttrs withPalette {
+          "${prefix}_PALETTE" = toString palette;
+        } // environment;
+        # Never pick up checkout JS/TS, even after a service restart.
+        forced_environment."${prefix}_CONFIG" = entry;
+      });
     in
-    # --- Generated launcher ---------------------------------------------------
-    pkgs.writeShellApplication {
-      inherit name;
-      passthru = { inherit ags source entry; } // lib.optionalAttrs withPalette { inherit palette; };
-      text = ''
-        usage() {
-          printf '%s\n' ${lib.escapeShellArg "Usage: ${name} ${lib.concatStringsSep " | " (map (command: if command == "toggle" then "toggle [monitor]" else command) commands)}"}
-        }
-        command="''${1-}"
-        case "$command" in
-          -h|--help)
-            ${lib.optionalString strictHelp ''if [ "$#" -ne 1 ]; then usage >&2; exit 2; fi''}
-            usage
-            exit 0
-            ;;
-          ${lib.concatStringsSep "|" (lib.remove "toggle" commands)})
-            if [ "$#" -ne 1 ]; then usage >&2; exit 2; fi
-            ;;
-          toggle)
-            if [ "$#" -gt 2 ]; then usage >&2; exit 2; fi
-            ;;
-          *) usage >&2; exit 2 ;;
-        esac
-
-        # Never pick up unbuilt JS/TS, even after a service restart.
-        export ${prefix}_CONFIG=${lib.escapeShellArg entry}
-        export PANEL_CSS_FILE="''${PANEL_CSS_FILE:-${repoRoot}/scripts/${sourceDir}/style.css}"
-        ${lib.optionalString withPalette ''export ${prefix}_PALETTE="''${${prefix}_PALETTE:-${palette}}"''}
-        ${lib.concatStringsSep "\n" (lib.mapAttrsToList (key: value: ''export ${key}="''${${key}:-${value}}"'') environment)}
-
-        if [ "$command" = run ]; then
-          runtime_dir="''${XDG_RUNTIME_DIR:?${name}: XDG_RUNTIME_DIR is required}/ags-panels"
-          ${pkgs.coreutils}/bin/install -d -m 700 "$runtime_dir"
-          bundle="$runtime_dir/${name}.js"
-          ${lib.getExe ags} bundle --gtk 4 -- ${lib.escapeShellArg entry} "$bundle"
-          exec ${ags}/bin/panel-gjs -m "$bundle"
-        fi
-        request=$(${lib.getExe pkgs.jq} -cn \
-          --arg command "$command" --arg monitor "''${2-}" \
-          '{command: $command} + (if $monitor == "" then {} else {monitor: $monitor} end)')
-        ${if checkResponse then ''
-          response=$(${lib.getExe ags} request --instance ${name} -- "$request")
-          printf '%s\n' "$response"
-          if printf '%s' "$response" | ${lib.getExe pkgs.jq} -e 'type == "object" and has("error")' >/dev/null 2>&1; then
-            exit 1
-          fi
-        '' else ''
-          exec ${lib.getExe ags} request --instance ${name} -- "$request"
-        ''}
-      '';
-    };
+    # Only the fixed manifest is injected here; all CLI behavior lives in Rust.
+    pkgs.runCommand name {
+      nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+      meta.mainProgram = name;
+      passthru = { inherit ags source entry bundle launcherConfig; }
+        // lib.optionalAttrs withPalette { inherit palette; };
+    } ''
+      install -d "$out/bin" "$out/share/${name}"
+      ln -s ${launcherConfig} "$out/share/${name}/launcher.json"
+      makeBinaryWrapper ${lib.getExe panelLauncher} "$out/bin/${name}" \
+        --add-flags ${lib.escapeShellArg "--config ${launcherConfig}"}
+    '';
 
   # ===========================================================================
   # Per-panel package declarations
   # ===========================================================================
   packages =
-    { pkgs, repoRoot, audioControl, mediaControl, networkManager, clipboardCustom }:
+    { pkgs, repoRoot, panelLauncher, audioControl, mediaControl, networkManager, clipboardCustom }:
     let
-      panel = args: mkPanel ({ inherit pkgs repoRoot; } // args);
+      panel = args: mkPanel ({ inherit pkgs repoRoot panelLauncher; } // args);
     in
     {
       # --- Audio / Bluetooth --------------------------------------------------
@@ -217,7 +199,6 @@ rec {
       config,
       lib,
       pkgs,
-      repoRoot,
       repoPackages,
       ...
     }:
@@ -234,6 +215,15 @@ rec {
         repoPackages.clipboardPanel
         repoPackages.clipboardCustom
       ];
+
+      # Inferred TypeScript projects discover ancestor @types packages without
+      # a checkout tsconfig or node_modules. Keep generated dependencies in Nix.
+      home.file = {
+        "node_modules/@types/dashboard-gi".source =
+          "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/dashboard-gi";
+        "node_modules/@types/node".source =
+          "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/node";
+      };
 
       # --- Palette configuration files ----------------------------------------
       # CSS is read directly through PANEL_CSS_FILE. Installing child links under

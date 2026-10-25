@@ -11,7 +11,7 @@ import GdkX11 from 'gi://GdkX11?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import System from 'system';
-import { loadPanelStyle } from '../../../panels/style.js';
+import { loadPanelStyle } from '../../../live-style.js';
 
 if (GLib.getenv('AUDIO_DROPDOWN_ISOLATED') !== '1'
     || GLib.getenv('GDK_BACKEND') !== 'x11'
