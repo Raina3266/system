@@ -8,7 +8,7 @@ import Astal from 'gi://Astal?version=4.0';
 import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { NetworkBackend, controllerRuntime, dismissOtherPanels } from './backend.js';
-import { NetworkController, parseRequest } from './logic.js';
+import { NetworkController, isUndetectedSaved, parseRequest, signalLabel } from './logic.js';
 import { loadPanelStyle } from '../../live-style.js';
 
 function read(path) {
@@ -110,6 +110,7 @@ export class NetworkPanel {
         this.dismissOtherPanels = dismiss;
         this.rows = new Map();
         this.profileChoices = new Map();
+        this.listTab = 'nearby';
         this.monitor = null;
         this.monitorSignal = 0;
         this.presented = false;
@@ -151,13 +152,13 @@ export class NetworkPanel {
                 || y < bounds.get_y() || y >= bounds.get_y() + bounds.get_height()) this.close();
         });
         this.root.add_controller(outside);
-        this.build();
+        this.build(palette);
         this.monitors = Gdk.Display.get_default().get_monitors();
         this.monitorsSignal = this.monitors.connect('items-changed', () => this.updateMonitors());
         this.render();
     }
 
-    build() {
+    build(palette) {
 
         this.wifiNotice = label('', ['warning']);
         this.error = label('', ['warning']);
@@ -181,7 +182,49 @@ export class NetworkPanel {
         this.list.set_child(scroll(this.networkRows, { vexpand: true }));
         this.list.add_overlay(this.empty);
         this.list.set_measure_overlay(this.empty, false);
-        this.pages.add_named(this.list, 'list');
+        this.savedRows = box(true);
+        this.savedEmpty = label('No undetected saved networks');
+        this.savedEmpty.halign = Gtk.Align.CENTER;
+        this.savedEmpty.valign = Gtk.Align.CENTER;
+        this.savedList = new Gtk.Overlay({ hexpand: true, vexpand: true });
+        this.savedList.set_child(scroll(this.savedRows, { vexpand: true }));
+        this.savedList.add_overlay(this.savedEmpty);
+        this.savedList.set_measure_overlay(this.savedEmpty, false);
+        this.networkLists = new Gtk.Stack({ transition_type: Gtk.StackTransitionType.NONE,
+            hhomogeneous: false, vhomogeneous: false, hexpand: true, vexpand: true });
+        this.networkLists.add_named(this.list, 'nearby');
+        this.networkLists.add_named(this.savedList, 'saved');
+        this.nearbyTab = button('NEARBY', () => this.selectListTab('nearby'), ['network-tab']);
+        this.savedTab = button('SAVED', () => this.selectListTab('saved'), ['network-tab']);
+        this.savedTab.tooltip_text = 'Saved Wi-Fi networks that are not currently detected';
+        const tabs = box(false, 0, [this.nearbyTab, this.savedTab]);
+        tabs.homogeneous = true;
+        this.nearbyTab.hexpand = this.savedTab.hexpand = true;
+        this.nearbyTab.height_request = this.savedTab.height_request = 40;
+        this.listFrame = new Gtk.Overlay({ hexpand: true, vexpand: true });
+        this.listBorder = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
+        const rgb = palette.cyan.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
+        this.listBorder.set_draw_func((_, cr, width, height) => {
+            if (width < 1 || height < 1) return;
+            cr.setSourceRGBA(...rgb, 1);
+            cr.setLineWidth(1);
+            cr.moveTo(0.5, 0.5);
+            cr.lineTo(0.5, height - 0.5);
+            cr.lineTo(width - 0.5, height - 0.5);
+            cr.lineTo(width - 0.5, 0.5);
+            const left = this.listTab === 'saved' ? width / 2 : 0, right = left + width / 2;
+            cr.moveTo(0, 0.5);
+            cr.lineTo(left, 0.5);
+            cr.moveTo(right, 0.5);
+            cr.lineTo(width, 0.5);
+            cr.stroke();
+        });
+        this.listFrame.set_child(this.listBorder);
+        this.networkLists.margin_top = this.networkLists.margin_bottom = 12;
+        this.networkLists.margin_start = this.networkLists.margin_end = 12;
+        this.listFrame.add_overlay(this.networkLists);
+        this.listFrame.set_measure_overlay(this.networkLists, false);
+        this.pages.add_named(box(true, 0, [tabs, this.listFrame]), 'list');
         this.buildInfo();
         this.buildQr();
         this.content.append(this.pages);
@@ -197,8 +240,8 @@ export class NetworkPanel {
         this.content.append(this.credentials);
         this.forgetConfirm = button('Forget', () => this.controller.confirmForget());
         this.forgetCancel = button('Cancel', () => this.controller.cancelForget());
-        this.forget = box(true, 8, [label('Forget ALL saved profiles for this network and disconnect it?'),
-            box(false, 8, [this.forgetConfirm, this.forgetCancel])]);
+        this.forgetMessage = label();
+        this.forget = box(true, 8, [this.forgetMessage, box(false, 8, [this.forgetConfirm, this.forgetCancel])]);
         this.content.append(this.forget);
 
     }
@@ -206,6 +249,20 @@ export class NetworkPanel {
     buildInfo() {
         this.summary = label();
         this.savedProfiles = label();
+        this.infoProfile = new Gtk.DropDown({ hexpand: true, enable_search: false, css_classes: ['profile-choice'] });
+        this.infoProfile.tooltip_text = 'Saved profile whose password will be revealed';
+        const profileFactory = () => {
+            const factory = new Gtk.SignalListItemFactory();
+            factory.connect('setup', (_, item) => item.set_child(label('', [], false)));
+            factory.connect('bind', (_, item) => item.get_child().set_label(item.get_item().get_string()));
+            return factory;
+        };
+        this.infoProfile.factory = profileFactory();
+        this.infoProfile.list_factory = profileFactory();
+        this.infoProfileUuids = [];
+        this.infoProfile.connect('notify::selected', () => {
+            if (!this.updatingInfoProfile) this.controller.selectSavedProfile(this.infoProfileUuids[this.infoProfile.selected]);
+        });
         this.detailLabels = new Map(detailFields.map(([key]) => [key, label()]));
         this.reveal = button('Reveal password', () => {
             if (this.controller.secretRequested) this.controller.hideSecret();
@@ -213,7 +270,8 @@ export class NetworkPanel {
         });
         this.secretLoading = label('Loading…');
         this.secret = label();
-        this.infoContent = box(true, 8, [this.summary, this.savedProfiles,
+        this.secret.selectable = true;
+        this.infoContent = box(true, 8, [this.summary, this.savedProfiles, this.infoProfile,
             ...this.detailLabels.values(), box(false, 8, [this.reveal, this.secretLoading]), this.secret]);
         this.pages.add_named(scroll(this.infoContent, { vexpand: true }), 'info');
     }
@@ -261,68 +319,97 @@ export class NetworkPanel {
             else this.controller.connectNetwork(key, this.profileChoices.get(key) || '');
         });
         row.forget = button('Forget', () => this.controller.requestForget(key));
+        row.remove = button('×', () => this.controller.requestForget(key), ['network-remove']);
         row.info = button('Info', () => { this.clearPassword(); this.controller.info(key); });
         row.qr = button('QR', () => { this.clearPassword(); this.controller.qr(key); });
-        row.heading = box(false, 8, [row.name, row.connect]);
+        row.heading = box(false, 8, [row.name, row.connect, row.remove]);
         row.actions = scroll(box(false, 8, [row.forget, row.info, row.qr]), {
             hscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vscrollbar_policy: Gtk.PolicyType.NEVER,
             min_content_height: 28 });
         row.widget = box(true, 4, [row.heading, row.metadata, row.profile, row.actions]);
-        this.networkRows.append(row.widget);
         this.rows.set(key, row);
         return row;
     }
 
+    selectListTab(tab) {
+        if (!['nearby', 'saved'].includes(tab) || tab === this.listTab) return;
+        this.listTab = tab;
+        this.clearPassword();
+        this.controller.back();
+    }
+
     renderRows() {
         const c = this.controller;
-        const remembered = (c.rows || []).filter(row => row.known || row.connected);
-        const available = (c.rows || []).filter(row => !row.known && !row.connected);
-        const data = [...remembered, ...available];
+        const saved = (c.rows || []).filter(isUndetectedSaved);
+        const nearby = (c.rows || []).filter(row => !isUndetectedSaved(row));
+        const remembered = nearby.filter(row => row.known || row.connected);
+        const available = nearby.filter(row => !row.known && !row.connected);
+        const wanted = new Set((c.rows || []).map(row => row.key));
         this.networkSeparator.visible = remembered.length > 0 && available.length > 0;
-        const wanted = new Set(data.map(row => row.key));
         for (const [key, row] of this.rows) {
             if (wanted.has(key)) continue;
-            this.networkRows.remove(row.widget);
+            row.widget.get_parent()?.remove(row.widget);
             this.rows.delete(key);
             this.profileChoices.delete(key);
         }
-        let previous = null, separated = false;
-        for (const dataRow of data) {
-            if (this.networkSeparator.visible && !dataRow.known && !dataRow.connected && !separated) {
-                this.networkRows.reorder_child_after(this.networkSeparator, previous);
-                previous = this.networkSeparator;
-                separated = true;
+        for (const [container, data] of [[this.networkRows, [...remembered, ...available]], [this.savedRows, saved]]) {
+            let previous = null, separated = false;
+            const undetected = container === this.savedRows;
+            for (const dataRow of data) {
+                if (!undetected && this.networkSeparator.visible && !dataRow.known && !dataRow.connected && !separated) {
+                    this.networkRows.reorder_child_after(this.networkSeparator, previous);
+                    previous = this.networkSeparator;
+                    separated = true;
+                }
+                const row = this.rows.get(dataRow.key) || this.createRow(dataRow.key);
+                if (row.widget.get_parent() !== container) {
+                    // Keep the same widget and profile choice as scan results move it between tabs.
+                    row.widget.get_parent()?.remove(row.widget);
+                    container.append(row.widget);
+                }
+                row.data = dataRow;
+                row.name.set_label(`${dataRow.kind === 'WIRED' ? 'Wired' : 'Wi-Fi'} · ${dataRow.name}`);
+                row.metadata.set_label([dataRow.connected ? 'Connected' : dataRow.known ? 'Saved' : 'Not saved',
+                    dataRow.interface, dataRow.wireless ? signalLabel(dataRow.strength) : '',
+                    dataRow.security || (dataRow.wireless ? 'Open' : ''), dataRow.changing ? 'Working…' : ''].filter(Boolean).join(' · '));
+                const profiles = dataRow.profiles || [];
+                const signature = JSON.stringify(profiles);
+                if (signature !== row.profilesSignature) {
+                    row.updating = true;
+                    row.profileUuids = ['', ...profiles.map(profile => profile.uuid)];
+                    const choice = this.profileChoices.get(dataRow.key) || '';
+                    if (!row.profileUuids.includes(choice)) this.profileChoices.delete(dataRow.key);
+                    row.profile.set_model(Gtk.StringList.new(['Automatic (default)', ...profiles.map(profile => formatted(profile.id))]));
+                    row.profile.selected = Math.max(0, row.profileUuids.indexOf(this.profileChoices.get(dataRow.key) || ''));
+                    row.profilesSignature = signature;
+                    row.updating = false;
+                }
+                row.profile.visible = !undetected && profiles.length > 1;
+                row.connect.visible = !undetected;
+                row.connect.get_child().set_label(dataRow.connected ? 'Disconnect' : 'Connect');
+                row.connect.sensitive = !dataRow.changing && (!dataRow.wireless || (c.wifiEnabled && c.wifiHardwareEnabled));
+                row.forget.visible = Boolean(dataRow.known && !undetected);
+                row.forget.sensitive = Boolean(dataRow.known && !dataRow.changing);
+                row.remove.visible = undetected;
+                row.remove.sensitive = Boolean(dataRow.known && !dataRow.changing);
+                row.remove.tooltip_text = `Forget saved network ${dataRow.name}`;
+                row.remove.update_property([Gtk.AccessibleProperty.LABEL], [row.remove.tooltip_text]);
+                row.info.visible = Boolean(dataRow.connected || dataRow.known);
+                row.qr.visible = Boolean(dataRow.connected && dataRow.wireless);
+                row.actions.visible = row.forget.visible || row.info.visible || row.qr.visible;
+                if (row.widget.get_prev_sibling() !== previous) container.reorder_child_after(row.widget, previous);
+                previous = row.widget;
             }
-            const row = this.rows.get(dataRow.key) || this.createRow(dataRow.key);
-            row.data = dataRow;
-            row.name.set_label(`${dataRow.kind === 'WIRED' ? 'Wired' : 'Wi-Fi'} · ${dataRow.name}`);
-            row.metadata.set_label([dataRow.connected ? 'Connected' : dataRow.known ? 'Saved' : 'Not saved',
-                dataRow.interface, dataRow.wireless ? `${dataRow.strength}%` : '',
-                dataRow.security || (dataRow.wireless ? 'Open' : ''), dataRow.changing ? 'Working…' : ''].filter(Boolean).join(' · '));
-            const profiles = dataRow.profiles || [];
-            const signature = JSON.stringify(profiles);
-            if (signature !== row.profilesSignature) {
-                row.updating = true;
-                row.profileUuids = ['', ...profiles.map(profile => profile.uuid)];
-                const choice = this.profileChoices.get(dataRow.key) || '';
-                if (!row.profileUuids.includes(choice)) this.profileChoices.delete(dataRow.key);
-                row.profile.set_model(Gtk.StringList.new(['Automatic (default)', ...profiles.map(profile => formatted(profile.id))]));
-                row.profile.selected = Math.max(0, row.profileUuids.indexOf(this.profileChoices.get(dataRow.key) || ''));
-                row.profilesSignature = signature;
-                row.updating = false;
-            }
-            row.profile.visible = profiles.length > 1;
-            row.connect.get_child().set_label(dataRow.connected ? 'Disconnect' : 'Connect');
-            row.connect.sensitive = !dataRow.changing && (!dataRow.wireless || (c.wifiEnabled && c.wifiHardwareEnabled));
-            row.forget.visible = Boolean(dataRow.known);
-            row.forget.sensitive = Boolean(dataRow.known && !dataRow.changing);
-            row.info.visible = Boolean(dataRow.connected);
-            row.qr.visible = Boolean(dataRow.connected && dataRow.wireless);
-            row.actions.visible = row.forget.visible || row.info.visible || row.qr.visible;
-            if (row.widget.get_prev_sibling() !== previous) this.networkRows.reorder_child_after(row.widget, previous);
-            previous = row.widget;
         }
-        this.empty.visible = data.length === 0;
+        this.empty.visible = nearby.length === 0;
+        this.savedEmpty.visible = saved.length === 0;
+        this.savedTab.get_child().set_label(`SAVED (${saved.length})`);
+        this.networkLists.visible_child_name = this.listTab;
+        this.listBorder.queue_draw();
+        for (const [tab, button] of [['nearby', this.nearbyTab], ['saved', this.savedTab]]) {
+            if (tab === this.listTab) button.add_css_class('active');
+            else button.remove_css_class('active');
+        }
     }
 
     clearPassword() { this.password.set_text(''); }
@@ -336,6 +423,7 @@ export class NetworkPanel {
     render() {
         if (this.disposed) return;
         const c = this.controller;
+        if (!c.opened) this.listTab = 'nearby';
         const identity = JSON.stringify([Boolean(c.opened), c.monitor, c.page, c.credentialKey || '',
             c.credentialRow?.key || '', c.selectedRow?.key || '']);
         const changed = identity !== this.interactionIdentity;
@@ -357,6 +445,9 @@ export class NetworkPanel {
         this.credentialName.set_label(this.credentials.visible ? `Password · ${c.credentialRow.name}` : '');
         this.submit.sensitive = this.password.get_text().length > 0;
         this.forget.visible = Boolean(shown && c.page === 'list' && c.forgetKey);
+        const forgetting = c.rows.find(row => row.key === c.forgetKey);
+        this.forgetMessage.set_label(forgetting
+            ? `Forget all saved profiles for ${forgetting.name}${forgetting.connected ? ' and disconnect it' : ''}?` : '');
         this.renderInfo(shown && c.page === 'info');
         this.renderQr(shown && c.page === 'qr' ? c.qrImage || '' : '');
         if (shown && changed && this.credentials.visible) this.password.grab_focus();
@@ -366,16 +457,31 @@ export class NetworkPanel {
 
     renderInfo(active) {
         const c = this.controller, row = active ? c.selectedRow : null;
-        this.summary.set_label(row ? `SSID / name: ${formatted(row.name)}\nInterface: ${formatted(row.interface)}\nSecurity: ${formatted(row.security)}\nSignal: ${formatted(row.strength)}%` : '');
+        this.summary.set_label(row ? `SSID / name: ${formatted(row.name)}\nInterface: ${formatted(row.interface)}\nSecurity: ${formatted(row.security)}\nSignal: ${signalLabel(row.strength)}` : '');
         message(this.savedProfiles, row?.profiles?.length > 1
             ? `Saved profiles (ID / UUID):\n${formatted(row.profiles.map(profile => `${profile.id} (${profile.uuid})`))}` : '');
+        const profiles = row?.wireless && row.known && !row.connected ? row.profiles || [] : [];
+        const signature = JSON.stringify(profiles);
+        this.updatingInfoProfile = true;
+        if (signature !== this.infoProfileSignature) {
+            this.infoProfileUuids = profiles.map(profile => profile.uuid);
+            this.infoProfile.set_model(Gtk.StringList.new(profiles.map(profile => `${formatted(profile.id)} · ${profile.uuid}`)));
+            this.infoProfileSignature = signature;
+        }
+        this.infoProfile.selected = Math.max(0, this.infoProfileUuids.indexOf(c.selectedProfileUuid));
+        this.updatingInfoProfile = false;
+        this.infoProfile.visible = profiles.length > 1;
+        this.infoProfile.sensitive = Boolean(row && !row.changing);
         for (const [key, title, wireless] of detailFields) {
             const widget = this.detailLabels.get(key);
-            widget.visible = Boolean(row && (!wireless || row.wireless));
+            widget.visible = Boolean(row && (row.connected || ['profileId', 'profileUuid'].includes(key))
+                && (!wireless || row.wireless));
             widget.set_label(row ? `${title}: ${formatted(c.details?.[key])}` : '');
         }
         this.reveal.get_child().set_label(c.secretRequested ? 'Hide password' : 'Reveal password');
-        this.reveal.sensitive = Boolean(active && !c.secretLoading && row?.wireless);
+        this.reveal.visible = Boolean(row?.wireless && (row.connected || row.known));
+        this.reveal.sensitive = Boolean(active && !c.secretLoading && row?.wireless && !row.changing
+            && (row.connected || row.known));
         this.secretLoading.visible = Boolean(active && c.secretLoading);
         message(this.secret, active && c.secretRequested ? c.secret || '' : '');
     }

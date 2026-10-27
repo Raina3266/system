@@ -239,6 +239,8 @@ export class NetworkBackend {
         this.client = network?.client ?? null;
         this._rows = [];
         this._entries = new Map();
+        this._savedObjectIds = new WeakMap();
+        this._savedObjectSerial = 0;
         this._watches = new Map();
         this._operations = new Set();
         this._busy = new Map();
@@ -320,6 +322,17 @@ export class NetworkBackend {
         }
     }
 
+    _savedIdentity(entry) {
+        // Opaque, non-secret object stamps distinguish replacements that reuse a
+        // device interface or profile UUID. Never put native objects in rows.
+        const id = object => {
+            if (!this._savedObjectIds.has(object)) this._savedObjectIds.set(object, ++this._savedObjectSerial);
+            return this._savedObjectIds.get(object);
+        };
+        return JSON.stringify([id(entry.device), entry.profiles.map(profile => [profile.get_uuid(), id(profile)])
+            .sort((left, right) => left[0].localeCompare(right[0]))]);
+    }
+
     _sync(notify = true) {
         if (this._disposed) return;
         const objects = new Map();
@@ -391,9 +404,11 @@ export class NetworkBackend {
                 interface: device.get_iface(), kind: wireless ? 'WI-FI' : 'WIRED', wireless,
                 connected: Boolean(connected),
                 changing: this._busy.get(device)?.key === entry.key || Boolean(target && (isChanging(device) || device.get_state() === NM.DeviceState.DEACTIVATING)),
-                known: entry.profiles.length > 0, strength: wireless ? Math.max(0, Math.min(100, ap?.get_strength() ?? 0)) : 0,
+                known: entry.profiles.length > 0,
+                strength: wireless ? (ap ? Math.max(0, Math.min(100, ap.get_strength())) : null) : 0,
                 security: wireless ? securityLabel(entry, ap) : 'Wired', securityType: entry.securityType,
                 profiles: entry.profiles.map(profile => ({ id: profile.get_id(), uuid: profile.get_uuid() })),
+                savedIdentity: this._savedIdentity(entry),
             };
         });
         this._watch(objects);
@@ -469,7 +484,16 @@ export class NetworkBackend {
     details(key) {
         const entry = this._entry(key);
         const identity = this.getIdentity(key);
-        if (!identity) throw failure('This network is no longer connected.');
+        if (!identity) {
+            const profile = entry.profiles[0];
+            if (!profile) throw failure('This network is no longer connected.');
+            // The adapter may be connected to a different network. Only return
+            // saved-profile metadata, never that connection's live details.
+            return {
+                ssid: entry.wireless ? ssidText(entry.ssidBytes) : '', interface: entry.device.get_iface(),
+                profileId: profile.get_id() ?? '', profileUuid: profile.get_uuid() ?? '', identity: null,
+            };
+        }
         const device = entry.device;
         const active = device.get_active_connection();
         const ip4 = device.get_ip4_config();
@@ -527,6 +551,61 @@ export class NetworkBackend {
             this._assertIdentity(key, expected);
             return { password, authentication: type === 'open' ? 'nopass' : type === 'wep' ? 'WEP' : 'WPA', hidden };
         });
+    }
+
+    async readSavedSecret(key, profileUuid, cancellable = null) {
+        try {
+            // Bind before yielding: a replacement with the same UUID must not
+            // become the authorization target of an already-issued request.
+            const original = this._entry(key);
+            const profile = typeof profileUuid === 'string' && profileUuid
+                ? original.profiles.find(candidate => candidate.get_uuid() === profileUuid) : null;
+            if (!profile) throw failure('The selected saved profile is no longer available.');
+            const type = profileSecurity(profile);
+            if (!original.wireless || !['open', 'wep', 'psk', 'sae'].includes(type)
+                || ['owe', 'enterprise', 'unknown'].includes(original.securityType))
+                throw failure('Sharing credentials is not supported for this network.');
+            const iface = original.device.get_iface();
+            const radios = `${this.wifiEnabled}:${this.wifiHardwareEnabled}`;
+            const hidden = Boolean(profile.get_setting_wireless()?.get_hidden());
+            const keyIndex = type === 'wep' ? profile.get_setting_wireless_security().get_wep_tx_keyidx() : null;
+            // GetSecrets can refresh the profile and bump VersionId. Pin its
+            // identity and authentication context, not that revision counter.
+            const savedIdentity = this._savedIdentity(original);
+            return await this._run(cancellable, 30000, async operation => {
+                operation.device = original.device;
+                const validate = () => {
+                    this._check(operation);
+                    const entry = this._entry(key, original.device);
+                    const matches = this.client.get_connections().filter(candidate => candidate.get_uuid() === profileUuid);
+                    const row = this._rows.find(row => row.key === key);
+                    if (!entry.wireless || entry.device.get_device_type() !== NM.DeviceType.WIFI
+                        || entry.device.get_iface() !== iface || entry.ssidKey !== original.ssidKey
+                        || entry.securityType !== original.securityType || this._savedIdentity(entry) !== savedIdentity
+                        || !entry.profiles.includes(profile) || matches.length !== 1 || matches[0] !== profile
+                        || profile.get_uuid() !== profileUuid || profile.get_connection_type() !== WIFI
+                        || bytesKey(profile.get_setting_wireless()?.get_ssid()) !== original.ssidKey
+                        || !compatible(entry.device, profile) || profileSecurity(profile) !== type
+                        || Boolean(profile.get_setting_wireless()?.get_hidden()) !== hidden
+                        || (type === 'wep' && profile.get_setting_wireless_security().get_wep_tx_keyidx() !== keyIndex)
+                        || `${this.wifiEnabled}:${this.wifiHardwareEnabled}` !== radios
+                        || !row || row.connected || row.changing || this.getIdentity(key))
+                        throw failure('The selected saved profile or connection changed. Reopen network information and try again.');
+                };
+                validate();
+                let password = '';
+                if (type !== 'open') {
+                    const result = await nativeAsync(profile, 'get_secrets_async', 'get_secrets_finish', [SECURITY], operation.io);
+                    validate();
+                    const secrets = unpack(result)?.[SECURITY] ?? {};
+                    password = type === 'wep' ? secrets[`wep-key${keyIndex}`] : secrets.psk;
+                    if (typeof password !== 'string' || !password)
+                        throw failure('The saved password is not available. Check the saved network settings.');
+                }
+                validate();
+                return { password, authentication: type === 'open' ? 'nopass' : type === 'wep' ? 'WEP' : 'WPA', hidden };
+            });
+        } catch (error) { throw safeError(error); }
     }
 
     _check(operation) {

@@ -600,8 +600,18 @@ and glow, cyan/pink palette, three sections, scrolling, and Escape/outside-click
 dismissal. The Waybar badge retains battery percentage and charging/low states,
 now read from Astal rather than a parallel shell status reader.
 
-- **Power:** native Astal battery and power profiles, plus airplane mode through
-  native NetworkManager and Bluetooth adapter power. Idle inhibition is removed.
+- **Power:** native Astal battery and power profiles, plus a matching arrow
+  switcher for idle sleep time: **None**, **10 min**, **30 min**, **1h**,
+  **2h**, **3h**, or **6h**. None (the default) disables automatic sleep. Other
+  choices use `swayidle` and `systemctl suspend` to suspend the computer after
+  inactivity, pausing normal applications rather than just powering off the
+  displays. Wayland idle inhibitors and normal system suspend inhibitors are
+  respected. The timer stays active while the dashboard is closed; selecting
+  None stops it. No automatic locking is added; manually locked sessions remain
+  locked. Keyboard/mouse wake depends on hardware; use the lid or power button
+  when needed. The choice is saved atomically to the existing
+  `$XDG_STATE_HOME/dashboard/screen-timeout.json` and restored at service startup,
+  preserving the previously selected screen-off timeout as the new sleep timeout.
 - **System parameters:** asynchronous Gio reads of `/proc/stat`, `/proc/meminfo`,
   and `/sys/class/thermal/thermal_zone0/temp` every 2.5 seconds while open;
   root filesystem usage from the existing coreutils `df` every 30 seconds.
@@ -611,8 +621,11 @@ now read from Astal rather than a parallel shell status reader.
 
 Sources, tests, and runtime metadata live in `scripts/dashboard/`; the launcher
 is defined in `niri/panels.nix`. The `ags-dashboard` user service owns the
-resident `dashboard-panel` application, starting `power.ts`. `parameters.ts`
-contains metrics and `notification.ts` contains notification state and widgets.
+resident `dashboard-panel` application, starting `power.ts`, which also manages
+the idle watcher and saved timeout. `parameters.ts` contains metrics, while
+`notification.ts` contains notification state and widgets. Apply a normal
+NixOS/Home Manager switch to install the updated bundle and its `swayidle` runtime;
+a service restart alone does not update packaged code.
 Run `npm test` in `scripts/dashboard/` for the consolidated `tests.ts` suite.
 
 ### Notification popups
@@ -666,21 +679,37 @@ operations, not custom-backend exceptions. Activation completes only when the
 requested connection and device both report `ACTIVATED`; closing a pending UI
 request does not issue an implicit network disconnect.
 
-Connected and saved networks are grouped above nearby unsaved networks, with
-one divider between the groups, like the Bluetooth device list. Connect or
-Disconnect sits beside each network name; unsaved networks have no Forget
-button or empty actions row. Within each group, native connection ordering and
-signal-icon buckets avoid reshuffling for one-percent changes. Ethernet takes
-priority in Waybar. Profiles are selected by UUID, not their display names.
+The **Nearby** tab shows connected, connecting, and detected networks, with
+connected/saved entries above unsaved ones and a single divider between groups.
+The **Saved** tab lists disconnected saved Wi-Fi networks that are not currently
+detected, with a live count, a small **×** remove button, and **Info** for each
+entry. Removal uses the existing confirmation before deleting saved profiles.
+Rows move between tabs as scan results change without losing their profile
+selection; a genuine measured `0%` remains in Nearby. Both tabs keep scanning
+active while the panel is open, and Back from Info returns to the same tab.
+The joined uppercase tabs match the Bluetooth/Audio panel, with a cyan active tab,
+pink inactive tab, and a cyan page outline that joins the active tab.
+Connect or Disconnect sits beside each Nearby network name; unsaved networks
+have no Forget button or empty actions row. Native connection ordering and
+signal-icon buckets avoid reshuffling for one-percent changes. Undetected saved
+networks show **Not currently detected** rather than a fabricated percentage.
+Ethernet takes priority in Waybar. Profiles are selected by UUID, not their display names.
 Open, OWE, WEP and personal WPA/WPA2/WPA3 connections use native libnm settings.
 Ambiguous per-profile credential updates and enterprise/hidden configuration
 require a separately configured saved profile; the panel does not launch an
 external connection editor. Forget confirms deletion of all matching saved
 profiles and disconnects the network.
 
-**Info** shows SSID, signal/security, active profile ID/UUID, interface/MAC,
-IPv4/IPv6, gateways, DNS, BSSID, frequency/band/channel/mode, and link rate.
-Passwords are queried only after **Reveal password**, not on opening Info.
+**Info** is available for connected and saved networks. Connected Info shows
+SSID, signal/security, active profile ID/UUID, interface/MAC, IPv4/IPv6, gateways,
+DNS, BSSID, frequency/band/channel/mode, and link rate. Disconnected saved Info
+shows saved-profile metadata, never live details from a different network on
+the same adapter. **Reveal password** works for connected and saved disconnected
+Wi-Fi, including undetected networks. When multiple saved profiles match, select
+the intended profile by ID/UUID before revealing its password. Passwords are
+queried from NetworkManager only on explicit reveal, remain request-local, and
+are cleared on hide, profile/connection changes, tab changes, Back, or dismissal.
+QR remains connected-only.
 **QR** explicitly requests a share code for supported open/WEP/personal WPA
 profiles, including the hidden flag. Enterprise and Enhanced Open sharing
 remain unsupported, with an explanation.

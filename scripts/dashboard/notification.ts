@@ -502,7 +502,7 @@ export class NotificationEntry {
         this.row = row;
         this.widget = new Gtk.Overlay({ css_classes: ['notification-entry', ...(popup ? ['popup-entry'] : [])],
             hexpand: true, height_request: 64, overflow: Gtk.Overflow.HIDDEN });
-        const artworkSize = popup ? 100 : 64;
+        const artworkSize = popup ? 66 : 64;
         this.artwork = new Gtk.Image({ pixel_size: artworkSize, width_request: artworkSize,
             height_request: artworkSize, valign: Gtk.Align.START });
         this.app = ellipsis('', ['notification-app']);

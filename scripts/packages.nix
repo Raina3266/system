@@ -255,7 +255,7 @@ rec {
       modules = [
         "GLib-2.0" "Gio-2.0" "GObject-2.0" "Gtk-4.0" "Gdk-4.0"
         "Astal-4.0" "AstalIO-0.1" "AstalBattery-0.1" "AstalPowerProfiles-0.1"
-        "AstalNetwork-0.1" "AstalBluetooth-0.1" "AstalNotifd-0.1"
+        "AstalNotifd-0.1"
         "Gtk4LayerShell-1.0" "Pango-1.0" "cairo-1.0"
       ];
       nodeTypes = pkgs.fetchurl {

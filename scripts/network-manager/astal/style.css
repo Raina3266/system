@@ -60,6 +60,45 @@ window.network-panel {
     box-shadow: none;
 }
 
+.network-panel button.network-tab {
+    border: 1px solid alpha(@np_pink, 0.7);
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    min-height: 39px;
+    padding: 0;
+    background: transparent;
+    color: @np_pink;
+    box-shadow: none;
+}
+.network-panel button.network-tab label { font-size: 13px; letter-spacing: 1px; }
+.network-panel button.network-tab:hover,
+.network-panel button.network-tab:focus-visible {
+    border-color: @np_pink;
+    border-width: 1px;
+    border-bottom: none;
+    min-height: 39px;
+    background: alpha(@np_pink, 0.1);
+    box-shadow: none;
+}
+.network-panel button.network-tab.active,
+.network-panel button.network-tab.active:hover,
+.network-panel button.network-tab.active:focus-visible {
+    border-color: @np_cyan;
+    border-width: 1.5px;
+    border-bottom: none;
+    min-height: 38.5px;
+    background: alpha(@np_cyan, 0.08);
+    color: @np_cyan;
+    box-shadow: none;
+}
+.network-panel button.network-tab:active,
+.network-panel button.network-tab.active:active { background: alpha(@np_cyan, 0.18); }
+.network-panel button.network-remove {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+}
+.network-panel button.network-remove label { font-size: 16px; }
 
 .network-panel entry.network-password {
     background: alpha(@np_chromeBackground, 0.8);

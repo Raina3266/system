@@ -6,6 +6,14 @@ export function signalIcon(strength) {
     return ['󰤯', '󰤟', '󰤢', '󰤥', '󰤨'][signalBars(strength)];
 }
 
+export function signalLabel(strength) {
+    return Number.isFinite(strength) ? `${strength}%` : 'Not currently detected';
+}
+
+export function isUndetectedSaved(row) {
+    return Boolean(row?.wireless && row.known && !row.connected && !row.changing && !Number.isFinite(row.strength));
+}
+
 export function sortRows(rows) {
     const rank = row => row.connected || row.changing ? 0 : row.known ? 1 : 2;
     return rows.slice().sort((left, right) => Number(left.wireless) - Number(right.wireless)
@@ -28,6 +36,13 @@ export function profileStamp(row) {
     return JSON.stringify((row?.profiles || []).map(profile => profile.uuid).sort());
 }
 
+function savedInfoStamp(row) {
+    if (!row?.known || row.connected || !row.profiles?.length) return '';
+    // Detection and display-name changes do not change the saved selection.
+    return JSON.stringify([row.key, row.interface, row.ssid, row.wireless, row.securityType,
+        Boolean(row.changing), profileStamp(row), row.savedIdentity || '']);
+}
+
 export function escapeMarkup(value) {
     return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -41,7 +56,7 @@ export function waybarStatus(rows, details, available) {
         return {
             text: `<span size='large'>${row.wireless ? signalIcon(row.strength) : '󰈀'}</span>`,
             tooltip: escapeMarkup(row.wireless
-                ? `Wi-Fi: ${row.name}\nSignal: ${row.strength}%\nSecurity: ${row.security}\nIPv4: ${address}`
+                ? `Wi-Fi: ${row.name}\nSignal: ${signalLabel(row.strength)}\nSecurity: ${row.security}\nIPv4: ${address}`
                 : `Ethernet: ${row.interface}\nIPv4: ${address}`),
             class: row.wireless ? 'wifi' : 'ethernet',
         };
@@ -116,9 +131,11 @@ export class NetworkController {
         const radios = `${this.wifiEnabled}:${this.wifiHardwareEnabled}`;
         if (this.radios !== undefined && this.radios !== radios) this._reset();
         this.radios = radios;
-        if (this.selectedKey && !identityEqual(this.selectionIdentity, this.backend.getIdentity(this.selectedKey))) {
-            this._reset();
-            this.error = 'The connection changed. Reopen its details.';
+        if (this.selectedKey) {
+            if (!this._selectionCurrent(this.selectedKey, this.selectionIdentity, this.selectionSavedStamp, this.selectedProfileUuid)) {
+                this._reset();
+                this.error = 'The connection changed. Reopen its details.';
+            }
         }
         if (this.credentialKey && (!this.credentialRow || profileStamp(this.credentialRow) !== this.credentialProfiles)) {
             this.credentialKey = '';
@@ -151,6 +168,8 @@ export class NetworkController {
         this.error = '';
         this.selectedKey = '';
         this.selectionIdentity = null;
+        this.selectionSavedStamp = '';
+        this.selectedProfileUuid = '';
         this.credentialKey = '';
         this.credentialProfiles = '';
         this.forgetKey = '';
@@ -290,16 +309,27 @@ export class NetworkController {
 
     _select(key, page) {
         const row = this.row(key);
-        if (!row?.connected || (page === 'qr' && !row.wireless)) return false;
+        const savedStamp = savedInfoStamp(row);
+        if (!row || (!row.connected && (page !== 'info' || !savedStamp))
+            || (page === 'qr' && !row.wireless)) return false;
         this._reset();
         try {
             const identity = this.backend.getIdentity(key);
-            if (!identity) throw new Error('The connection changed. Reopen its details.');
-            this.details = this.backend.details(key);
-            if (!identityEqual(identity, this.backend.getIdentity(key)))
+            if (savedStamp ? identity : !identity) throw new Error('The connection changed. Reopen its details.');
+            const details = this.backend.details(key);
+            const currentIdentity = this.backend.getIdentity(key);
+            const currentRow = this.backend.rows.find(row => row.key === key);
+            if (savedStamp ? currentIdentity || savedInfoStamp(currentRow) !== savedStamp
+                : !identityEqual(identity, currentIdentity))
                 throw new Error('The connection changed. Reopen its details.');
+            if (savedStamp) {
+                const profile = currentRow.profiles.find(profile => profile.uuid === details.profileUuid) || currentRow.profiles[0];
+                this.selectedProfileUuid = profile.uuid;
+                this.details = { ...details, profileId: profile.id ?? '', profileUuid: profile.uuid };
+            } else this.details = details;
             this.selectedKey = key;
-            this.selectionIdentity = { ...identity };
+            this.selectionIdentity = identity ? { ...identity } : null;
+            this.selectionSavedStamp = savedStamp;
             this.page = page;
         } catch (error) { this.error = error.message; this.emit(); return false; }
         this.emit();
@@ -308,13 +338,36 @@ export class NetworkController {
 
     info(key) { this._select(key, 'info'); }
 
+    selectSavedProfile(uuid) {
+        if (this.disposed || !this.opened || this.page !== 'info' || this.selectionIdentity
+            || !this.selectionSavedStamp || !this.selectedRow?.wireless) return;
+        if (!this._selectionCurrent(this.selectedKey, null, this.selectionSavedStamp, this.selectedProfileUuid)) {
+            this.changed();
+            return;
+        }
+        const row = this.backend.rows.find(row => row.key === this.selectedKey);
+        const profile = row?.profiles.find(profile => profile.uuid === uuid);
+        if (!profile || row.changing || uuid === this.selectedProfileUuid) return;
+        this._cancelRead();
+        this.secretRequested = false;
+        this.secret = '';
+        this.qrImage = '';
+        this.error = '';
+        this.selectedProfileUuid = profile.uuid;
+        this.details = { ...this.details, profileId: profile.id ?? '', profileUuid: profile.uuid };
+        this.emit();
+    }
+
     async qr(key) {
         if (!this._select(key, 'qr')) return;
         return this._readSensitive('qr');
     }
 
     revealSecret() {
-        if (this.page !== 'info' || !this.selectedRow?.wireless || this.secretLoading) return;
+        const row = this.selectedRow;
+        if (this.page !== 'info' || !row?.wireless || this.secretLoading
+            || !(row.connected ? this.selectionIdentity
+                : row.known && !row.changing && this.selectionSavedStamp && this.selectedProfileUuid)) return;
         this.secretRequested = true;
         return this._readSensitive('secret');
     }
@@ -326,24 +379,52 @@ export class NetworkController {
         this.emit();
     }
 
+    _selectionCurrent(key, identity, savedStamp, profileUuid) {
+        // getIdentity refreshes native rows before the saved-profile check, even
+        // when a DBus change notification has not reached the controller yet.
+        const active = this.backend.getIdentity(key);
+        if (identity) return identityEqual(identity, active);
+        const row = this.backend.rows.find(row => row.key === key);
+        return Boolean(savedStamp && !active && savedInfoStamp(row) === savedStamp
+            && row.profiles.some(profile => profile.uuid === profileUuid));
+    }
+
     _readCurrent(request) {
         return !this.disposed && this.opened && this.read === request && request.serial === this.serial
+            && !request.io.is_cancelled() && request.radios === `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
             && request.key === this.selectedKey && request.page === this.page
             && (request.kind !== 'secret' || this.secretRequested)
-            && identityEqual(request.identity, this.backend.getIdentity(request.key));
+            && request.savedInfoStamp === this.selectionSavedStamp
+            && (request.identity || request.profileUuid === this.selectedProfileUuid)
+            && this._selectionCurrent(request.key, request.identity, request.savedInfoStamp, request.profileUuid);
     }
 
     async _readSensitive(kind) {
+        const row = this.selectedRow;
+        const saved = kind === 'secret' && this.page === 'info' && this.selectionSavedStamp
+            && this.selectedProfileUuid && row?.known && !row.connected && !row.changing;
+        if (this.disposed || !this.opened || !row?.wireless
+            || (!saved && (!row.connected || !this.selectionIdentity))) return;
+        if (this.radios !== `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
+            || !this._selectionCurrent(this.selectedKey, this.selectionIdentity, this.selectionSavedStamp, this.selectedProfileUuid)) {
+            this.changed();
+            return;
+        }
         this._cancelRead();
+        this.secret = '';
         this.error = '';
         const request = { kind, key: this.selectedKey, page: this.page, serial: this.serial,
-            identity: { ...this.selectionIdentity }, io: this.createCancellable() };
+            identity: this.selectionIdentity ? { ...this.selectionIdentity } : null,
+            savedInfoStamp: this.selectionSavedStamp, profileUuid: this.selectedProfileUuid,
+            radios: `${this.wifiEnabled}:${this.wifiHardwareEnabled}`, io: this.createCancellable() };
         this.read = request;
         this.secretLoading = kind === 'secret';
         this.qrLoading = kind === 'qr';
         this.emit();
         try {
-            const credentials = await this.backend.readSecret(request.key, request.identity, request.io);
+            const credentials = request.identity
+                ? await this.backend.readSecret(request.key, request.identity, request.io)
+                : await this.backend.readSavedSecret(request.key, request.profileUuid, request.io);
             if (!this._readCurrent(request)) return;
             if (kind === 'secret') this.secret = credentials.password || 'No password (open network)';
             else {
@@ -356,6 +437,7 @@ export class NetworkController {
         } catch (error) {
             if (this._readCurrent(request)) {
                 this.error = error.message;
+                if (kind === 'secret') this.secretRequested = false;
                 this.secret = '';
                 this.qrImage = '';
             }
@@ -364,8 +446,10 @@ export class NetworkController {
                 this.read = null;
                 this.secretLoading = false;
                 this.qrLoading = false;
-                // A roam may occur before a queued native change notification.
-                if (!identityEqual(request.identity, this.backend.getIdentity(request.key))) this.changed();
+                // A roam, profile replacement, or radio change can precede its
+                // queued notification. Do not retain the obsolete selection.
+                if (request.radios !== `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
+                    || !this._selectionCurrent(request.key, request.identity, request.savedInfoStamp, request.profileUuid)) this.changed();
                 else this.emit();
             }
         }

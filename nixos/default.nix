@@ -103,15 +103,11 @@ in
     # Networking
     networking.hostName = "raina";
     networking.networkmanager.enable = true;
-    networking.networkmanager.dns = "none";
+    # Use network-provided DNS so captive-portal hostnames can resolve before sign-in.
+    networking.networkmanager.dns = "default";
     networking.wireless.iwd.enable = true;
     networking.networkmanager.wifi.backend = "iwd";
-    networking.nameservers = [
-      "8.8.8.8"
-      "100.100.100.100"
-      "1.1.1.1"
-      "9.9.9.9"
-    ];
+
     networking.firewall = rec {
       allowedTCPPortRanges = [
         {

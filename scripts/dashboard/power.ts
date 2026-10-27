@@ -8,9 +8,8 @@ import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import Battery from 'gi://AstalBattery';
 import PowerProfiles from 'gi://AstalPowerProfiles';
-import Network from 'gi://AstalNetwork';
-import Bluetooth from 'gi://AstalBluetooth';
 import type Cairo from 'cairo';
+
 import { MetricBar, MetricsSampler, type Metrics } from './parameters.ts';
 import {
     NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
@@ -20,26 +19,123 @@ import {
 
 const BATTERY_ICONS = ['󰁺', '󰁻', '󰁼', '󰁽', '󰁾', '󰁿', '󰂀', '󰂁', '󰂂', '󰁹'];
 
+export const SCREEN_TIMEOUT_CHOICES = [
+    { id: '0', label: 'Sleep after: None' },
+    { id: '10', label: 'Sleep after: 10 min' },
+    { id: '30', label: 'Sleep after: 30 min' },
+    { id: '60', label: 'Sleep after: 1h' },
+    { id: '120', label: 'Sleep after: 2h' },
+    { id: '180', label: 'Sleep after: 3h' },
+    { id: '360', label: 'Sleep after: 6h' },
+] as const;
+
+function validMinutes(minutes: unknown): minutes is number {
+    return typeof minutes === 'number' && SCREEN_TIMEOUT_CHOICES.some(choice => Number(choice.id) === minutes);
+}
+
+export class ScreenTimeoutController {
+    private currentMinutes = 0;
+    private child: Gio.Subprocess | null = null;
+    private disposed = false;
+    private readonly path: string;
+
+    constructor(private readonly onChange: () => void) {
+        // Retain the original preference path so the selected timeout carries over.
+        this.path = GLib.build_filenamev([GLib.getenv('XDG_STATE_HOME')
+            || GLib.build_filenamev([GLib.get_home_dir(), '.local', 'state']), 'dashboard', 'screen-timeout.json']);
+        try {
+            const file = Gio.File.new_for_path(this.path);
+            if (file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null).get_size() > 1024)
+                throw new Error('Sleep timer preference exceeds 1 KiB.');
+            const [ok, bytes] = file.load_contents(null);
+            if (!ok) throw new Error('Could not read sleep timer preference.');
+            const saved = JSON.parse(new TextDecoder().decode(bytes));
+            if (!saved || saved.version !== 1 || !validMinutes(saved.minutes))
+                throw new Error('Invalid sleep timer preference.');
+            this.child = saved.minutes ? this.start(saved.minutes) : null;
+            this.currentMinutes = saved.minutes;
+        } catch (error: any) {
+            if (!error.matches?.(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_FOUND))
+                console.warn(`Sleep timer: ${String(error)}`);
+        }
+    }
+
+    get minutes(): number { return this.currentMinutes; }
+
+    setMinutes(minutes: number): void {
+        if (this.disposed) return;
+        if (!validMinutes(minutes)) throw new Error(`Invalid sleep timer: ${minutes}`);
+        if (minutes === this.currentMinutes) return;
+        const next = minutes ? this.start(minutes) : null;
+        try {
+            const parent = GLib.path_get_dirname(this.path);
+            if (GLib.mkdir_with_parents(parent, 0o700) !== 0) throw new Error(`Could not create ${parent}`);
+            const [ok] = Gio.File.new_for_path(this.path).replace_contents(
+                new TextEncoder().encode(JSON.stringify({ version: 1, minutes })), null, false,
+                Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+            if (!ok) throw new Error('Could not save sleep timer preference.');
+        } catch (error) {
+            this.stop(next);
+            throw error;
+        }
+        const previous = this.child;
+        this.child = next;
+        this.currentMinutes = minutes;
+        this.stop(previous);
+        this.onChange();
+    }
+
+    private start(minutes: number): Gio.Subprocess {
+        const systemctl = GLib.shell_quote(GLib.getenv('SYSTEMCTL') || 'systemctl');
+        const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_SILENCE });
+        // Use compositor idle notifications, not a wall-clock timer; activity and
+        // Wayland idle inhibitors are handled by swayidle even while the panel is closed.
+        const child = launcher.spawnv([GLib.getenv('SWAYIDLE') || 'swayidle', '-w', '-C', '/dev/null',
+            'timeout', String(minutes * 60), `exec ${systemctl} suspend`]);
+        child.wait_async(null, (_process: Gio.Subprocess | null, result: Gio.AsyncResult) => {
+            try { child.wait_finish(result); }
+            catch (error) { console.warn(`Sleep timer wait: ${String(error)}`); }
+            if (this.disposed || child !== this.child) return;
+            this.child = null;
+            this.currentMinutes = 0;
+            console.warn('Sleep timer: swayidle exited; automatic sleep is disabled.');
+            this.onChange();
+        });
+        return child;
+    }
+
+    private stop(child: Gio.Subprocess | null): void {
+        // Stop the watcher gracefully; its uncancelled wait callback reaps it.
+        // No resume action is registered, so stopping cannot trigger a power action.
+        child?.send_signal(15);
+    }
+
+    dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.stop(this.child);
+        this.child = null;
+    }
+}
+
 export class DashboardBackend {
     readonly notifications: NotificationCenter;
     battery = { ready: false, present: false, percentage: -1, status: 'READING BATTERY STATUS' };
-    airplaneMode = false;
     profiles: string[] = [];
     activeProfile = '';
     private batteryDevice = Battery.get_default();
     private upower = new Battery.UPower();
     private power = PowerProfiles.get_default();
-    private network = Network.get_default();
-    private bluetooth = Bluetooth.get_default();
+    private screenTimeout: ScreenTimeoutController;
     private sampler: MetricsSampler;
     private listeners = new Set<() => void>();
     private signals: [any, number][] = [];
-    private radioSignals: [any, number][] = [];
     private unsubscribeNotifications: () => void;
     private disposed = false;
 
     constructor() {
         this.sampler = new MetricsSampler(() => this.emit());
+        this.screenTimeout = new ScreenTimeoutController(() => this.emit());
         this.notifications = new NotificationCenter();
         this.unsubscribeNotifications = this.notifications.subscribe(() => this.emit());
         const refresh = () => this.refresh();
@@ -47,9 +143,7 @@ export class DashboardBackend {
         this.watch(this.upower, 'notify', refresh);
         this.watch(this.power, 'notify::profiles', refresh);
         this.watch(this.power, 'notify::active-profile', refresh);
-        this.watch(this.network, 'notify::client', () => this.watchRadios());
-        this.watch(this.bluetooth, 'notify::adapters', () => this.watchRadios());
-        this.watchRadios();
+        this.refresh();
     }
 
     get metrics(): Metrics { return this.sampler.data; }
@@ -60,17 +154,8 @@ export class DashboardBackend {
         return () => this.listeners.delete(callback);
     }
 
-    private watch(object: any, signal: string, callback: () => void, radios = false) {
-        if (object) (radios ? this.radioSignals : this.signals).push([object, object.connect(signal, callback)]);
-    }
-
-    private watchRadios() {
-        for (const [object, signal] of this.radioSignals) object.disconnect(signal);
-        this.radioSignals = [];
-        this.watch(this.network.client, 'notify::wireless-enabled', () => this.refresh(), true);
-        for (const adapter of this.bluetooth.adapters || [])
-            this.watch(adapter, 'notify::powered', () => this.refresh(), true);
-        this.refresh();
+    private watch(object: any, signal: string, callback: () => void) {
+        if (object) this.signals.push([object, object.connect(signal, callback)]);
     }
 
     private refresh() {
@@ -89,8 +174,6 @@ export class DashboardBackend {
         }
         this.battery = { ready, present, status,
             percentage: present && Number.isFinite(device.percentage) ? Math.max(0, Math.min(1, device.percentage)) : -1 };
-        this.airplaneMode = !this.network.client?.wireless_enabled
-            && (this.bluetooth.adapters || []).every((adapter: Bluetooth.Adapter) => !adapter.powered);
         this.profiles = (this.power.get_profiles() || []).map((profile: PowerProfiles.Profile) => profile.profile)
                     .filter((profile: string) => typeof profile === 'string' && profile.length > 0);
         this.activeProfile = this.power.active_profile || '';
@@ -105,13 +188,10 @@ export class DashboardBackend {
         if (!this.disposed) this.sampler.setActive(Boolean(active));
     }
 
-    toggleAirplaneMode() {
-        if (this.disposed) return;
-        const enabled = this.airplaneMode;
-        // NM's global client property works even without a selected wifi device.
-        if (this.network.client) this.network.client.wireless_enabled = enabled;
-        // AstalBluetooth.toggle() only changes the default adapter; use all of them.
-        for (const adapter of this.bluetooth.adapters || []) adapter.powered = enabled;
+    get screenTimeoutMinutes(): number { return this.screenTimeout.minutes; }
+
+    setScreenTimeout(minutes: number) {
+        if (!this.disposed) this.screenTimeout.setMinutes(minutes);
     }
 
     setProfile(profile: string) {
@@ -135,7 +215,7 @@ export class DashboardBackend {
             tooltip: available ? `${battery.status} | Profile: ${this.activeProfile} | Click: Dashboard` : 'Dashboard',
             class: !available ? 'clear' : charging ? 'charging' : full ? 'full'
                 : percent <= 15 ? 'critical' : percent <= 25 ? 'warning' : percent < 50 ? 'low' : 'discharging',
-            historyCount, popupCount, dnd, airplaneMode: this.airplaneMode,
+            historyCount, popupCount, dnd, screenTimeoutMinutes: this.screenTimeoutMinutes,
             activeProfile: this.activeProfile,
         };
     }
@@ -144,11 +224,11 @@ export class DashboardBackend {
         if (this.disposed) return;
         this.disposed = true;
         this.sampler.dispose();
+        this.screenTimeout.dispose();
         this.unsubscribeNotifications();
         this.notifications.dispose();
-        for (const [object, signal] of [...this.signals, ...this.radioSignals]) object.disconnect(signal);
+        for (const [object, signal] of this.signals) object.disconnect(signal);
         this.signals = [];
-        this.radioSignals = [];
         this.listeners.clear();
     }
 }
@@ -283,7 +363,7 @@ export class DashboardPanel {
     readonly card: Gtk.Overlay;
     readonly viewport: Gtk.ScrolledWindow;
     readonly content: Gtk.Box;
-    readonly airplane: ButtonSwitcher;
+    readonly screenTimeout: ButtonSwitcher;
     readonly profile: ButtonSwitcher;
     readonly metrics: Record<'cpu' | 'memory' | 'disk' | 'temperature', MetricBar>;
     readonly history: NotificationStack;
@@ -324,12 +404,10 @@ export class DashboardPanel {
             { id: 'performance', label: 'Performance' },
         ], profile => backend.setProfile(profile), palette);
 
-        this.airplane = new ButtonSwitcher('Airplane mode', [
-            { id: 'no', label: 'Airplane mode: Off' }, { id: 'yes', label: 'Airplane mode: On' },
-        ], value => {
-            if ((value === 'yes') !== backend.airplaneMode) backend.toggleAirplaneMode();
-        }, palette);
-        const powerControls = box(false, 10, [this.profile.widget, this.airplane.widget]);
+        this.screenTimeout = new ButtonSwitcher('Sleep timer', SCREEN_TIMEOUT_CHOICES,
+            value => backend.setScreenTimeout(Number(value)), palette);
+        this.screenTimeout.widget.tooltip_text = 'Suspend the computer after inactivity. None disables automatic sleep. Locking is unchanged; keyboard/mouse wake depends on hardware.';
+        const powerControls = box(false, 10, [this.profile.widget, this.screenTimeout.widget]);
         powerControls.homogeneous = true;
         power.append(powerControls);
 
@@ -378,7 +456,7 @@ export class DashboardPanel {
 
     render(): void {
         const { metrics, notifications } = this.backend;
-        this.airplane.update(this.backend.airplaneMode ? 'yes' : 'no');
+        this.screenTimeout.update(String(this.backend.screenTimeoutMinutes));
         this.profile.update(this.backend.activeProfile, this.backend.profiles);
         this.metrics.cpu.update(metrics.cpuPercent, metrics.cpuPercent < 0 ? '—' : `${metrics.cpuPercent}%`);
         this.metrics.memory.update(metrics.memoryPercent, metrics.memoryPercent < 0 ? '—'

@@ -82,6 +82,7 @@ const writes: { path: string; flags: number }[] = [];
 const settings = new Map<string, any>();
 const environment = new Map<string, string>();
 const reads: { path: string; io: any; callback: (file: any, result: any) => void }[] = [];
+const syncReads: string[] = [];
 const children: Child[] = [];
 const missing = () => Object.assign(new Error('Not found'), { matches: () => true });
 const delay = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -111,20 +112,26 @@ const GLib = {
     get_home_dir: () => '/test/home', build_filenamev: (parts: string[]) => path.join(...parts),
     path_get_dirname: path.dirname, mkdir_with_parents: () => 0,
     uuid_string_random: () => `uuid-${++serial}`,
+    shell_quote: (text: string) => `'${text.replaceAll("'", "'\\''")}'`,
 };
 
 class Child {
     argv: string[];
+    flags: number;
     killed = false;
     done = false;
+    signals: number[] = [];
+    waitCancellable: any = undefined;
+    reaped = 0;
     wait: ((child: Child, result: any) => void) | null = null;
     communicate: ((child: Child, result: any) => void) | null = null;
-    constructor(argv: string[]) { this.argv = argv; children.push(this); }
-    wait_async(_io: any, callback: any) { this.wait = callback; }
-    wait_finish() { return true; }
+    constructor(argv: string[], flags = 0) { this.argv = argv; this.flags = flags; children.push(this); }
+    wait_async(io: any, callback: any) { this.waitCancellable = io; this.wait = callback; }
+    wait_finish() { this.reaped++; return true; }
     communicate_utf8_async(_input: any, _io: any, callback: any) { this.communicate = callback; }
     communicate_utf8_finish(result: any) { return [true, result, '']; }
     get_successful() { return !this.killed; }
+    send_signal(signal: number) { this.signals.push(signal); }
     force_exit() { this.killed = true; this.finish(''); }
     finish(output: string) {
         if (this.done) return;
@@ -147,16 +154,17 @@ const Gio = {
     Cancellable: class { cancelled = false; cancel() { this.cancelled = true; } },
     FileQueryInfoFlags: { NONE: 0 }, IOErrorEnum: { NOT_FOUND: 1 }, io_error_quark: () => 0,
     FileCreateFlags: { PRIVATE: 1, REPLACE_DESTINATION: 2 },
-    SubprocessFlags: { STDOUT_PIPE: 1, STDERR_SILENCE: 2 },
+    SubprocessFlags: { STDOUT_PIPE: 1, STDERR_SILENCE: 2, STDOUT_SILENCE: 4, STDERR_PIPE: 8 },
     SubprocessLauncher: class {
-        constructor(_options: any) {}
+        flags: number;
+        constructor(options: { flags: number }) { this.flags = options.flags; }
         setenv() {}
-        spawnv(argv: string[]) { return new Child(argv); }
+        spawnv(argv: string[]) { return new Child(argv, this.flags); }
     },
     File: { new_for_path(filename: string) {
         return {
-            query_info() { if (!files.has(filename)) throw missing(); return { get_size: () => files.get(filename)!.length }; },
-            load_contents() { if (!files.has(filename)) throw missing(); return [true, new TextEncoder().encode(files.get(filename)!)]; },
+            query_info() { if (!files.has(filename)) throw missing(); return { get_size: () => new TextEncoder().encode(files.get(filename)!).length }; },
+            load_contents() { syncReads.push(filename); if (!files.has(filename)) throw missing(); return [true, new TextEncoder().encode(files.get(filename)!)]; },
             replace_contents(bytes: Uint8Array, _etag: any, _backup: boolean, flags: number) {
                 files.set(filename, new TextDecoder().decode(bytes)); writes.push({ path: filename, flags }); return [true, 'etag'];
             },
@@ -214,14 +222,11 @@ const device = Object.assign(new Signals(), { is_present: true, percentage: 0.42
 const upower = Object.assign(new Signals(), { daemon_version: '1', on_battery: false });
 let availableProfiles = [{ profile: 'balanced' }, { profile: 'power-saver' }];
 const power = Object.assign(new Signals(), { get_profiles: () => availableProfiles, active_profile: 'balanced' });
-const network = Object.assign(new Signals(), { client: Object.assign(new Signals(), { wireless_enabled: true }) as any });
-const bluetooth = Object.assign(new Signals(), { adapters: [] as any[] });
 const mockGI: Record<string, any> = {
     GLib, Gio, AstalNotifd: { get_default: () => native, ClosedReason: { EXPIRED: 1 } },
     AstalBattery: { get_default: () => device, UPower: class { constructor() { return upower; } },
         State: { CHARGING: 1, PENDING_CHARGE: 5, FULLY_CHARGED: 4 } },
-    AstalPowerProfiles: { get_default: () => power }, AstalNetwork: { get_default: () => network },
-    AstalBluetooth: { get_default: () => bluetooth },
+    AstalPowerProfiles: { get_default: () => power },
     // Native widget doubles exercise controls without starting the application.
     GObject: { registerClass: (_metadata: any, implementation: any) => implementation },
     Astal: { Application: class {} }, AstalIO: {}, Gtk, Gdk: {}, Pango: {}, Gtk4LayerShell: {},
@@ -249,21 +254,22 @@ const {
 const {
     MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
 } = await import('./parameters.ts');
-const { ButtonSwitcher, DashboardApplication, DashboardBackend, parseRequest } = await import('./power.ts');
+const {
+    ButtonSwitcher, DashboardApplication, DashboardBackend, parseRequest, SCREEN_TIMEOUT_CHOICES, ScreenTimeoutController,
+} = await import('./power.ts');
 hooks.deregister();
 
 beforeEach(() => {
     clock = 0; serial = 0; timers.clear(); files.clear(); writes.length = 0; settings.clear(); environment.clear();
-    reads.length = 0; children.length = 0; native = new Native();
+    reads.length = 0; syncReads.length = 0; children.length = 0; native = new Native();
     environment.set('XDG_STATE_HOME', '/test/state');
     device.is_present = true; device.percentage = 0.42; device.state = 1;
     upower.daemon_version = '1'; upower.on_battery = false;
     availableProfiles = [{ profile: 'balanced' }, { profile: 'power-saver' }]; power.active_profile = 'balanced';
-    network.client = Object.assign(new Signals(), { wireless_enabled: true });
-    bluetooth.adapters = [Object.assign(new Signals(), { powered: true }), Object.assign(new Signals(), { powered: false })];
 });
 
 const archivePath = '/test/state/dashboard/notifications.json';
+const screenTimeoutPath = '/test/state/dashboard/screen-timeout.json';
 function completeReads(cpu = 'cpu 10 0 0 90', memory = 'MemTotal: 2097152 kB\nMemAvailable: 1048576 kB', temperature = '45000') {
     for (const request of reads.splice(0)) request.callback(Gio.File.new_for_path(request.path), request.io.cancelled
         ? { error: new Error('Cancelled') } : { text: request.path === '/proc/stat' ? cpu : request.path === '/proc/meminfo' ? memory : temperature });
@@ -460,22 +466,351 @@ test('switcher ticks reflect authoritative selection and availability and reset 
     assert.deepEqual(requests, []);
 });
 
-test('switcher shows Airplane mode On/Off inside and cycles without optimistic toggles', () => {
-    const { control, requests, previous, next, value } = switcher([
-        { id: 'no', label: 'Airplane mode: Off' }, { id: 'yes', label: 'Airplane mode: On' },
+test('sleep timer choices have exact labels and switcher arrows wrap without optimistic selection', () => {
+    assert.deepEqual(SCREEN_TIMEOUT_CHOICES, [
+        { id: '0', label: 'Sleep after: None' },
+        { id: '10', label: 'Sleep after: 10 min' },
+        { id: '30', label: 'Sleep after: 30 min' },
+        { id: '60', label: 'Sleep after: 1h' },
+        { id: '120', label: 'Sleep after: 2h' },
+        { id: '180', label: 'Sleep after: 3h' },
+        { id: '360', label: 'Sleep after: 6h' },
     ]);
-    control.update('no');
-    previous.emit('clicked');
-    next.emit('clicked');
-    assert.deepEqual(requests, ['yes', 'yes']);
-    assert.equal(value.label, 'Airplane mode: Off');
-    assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Airplane mode: Off');
-    control.update('yes');
-    previous.emit('clicked');
-    next.emit('clicked');
-    assert.deepEqual(requests, ['yes', 'yes', 'no', 'no']);
-    assert.equal(value.label, 'Airplane mode: On');
-    assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), 'Airplane mode: On');
+    const { control, requests, previous, next, value, indicators } = switcher(SCREEN_TIMEOUT_CHOICES);
+    assert.equal(indicators.children.length, 7);
+    for (const [index, choice] of SCREEN_TIMEOUT_CHOICES.entries()) {
+        control.update(choice.id);
+        previous.emit('clicked');
+        next.emit('clicked');
+        assert.deepEqual(requests.splice(0), [
+            SCREEN_TIMEOUT_CHOICES[(index + 6) % 7].id,
+            SCREEN_TIMEOUT_CHOICES[(index + 1) % 7].id,
+        ]);
+        assert.equal(value.label, choice.label);
+        assert.equal(value.accessible.get(Gtk.AccessibleProperty.LABEL), choice.label);
+    }
+});
+
+test('screen timeout defaults to None without writes, a child or change notifications', () => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    assert.equal(controller.minutes, 0);
+    controller.setMinutes(0);
+    controller.setMinutes(0);
+    controller.dispose(); controller.dispose();
+    assert.equal(changes, 0);
+    assert.equal(writes.length, 0);
+    assert.equal(children.length, 0);
+    assert.equal(timers.size, 0);
+});
+
+for (const [minutes, seconds] of [[10, 600], [30, 1800], [60, 3600], [120, 7200], [180, 10800], [360, 21600]]) {
+    test(`sleep timer ${minutes} minutes requests suspend after ${seconds} idle seconds and persists synchronously`, () => {
+        const observed: number[] = [];
+        const controller = new ScreenTimeoutController(() => observed.push(controller.minutes));
+        controller.setMinutes(minutes);
+        assert.equal(controller.minutes, minutes);
+        assert.deepEqual(observed, [minutes]);
+        assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes });
+        assert.deepEqual(writes, [{ path: screenTimeoutPath,
+            flags: Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION }]);
+        assert.equal(children.length, 1);
+        const child = children[0];
+        assert.deepEqual(child.argv, ['swayidle', '-w', '-C', '/dev/null', 'timeout', String(seconds),
+            "exec 'systemctl' suspend"]);
+        assert.equal(child.flags, Gio.SubprocessFlags.STDOUT_SILENCE, 'stderr must inherit, not be silenced or piped');
+        assert.equal(child.waitCancellable, null);
+        assert.equal(typeof child.wait, 'function');
+        controller.setMinutes(minutes);
+        assert.equal(children.length, 1, 'identical active selection must not spawn again');
+        assert.equal(writes.length, 1);
+        assert.deepEqual(observed, [minutes]);
+        controller.dispose();
+        assert.deepEqual(child.signals, [15]);
+        assert.equal(child.killed, false);
+        child.finish('');
+        assert.equal(child.reaped, 1);
+    });
+}
+
+test('sleep timer honors executable overrides and shell-quotes systemctl', () => {
+    environment.set('SWAYIDLE', '/test/sway idle');
+    environment.set('SYSTEMCTL', "/test/system'ctl with spaces");
+    const controller = new ScreenTimeoutController(() => {});
+    controller.setMinutes(30);
+    assert.deepEqual(children[0].argv, ['/test/sway idle', '-w', '-C', '/dev/null', 'timeout', '1800',
+        "exec '/test/system'\\''ctl with spaces' suspend"]);
+    controller.dispose();
+});
+
+test('screen timeout rejects values outside the exact numeric choices without side effects', () => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(10);
+    for (const invalid of [-1, 1, 5, 10.5, 20, 61, 361, NaN, Infinity, -Infinity, '10', null, undefined, true]) {
+        assert.throws(() => controller.setMinutes(invalid as number), String(invalid));
+        assert.equal(controller.minutes, 10);
+    }
+    assert.equal(changes, 1);
+    assert.equal(children.length, 1);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(children[0].signals, []);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
+    controller.dispose();
+});
+
+for (const minutes of [0, 10, 30, 60, 120, 180, 360]) {
+    test(`sleep timer reuses saved screen timeout of ${minutes} minutes without rewriting the preference`, () => {
+        const saved = JSON.stringify({ version: 1, minutes });
+        files.set(screenTimeoutPath, saved);
+        const controller = new ScreenTimeoutController(() => {});
+        assert.equal(controller.minutes, minutes);
+        assert.equal(children.length, minutes === 0 ? 0 : 1);
+        if (minutes) {
+            assert.equal(children[0].argv[5], String(minutes * 60));
+            assert.equal(children[0].argv[6], "exec 'systemctl' suspend");
+            assert.equal(children[0].waitCancellable, null);
+        }
+        assert.deepEqual(syncReads, [screenTimeoutPath]);
+        assert.equal(writes.length, 0);
+        assert.equal(files.get(screenTimeoutPath), saved);
+        controller.dispose();
+    });
+}
+
+test('screen timeout ignores corrupt, unsupported and oversized saved preferences without loading oversized files', t => {
+    t.mock.method(console, 'warn', () => {});
+    for (const text of ['{broken', 'null', '[]', '{}', '{"minutes":10}',
+        '{"version":2,"minutes":10}', '{"version":1}', '{"version":1,"minutes":"10"}',
+        '{"version":1,"minutes":null}', '{"version":1,"minutes":true}',
+        '{"version":1,"minutes":-1}', '{"version":1,"minutes":20}', '{"version":1,"minutes":10.5}',
+        JSON.stringify({ version: 1, minutes: 10 }).padEnd(1025)]) {
+        files.set(screenTimeoutPath, text);
+        syncReads.length = 0;
+        const controller = new ScreenTimeoutController(() => {});
+        assert.equal(controller.minutes, 0, text);
+        assert.equal(children.length, 0);
+        assert.equal(writes.length, 0);
+        assert.equal(files.get(screenTimeoutPath), text);
+        if (text.length > 1024) assert.deepEqual(syncReads, [], 'size must be checked before reading contents');
+        controller.dispose();
+    }
+});
+
+test('screen timeout accepts a saved preference at the 1024-byte size boundary', () => {
+    files.set(screenTimeoutPath, JSON.stringify({ version: 1, minutes: 60 }).padEnd(1024));
+    const controller = new ScreenTimeoutController(() => {});
+    assert.equal(controller.minutes, 60);
+    assert.equal(children.length, 1);
+    assert.deepEqual(syncReads, [screenTimeoutPath]);
+    assert.equal(writes.length, 0);
+    controller.dispose();
+});
+
+test('screen timeout saves and restores under ~/.local/state when XDG_STATE_HOME is absent', () => {
+    environment.delete('XDG_STATE_HOME');
+    const filename = '/test/home/.local/state/dashboard/screen-timeout.json';
+    let controller = new ScreenTimeoutController(() => {});
+    assert.equal(writes.length, 0);
+    assert.equal(children.length, 0);
+    controller.setMinutes(120);
+    assert.deepEqual(JSON.parse(files.get(filename)!), { version: 1, minutes: 120 });
+    assert.equal(writes[0].path, filename);
+    controller.dispose();
+    controller = new ScreenTimeoutController(() => {});
+    assert.equal(controller.minutes, 120);
+    assert.equal(children.length, 2);
+    assert.equal(children[1].argv[5], '7200');
+    assert.equal(writes.length, 1);
+    controller.dispose();
+});
+
+test('sleep timer None stops the watcher without a power or lock command and can re-enable before its stale exit', async t => {
+    const warnings = t.mock.method(console, 'warn', () => {});
+    const observed: number[] = [];
+    const controller = new ScreenTimeoutController(() => observed.push(controller.minutes));
+    controller.setMinutes(10);
+    const old = children[0];
+    controller.setMinutes(0);
+    assert.equal(controller.minutes, 0);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 0 });
+    assert.deepEqual(old.signals, [15]);
+    assert.equal(old.killed, false, 'watchers should shut down gracefully');
+    assert.equal(children.length, 1, 'None must not launch a suspend, resume or lock command');
+    assert.equal(old.argv.includes('resume'), false, 'stopping the watcher must not trigger a power action');
+    assert.equal(old.waitCancellable, null);
+    controller.setMinutes(0);
+    assert.equal(writes.length, 2);
+    assert.equal(children.length, 1);
+    controller.setMinutes(30);
+    assert.equal(controller.minutes, 30);
+    assert.equal(children.length, 2);
+    old.finish(''); await delay();
+    assert.equal(old.reaped, 1);
+    assert.equal(controller.minutes, 30);
+    assert.deepEqual(observed, [10, 0, 30]);
+    assert.equal(warnings.mock.callCount(), 0);
+    assert.deepEqual(children[1].signals, []);
+    controller.dispose();
+});
+
+test('screen timeout replacement spawns and saves before committing and terminating the old child', async t => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(10);
+    const old = children[0];
+    const open = Gio.File.new_for_path;
+    const saving = t.mock.method(Gio.File, 'new_for_path', (filename: string) => {
+        const file = open(filename);
+        if (filename !== screenTimeoutPath) return file;
+        return { ...file, replace_contents(...args: Parameters<typeof file.replace_contents>) {
+            assert.equal(controller.minutes, 10, 'selection must not commit before persistence');
+            assert.equal(children.length, 2, 'replacement must exist before persistence');
+            assert.deepEqual(old.signals, []);
+            return file.replace_contents(...args);
+        } };
+    });
+    const signal = old.send_signal.bind(old);
+    t.mock.method(old, 'send_signal', (number: number) => {
+        assert.equal(controller.minutes, 30);
+        assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 30 });
+        signal(number);
+    });
+    controller.setMinutes(30);
+    saving.mock.restore();
+    assert.equal(controller.minutes, 30);
+    assert.equal(changes, 2);
+    assert.deepEqual(old.signals, [15]);
+    assert.equal(old.killed, false);
+    assert.deepEqual(children[1].signals, []);
+    old.finish(''); await delay();
+    assert.equal(old.reaped, 1);
+    assert.equal(controller.minutes, 30);
+    assert.equal(changes, 2, 'stale replacement exit must not emit a change');
+    controller.dispose();
+});
+
+test('screen timeout unexpected active exit resets live state, warns and retains the preference for restart', async t => {
+    const warnings = t.mock.method(console, 'warn', () => {});
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(60);
+    const child = children[0];
+    child.finish(''); await delay();
+    assert.equal(child.reaped, 1);
+    assert.equal(controller.minutes, 0);
+    assert.equal(changes, 2);
+    assert.ok(warnings.mock.callCount() > 0, 'unexpected exit must log a warning');
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 60 });
+    assert.equal(writes.length, 1);
+    assert.equal(children.length, 1, 'unexpected exit must not enter an automatic restart loop');
+    controller.dispose();
+    assert.deepEqual(child.signals, []);
+    const restarted = new ScreenTimeoutController(() => {});
+    assert.equal(restarted.minutes, 60);
+    assert.equal(children.length, 2);
+    assert.equal(writes.length, 1);
+    restarted.dispose();
+});
+
+test('screen timeout failed spawn preserves the active child, preference and notifications', t => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(10);
+    const spawn = t.mock.method(Gio.SubprocessLauncher.prototype, 'spawnv', () => { throw new Error('spawn failed'); });
+    assert.throws(() => controller.setMinutes(30), /spawn failed/);
+    assert.equal(spawn.mock.callCount(), 1);
+    assert.equal(controller.minutes, 10);
+    assert.equal(changes, 1);
+    assert.equal(children.length, 1);
+    assert.deepEqual(children[0].signals, []);
+    assert.equal(children[0].killed, false);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
+    assert.equal(writes.length, 1);
+    spawn.mock.restore();
+    controller.setMinutes(30);
+    assert.equal(controller.minutes, 30);
+    assert.deepEqual(children[0].signals, [15]);
+    controller.dispose();
+});
+
+test('screen timeout failed save terminates only the candidate and failed None preserves the active child', async t => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(10);
+    const old = children[0];
+    const open = Gio.File.new_for_path;
+    const saving = t.mock.method(Gio.File, 'new_for_path', (filename: string) => {
+        const file = open(filename);
+        return filename !== screenTimeoutPath ? file : { ...file,
+            replace_contents() { throw new Error('save failed'); } };
+    });
+    assert.throws(() => controller.setMinutes(30), /save failed/);
+    assert.equal(children.length, 2);
+    const candidate = children[1];
+    assert.deepEqual(candidate.signals, [15]);
+    assert.equal(candidate.killed, false);
+    assert.equal(candidate.waitCancellable, null);
+    candidate.finish(''); await delay();
+    assert.equal(candidate.reaped, 1);
+    assert.equal(controller.minutes, 10);
+    assert.equal(changes, 1, 'discarded candidate exit must not change active state');
+    assert.throws(() => controller.setMinutes(0), /save failed/);
+    assert.equal(controller.minutes, 10);
+    assert.equal(changes, 1);
+    assert.deepEqual(old.signals, []);
+    assert.equal(old.killed, false);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
+    assert.equal(writes.length, 1);
+    assert.equal(children.length, 2, 'failed None must not spawn a child');
+    saving.mock.restore();
+    controller.setMinutes(30);
+    assert.equal(controller.minutes, 30);
+    assert.deepEqual(old.signals, [15]);
+    controller.dispose();
+});
+
+test('screen timeout failed restore spawn leaves None live without erasing the saved preference', t => {
+    const warnings = t.mock.method(console, 'warn', () => {});
+    const saved = JSON.stringify({ version: 1, minutes: 30 });
+    files.set(screenTimeoutPath, saved);
+    const spawn = t.mock.method(Gio.SubprocessLauncher.prototype, 'spawnv', () => { throw new Error('restore spawn failed'); });
+    const controller = new ScreenTimeoutController(() => {});
+    assert.equal(controller.minutes, 0);
+    assert.equal(children.length, 0);
+    assert.equal(writes.length, 0);
+    assert.equal(files.get(screenTimeoutPath), saved);
+    assert.equal(spawn.mock.callCount(), 1);
+    assert.ok(warnings.mock.callCount() > 0);
+    spawn.mock.restore();
+    controller.setMinutes(30);
+    assert.equal(controller.minutes, 30);
+    assert.equal(children.length, 1);
+    controller.dispose();
+});
+
+test('screen timeout disposal is idempotent, reaps with SIGTERM and makes all later setters inert', async () => {
+    let changes = 0;
+    const controller = new ScreenTimeoutController(() => changes++);
+    controller.setMinutes(180);
+    const child = children[0];
+    controller.dispose(); controller.dispose();
+    const disposedMinutes = controller.minutes;
+    for (const value of [0, 30, NaN]) assert.doesNotThrow(() => controller.setMinutes(value));
+    assert.equal(controller.minutes, disposedMinutes);
+    assert.deepEqual(child.signals, [15]);
+    assert.equal(child.killed, false);
+    assert.equal(child.waitCancellable, null);
+    assert.equal(writes.length, 1, 'disposal must not erase the saved preference');
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 180 });
+    assert.equal(children.length, 1);
+    const beforeExit = changes;
+    child.finish(''); await delay();
+    assert.equal(child.reaped, 1);
+    assert.equal(controller.minutes, disposedMinutes);
+    assert.equal(changes, beforeExit);
+    controller.dispose();
+    assert.deepEqual(child.signals, [15]);
 });
 
 test('dashboard actions safely report thrown and rejected non-Error values', async () => {
@@ -617,39 +952,27 @@ test('restore tolerates malformed rows, defaults optional fields, deduplicates, 
         assert.throws(() => restoreArchive(text));
 });
 
-test('backend native controls, fractional battery, radio hotplug and read-only status', () => {
+test('backend native controls, fractional battery, screen timeout and read-only status', () => {
     const backend = new DashboardBackend();
     let changes = 0;
     const unsubscribe = backend.subscribe(() => changes++);
     assert.equal(backend.battery.percentage, 0.42);
     assert.equal(backend.battery.status, 'CHARGING');
-    assert.equal(backend.airplaneMode, false);
+    assert.equal(backend.screenTimeoutMinutes, 0);
+    assert.equal('airplaneMode' in backend, false);
+    assert.equal('toggleAirplaneMode' in backend, false);
     assert.equal(reads.length, 0);
     assert.equal(children.length, 0);
     const writesBefore = writes.length;
     for (let i = 0; i < 20; i++) assert.equal(backend.status().historyCount, 0);
     assert.equal(writes.length, writesBefore);
     assert.equal(timers.size, 0);
-    backend.toggleAirplaneMode();
-    assert.equal(network.client.wireless_enabled, false);
-    assert.ok(bluetooth.adapters.every(adapter => !adapter.powered));
-    network.client.emit('notify::wireless-enabled');
-    assert.equal(backend.airplaneMode, true);
-    backend.toggleAirplaneMode();
-    assert.equal(network.client.wireless_enabled, true);
-    assert.ok(bluetooth.adapters.every(adapter => adapter.powered));
-    network.client = null;
-    network.emit('notify::client');
-    bluetooth.adapters = [];
-    bluetooth.emit('notify::adapters');
-    assert.equal(backend.airplaneMode, true);
-    assert.doesNotThrow(() => backend.toggleAirplaneMode());
-    const hotplugged = Object.assign(new Signals(), { powered: true });
-    bluetooth.adapters.push(hotplugged);
-    bluetooth.emit('notify::adapters');
-    assert.equal(backend.airplaneMode, false);
-    hotplugged.powered = false; hotplugged.emit('notify::powered');
-    assert.equal(backend.airplaneMode, true);
+    backend.setScreenTimeout(10);
+    assert.equal(backend.screenTimeoutMinutes, 10);
+    assert.equal(backend.status().screenTimeoutMinutes, 10);
+    assert.ok(changes > 0, 'timeout selection must synchronously notify subscribers');
+    assert.equal(children.length, 1);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
     backend.setProfile('power-saver');
     assert.equal(power.active_profile, 'power-saver');
     assert.throws(() => backend.setProfile('performance'));
@@ -662,7 +985,70 @@ test('backend native controls, fractional battery, radio hotplug and read-only s
     native.send(new NativeNotification(2, 'Unsubscribed'));
     assert.equal(changes, before);
     backend.dispose(); backend.dispose();
+    assert.deepEqual(children[0].signals, [15]);
+    assert.equal(children[0].killed, false);
     assert.equal(timers.size, 0);
+});
+
+test('backend keeps restored screen timeout running across panel close and status reads have no side effects', async () => {
+    files.set(screenTimeoutPath, JSON.stringify({ version: 1, minutes: 30 }));
+    const backend = new DashboardBackend();
+    assert.equal(backend.screenTimeoutMinutes, 30);
+    assert.equal(children.length, 1, 'saved timeout must run even before the panel opens');
+    const child = children[0];
+    const descriptor = Object.getOwnPropertyDescriptor(DashboardBackend.prototype, 'screenTimeoutMinutes')!;
+    assert.equal(typeof descriptor.get, 'function');
+    assert.equal(descriptor.set, undefined);
+    backend.setActive(true);
+    assert.equal(children.length, 2);
+    const metricsChild = children[1];
+    backend.setActive(false);
+    completeReads(); await delay();
+    assert.equal(metricsChild.killed, true, 'panel close still stops metrics');
+    assert.equal(child.killed, false);
+    assert.deepEqual(child.signals, [], 'panel close must not terminate swayidle');
+    assert.equal(backend.screenTimeoutMinutes, 30);
+    assert.equal(backend.status().screenTimeoutMinutes, 30);
+    assert.equal('airplaneMode' in backend.status(), false);
+    let changes = 0;
+    backend.subscribe(() => changes++);
+    const state = () => ({
+        files: [...files], writes: [...writes], reads: reads.length, syncReads: [...syncReads],
+        children: [...children], signals: [...child.signals], timers: timers.size, settings: [...settings],
+        battery: backend.battery, history: backend.notifications.history, popups: backend.notifications.popups,
+        resolutions: [...native.resolutions], notifications: [...native.notifications],
+    });
+    const before = state();
+    const status = backend.status();
+    for (let index = 0; index < 20; index++) {
+        assert.equal(backend.screenTimeoutMinutes, 30);
+        assert.deepEqual(backend.status(), status);
+    }
+    assert.deepEqual(state(), before);
+    assert.equal(changes, 0);
+    backend.dispose(); backend.dispose();
+    assert.deepEqual(child.signals, [15]);
+    assert.equal(child.killed, false);
+    child.finish(''); await delay();
+    assert.equal(child.reaped, 1);
+    const afterDispose = { writes: writes.length, children: children.length, changes };
+    backend.setScreenTimeout(60);
+    assert.deepEqual({ writes: writes.length, children: children.length, changes }, afterDispose);
+});
+
+test('backend publishes unexpected timeout exit synchronously through its getter and subscribers', async t => {
+    t.mock.method(console, 'warn', () => {});
+    const backend = new DashboardBackend();
+    const observed: number[] = [];
+    backend.subscribe(() => observed.push(backend.screenTimeoutMinutes));
+    backend.setScreenTimeout(60);
+    assert.deepEqual(observed, [60]);
+    children[0].finish(''); await delay();
+    assert.equal(backend.screenTimeoutMinutes, 0);
+    assert.equal(backend.status().screenTimeoutMinutes, 0);
+    assert.deepEqual(observed, [60, 0]);
+    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 60 });
+    backend.dispose();
 });
 
 test('power profile switcher uses the native getter and cycles all available profiles', () => {
@@ -776,7 +1162,7 @@ test('status keeps notification metadata without changing the battery badge or m
     native.send(new NativeNotification(2, 'Transient', { transient: true }));
     assert.deepEqual(backend.status(), {
         text: '󰂄 42%', tooltip: 'CHARGING | Profile: balanced | Click: Dashboard', class: 'charging',
-        historyCount: 1, popupCount: 2, dnd: false, airplaneMode: false, activeProfile: 'balanced',
+        historyCount: 1, popupCount: 2, dnd: false, screenTimeoutMinutes: 0, activeProfile: 'balanced',
     });
     backend.notifications.toggleDnd();
     const expected = { ...backend.status(), historyCount: 1, popupCount: 0, dnd: true };

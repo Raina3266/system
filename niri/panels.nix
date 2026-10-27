@@ -159,13 +159,14 @@ rec {
         sourceDir = "dashboard";
         entryPoint = "power.ts";
         extraPackages = [
-          pkgs.astal.battery pkgs.astal.powerprofiles pkgs.astal.network
-          pkgs.networkmanager pkgs.astal.bluetooth pkgs.astal.notifd
+          pkgs.astal.battery pkgs.astal.powerprofiles pkgs.astal.notifd
         ];
         imageLoaders = true;
         environment = {
           NETWORK_PANEL = "network-panel";
           COREUTILS_DF = "${pkgs.coreutils}/bin/df";
+          SWAYIDLE = pkgs.lib.getExe pkgs.swayidle;
+          SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
         };
         commands = [ "run" "status" "toggle" "close" "toggleDnd" "clearNotifications" ];
       };
