@@ -398,11 +398,12 @@ export function invoke(action: () => unknown): void {
     } catch (error) { console.warn(`Dashboard action: ${String(error)}`); }
 }
 
-export function iconButton(glyph: string, tooltip: string | null, clicked: () => unknown, size = 28): Gtk.Button {
+export function iconButton(glyph: string, accessibleLabel: string | null, clicked: () => unknown, size = 28): Gtk.Button {
     const child = label(glyph, ['icon-glyph']);
     child.xalign = 0.5;
-    const widget = new Gtk.Button({ child, ...(tooltip === null ? {} : { tooltip_text: tooltip }), css_classes: ['icon-button'],
+    const widget = new Gtk.Button({ child, css_classes: ['icon-button'],
         width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
+    if (accessibleLabel !== null) widget.update_property([Gtk.AccessibleProperty.LABEL], [accessibleLabel]);
     widget.connect('clicked', () => invoke(clicked));
     return widget;
 }
@@ -597,7 +598,8 @@ export class NotificationEntry {
                 const text = new Gtk.Label({ label: action.text, use_markup: false, ellipsize: Pango.EllipsizeMode.END,
                     max_width_chars: 24, css_classes: ['notification-action-label'] });
                 const button = new Gtk.Button({ child: text, css_classes: ['notification-action'],
-                    height_request: 28, tooltip_text: action.text, valign: Gtk.Align.START });
+                    height_request: 28, valign: Gtk.Align.START });
+                button.update_property([Gtk.AccessibleProperty.LABEL], [action.text]);
                 button.connect('clicked', () => invoke(() => this.center.invokeNotificationAction(this.row.id, action.identifier)));
                 this.actions.insert(button, -1);
                 button.get_parent()?.set_focusable(false);

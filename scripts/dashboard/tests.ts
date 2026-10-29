@@ -2,9 +2,47 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { registerHooks } from 'node:module';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { NotificationRow, Palette } from './notification.ts';
 import type { DashboardPanel } from './power.ts';
+
+test('notification history uses dim yellow interactions, a later dim red focus override and borderless popups', () => {
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const matchingRules = (...selectors: string[]) => rules.filter(([, group]) => group.split(',').some(value => selectors.includes(value.trim())));
+    const rule = (selector: string) => {
+        const [match] = matchingRules(selector);
+        assert.ok(match, `Missing rule for ${selector}`);
+        return match[2];
+    };
+    const base = rule('.dashboard-ui .notification-entry');
+    assert.match(base, /border: 1px solid alpha\(@dp_cyan, 0\.42\);/);
+    assert.match(base, /background: transparent;/);
+    for (const state of ['hover', 'focus-visible', 'active']) {
+        const entry = rule(`.dashboard-ui .notification-entry:${state}`);
+        assert.match(entry, /border-color: alpha\(@dp_yellow, 0\.45\);/);
+        assert.match(entry, /background: alpha\(@dp_red, 0\.1\);/);
+        assert.doesNotMatch(entry, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
+    }
+    const focus = '.dashboard-ui .notification-entry:focus-visible';
+    const focusRules = matchingRules(focus);
+    assert.equal(focusRules.length, 2);
+    assert.equal(focusRules[1][1].trim(), focus);
+    assert.equal(focusRules[1][2].trim(), 'border-color: alpha(@dp_red, 0.55);');
+    for (const state of ['', ':hover', ':active']) {
+        // Equal specificity makes the later focus rule win, even while hovered/pressed.
+        const colors = matchingRules(focus, `.dashboard-ui .notification-entry${state}`)
+            .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
+        assert.deepEqual(colors, ['alpha(@dp_yellow, 0.45)', 'alpha(@dp_red, 0.55)'], `Focus must win over ${state || 'idle'}`);
+    }
+    for (const state of ['', '.hovered', ':focus-visible']) {
+        const popupRules = matchingRules(`.dashboard-ui .popup-entry${state}`);
+        assert.equal(popupRules.length, 1);
+        assert.ok(rules.indexOf(popupRules[0]) > rules.indexOf(focusRules[1]), 'Popup override must follow the focus override');
+        assert.equal(popupRules[0][2].trim(), 'background: transparent; border: none;');
+    }
+});
 
 class Signals {
     private handlers = new Map<number, { signal: string; callback: (...args: any[]) => void }>();
@@ -25,7 +63,8 @@ class Widget extends Signals {
     [key: string]: any;
     sensitive = true;
     visible = true;
-    parent: Box | null = null;
+    parent: Widget | null = null;
+    controllers: Widget[] = [];
     get_next_sibling(): Widget | null {
         const siblings = this.parent?.children || [];
         return siblings[siblings.indexOf(this) + 1] || null;
@@ -44,12 +83,18 @@ class Widget extends Signals {
     update_property(properties: number[], values: unknown[]) {
         properties.forEach((property, index) => this.accessible.set(property, values[index]));
     }
+    get_parent(): Widget | null { return this.parent; }
+    set_child(child: Widget) { this.child = child; child.parent = this; }
+    set_focusable(focusable: boolean) { this.focusable = focusable; }
+    add_controller(controller: Widget) { this.controllers.push(controller); }
     queue_draw() {}
+    destroy() {}
 }
 
 class Box extends Widget {
     children: Widget[] = [];
     append(child: Widget) { child.parent = this; this.children.push(child); }
+    remove(child: Widget) { this.children = this.children.filter(value => value !== child); child.parent = null; }
     get_first_child(): Widget | null { return this.children[0] || null; }
 }
 class Label extends Widget { label = ''; constructor(properties: Record<string, any> = {}) { super(properties); Object.assign(this, properties); } }
@@ -59,7 +104,6 @@ class Button extends Widget {
 class Overlay extends Widget {
     overlays: Widget[] = [];
     measured = new Map<Widget, boolean>();
-    set_child(child: Widget) { this.child = child; }
     add_overlay(child: Widget) { this.overlays.push(child); }
     set_measure_overlay(child: Widget, measure: boolean) { this.measured.set(child, measure); }
 }
@@ -67,11 +111,27 @@ class DrawingArea extends Widget {
     draw: ((...args: any[]) => void) | null = null;
     set_draw_func(callback: (...args: any[]) => void) { this.draw = callback; }
 }
+class FlowBox extends Box {
+    insert(child: Widget, position: number) {
+        const wrapper = new Box();
+        wrapper.append(child);
+        wrapper.parent = this;
+        this.children.splice(position < 0 ? this.children.length : position, 0, wrapper);
+    }
+}
+class Image extends Widget {
+    clear() {}
+    set_from_gicon(icon: unknown) { this.gicon = icon; }
+}
 const Gtk = {
-    Box, Label, Button, Overlay, DrawingArea,
+    Box, Label, Button, Overlay, DrawingArea, FlowBox, Image,
+    ScrolledWindow: Widget, ProgressBar: class extends Widget { fraction = 0; },
+    EventControllerKey: Widget, EventControllerMotion: Widget, GestureClick: Widget,
     Orientation: { HORIZONTAL: 0, VERTICAL: 1 },
     Align: { FILL: 0, START: 1, END: 2, CENTER: 3 },
-    Overflow: { VISIBLE: 0 },
+    Overflow: { VISIBLE: 0, HIDDEN: 1 },
+    SelectionMode: { NONE: 0 }, PolicyType: { NEVER: 0, AUTOMATIC: 1 },
+    PropagationPhase: { CAPTURE: 0, BUBBLE: 1 },
     AccessibleProperty: { LABEL: 0, DESCRIPTION: 1 },
 };
 
@@ -229,7 +289,10 @@ const mockGI: Record<string, any> = {
     AstalPowerProfiles: { get_default: () => power },
     // Native widget doubles exercise controls without starting the application.
     GObject: { registerClass: (_metadata: any, implementation: any) => implementation },
-    Astal: { Application: class {} }, AstalIO: {}, Gtk, Gdk: {}, Pango: {}, Gtk4LayerShell: {},
+    Astal: { Application: class {}, Window: Widget, WindowAnchor: { TOP: 1, BOTTOM: 2, LEFT: 4, RIGHT: 8 },
+        Exclusivity: { IGNORE: 0 }, Layer: { OVERLAY: 0 }, Keymode: { NONE: 0 } },
+    AstalIO: {}, Gtk, Gdk: { BUTTON_PRIMARY: 1 },
+    Pango: { EllipsizeMode: { END: 0 }, WrapMode: { WORD_CHAR: 0 } }, Gtk4LayerShell: {},
     system: { programPath: '' },
 };
 (globalThis as any)[Symbol.for('dashboard-test-gi')] = mockGI;
@@ -248,14 +311,15 @@ const hooks = registerHooks({
     },
 });
 const {
-    NotificationCenter, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
+    NotificationCenter, NotificationEntry, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
     notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke, iconButton,
 } = await import('./notification.ts');
 const {
     MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
 } = await import('./parameters.ts');
 const {
-    ButtonSwitcher, DashboardApplication, DashboardBackend, parseRequest, SCREEN_TIMEOUT_CHOICES, ScreenTimeoutController,
+    ButtonSwitcher, DashboardApplication, DashboardBackend, DashboardPanel: DashboardPanelWidget,
+    parseRequest, SCREEN_TIMEOUT_CHOICES, ScreenTimeoutController,
 } = await import('./power.ts');
 hooks.deregister();
 
@@ -301,17 +365,100 @@ function switcher(choices: readonly { id: string; label: string }[] = profileCho
     return { control, requests, previous, next, value, indicators };
 }
 
-test('icon buttons omit absent tooltips instead of passing undefined to GObject', () => {
+function assertNoTooltips(widget: Widget): void {
+    for (const property of ['tooltip_text', 'tooltip_markup', 'has_tooltip'])
+        assert.equal(Object.hasOwn(widget, property), false, `${widget.constructor.name}.${property}`);
+    for (const child of [...(widget.children || []), ...(widget.overlays || []), ...(widget.child ? [widget.child] : [])])
+        assertNoTooltips(child);
+}
+
+test('dashboard widget sources never configure or activate visual tooltips', () => {
+    for (const file of ['power.ts', 'notification.ts', 'parameters.ts']) {
+        const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+        assert.doesNotMatch(source,
+            /\b(?:tooltip[_-](?:text|markup)|has[_-]tooltip|set_tooltip(?:_\w+)?|set_has_tooltip|trigger_tooltip_query|query-tooltip)\b/,
+            file);
+    }
+});
+
+test('icon buttons keep optional accessible labels and callbacks without visual tooltips', () => {
     let clicked = 0;
-    for (const tooltip of [null, '', 'Clear notifications']) {
-        const button = iconButton('×', tooltip, () => { clicked++; }) as unknown as Button;
-        assert.equal(Object.hasOwn(button, 'tooltip_text'), tooltip !== null);
-        if (tooltip !== null) assert.equal(button.tooltip_text, tooltip);
+    for (const accessibleLabel of [null, '', 'Clear notifications']) {
+        const button = iconButton('×', accessibleLabel, () => { clicked++; }) as unknown as Button;
+        assertNoTooltips(button);
+        assert.equal(button.accessible.has(Gtk.AccessibleProperty.LABEL), accessibleLabel !== null);
+        if (accessibleLabel !== null) assert.equal(button.accessible.get(Gtk.AccessibleProperty.LABEL), accessibleLabel);
         assert.equal((button.get_child() as Label).label, '×');
         button.emit('clicked');
     }
     assert.equal(clicked, 3);
 });
+
+test('dashboard controls keep sleep descriptions and dynamic DND labels without visual tooltips', () => {
+    const backend = new DashboardBackend();
+    const panel = new DashboardPanelWidget({ app: new DashboardApplication(), backend, palette });
+    const sleep = panel.screenTimeout.widget as unknown as Widget;
+    const dnd = panel.dnd as unknown as Button;
+    const clear = panel.clear as unknown as Button;
+    assert.equal(sleep.accessible.get(Gtk.AccessibleProperty.DESCRIPTION),
+        'Suspend the computer after inactivity. None disables automatic sleep. Locking is unchanged; keyboard/mouse wake depends on hardware.');
+    assert.equal((panel.screenTimeout.previous as unknown as Button).accessible.get(Gtk.AccessibleProperty.LABEL), 'Previous sleep timer');
+    assert.equal((panel.screenTimeout.next as unknown as Button).accessible.get(Gtk.AccessibleProperty.LABEL), 'Next sleep timer');
+    assert.equal(clear.accessible.get(Gtk.AccessibleProperty.LABEL), 'Clear all');
+    assert.equal(dnd.accessible.get(Gtk.AccessibleProperty.LABEL), 'Enable do not disturb');
+    for (const enabled of [false, true, false]) {
+        if (backend.notifications.dnd !== enabled) dnd.emit('clicked');
+        panel.render();
+        assert.equal(backend.notifications.dnd, enabled);
+        assert.equal(dnd.accessible.get(Gtk.AccessibleProperty.LABEL), enabled ? 'Disable do not disturb' : 'Enable do not disturb');
+        assert.equal((dnd.get_child() as Label).label, enabled ? '󰂛' : '󰂚');
+        assertNoTooltips(panel.window as unknown as Widget);
+    }
+    assert.equal(children.length, 0);
+    panel.dispose();
+    backend.dispose();
+});
+
+for (const popup of [false, true]) {
+    test(`notification ${popup ? 'popup' : 'history'} controls keep full accessible labels and actions without visual tooltips`, () => {
+        const invoked: [string, string][] = [];
+        const dismissed: string[] = [];
+        const hovered: [string, boolean][] = [];
+        const notification = row('live', { icon: '', actions: [
+            { identifier: 'default', text: 'Default' },
+            { identifier: 'open', text: 'Open the full notification details & preferences' },
+        ] });
+        const entry = new NotificationEntry(notification, {
+            setHovered: (id, value) => { hovered.push([id, value]); },
+            dismissNotification: id => { dismissed.push(id); },
+            invokeNotificationAction: (id, identifier) => { invoked.push([id, identifier]); },
+        }, popup);
+        const actionButton = () => ((entry.actions as unknown as FlowBox).children[0] as Box).children[0] as Button;
+        const button = actionButton();
+        assert.equal((entry.actions as unknown as FlowBox).children.length, 1);
+        assert.equal(button.accessible.get(Gtk.AccessibleProperty.LABEL), notification.actions[1].text);
+        assert.equal((button.get_child() as Label).label, notification.actions[1].text);
+        assert.equal((button.get_child() as Label).use_markup, false);
+        assert.equal((entry.close as unknown as Button).accessible.get(Gtk.AccessibleProperty.LABEL), 'Dismiss notification');
+        assertNoTooltips(entry.widget as unknown as Widget);
+        button.emit('clicked');
+        assert.deepEqual(invoked, [['live', 'open']]);
+        entry.update({ ...notification, body: 'Updated body' });
+        assert.equal(actionButton(), button);
+        entry.update({ ...notification, actions: [{ identifier: 'reply', text: 'Reply to this notification' }] });
+        assert.notEqual(actionButton(), button);
+        assert.equal(actionButton().accessible.get(Gtk.AccessibleProperty.LABEL), 'Reply to this notification');
+        assertNoTooltips(entry.widget as unknown as Widget);
+        actionButton().emit('clicked');
+        (entry.close as unknown as Button).emit('clicked');
+        assert.deepEqual(invoked, [['live', 'open'], ['live', 'reply']]);
+        assert.deepEqual(dismissed, ['live']);
+        const motion = (entry.widget as unknown as Widget).controllers.at(-1)!;
+        motion.emit('enter');
+        entry.dispose();
+        assert.deepEqual(hovered, popup ? [['live', true], ['live', false]] : []);
+    });
+}
 
 test('switcher has no outside caption, keeps its frame transparent and exposes accessible arrows', () => {
     const { control, previous, next, value, indicators } = switcher();

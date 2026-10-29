@@ -110,7 +110,7 @@ rec {
   # Per-panel package declarations
   # ===========================================================================
   packages =
-    { pkgs, repoRoot, panelLauncher, audioControl, mediaControl, networkManager, clipboardCustom }:
+    { pkgs, repoRoot, panelLauncher, audioControl, mediaControl, clipboardCustom }:
     let
       panel = args: mkPanel ({ inherit pkgs repoRoot panelLauncher; } // args);
     in
@@ -142,11 +142,10 @@ rec {
       networkPanel = panel {
         name = "network-panel";
         prefix = "NETWORK_PANEL";
-        sourceDir = "network-manager/astal";
+        sourceDir = "network-manager";
         # AstalNetwork's GIR references NM.Client; include libnm's typelib.
         extraPackages = [ pkgs.astal.network pkgs.networkmanager ];
         environment = {
-          NETWORK_CUSTOM_HELPER = pkgs.lib.getExe networkManager;
           DASHBOARD_PANEL = "dashboard-panel";
           MEDIA_PANEL = "media-panel";
         };
@@ -280,7 +279,6 @@ rec {
             "GDK_BACKEND=wayland"
 
             "NETWORK_PANEL_PALETTE=${config.xdg.configHome}/ags/network-palette.json"
-            "NETWORK_CUSTOM_HELPER=${lib.getExe repoPackages.networkManager}"
 
             "DASHBOARD_PANEL=${lib.getExe repoPackages.dashboardPanel}"
             "MEDIA_PANEL=${lib.getExe repoPackages.mediaPanel}"

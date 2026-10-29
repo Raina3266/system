@@ -2,7 +2,7 @@ window.network-panel {
     background: transparent;
     color: @np_cyan;
     font-family: "Noto Sans", sans-serif;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .network-panel .network-card,
@@ -12,14 +12,36 @@ window.network-panel {
     box-shadow: none;
     text-shadow: none;
     font-family: "Noto Sans", sans-serif;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .network-panel .network-card { background: transparent; padding: 0; margin: 0; border: none; }
 .network-panel .network-content { padding: 12px; }
 .network-panel label { background: transparent; color: @np_cyan; padding: 0; margin: 0; }
 
-.network-panel .network-name { font-weight: bold; }
+.network-panel .network-row {
+    border: 1px solid transparent;
+    border-radius: 0;
+    padding: 6px 4px;
+    background: transparent;
+    transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.network-panel .network-row:hover,
+.network-panel .network-row:focus-within,
+.network-panel .network-row.expanded {
+    background: alpha(@np_red, 0.1);
+    border-color: alpha(@np_yellow, 0.45);
+}
+.network-panel .network-row.expanded {
+    border-color: alpha(@np_red, 0.55);
+}
+.network-panel .network-name { color: alpha(@np_cyan, 0.78); font-weight: 500; }
+.network-panel .network-row.connected .network-name { color: @np_cyan; }
+.network-panel .network-marker { color: alpha(@np_cyan, 0.45); }
+.network-panel .network-row.expanded .network-marker,
+.network-panel .network-row.connected .network-marker { color: @np_cyan; }
+.network-panel .network-row .network-marker.network-wifi-marker { color: #ffffff; }
+.network-panel .network-status { color: #ffffff; }
 .network-panel .metadata { color: @np_foreground; }
 .network-panel .warning { color: @np_yellow; }
 .network-panel .network-divider {
@@ -44,9 +66,34 @@ window.network-panel {
     transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
 .network-panel button.control-button label { color: inherit; font-weight: bold; padding: 0; margin: 0; }
+.network-panel button.control-button image { color: inherit; }
+.network-panel button.icon-button {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+}
+.network-panel button.info-toggle.expanded {
+    background: transparent;
+    border-color: @np_cyan;
+}
+.network-panel .network-details {
+    border-left: none;
+    box-shadow: inset 2px 0 0 alpha(@np_cyan, 0.8);
+    border-top: 1px solid alpha(@np_pink, 0.18);
+    background: transparent;
+    padding: 6px 6px 6px 12px;
+    margin-top: 6px;
+}
+.network-panel .network-row button:focus-visible,
+.network-panel .network-row button:active { background: transparent; }
+.network-panel .network-details label { color: #ffffff; }
+.network-panel .network-details .network-info-heading { font-weight: bold; }
 
 /* Paint the extra hover stroke inward, so keyboard focus never resizes a row. */
-.network-panel button.control-button:hover,
+.network-panel button.control-button:hover {
+    border-color: @np_yellow;
+    box-shadow: inset 0 0 0 1.15px @np_yellow;
+}
 .network-panel button.control-button:focus-visible {
     background: alpha(@np_pink, 0.333);
     border-color: @np_yellow;
@@ -61,38 +108,32 @@ window.network-panel {
 }
 
 .network-panel button.network-tab {
-    border: 1px solid alpha(@np_pink, 0.7);
-    border-bottom: none;
-    border-radius: 3px 3px 0 0;
-    min-height: 39px;
+    border: none;
+    border-bottom: 2px solid @np_cyan;
+    border-radius: 0;
+    min-height: 30px;
     padding: 0;
     background: transparent;
-    color: @np_pink;
+    color: @np_cyan;
     box-shadow: none;
 }
-.network-panel button.network-tab label { font-size: 13px; letter-spacing: 1px; }
+.network-panel button.network-tab label { font-size: 14px; letter-spacing: 0.5px; }
 .network-panel button.network-tab:hover,
 .network-panel button.network-tab:focus-visible {
-    border-color: @np_pink;
-    border-width: 1px;
-    border-bottom: none;
-    min-height: 39px;
-    background: alpha(@np_pink, 0.1);
+    border-color: @np_cyan;
+    background: transparent;
     box-shadow: none;
 }
 .network-panel button.network-tab.active,
 .network-panel button.network-tab.active:hover,
 .network-panel button.network-tab.active:focus-visible {
-    border-color: @np_cyan;
-    border-width: 1.5px;
-    border-bottom: none;
-    min-height: 38.5px;
-    background: alpha(@np_cyan, 0.08);
-    color: @np_cyan;
+    border-color: @np_red;
+    background: transparent;
+    color: @np_red;
     box-shadow: none;
 }
 .network-panel button.network-tab:active,
-.network-panel button.network-tab.active:active { background: alpha(@np_cyan, 0.18); }
+.network-panel button.network-tab.active:active { background: transparent; }
 .network-panel button.network-remove {
     min-width: 22px;
     min-height: 22px;
@@ -142,8 +183,24 @@ window.network-panel {
     padding: 4px;
 }
 .network-panel dropdown.profile-choice listview { background: transparent; color: @np_cyan; }
-.network-panel dropdown.profile-choice listview row { padding: 4px 6px; border: none; }
-.network-panel dropdown.profile-choice listview row:selected { background: alpha(@np_pink, 0.333); }
+.network-panel dropdown.profile-choice listview row {
+    padding: 3px 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    background-image: none;
+    outline: none;
+    box-shadow: none;
+}
+.network-panel dropdown.profile-choice listview row:selected,
+.network-panel dropdown.profile-choice listview row:hover,
+.network-panel dropdown.profile-choice listview row:focus-visible,
+.network-panel dropdown.profile-choice listview row:active {
+    background: alpha(@np_red, 0.1);
+    border-color: alpha(@np_yellow, 0.45);
+}
+.network-panel dropdown.profile-choice listview row:selected {
+    border-color: alpha(@np_red, 0.55);
+}
 
 .network-panel scrolledwindow,
 .network-panel viewport { background: transparent; border: none; padding: 0; margin: 0; }

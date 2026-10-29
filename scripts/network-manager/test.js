@@ -211,7 +211,7 @@ async function isolatedUI(argv) {
         fs.writeFileSync(guard, `#!${process.execPath}\nconst fs = require('node:fs');\n`
             + `fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.argv) + '\\n');\nprocess.exit(125);\n`,
             { mode: 0o700 });
-        for (const name of ['NETWORK_CUSTOM_HELPER', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) env[name] = guard;
+        for (const name of ['DASHBOARD_PANEL', 'MEDIA_PANEL']) env[name] = guard;
         const config = join(root, 'bus.conf');
         const socket = join(env.XDG_RUNTIME_DIR, 'bus').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         // Omit all service directories: nothing, including desktop portals, can autoactivate.
@@ -235,7 +235,7 @@ async function isolatedUI(argv) {
         const counts = {};
         for (const [phase, title, minimum] of [['ui', 'network GTK UI', 85], ['application', 'network application bootstrap', 36]]) {
             const output = await runTest(phase);
-            if (fs.existsSync(attempts)) throw new Error(`${phase} attempted an external helper/panel call:\n${output}`);
+            if (fs.existsSync(attempts)) throw new Error(`${phase} attempted an external panel call:\n${output}`);
             for (const service of processes.filter(record => record.service)) {
                 if (service.result || service.failure) throw new Error(`Private service failed:\n${fs.readFileSync(service.logPath, 'utf8')}`);
             }
@@ -280,6 +280,174 @@ async function nodeControllerTests() {
     const { readFileSync } = await import('node:fs');
     const { default: vm } = await import('node:vm');
     const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    it('hides the password row for open and enhanced-open Wi-Fi details', () => {
+        const expression = frontend.match(/const hasPassword = ([\s\S]*?);/)?.[1];
+        assert.ok(expression, 'The real details password visibility condition is available');
+        for (const securityType of ['open', 'owe', 'wep', 'psk', 'sae', 'enterprise']) {
+            for (const connected of [false, true]) {
+                const row = { wireless: true, known: !connected, connected, securityType };
+                assert.equal(vm.runInNewContext(expression, { row }), !['open', 'owe'].includes(securityType),
+                    `${securityType}, connected=${connected}`);
+            }
+        }
+        assert.match(frontend, /this\.passwordCaption\.visible = this\.passwordLine\.visible = this\.reveal\.visible = hasPassword/);
+    });
+
+    it('omits Wi-Fi saved status and hides empty metadata without losing connection progress', () => {
+        const statements = frontend.match(/row\.metadata\.set_label\([\s\S]*?row\.metadata\.visible = [^;]+;/)?.[0];
+        assert.ok(statements);
+        const render = (dataRow, undetected = false) => {
+            const metadata = { set_label(text) { this.label = text; } };
+            vm.runInNewContext(statements, { row: { metadata }, dataRow, undetected });
+            return { label: metadata.label, visible: metadata.visible };
+        };
+        for (const known of [false, true]) {
+            const wifi = { wireless: true, known };
+            assert.deepEqual(render(wifi), { label: '', visible: false });
+            assert.deepEqual(render({ ...wifi, connected: true }), { label: 'Connected', visible: true });
+            assert.deepEqual(render({ ...wifi, changing: true }), { label: 'Working…', visible: true });
+            assert.deepEqual(render({ ...wifi, connected: true, changing: true }),
+                { label: 'Connected · Working…', visible: true });
+            assert.deepEqual(render({ wireless: false, known, interface: 'eth0' }),
+                { label: `${known ? 'Saved' : 'Not saved'} · eth0`, visible: true });
+        }
+        assert.deepEqual(render({ wireless: true, known: true }, true), { label: '', visible: false });
+    });
+
+    it('does not open details for Saved-tab rows, but keeps Nearby details', () => {
+        const method = frontend.match(/    toggleInfo\(key\) \{([\s\S]*?)\n    \}/)?.[1];
+        assert.ok(method);
+        const toggle = vm.runInNewContext(`(function(key) {${method}\n})`, {
+            isUndetectedSaved: row => row.strength === null,
+        });
+        const calls = [];
+        const view = { listTab: 'saved', maskSecret() {}, clearPassword() {}, controller: {
+            page: 'list', rows: [{ key: 'saved', strength: null }, { key: 'nearby', strength: 50 }],
+            info(key) { calls.push(key); },
+        } };
+        toggle.call(view, 'saved');
+        toggle.call(view, 'nearby');
+        view.listTab = 'nearby';
+        toggle.call(view, 'saved');
+        assert.deepEqual(calls, []);
+        toggle.call(view, 'nearby');
+        assert.deepEqual(calls, ['nearby']);
+        assert.match(frontend, /row\.info\.visible = Boolean\(!undetected &&/);
+    });
+
+    it('draws the panel frame without a translucent inner rail', () => {
+        const frame = frontend.match(/function frame\(palette\) \{([\s\S]*?)\n\}/)?.[1];
+        assert.ok(frame);
+        assert.doesNotMatch(frame, /railX|railTop|setLineWidth\(3\)/);
+        assert.match(frame, /cr\.setLineWidth\(1\)/);
+    });
+
+    it('matches the audio panel background, yellow outline and cut-corner drawing', () => {
+        const audio = readFileSync(new URL('../audio-control/astal/frontend.js', import.meta.url), 'utf8');
+        const palette = { yellow: '#ffcc33', cyan: '#33ddff', background: '#110011' };
+        const capture = (source, width, height) => {
+            const definition = source.match(/function frame\(palette\) \{[\s\S]*?\n\}/)?.[0];
+            assert.ok(definition);
+            const frame = vm.runInNewContext(`${definition}\nframe;`, {
+                Gtk: { DrawingArea: class {
+                    set_draw_func(callback) { this.draw = callback; }
+                } },
+            });
+            const calls = [];
+            const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA',
+                'fillPreserve', 'setLineWidth', 'stroke'].map(name =>
+                [name, (...args) => calls.push([name, ...args])]));
+            const drawing = frame(palette);
+            drawing.draw(drawing, cr, width, height);
+            return calls;
+        };
+        for (const [width, height] of [[380, 416], [240, 180], [24, 32]]) {
+            const actual = capture(frontend, width, height);
+            assert.deepEqual(actual, capture(audio, width, height));
+            assert.ok(actual.some(([name, ...args]) => name === 'setSourceRGBA'
+                && args.every((value, index) => value === [37 / 255, 37 / 255, 47 / 255, 0.9][index])));
+        }
+    });
+
+    it('network rows and profile choices use dim yellow hover and dim red selected outlines', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        const rows = css.slice(css.indexOf('.network-panel .network-row {'), css.indexOf('.network-panel .network-name {'));
+        assert.match(rows, /border: 1px solid transparent;/);
+        assert.doesNotMatch(rows, /\.network-row\.connected/,
+            'connected state alone must not look selected');
+        for (const state of [':hover', ':focus-within', '.expanded'])
+            assert.ok(rows.includes(`.network-row${state}`));
+        assert.match(rows, /border-color: alpha\(@np_yellow, 0\.45\);/);
+        assert.match(rows, /\.network-row\.expanded \{\s*border-color: alpha\(@np_red, 0\.55\);/);
+        assert.ok(rows.lastIndexOf('.network-row.expanded {') > rows.indexOf('.network-row:hover,'));
+        assert.match(rows, /background: alpha\(@np_red, 0\.1\);/);
+        const profiles = css.slice(css.indexOf('.network-panel dropdown.profile-choice listview row {'), css.indexOf('.network-panel scrolledwindow,'));
+        assert.match(profiles, /border: 1px solid transparent;/);
+        assert.match(profiles, /border-color: alpha\(@np_yellow, 0\.45\);/);
+        assert.match(profiles, /row:selected \{\s*border-color: alpha\(@np_red, 0\.55\);/);
+        assert.ok(profiles.indexOf('row:selected {') > profiles.indexOf('row:hover,'));
+        assert.match(profiles, /background: alpha\(@np_red, 0\.1\);/);
+        const details = css.match(/\.network-panel \.network-details \{([^}]+)\}/)?.[1];
+        assert.match(details, /background: transparent;/);
+    });
+
+    it('keeps tabs, network lists and forms inset from the outer frame', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        assert.match(css, /\.network-content \{ padding: 12px; \}/);
+    });
+
+    it('uses a taller network card while keeping it bounded by the monitor', () => {
+        const method = frontend.match(/    position\(\) \{([\s\S]*?)\n    \}/)?.[1];
+        assert.ok(method);
+        const position = vm.runInNewContext(`(function() {${method}\n})`);
+        for (const [width, height, expected] of [[1280, 800, 480], [360, 240, 186], [16, 54, 0]]) {
+            const panel = { monitor: { get_geometry: () => ({ width, height }) }, card: {}, preferredHeight: () => 480 };
+            position.call(panel);
+            assert.equal(panel.card.height_request, expected);
+            assert.ok(panel.card.margin_top + expected <= height);
+        }
+    });
+
+    it('fits six measured unsaved rows plus remembered rows, padding and the divider', () => {
+        const method = frontend.match(/    preferredHeight\(width\) \{([\s\S]*?)\n    \}/)?.[1];
+        assert.ok(method);
+        const preferredHeight = vm.runInNewContext(`(function(width) {${method}\n})`, {
+            Gtk: { Orientation: { VERTICAL: 1 } }, isUndetectedSaved: () => false,
+        });
+        const available = Array.from({ length: 8 }, (_, index) => ({ key: `available-${index}`, height: index < 6 ? 40 : 999 }));
+        const remembered = { key: 'connected', known: true, height: 70, detailsHeight: 120 };
+        const rows = [remembered, ...available];
+        const panel = { controller: { rows }, rows: new Map(rows.map(data => [data.key, {
+            widget: { get_style_context: () => ({
+                get_padding: () => ({ left: 4, right: 4 }), get_border: () => ({ left: 1, right: 1 }),
+            }), measure: () => [0, data.height + (data.detailsHeight || 0)] },
+            details: { measure: () => [0, data.detailsHeight || 0] },
+        }])), content: { get_style_context: () => ({ get_padding: () => ({ top: 12, bottom: 12, left: 12, right: 12 }) }) },
+        networkLists: { margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6 },
+        networkRows: { spacing: 8 }, networkSeparator: { measure: () => [0, 1] }, listTabs: { measure: () => [0, 32] } };
+        assert.equal(preferredHeight.call(panel, 380), 435);
+        available[5].height = 60;
+        assert.equal(preferredHeight.call(panel, 380), 455, 'wrapped row heights increase the fit budget');
+        panel.controller.rows = [remembered, available[0]];
+        assert.equal(preferredHeight.call(panel, 380), 435, 'reserve six slots when fewer networks are found');
+        panel.controller.rows = [remembered];
+        assert.equal(preferredHeight.call(panel, 380), 480, 'retain a usable fallback without unsaved rows');
+    });
+
+    it('places the network expand button on a second line without reserving empty unsaved rows', () => {
+        assert.match(frontend, /row\.heading = box\(false, 4, \[row\.marker, row\.name, row\.status, row\.connect, row\.forget, row\.remove\]\)/);
+        assert.match(frontend, /row\.secondary = box\(false, 4, \[row\.metadata, row\.info\]\)/);
+        assert.match(frontend, /row\.secondary\.visible = row\.metadata\.visible \|\| row\.info\.visible/);
+    });
+
+    it('leaves a gap between expanded details text and the left accent line', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        const details = css.match(/\.network-panel \.network-details \{([^}]+)\}/)?.[1];
+        assert.ok(details);
+        assert.match(details, /padding: 6px 6px 6px 12px;/);
+        assert.match(details, /box-shadow: inset 2px 0 0/);
+    });
+
     const requestMethod = frontend.match(/        handleRequest\(request\) \{([\s\S]*?)\n        \}/);
     assert.ok(requestMethod, 'The real frontend request handler is available for isolated IPC tests');
     const handleRequest = vm.runInNewContext(`({ handleRequest(request) { ${requestMethod[1]} } }).handleRequest`, { parseRequest });
@@ -317,8 +485,6 @@ async function nodeControllerTests() {
 
     const password = 'offline-only-fixture-value';
     const credentials = { password, authentication: 'WPA', hidden: false };
-    const image = 'data:image/png;base64,aW1hZ2U=';
-    const otherImage = 'data:image/png;base64,b3RoZXI=';
     const identityChanges = {
         interface: 'wlan1', ssid: 'Another network', profileUuid: 'profile-b',
         bssid: '02:00:00:00:00:02', activePath: '/active/replacement',
@@ -399,7 +565,7 @@ async function nodeControllerTests() {
 
     function fixture(t, rows = [wifi()], { opened = true } = {}) {
         const backend = new FakeBackend(rows);
-        const hooks = { changes: 0, cancellations: [], encodings: [] };
+        const hooks = { changes: 0, cancellations: [] };
         const controller = new NetworkController({
             backend,
             onChange: () => hooks.changes++,
@@ -411,11 +577,6 @@ async function nodeControllerTests() {
                 };
                 hooks.cancellations.push(io);
                 return io;
-            },
-            encodeQr: (request, io) => {
-                const encoding = { request, io, ...deferred() };
-                hooks.encodings.push(encoding);
-                return encoding.promise;
             },
         });
         t.after(() => controller.dispose());
@@ -433,10 +594,8 @@ async function nodeControllerTests() {
         assert.equal(controller.pendingKey, '');
         assert.deepEqual(controller.details, {});
         assert.equal(controller.secretLoading, false);
-        assert.equal(controller.qrLoading, false);
         assert.equal(controller.secretRequested, false);
         assertSecret(controller.secret, '');
-        assert.equal(controller.qrImage, '');
     }
 
     function mutationCounts(backend) {
@@ -446,6 +605,23 @@ async function nodeControllerTests() {
             disconnect: backend.calls.disconnect.length, forget: backend.calls.forget.length,
         };
     }
+
+    it('dismisses only the error without resetting the current network interaction', t => {
+        const { controller, backend, hooks } = fixture(t, [saved()]);
+        controller.info('wifi');
+        controller.error = 'Network operation failed';
+        const selection = controller.selectedKey, page = controller.page;
+        const before = mutationCounts(backend), changes = hooks.changes;
+        controller.dismissError();
+        assert.equal(controller.error, '');
+        assert.equal(controller.selectedKey, selection);
+        assert.equal(controller.page, page);
+        assert.equal(hooks.changes, changes + 1);
+        assert.deepEqual(mutationCounts(backend), before);
+        controller.error = 'A later failure';
+        backend.notify();
+        assert.equal(controller.error, 'A later failure');
+    });
 
     describe('lifecycle and scan visibility policy', () => {
         it('starts the backend, exposes native radio state, and sorts a copy of its rows', t => {
@@ -490,20 +666,15 @@ async function nodeControllerTests() {
             assert.deepEqual(backend.calls.opened, [true, true]);
         });
 
-        it('keeps native scanning enabled on info and QR pages until the panel closes', async t => {
+        it('keeps native scanning enabled on inline Info until the panel closes', async t => {
             const { controller, backend } = fixture(t, [active()]);
             controller.info('wifi');
             assert.equal(controller.page, 'info');
-            assert.equal(backend.opened, true);
-            const qr = controller.qr('wifi');
-            assert.equal(controller.page, 'qr');
             assert.equal(backend.opened, true);
             assert.deepEqual(backend.calls.opened, [true], 'Page navigation does not interrupt native scanning');
             controller.close();
             assert.equal(backend.opened, false);
             assert.deepEqual(backend.calls.opened, [true, false]);
-            backend.calls.readSecret[0].resolve(credentials);
-            await qr;
         });
     });
 
@@ -978,7 +1149,7 @@ async function nodeControllerTests() {
             ['genuine zero Wi-Fi', saved({ strength: 0 })],
             ['Ethernet', wired()],
         ]) {
-            it(`opens ${label} profile metadata without credentials, QR or a live identity`, async t => {
+            it(`opens ${label} profile metadata without credentials or a live identity`, async t => {
                 const { controller, backend, hooks } = fixture(t, [selected]);
                 controller.info(selected.key);
                 assert.equal(controller.page, 'info');
@@ -990,18 +1161,13 @@ async function nodeControllerTests() {
                 assert.equal(controller.details.profileUuid, selected.profiles[0].uuid);
                 assert.deepEqual(backend.calls.details, [selected.key]);
                 assert.equal(controller.selectedProfileUuid, selected.profiles[0].uuid);
-                await controller.qr(selected.key);
-                assert.equal(controller.page, 'info', 'Rejected QR does not navigate away from offline Info');
                 assert.equal(controller.secretRequested, false);
                 assert.equal(controller.secretLoading, false);
-                assert.equal(controller.qrLoading, false);
                 assertSecret(controller.secret, '');
-                assert.equal(controller.qrImage, '');
                 assert.equal(controller.credentialKey, '');
                 assert.equal(backend.calls.readSecret.length, 0);
                 assert.equal(backend.calls.readSavedSecret.length, 0);
                 assert.equal(hooks.cancellations.length, 0);
-                assert.equal(hooks.encodings.length, 0);
                 assert.equal(backend.calls.activate.length, 0);
                 assert.equal(controller.opened, true);
                 assert.equal(backend.opened, true, 'Offline Info keeps native scanning enabled');
@@ -1090,11 +1256,10 @@ async function nodeControllerTests() {
                 backend.rows[0] = { ...backend.rows[0], profiles: profiles.slice().reverse() };
                 backend.notify();
                 controller.status();
-                await controller.qr('wifi');
                 assert.equal(controller.page, 'info');
                 assert.equal(controller.selectedProfileUuid, 'profile-b');
                 assert.equal(controller.details.profileUuid, 'profile-b');
-                assert.equal(backend.calls.readSavedSecret.length, 0, 'Info, selection, notification, status and rejected QR never read secrets');
+                assert.equal(backend.calls.readSavedSecret.length, 0, 'Info, selection, notification, status never read secrets');
                 assert.equal(hooks.cancellations.length, 0);
                 const work = controller.revealSecret();
                 await controller.revealSecret();
@@ -1106,16 +1271,14 @@ async function nodeControllerTests() {
                 assert.equal(controller.secretRequested, true);
                 assert.equal(controller.secretLoading, true);
                 assertSecret(controller.secret, '');
-                await controller.qr('wifi');
                 controller.selectSavedProfile('profile-b');
-                assert.equal(request.io.cancelled, false, 'Rejected offline QR and unchanged UUID do not disturb an explicit read');
+                assert.equal(request.io.cancelled, false, 'An unchanged UUID does not disturb an explicit read');
                 assert.equal(controller.secretLoading, true);
                 request.resolve(securityType === 'open' ? { password: '', authentication: 'nopass', hidden: false } : credentials);
                 await work;
                 assertSecret(controller.secret, securityType === 'open' ? 'No password (open network)' : password);
                 assert.equal(controller.secretLoading, false);
                 assert.equal(backend.calls.readSecret.length, 0, 'Offline reads never borrow the active identity API');
-                assert.equal(hooks.encodings.length, 0, 'Offline reveal never creates a QR');
                 assert.equal(backend.calls.activate.length, 0);
                 assert.deepEqual(backend.calls.disconnect, []);
                 assert.deepEqual(backend.calls.forget, []);
@@ -1284,7 +1447,6 @@ async function nodeControllerTests() {
             assertSecret(controller.secret, password);
             assert.equal(controller.secretRequested, true);
             assert.equal(controller.error, '');
-            assert.equal(hooks.encodings.length, 0);
         });
     });
 
@@ -1319,7 +1481,6 @@ async function nodeControllerTests() {
             assertSecret(controller.secret, password);
             assert.equal(controller.secretLoading, false);
             assert.equal(backend.calls.readSavedSecret.length, 0, 'Connected reveal retains the active-identity API');
-            assert.equal(hooks.encodings.length, 0);
             controller.hideSecret();
             assertSecret(controller.secret, '');
             assert.equal(controller.secretRequested, false);
@@ -1341,7 +1502,6 @@ async function nodeControllerTests() {
             controller.info('wifi');
             assert.equal(controller.page, 'list');
             controller.info('missing');
-            await controller.qr('wired');
             assert.equal(controller.page, 'list');
             controller.info('wired');
             assert.equal(controller.page, 'info');
@@ -1371,7 +1531,7 @@ async function nodeControllerTests() {
             assert.equal(backend.calls.readSecret.length, 0);
         });
 
-        it('reports secret authorization failure without retaining data or encoding a QR', async t => {
+        it('reports secret authorization failure without retaining data', async t => {
             const { controller, backend, hooks } = fixture(t, [active()]);
             controller.info('wifi');
             const work = controller.revealSecret();
@@ -1388,7 +1548,6 @@ async function nodeControllerTests() {
             assert.equal(controller.error, '');
             backend.calls.readSecret[1].resolve(credentials); await retry;
             assertSecret(controller.secret, password);
-            assert.equal(hooks.encodings.length, 0);
         });
 
         it('describes an open network without manufacturing a password', async t => {
@@ -1496,140 +1655,6 @@ async function nodeControllerTests() {
         }
     });
 
-    describe('request-local QR encoding', () => {
-        for (const hidden of [false, true]) {
-            it(`encodes a pinned SSID and native authentication/hidden metadata (hidden=${hidden})`, async t => {
-                const { controller, backend, hooks } = fixture(t, [active()]);
-                const work = controller.qr('wifi');
-                assert.equal(controller.page, 'qr');
-                assert.equal(controller.qrLoading, true);
-                assert.equal(controller.secretRequested, false);
-                assert.equal(hooks.encodings.length, 0);
-                const request = backend.calls.readSecret[0];
-                request.resolve({ ...credentials, hidden });
-                await flush();
-                assert.equal(hooks.encodings.length, 1);
-                const encoding = hooks.encodings[0];
-                assert.equal(encoding.request.ssid, 'Cafe');
-                assert.equal(encoding.request.authentication, 'WPA');
-                assert.equal(encoding.request.hidden, hidden);
-                assertSecret(encoding.request.password, password);
-                assert.equal(encoding.io, request.io);
-                assert.equal(controller.qrImage, '');
-                assertSecret(controller.secret, '');
-                encoding.resolve(image);
-                await work;
-                assert.equal(controller.qrImage, image);
-                assert.equal(controller.qrLoading, false);
-                assertSecret(controller.secret, '');
-            });
-        }
-
-        it('does not encode if the native secret request fails', async t => {
-            const { controller, backend, hooks } = fixture(t, [active()]);
-            const work = controller.qr('wifi');
-            backend.calls.readSecret[0].reject(new Error('Native secret request failed.'));
-            await work;
-            assert.equal(hooks.encodings.length, 0);
-            assert.equal(controller.qrImage, '');
-            assert.equal(controller.qrLoading, false);
-            assert.equal(controller.error, 'Native secret request failed.');
-        });
-
-        it('does not start the encoder when credentials arrive after closing', async t => {
-            const { controller, backend, hooks } = fixture(t, [active()]);
-            const work = controller.qr('wifi');
-            controller.close();
-            backend.calls.readSecret[0].resolve(credentials);
-            await work;
-            assert.equal(hooks.encodings.length, 0);
-            assertCleared(controller);
-        });
-
-        for (const invalid of [null, undefined, 42, '', 'not an image', 'data:image/svg+xml;base64,AAAA']) {
-            it(`rejects an encoder reply without a PNG data URL (${typeof invalid}, ${String(invalid).length} characters)`, async t => {
-                const { controller, backend, hooks } = fixture(t, [active()]);
-                const work = controller.qr('wifi');
-                backend.calls.readSecret[0].resolve(credentials);
-                await flush();
-                hooks.encodings[0].resolve(invalid);
-                await work;
-                assert.equal(controller.qrImage, '');
-                assert.match(controller.error, /Could not generate.*QR/);
-                assert.equal(controller.qrLoading, false);
-                assertSecret(controller.secret, '');
-            });
-        }
-
-        it('reports asynchronous encoder failure without displaying credentials', async t => {
-            const { controller, backend, hooks } = fixture(t, [active()]);
-            const work = controller.qr('wifi');
-            backend.calls.readSecret[0].resolve(credentials);
-            await flush();
-            hooks.encodings[0].reject(new Error('The QR encoder timed out.'));
-            await work;
-            assert.equal(controller.error, 'The QR encoder timed out.');
-            assert.equal(controller.qrImage, '');
-            assert.equal(controller.qrLoading, false);
-            assertSecret(controller.secret, '');
-        });
-
-        for (const [field, value] of Object.entries(identityChanges)) {
-            it(`discards an asynchronously encoded QR after ${field} changes`, async t => {
-                const { controller, backend, hooks } = fixture(t, [active()]);
-                const work = controller.qr('wifi');
-                backend.calls.readSecret[0].resolve(credentials);
-                await flush();
-                assert.equal(hooks.encodings.length, 1);
-                backend.identities.set('wifi', { ...backend.getIdentity('wifi'), [field]: value });
-                hooks.encodings[0].resolve(image);
-                await work;
-                assertCleared(controller);
-                assert.match(controller.error, /connection changed/i);
-            });
-        }
-
-        for (const destination of ['back', 'close', 'info']) {
-            for (const outcome of ['resolve', 'reject']) {
-                it(`discards an encoder ${outcome} after navigating to ${destination}`, async t => {
-                    const { controller, backend, hooks } = fixture(t, [active()]);
-                    const work = controller.qr('wifi');
-                    backend.calls.readSecret[0].resolve(credentials);
-                    await flush();
-                    if (destination === 'info') controller.info('wifi');
-                    else controller[destination]();
-                    assert.equal(hooks.encodings[0].io.cancelled, true);
-                    if (outcome === 'resolve') hooks.encodings[0].resolve(image);
-                    else hooks.encodings[0].reject(new Error('Obsolete encoder error.'));
-                    await work;
-                    assert.equal(controller.qrImage, '');
-                    assert.equal(controller.error, '');
-                    assertSecret(controller.secret, '');
-                    assert.equal(controller.page, destination === 'info' ? 'info' : 'list');
-                });
-            }
-        }
-
-        it('does not let an obsolete QR result clear a newer encoder or replace its image', async t => {
-            const { controller, backend, hooks } = fixture(t, [active()]);
-            const first = controller.qr('wifi');
-            backend.calls.readSecret[0].resolve(credentials);
-            await flush();
-            const second = controller.qr('wifi');
-            backend.calls.readSecret[1].resolve(credentials);
-            await flush();
-            hooks.encodings[0].resolve(image);
-            await first;
-            assert.equal(controller.qrLoading, true);
-            assert.equal(controller.qrImage, '');
-            assert.equal(hooks.encodings[1].io.cancelled, false);
-            hooks.encodings[1].resolve(otherImage);
-            await second;
-            assert.equal(controller.qrImage, otherImage);
-            assert.equal(controller.qrLoading, false);
-        });
-    });
-
     describe('read-only status and disposal', () => {
         for (const opened of [false, true]) {
             it(`returns Waybar JSON without network mutations or UI hooks (opened=${opened})`, t => {
@@ -1642,7 +1667,6 @@ async function nodeControllerTests() {
                 assert.deepEqual(backend.calls.details, ['wired']);
                 assert.deepEqual(mutationCounts(backend), before);
                 assert.equal(backend.calls.readSecret.length, 0);
-                assert.equal(hooks.encodings.length, 0);
                 assert.equal(hooks.cancellations.length, 0);
                 assert.equal(hooks.changes, changes, 'polling must not cause panel render/dismiss hooks');
                 assert.equal(controller.opened, opened);
@@ -1725,19 +1749,7 @@ async function nodeControllerTests() {
             assertCleared(controller);
         });
 
-        it('cancels an asynchronous encoder on dispose and drops its eventual image', async t => {
-            const { controller, backend, hooks } = fixture(t, [active()]);
-            const work = controller.qr('wifi');
-            backend.calls.readSecret[0].resolve(credentials);
-            await flush();
-            controller.dispose();
-            const changes = hooks.changes;
-            assert.equal(hooks.encodings[0].io.cancelled, true);
-            hooks.encodings[0].resolve(image);
-            await work;
-            assert.equal(hooks.changes, changes);
-            assertCleared(controller);
-        });
+
     });
 }
 
@@ -1864,6 +1876,25 @@ async function nodeLogicTests() {
             ]);
             assert.equal(rows[1].strength, null);
             assert.equal(rows[0].strength, 0);
+        });
+
+        it('puts WPA/WPA2 profiles first in Saved, retaining alphabetical order within each group', () => {
+            const rows = [
+                row('open', { name: 'Alpha', known: true, strength: null, securityType: 'open' }),
+                row('wpa2', { name: 'Zulu', known: true, strength: null, securityType: 'psk', security: 'WPA2' }),
+                row('wpa3', { name: 'Bravo', known: true, strength: null, securityType: 'sae' }),
+                row('mixed', { name: 'Delta', known: true, strength: null, securityType: 'psk', security: 'WPA/WPA2' }),
+                row('wpa', { name: 'Charlie', known: true, strength: null, securityType: 'psk', security: 'WPA' }),
+            ];
+            assert.deepEqual(sortRows(rows).map(item => item.key), ['wpa', 'mixed', 'wpa2', 'open', 'wpa3']);
+        });
+
+        it('does not prioritize WPA/WPA2 over other security types in Nearby', () => {
+            const rows = [
+                row('psk', { name: 'Zulu', known: true, strength: 50, securityType: 'psk' }),
+                row('open', { name: 'Alpha', known: true, strength: 50, securityType: 'open' }),
+            ];
+            assert.deepEqual(sortRows(rows).map(item => item.key), ['open', 'psk']);
         });
 
         it('breaks equal-name ties by interface and stable row key', () => {
@@ -2086,7 +2117,7 @@ async function nodeLauncherTests() {
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
 
-    const root = new URL('../../../', import.meta.url);
+    const root = new URL('../../', import.meta.url);
     const read = path => readFileSync(new URL(path, root), 'utf8');
 
     test('Niri imports the exported panel Home Manager module', () => {
@@ -2152,9 +2183,9 @@ async function nodeLauncherTests() {
         assert.match(manifest.bundle, /^\/nix\/store\/[a-z0-9]{32}-[^/]+(?:\/|$)/, 'the prebuilt bundle must be immutable');
         assert.ok(statSync(manifest.bundle).isFile());
         assert.match(manifest.forced_environment.NETWORK_PANEL_CONFIG,
-            /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/astal\/frontend\.js$/,
+            /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/frontend\.js$/,
             'the entry must come from the packaged source, never the checkout or XDG config');
-        for (const key of ['NETWORK_PANEL_PALETTE', 'NETWORK_CUSTOM_HELPER', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) {
+        for (const key of ['NETWORK_PANEL_PALETTE', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) {
             assert.equal(typeof manifest.environment[key], 'string', `${key} must have a manifest default`);
             assert.notEqual(manifest.environment[key], '');
         }
@@ -2258,8 +2289,7 @@ async function nodeLauncherTests() {
             assert.deepEqual(runtime.env, { ...manifest.environment, ...manifest.forced_environment,
                 XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
             assert.match(runtime.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
-            assert.match(runtime.env.NETWORK_CUSTOM_HELPER, /\/bin\/network-manager$/);
-            assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/astal\/style\.css$/);
+            assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/style\.css$/);
             assert.doesNotMatch(runtime.env.PANEL_CSS_FILE, /^\/nix\/store\//);
             assert.equal(runtime.env.DASHBOARD_PANEL, 'dashboard-panel');
             assert.equal(runtime.env.MEDIA_PANEL, 'media-panel');
@@ -2275,10 +2305,10 @@ async function nodeLauncherTests() {
             }
         });
 
-        await t.test('ignores live-source overrides but preserves literal palette, helper, peer and CSS overrides', () => {
+        await t.test('ignores live-source overrides but preserves literal palette, peer and CSS overrides', () => {
             const marker = join(fixture, 'config-was-evaluated');
             const overrides = { NETWORK_PANEL_CONFIG: join(fixture, `custom '"; $(touch ${marker}); frontend.js`),
-                NETWORK_PANEL_PALETTE: join(fixture, 'custom palette.json'), NETWORK_CUSTOM_HELPER: join(fixture, 'custom helper'),
+                NETWORK_PANEL_PALETTE: join(fixture, 'custom palette.json'),
                 PANEL_CSS_FILE: join(fixture, 'custom style with spaces.css'),
                 DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
                 MEDIA_PANEL: join(fixture, 'custom media'), XDG_RUNTIME_DIR: join(fixture, 'isolated runtime $HOME with spaces') };
@@ -2766,9 +2796,7 @@ async function gjsNativeTests() {
             get_gateway: () => '192.0.2.1', get_nameservers: () => ['192.0.2.53'],
         });
         wifi.get_ip4_config = () => ip4;
-        let encodings = 0;
-        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable(),
-            encodeQr: async () => { encodings++; throw new Error('Offline Info must not encode a QR'); } });
+        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
         try {
             controller.start(); controller.toggle('offline-monitor');
             const selected = row(backend, 'offline saved'), key = selected.key;
@@ -2795,9 +2823,9 @@ async function gjsNativeTests() {
             assert([first, second, live].every(item => item.secretCalls === 0), 'Opening offline Info never authorizes secrets');
             controller.selectSavedProfile(second.get_uuid());
             assert(second.secretCalls === 0 && controller.selectedProfileUuid === second.get_uuid(), 'Selecting a saved UUID only updates metadata');
-            await controller.revealSecret(); await controller.qr(key);
-            assert(controller.page === 'info' && controller.secretRequested && !controller.secretLoading && !controller.qrLoading,
-                'Explicit offline reveal stays on Info while QR remains connected-only');
+            await controller.revealSecret();
+            assert(controller.page === 'info' && controller.secretRequested && !controller.secretLoading,
+                'Explicit offline reveal stays on Info');
             assert(controller.secret === 'offline-secret' && second.secretCalls === 1 && second.secretFinishes === 1
                 && first.secretCalls === 0 && live.secretCalls === 0, 'Only the explicitly selected offline profile supplies credentials');
             controller.hideSecret();
@@ -2817,7 +2845,7 @@ async function gjsNativeTests() {
             assert(details.profileUuid === live.get_uuid() && details.bssid === wifi.activeAP.get_bssid()
                 && details.rate === '866.7 Mbit/s', 'Active profile, BSSID and link rate remain unchanged');
             assert(first.secretCalls === 0 && live.secretCalls === 0 && second.secretCalls === 1 && second.secretFinishes === 1
-                && encodings === 0 && client.calls.length === 0 && client.radioWrites.length === 0 && wifi.disconnects === 0,
+                && client.calls.length === 0 && client.radioWrites.length === 0 && wifi.disconnects === 0,
             'Offline Info and detection changes never automatically reread credentials or mutate network state');
         } finally { controller.dispose(); }
     }
@@ -2831,7 +2859,7 @@ async function gjsNativeTests() {
         wifi.active = new Active(saved, 'scan'); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
         wifi.activeAP = wifi.aps[0]; wifi.state = NM.DeviceState.ACTIVATED;
         wifi.holdScans = second.holdScans = true;
-        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable(), encodeQr: async () => '' });
+        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
         async function finishScans() { wifi.finishScans(); second.finishScans(); await delay(); }
         async function tick() {
             const source = GLib.MainContext.default().find_source_by_id(backend._scanTimer);
@@ -2857,9 +2885,8 @@ async function gjsNativeTests() {
             await tick();
             assert(wifi.scans === 2 && second.scans === 2, 'Periodic native scans continue on the info page');
             await finishScans();
-            await controller.qr(key);
             await tick();
-            assert(controller.page === 'qr' && wifi.scans === 3 && second.scans === 3, 'Periodic native scans continue on the QR page');
+            assert(controller.page === 'info' && wifi.scans === 3 && second.scans === 3, 'Periodic native scans continue across repeated Info ticks');
             controller.close();
             assert(!backend._scanTimer && !backend._scanMembers.size, 'Closing removes the periodic source and scan members');
             assert([...wifi.pendingScans, ...second.pendingScans].every(scan => scan.io.is_cancelled()), 'Closing cancels every in-flight native scan');
@@ -3129,8 +3156,7 @@ async function gjsNativeTests() {
         for (const change of ['retrieval revision', 'same-UUID replacement', 'device replacement']) {
             const { client, backend } = fixture();
             const remote = profile('controller saved', 'psk'); client.profiles = [remote]; remote.holdSecrets = true;
-            const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable(),
-                encodeQr: async () => { throw new Error('Saved Info cannot encode QR'); } });
+            const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
             try {
                 controller.start(); controller.toggle('offline-monitor');
                 const key = row(backend, 'controller saved').key;
@@ -3329,493 +3355,78 @@ async function gjsNativeTests() {
 }
 
 async function gjsRuntimeTests() {
-    // Offline QR transport tests. Import the real backend exports without constructing a native client.
-    // Run directly: panel-gjs -m test.js runtime
-    // NETWORK_TEST_QR_HELPER optionally exercises a real QR-only helper as well.
-    const { default: Gio } = await import('gi://Gio');
-    const { default: GLib } = await import('gi://GLib');
-    const { default: System } = await import('system');
-    const { encodeQr, controllerRuntime, dismissOtherPanels } = await import('./backend.js');
-
-    const PRIORITY = GLib.PRIORITY_DEFAULT;
-    const MAX_REPLY = 2 * 1024 * 1024;
-    const PRIVATE_MARKER = 'offline-runtime-private-sentinel';
-    // Generated 1x1 RGBA PNGs, including correct chunk CRCs (no image service needed).
-    const RED = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
-    const BLUE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg==';
-    const GENERIC_ERRORS = new Set([
-        'The QR request is too large.',
-        'Could not generate the Wi-Fi QR code.',
-        'Could not read the Wi-Fi QR image.',
-        'Could not send the Wi-Fi QR request.',
-        'Could not start the Wi-Fi QR encoder.',
-        'The Wi-Fi QR encoder failed.',
-        'The QR request was cancelled.',
-    ]);
-
-    class CheckFailure extends Error {}
-    function check(condition, message) {
-        // All messages are fixed test descriptions, never actual values or exceptions.
-        if (!condition) throw new CheckFailure(message);
-    }
-    const pause = (milliseconds = 10) => new Promise(resolve => GLib.timeout_add(PRIORITY, milliseconds,
-        () => { resolve(); return GLib.SOURCE_REMOVE; }));
-    const exists = path => GLib.file_test(path, GLib.FileTest.EXISTS);
-    function text(path) {
-        const [ok, bytes] = GLib.file_get_contents(path);
-        check(ok, 'Could not read a test fixture file.');
-        return new TextDecoder().decode(bytes);
-    }
-    function report(path) { return exists(path) ? JSON.parse(text(path)) : null; }
-    async function until(predicate, message, milliseconds = 2000) {
-        const end = GLib.get_monotonic_time() + milliseconds * 1000;
-        do {
-            if (predicate()) return;
-            await pause();
-        } while (GLib.get_monotonic_time() < end);
-        throw new CheckFailure(message);
-    }
-    async function bounded(promise, message, milliseconds = 2500) {
-        let timer = 0;
-        try {
-            return await Promise.race([promise, new Promise((_, reject) => {
-                timer = GLib.timeout_add(PRIORITY, milliseconds, () => {
-                    timer = 0;
-                    reject(new CheckFailure(message));
-                    return GLib.SOURCE_REMOVE;
-                });
-            })]);
-        } finally { if (timer) GLib.source_remove(timer); }
-    }
-    function removeTree(path) {
-        const file = Gio.File.new_for_path(path);
-        if (file.query_file_type(Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null) === Gio.FileType.DIRECTORY) {
-            const entries = file.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
-            try {
-                let entry;
-                while ((entry = entries.next_file(null))) removeTree(GLib.build_filenamev([path, entry.get_name()]));
-            } finally { entries.close(null); }
-        }
-        file.delete(null);
-    }
-    function executable(path, source) {
-        GLib.file_set_contents(path, '#!/usr/bin/env node\n' + source);
+    const Gio = (await import('gi://Gio')).default;
+    const GLib = (await import('gi://GLib')).default;
+    const System = (await import('system')).default;
+    const { controllerRuntime, dismissOtherPanels } = await import('./backend.js');
+    const root = GLib.dir_make_tmp('network-runtime-tests-XXXXXX');
+    const environment = new Map(['DASHBOARD_PANEL', 'MEDIA_PANEL'].map(name => [name, GLib.getenv(name)]));
+    let serial = 0;
+    const paths = [];
+    function check(condition, message) { if (!condition) throw new Error(message); }
+    const pause = () => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10, () => {
+        resolve(); return GLib.SOURCE_REMOVE;
+    }));
+    function fixture() {
+        const path = GLib.build_filenamev([root, `fake panel ${++serial} ; literal.cjs`]);
+        const output = `${path}.json`;
+        GLib.file_set_contents(path, '#!/usr/bin/env node\n' + `const fs = require('node:fs');
+fs.writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));\n`);
         Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o700, Gio.FileQueryInfoFlags.NONE, null);
+        paths.push(path, output);
+        return { path, output };
     }
-    function childPids(pid) {
-        const path = `/proc/${pid}/task/${pid}/children`;
-        if (!exists(path)) return [];
-        return text(path).trim().split(/\s+/).filter(Boolean);
+    async function closed(panel) {
+        const deadline = GLib.get_monotonic_time() + 3e6;
+        while (!GLib.file_test(panel.output, GLib.FileTest.EXISTS) && GLib.get_monotonic_time() < deadline) await pause();
+        const [ok, bytes] = GLib.file_get_contents(panel.output);
+        check(ok && JSON.stringify(JSON.parse(new TextDecoder().decode(bytes))) === '["close"]',
+            'Each panel must receive only the literal close argument.');
     }
-
-    async function worker(root) {
-        const injected = GLib.build_filenamev([root, 'shell-must-not-run']);
-        const request = {
-            ssid: 'Offline ; " café \\ fixture', authentication: 'WPA',
-            password: `${PRIVATE_MARKER}; $(touch ${injected}) \`touch ${injected}\` ' " \\ , :`, hidden: true,
-        };
-        const large = { ...request, password: request.password + 'é\\;:'.repeat(2200) };
-        const operations = [];
-        const fixtures = [];
-        const environment = new Map(['NETWORK_CUSTOM_HELPER', 'DASHBOARD_PANEL', 'MEDIA_PANEL']
-            .map(name => [name, GLib.getenv(name)]));
-        const ownPid = String(Gio.Credentials.new().get_unix_pid());
-        const originalChildren = new Set(childPids(ownPid));
-        let serial = 0, passed = 0, failed = 0, skipped = 0;
-
-        function fixture(body, { input = request, args = ['qr'] } = {}) {
-            const id = ++serial;
-            // Whitespace and shell punctuation are deliberately part of argv[0].
-            const path = GLib.build_filenamev([root, `fake helper ${id} ; literal.cjs`]);
-            const output = GLib.build_filenamev([root, `report-${id}.json`]);
-            const gate = GLib.build_filenamev([root, `release-${id}`]);
-            const wire = JSON.stringify(input);
-            const digest = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, wire, -1);
-            // Standalone Node fixtures keep every pipe/exit test real without Python.
-            executable(path, `const fs = require('node:fs');
-    const crypto = require('node:crypto');
-    const REPORT = ${JSON.stringify(output)}, GATE = ${JSON.stringify(gate)}, STATE = {};
-    function record(fields) {
-        Object.assign(STATE, fields);
-        fs.writeFileSync(REPORT + '.tmp', JSON.stringify(STATE));
-        fs.renameSync(REPORT + '.tmp', REPORT);
-    }
-    function receive(step = null) {
-        let raw, reads = 0;
-        if (step === null) {
-            raw = fs.readFileSync(0);
-            reads = 1;
-        } else {
-            const pieces = [], buffer = Buffer.alloc(step);
-            for (;;) {
-                const count = fs.readSync(0, buffer, 0, step, null);
-                if (!count) break;
-                pieces.push(Buffer.from(buffer.subarray(0, count)));
-                reads++;
-            }
-            raw = Buffer.concat(pieces);
-        }
-        let value;
-        try { value = JSON.parse(raw.toString('utf8')); }
-        catch (_) { process.exit(91); }
-        record({ stdin_ok: value !== null && typeof value === 'object' && !Array.isArray(value)
-            && crypto.createHash('sha256').update(raw).digest('hex') === ${JSON.stringify(digest)},
-            input_bytes: raw.length, reads });
-        return value;
-    }
-    function emit(image = ${JSON.stringify(RED)}) { fs.writeFileSync(1, JSON.stringify({ image })); }
-    function gate() {
-        const end = performance.now() + 4000;
-        const sleeper = new Int32Array(new SharedArrayBuffer(4));
-        while (!fs.existsSync(GATE)) {
-            if (performance.now() > end) process.exit(92);
-            Atomics.wait(sleeper, 0, 0, 5);
-        }
-    }
-    record({ pid: process.pid, argv_ok: JSON.stringify(process.argv.slice(2)) === ${JSON.stringify(JSON.stringify(args))},
-        executable_ok: process.argv[1] === ${JSON.stringify(path)},
-        cmdline_private: !fs.readFileSync('/proc/self/cmdline').includes(${JSON.stringify(PRIVATE_MARKER)}) });
-    if (!STATE.argv_ok || !STATE.executable_ok) process.exit(93);
-    ${body}
-    `);
-            const value = { path, output, gate, inputBytes: new TextEncoder().encode(wire).length };
-            fixtures.push(value);
-            return value;
-        }
-        function start(helper, input = request, io = new Gio.Cancellable()) {
-            GLib.setenv('NETWORK_CUSTOM_HELPER', helper.path, true);
-            const operation = { io, settled: false };
-            // Attach both handlers immediately, even for pre-cancelled requests.
-            operation.result = encodeQr(input, io).then(
-                value => { operation.settled = true; return { ok: true, value }; },
-                error => { operation.settled = true; return { ok: false, error }; });
-            operations.push(operation);
-            return operation;
-        }
-        async function success(operation, image = RED) {
-            const result = await bounded(operation.result, 'The QR request did not complete promptly.');
-            check(result.ok && result.value === image, 'The QR result must match the expected PNG exactly.');
-        }
-        async function failure(operation, expected = null) {
-            const result = await bounded(operation.result, 'The failed or cancelled request did not settle promptly.');
-            check(!result.ok, 'An invalid, failed or cancelled QR request must reject.');
-            check(result.error instanceof Error && GENERIC_ERRORS.has(result.error.message),
-                'The rejection must use a fixed generic error, never helper output.');
-            check(!String(result.error).includes(PRIVATE_MARKER), 'A rejected request exposed a private fixture marker.');
-            if (expected) check(result.error.message === expected, 'The failure used an unexpected generic error.');
-        }
-        async function ready(helper, predicate = value => Boolean(value)) {
-            await until(() => { const value = report(helper.output); return value && predicate(value); },
-                'The helper did not reach the expected pipe state.');
-        }
-        async function reaped(helper) {
-            const value = report(helper.output);
-            check(value && Number.isInteger(value.pid), 'The helper must report its process identity.');
-            await until(() => !exists(`/proc/${value.pid}`), 'The helper exited but was not reaped.');
-        }
-        function privateTransport(helper) {
-            const value = report(helper.output);
-            check(value?.argv_ok && value.executable_ok && value.cmdline_private,
-                'The executable must receive only literal argv and no credentials.');
-            check(value?.stdin_ok && value.input_bytes === helper.inputBytes,
-                'Credentials must arrive as the exact complete JSON stdin request.');
-            check(!exists(injected), 'Credential or executable shell syntax must never execute.');
-        }
-        async function test(name, action) {
-            try { await action(); passed++; print(`ok ${passed + failed} - ${name}`); }
-            catch (error) {
-                failed++;
-                print(`not ok ${passed + failed} - ${name}`);
-                print(error instanceof CheckFailure ? `  ${error.message}` : '  Unexpected exception (details suppressed for privacy).');
-            }
-        }
-
+    async function main() {
         try {
-            await test('literal helper argv, private JSON stdin and valid PNG', async () => {
-                const helper = fixture('receive()\nemit()');
-                await success(start(helper));
-                privateTransport(helper);
-                await reaped(helper);
-            });
-            await test('UTF-8 stdin larger than 4096 bytes survives chunked writes', async () => {
-                const helper = fixture('receive(257)\nemit()', { input: large });
-                check(helper.inputBytes > 8192 && helper.inputBytes < 16 * 1024, 'The chunked input fixture must span multiple writes.');
-                await success(start(helper, large));
-                privateTransport(helper);
-                check(report(helper.output).reads > 1, 'The helper must actually drain stdin in multiple reads.');
-                await reaped(helper);
-            });
-            await test('full-duplex pipes allow stdout EOF before stdin is drained', async () => {
-                const helper = fixture('emit()\nfs.closeSync(1)\nreceive(113)', { input: large });
-                await success(start(helper, large));
-                privateTransport(helper);
-                await reaped(helper);
-            });
-            await test('success waits for process exit as well as stdout EOF', async () => {
-                const helper = fixture('receive()\nemit()\nfs.closeSync(1)\nrecord({ stdout_closed: true })\ngate()');
-                const operation = start(helper);
-                await ready(helper, value => value.stdout_closed);
-                await pause(30);
-                check(!operation.settled, 'EOF alone must not resolve a still-running encoder.');
-                GLib.file_set_contents(helper.gate, 'release');
-                await success(operation);
-                await reaped(helper);
-            });
-            await test('spawn failure hides an untrusted helper path', async () => {
-                await failure(start({ path: GLib.build_filenamev([root, PRIVATE_MARKER]) }),
-                    'Could not start the Wi-Fi QR encoder.');
-            });
-            await test('requests over 16 KiB reject before spawning', async () => {
-                const helper = fixture('receive()\nemit()');
-                await failure(start(helper, { ...request, password: PRIVATE_MARKER.repeat(1024) }), 'The QR request is too large.');
-                await pause(30);
-                check(!exists(helper.output), 'An oversized request must not launch the helper.');
-            });
-
-            const badReplies = [
-                ['malformed JSON and credential-bearing stderr', 'const value = receive();\nfs.writeSync(2, value.password)\nfs.writeSync(1, value.password)'],
-                ['error JSON with a reflected credential', 'const value = receive();\nfs.writeSync(1, JSON.stringify({ error: value.password }))'],
-                ['nonzero exit even with an otherwise valid image', 'const value = receive();\nfs.writeSync(2, value.password)\nemit()\nprocess.exit(23)'],
-                ['nonzero exit with reflected JSON and stderr', 'const value = receive();\nfs.writeSync(2, value.password)\nfs.writeSync(1, JSON.stringify({ error: value.password }))\nprocess.exit(2)'],
-                ['empty reply', 'receive()'],
-                ['invalid UTF-8 reply', 'receive()\nfs.writeSync(1, Buffer.from([255, 254]))'],
-                ['JSON null', "receive()\nfs.writeSync(1, 'null')"],
-                ['JSON array', "receive()\nfs.writeSync(1, '[]')"],
-                ['missing image', "receive()\nfs.writeSync(1, '{}')"],
-                ['non-string image', 'receive()\nfs.writeSync(1, JSON.stringify({ image: 42 }))'],
-                ['untrusted text instead of an image URL', 'const value = receive();\nemit(value.password)'],
-                ['wrong image MIME type', "receive()\nemit('data:image/svg+xml;base64,PHN2Zz4=')"],
-                ['empty base64 image', "receive()\nemit('data:image/png;base64,')"],
-                ['invalid base64 alphabet', "receive()\nemit('data:image/png;base64,AAAA!AAA')"],
-                ['invalid base64 padding', "receive()\nemit('data:image/png;base64,AA=A')"],
-                ['impossible base64 length', "receive()\nemit('data:image/png;base64,A')"],
-                ['base64 data that is not a PNG', "receive()\nemit('data:image/png;base64,bm90IGEgcG5n')"],
-            ];
-            for (const [name, body] of badReplies) {
-                await test(`rejects ${name} with a generic error`, async () => {
-                    const helper = fixture(body);
-                    await failure(start(helper));
-                    await reaped(helper);
-                });
-            }
-            await test('a valid JSON reply exactly at the 2 MiB boundary succeeds', async () => {
-                const helper = fixture(`receive()
-    const reply = Buffer.from(JSON.stringify({ image: ${JSON.stringify(RED)} }));
-    fs.writeFileSync(1, Buffer.concat([reply, Buffer.alloc(${MAX_REPLY} - reply.length, 32)]));`);
-                await success(start(helper));
-                await reaped(helper);
-            });
-            await test('a reply over 2 MiB is rejected before EOF and the child is killed/reaped', async () => {
-                const helper = fixture(`receive()
-    const reply = Buffer.from(JSON.stringify({ image: ${JSON.stringify(RED)} }));
-    fs.writeFileSync(1, Buffer.concat([reply, Buffer.alloc(${MAX_REPLY} + 1 - reply.length, 32)]));
-    gate()`);
-                await failure(start(helper), 'Could not read the Wi-Fi QR image.');
-                await reaped(helper);
-            });
-            await test('early helper exit without reading stdin is handled and reaped', async () => {
-                const helper = fixture('process.exit(19)', { input: large });
-                await failure(start(helper, large));
-                await reaped(helper);
-            });
-            await test('a real broken stdin pipe rejects without exposing helper diagnostics', async () => {
-                const helper = fixture('fs.closeSync(0)\nrecord({ stdin_closed: true })\ngate()', { input: large });
-                const operation = start(helper, large);
-                // Do not dispatch the first write completion until the child closes fd 0.
-                // This makes a subsequent 4096-byte write hit EPIPE even on 64 KiB pipes.
-                const end = GLib.get_monotonic_time() + 2000 * 1000;
-                while (!report(helper.output)?.stdin_closed && GLib.get_monotonic_time() < end) GLib.usleep(1000);
-                check(report(helper.output)?.stdin_closed, 'The helper must close stdin before the next write callback.');
-                await failure(operation, 'Could not send the Wi-Fi QR request.');
-                await reaped(helper);
-            });
-            await test('pre-cancelled Gio.Cancellable rejects without launching a child', async () => {
-                const helper = fixture('receive()\nemit()');
-                const io = new Gio.Cancellable();
-                io.cancel();
-                await failure(start(helper, request, io), 'Could not start the Wi-Fi QR encoder.');
-                await pause(30);
-                check(!exists(helper.output), 'Pre-cancellation must not launch an encoder.');
-            });
-            await test('cancelling a pending read returns without deadlock and reaps the child', async () => {
-                const helper = fixture('receive()\nrecord({ waiting: true })\ngate()');
-                const operation = start(helper);
-                await ready(helper, value => value.waiting);
-                operation.io.cancel();
-                check(operation.io.is_cancelled(), 'Gio cancellation must return to its caller.');
-                await failure(operation);
-                await reaped(helper);
-                operation.io.cancel();
-                await pause();
-            });
-            await test('immediate cancellation settles pending pipe callbacks and reaps the child', async () => {
-                const helper = fixture('receive()\ngate()', { input: large });
-                const operation = start(helper, large);
-                const spawned = childPids(ownPid).filter(pid => !originalChildren.has(pid));
-                operation.io.cancel();
-                await failure(operation);
-                await until(() => spawned.every(pid => !exists(`/proc/${pid}`)), 'Immediate cancellation left an unreaped child.');
-            });
-            await test('cancelling after success cannot disturb a later independent request', async () => {
-                const helper = fixture('receive()\nemit()');
-                const operation = start(helper);
-                await success(operation);
-                operation.io.cancel();
-                await reaped(helper);
-                const next = fixture(`receive()\nemit(${JSON.stringify(BLUE)})`);
-                await success(start(next), BLUE);
-                await reaped(next);
-            });
-            await test('concurrent encodes preserve helper, stdin, output and cancellation identity', async () => {
-                const other = { ...request, ssid: 'Independent offline request', hidden: false };
-                const first = fixture('receive()\nrecord({ waiting: true })\ngate()\nemit()');
-                const cancelled = fixture('receive()\nrecord({ waiting: true })\ngate()');
-                const second = fixture(`receive(97)\nemit(${JSON.stringify(BLUE)})`, { input: other });
-                const a = start(first), c = start(cancelled), b = start(second, other);
-                await ready(first, value => value.waiting);
-                await ready(cancelled, value => value.waiting);
-                await success(b, BLUE);
-                check(!a.settled && !c.settled, 'One successful request must not settle its neighbours.');
-                c.io.cancel();
-                await failure(c);
-                check(!a.settled, 'Cancelling one request must not cancel another.');
-                GLib.file_set_contents(first.gate, 'release');
-                await success(a);
-                for (const helper of [first, second, cancelled]) {
-                    privateTransport(helper);
-                    await reaped(helper);
-                }
-            });
-            await test('controllerRuntime exposes the encoder and real independent Gio cancellables', async () => {
-                const runtime = controllerRuntime();
-                check(runtime.encodeQr === encodeQr, 'The controller must use the imported runtime encoder.');
-                const a = runtime.createCancellable(), b = runtime.createCancellable();
-                check(a instanceof Gio.Cancellable && b instanceof Gio.Cancellable && a !== b,
-                    'Controller requests must receive distinct native cancellables.');
-                a.cancel();
-                check(a.is_cancelled() && !b.is_cancelled(), 'Native cancellation must remain request-local.');
-            });
-            await test('dismissOtherPanels closes exactly the fake dashboard and media launchers', async () => {
-                const dashboard = fixture('', { args: ['close'] });
-                const media = fixture('', { args: ['close'] });
-                GLib.setenv('DASHBOARD_PANEL', dashboard.path, true);
-                GLib.setenv('MEDIA_PANEL', media.path, true);
-                dismissOtherPanels();
-                for (const helper of [dashboard, media]) {
-                    await ready(helper);
-                    check(report(helper.output).argv_ok && report(helper.output).executable_ok,
-                        'Each panel must receive only the literal close argument.');
-                    await reaped(helper);
-                }
-            });
-            await test('a failed fake dashboard launch does not prevent closing fake media', async () => {
-                const media = fixture('', { args: ['close'] });
-                GLib.setenv('DASHBOARD_PANEL', GLib.build_filenamev([root, 'missing-dashboard']), true);
-                GLib.setenv('MEDIA_PANEL', media.path, true);
-                dismissOtherPanels();
-                await ready(media);
-                check(report(media.output).argv_ok, 'Media must still receive close after a dashboard spawn failure.');
-                await reaped(media);
-            });
-            const actual = GLib.getenv('NETWORK_TEST_QR_HELPER');
-            if (actual) {
-                await test('optional provided QR helper returns an offline PNG', async () => {
-                    const result = await bounded(start({ path: actual }).result, 'The provided helper did not complete promptly.');
-                    check(result.ok && typeof result.value === 'string' && result.value.startsWith('data:image/png;base64,'),
-                        'The provided helper must return a PNG data URL.');
-                    const image = GLib.base64_decode(result.value.slice('data:image/png;base64,'.length));
-                    check(image.length > 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, i) => image[i] === byte),
-                        'The provided helper must return bytes with the PNG signature.');
-                });
-            } else {
-                skipped++;
-                print('skip - optional real QR helper (NETWORK_TEST_QR_HELPER is unset)');
-            }
-            skipped++;
-            print('skip - fixed 12-second timeout (not injectable; short failure/cancellation watchdogs are exercised)');
+            const runtime = controllerRuntime();
+            const a = runtime.createCancellable(), b = runtime.createCancellable();
+            check(a instanceof Gio.Cancellable && b instanceof Gio.Cancellable && a !== b,
+                'Controller requests must receive distinct native cancellables.');
+            a.cancel();
+            check(a.is_cancelled() && !b.is_cancelled(), 'Native cancellation must remain request-local.');
+            print('PASS controllerRuntime exposes real independent Gio cancellables');
+            const dashboard = fixture(), media = fixture();
+            GLib.setenv('DASHBOARD_PANEL', dashboard.path, true);
+            GLib.setenv('MEDIA_PANEL', media.path, true);
+            dismissOtherPanels();
+            await closed(dashboard); await closed(media);
+            print('PASS dismissOtherPanels closes exactly the fake dashboard and media launchers');
+            const nextMedia = fixture();
+            GLib.setenv('DASHBOARD_PANEL', GLib.build_filenamev([root, 'missing-dashboard']), true);
+            GLib.setenv('MEDIA_PANEL', nextMedia.path, true);
+            dismissOtherPanels();
+            await closed(nextMedia);
+            print('PASS a failed dashboard launch does not prevent closing media');
         } finally {
-            await test('all test requests settle and every spawned child is reaped', async () => {
-                for (const operation of operations) if (!operation.settled) operation.io.cancel();
-                await bounded(Promise.all(operations.map(operation => operation.result)), 'Cleanup left an unsettled QR request.');
-                // Release any intentionally gated fixture after a failed assertion.
-                for (const helper of fixtures) GLib.file_set_contents(helper.gate, 'release');
-                await until(() => childPids(ownPid).every(pid => originalChildren.has(pid)), 'Cleanup left a child process or zombie.');
-                for (const helper of fixtures) {
-                    const value = report(helper.output);
-                    if (value) check(!exists(`/proc/${value.pid}`), 'A fixture process was not reaped.');
-                }
-                check(!exists(injected), 'A shell-injection fixture unexpectedly executed.');
-            });
             for (const [name, value] of environment) {
-                if (value === null) GLib.unsetenv(name);
-                else GLib.setenv(name, value, true);
+                if (value === null) GLib.unsetenv(name); else GLib.setenv(name, value, true);
             }
+            for (const path of paths) if (GLib.file_test(path, GLib.FileTest.EXISTS)) Gio.File.new_for_path(path).delete(null);
+            Gio.File.new_for_path(root).delete(null);
         }
-        print(`RESULT ${passed} passed, ${failed} failed, ${skipped} skipped`);
-        return failed ? 1 : 0;
     }
-
-    async function supervise() {
-        // A separate GJS process is essential: a Cancellable.disconnect deadlock
-        // would also block an in-process GLib timeout. Capture logs before printing
-        // anything so even a regressed runtime cannot leak fixture credentials.
-        const root = GLib.dir_make_tmp('network-runtime-tests-XXXXXX');
-        let child, timer = 0, timedOut = false, code = 1;
-        try {
-            const launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
-            launcher.setenv('NETWORK_RUNTIME_TEST_WORKER', root, true);
-            const source = GLib.filename_from_uri(import.meta.url)[0];
-            child = launcher.spawnv([GLib.file_read_link('/proc/self/exe'), '-m', source, 'runtime']);
-            timer = GLib.timeout_add(PRIORITY, 20000, () => {
-                timer = 0;
-                timedOut = true;
-                child.force_exit();
-                return GLib.SOURCE_REMOVE;
-            });
-            const [stdout, stderr] = await new Promise((resolve, reject) => child.communicate_utf8_async(null, null, (process, result) => {
-                try { const [, out, err] = process.communicate_utf8_finish(result); resolve([out, err]); }
-                catch (_) { reject(new CheckFailure('Could not collect the isolated runtime test output.')); }
-            }));
-            if (timer) { GLib.source_remove(timer); timer = 0; }
-            if (timedOut) {
-                print('FAIL runtime worker exceeded its 20-second deadlock watchdog.');
-                // Fixtures have their own four-second lifetime bound if their parent dies.
-                await pause(4200);
-            } else if ((stdout + stderr).includes(PRIVATE_MARKER)) {
-                print('FAIL captured process logs exposed a private fixture marker; output suppressed.');
-            } else {
-                if (stdout.trim()) print(stdout.trim());
-                if (stderr.trim()) print(stderr.trim());
-                print('PASS captured stdout/stderr contain no credential marker (including suppressed helper diagnostics)');
-                code = child.get_successful() ? 0 : 1;
-            }
-        } catch (_) { print('FAIL runtime supervisor (exception details suppressed for privacy).'); }
-        finally {
-            if (timer) GLib.source_remove(timer);
-            try {
-                removeTree(root);
-                check(!exists(root), 'Temporary fixture cleanup failed.');
-                print('PASS temporary executable scripts and report files removed');
-            } catch (_) { print('FAIL temporary fixture cleanup'); code = 1; }
-        }
-        return code;
-    }
-
-    const root = GLib.getenv('NETWORK_RUNTIME_TEST_WORKER');
-    let exitCode = 1;
-    try { exitCode = root ? await worker(root) : await supervise(); }
-    catch (_) { print('FAIL runtime tests (exception details suppressed for privacy).'); }
+    let exitCode = 0;
+    try { await main(); }
+    catch (error) { printerr(error.stack || String(error)); exitCode = 1; }
     System.exit(exitCode);
 }
 
 async function gjsUITests() {
     // Run through node test.js --ui: real frontend/backend/logic imports,
-    // fake controller actions, authenticated private Xvfb and isolated D-Bus.
+    // fake actions/credentials, authenticated private Xvfb and isolated D-Bus.
     const { default: GLib } = await import('gi://GLib');
     const { default: Gio } = await import('gi://Gio');
     const { default: Gtk } = await import('gi://Gtk?version=4.0');
     const { default: Gdk } = await import('gi://Gdk?version=4.0');
-    const { default: GdkPixbuf } = await import('gi://GdkPixbuf');
+
+    const { default: Pango } = await import('gi://Pango');
     const { default: System } = await import('system');
 
     if (GLib.getenv('NETWORK_UI_ISOLATED') !== '1'
@@ -3826,6 +3437,18 @@ async function gjsUITests() {
 
     const { NetworkPanel, NetworkApplication, loadTheme, monitorFor } = await import(
         GLib.filename_to_uri(GLib.getenv('NETWORK_PANEL_CONFIG'), null));
+    const { NetworkController, isUndetectedSaved, signalLabel } = await import('./logic.js');
+    // GTK has no introspectable accessible-property getter. Observe updates while
+    // forwarding them to the real GTK implementation, including later rerenders.
+    const accessibleProperties = new WeakMap();
+    const updateAccessible = Gtk.Button.prototype.update_property;
+    const updateDropdownAccessible = Gtk.DropDown.prototype.update_property;
+    function trackAccessible(properties, values) {
+        const state = accessibleProperties.get(this) || new Map();
+        properties.forEach((property, index) => state.set(property, values[index]));
+        accessibleProperties.set(this, state);
+        return updateAccessible.call(this, properties, values);
+    }
     let checks = 0;
     function assert(condition, message) {
         if (!condition) throw new Error(message);
@@ -3835,6 +3458,11 @@ async function gjsUITests() {
     function wait(milliseconds = 80) {
         return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, milliseconds,
             () => { resolve(); return GLib.SOURCE_REMOVE; }));
+    }
+    async function waitFor(predicate, message, milliseconds = 1500) {
+        const deadline = GLib.get_monotonic_time() + milliseconds * 1000;
+        while (!predicate() && GLib.get_monotonic_time() < deadline) await wait(20);
+        assert(predicate(), message);
     }
     function owner(name) {
         return Gio.DBus.session.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
@@ -3853,6 +3481,201 @@ async function gjsUITests() {
         yield widget;
         for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) yield* widgets(child);
     }
+    function assertTooltipFree(view, phase = 'rerender') {
+        // Include hidden pages, GTK-owned descendants/popovers and detached shared
+        // details: none may retain text, markup or custom query-tooltip activation.
+        const tree = new Set([view.window, view.root, view.infoContent].flatMap(root => [...widgets(root)]));
+        const violations = [...tree].filter(widget => widget.has_tooltip || widget.tooltip_text || widget.tooltip_markup);
+        assert(violations.length === 0,
+            `${phase}: entire widget tree is tooltip-free (${violations.map(widget =>
+                `${widget.constructor.name}/${widget.icon_name || ''}: ${JSON.stringify([widget.has_tooltip, widget.tooltip_text,
+                    widget.tooltip_markup])} in ${widget.get_parent()?.constructor.name}`).join(', ')})`);
+        equal(accessibleProperties.get(view.savedTab)?.get(Gtk.AccessibleProperty.LABEL),
+            `Saved networks (${view.controller.rows.filter(isUndetectedSaved).length})`,
+            `${phase}: Saved keeps its live count in an explicit accessible label without hover text`);
+        equal(accessibleProperties.get(view.savedTab)?.get(Gtk.AccessibleProperty.DESCRIPTION),
+            'Saved Wi-Fi networks that are not currently detected', `${phase}: Saved keeps its accessible description`);
+        equal(accessibleProperties.get(view.infoProfile)?.get(Gtk.AccessibleProperty.LABEL), 'Saved profile',
+            `${phase}: the Info profile chooser has an explicit accessible label`);
+        equal(accessibleProperties.get(view.infoProfile)?.get(Gtk.AccessibleProperty.DESCRIPTION),
+            'Saved profile whose password will be revealed', `${phase}: the Info chooser keeps its accessible description`);
+        for (const row of view.rows.values()) {
+            equal(accessibleProperties.get(row.remove)?.get(Gtk.AccessibleProperty.LABEL), `Forget saved network ${row.data.name}`,
+                `${phase}: Remove keeps its descriptive accessible action`);
+            equal(accessibleProperties.get(row.info)?.get(Gtk.AccessibleProperty.LABEL),
+                `${row.details.reveal_child ? 'Collapse' : 'Expand'} details for ${row.data.name}`,
+                `${phase}: the Info accessible action follows expansion and the current SSID`);
+            equal(accessibleProperties.get(row.profile)?.get(Gtk.AccessibleProperty.LABEL), `Saved profile for ${row.data.name}`,
+                `${phase}: the connection profile chooser is labelled independently of tooltips`);
+        }
+    }
+    async function assertDropdownTooltipFree(view, dropdown, phase) {
+        await wait();
+        const popover = [...widgets(dropdown)].find(widget => widget instanceof Gtk.Popover);
+        assert(popover, `${phase}: the real dropdown owns a popup`);
+        await waitFor(() => dropdown.get_mapped(), `${phase}: the dropdown maps after the details slide opens`);
+        popover.popup();
+        try {
+            await wait();
+            assert(popover.get_mapped() && [...widgets(popover)].some(widget => widget instanceof Gtk.Label && widget.label),
+                `${phase}: the opened dropdown contains real GTK item descendants`);
+            assertTooltipFree(view, `${phase}, dropdown open`);
+        } finally { popover.popdown(); }
+        await wait();
+        assertTooltipFree(view, `${phase}, dropdown closed`);
+    }
+    function captureDrawing(draw, drawing) {
+        const strokes = [], fills = [];
+        let point = null, origin = null, path = [], color = [], width = 1;
+        const lineTo = (x, y) => { if (point) path.push([point, [x, y]]); point = [x, y]; };
+        const paint = target => { target.push({ path: [...path], color: [...color], width }); path = []; };
+        const preserve = target => { const saved = [...path]; paint(target); path = saved; };
+        const cairo = new Proxy({
+            moveTo(x, y) { point = origin = [x, y]; }, lineTo,
+            closePath() { if (origin) lineTo(...origin); },
+            rectangle(x, y, w, h) {
+                point = origin = [x, y]; lineTo(x + w, y); lineTo(x + w, y + h);
+                lineTo(x, y + h); lineTo(x, y);
+            },
+            setSourceRGBA(...rgba) { color = rgba; },
+            setSourceRGB(...rgb) { color = [...rgb, 1]; },
+            setLineWidth(value) { width = value; },
+            stroke() { paint(strokes); }, strokePreserve() { preserve(strokes); },
+            fill() { paint(fills); }, fillPreserve() { preserve(fills); },
+            newPath() { point = origin = null; path = []; },
+        }, { get: (target, name) => target[name] || (() => {}) });
+        draw(drawing, cairo, drawing.get_width(), drawing.get_height());
+        return { strokes, fills };
+    }
+    function matchesColor(rgba, text, alpha = null) {
+        const color = new Gdk.RGBA();
+        assert(color.parse(text), `Test palette contains a valid color: ${text}`);
+        return rgba.length === 4 && ['red', 'green', 'blue'].every((channel, index) => Math.abs(rgba[index] - color[channel]) < 0.01)
+            && (alpha === null || Math.abs(rgba[3] - alpha) < 0.01);
+    }
+    function assertEye(view, requested = false) {
+        const text = requested ? 'Hide password' : 'Reveal password';
+        assert(view.reveal instanceof Gtk.Button && view.reveal.get_child() instanceof Gtk.Image,
+            'The password control is a real icon-only GTK button');
+        equal(view.reveal.get_child().icon_name, requested ? 'view-conceal-symbolic' : 'view-reveal-symbolic',
+            'The eye icon follows requested/shown state, including authorization');
+        assertTooltipFree(view, `${text} eye`);
+        equal(accessibleProperties.get(view.reveal)?.get(Gtk.AccessibleProperty.LABEL), text,
+            'The icon-only eye has an explicit accessible action label');
+        for (const control of [view.reveal, ...[...view.rows.values()].map(row => row.info)]) {
+            const metadata = [control.tooltip_text, control.tooltip_markup,
+                ...Array.from(accessibleProperties.get(control)?.values() || [])];
+            assert(!metadata.some(value => String(value || '').includes('literal secret')
+                || String(value || '').includes('fake-password-')), 'Controls never expose fake credentials through tooltips or accessibility');
+        }
+    }
+    function assertMasked(view, controller, message = 'Hidden credentials use a constant non-selectable mask') {
+        assert(view.secret.label === '*******' && !view.secret.selectable && !controller.secret, message);
+    }
+    function assertConnectionAction(row, data) {
+        assert(row.connect instanceof Gtk.Button && row.connect.get_child() instanceof Gtk.Image,
+            `${data.key}: connection action is an icon-only GTK button`);
+        equal(row.connect.get_child().icon_name, data.connected ? 'network-offline-symbolic'
+            : data.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic',
+        `${data.key}: connection icon follows the current action and network type`);
+        equal(accessibleProperties.get(row.connect)?.get(Gtk.AccessibleProperty.LABEL),
+            `${data.connected ? 'Disconnect' : 'Connect'} ${data.name}`,
+            `${data.key}: connection action has an explicit accessible label with the literal network name`);
+        assert(!row.connect.has_tooltip && !row.connect.tooltip_text && !row.connect.tooltip_markup,
+            `${data.key}: connection action has no tooltip`);
+    }
+    function assertRowPresentation(view, data) {
+        const row = view.rows.get(data.key), saved = isUndetectedSaved(data);
+        const title = saved ? `Wi-Fi - ${data.security || 'Open'} - ${data.name}`
+            : `${data.kind === 'WIRED' ? 'Wired' : 'Wi-Fi'} · ${data.name}`;
+        equal(row.name.label, title, `${data.key}: only undetected Saved titles put security before the literal SSID`);
+        assert(!row.name.use_markup && !row.name.use_underline && row.name.get_text() === title,
+            `${data.key}: titles preserve literal markup, ampersands and underscores`);
+        equal([row.name.wrap, row.name.ellipsize], [!saved, saved ? Pango.EllipsizeMode.END : Pango.EllipsizeMode.NONE],
+            `${data.key}: Saved uses one ellipsized line; Nearby restores the original wrapped title`);
+        const colors = row.name.get_attributes().to_string();
+        if (data.wireless) {
+            assert(colors.includes('0 5 foreground #ffffffffffff'), 'Wi-Fi prefix is white without changing literal SSID text');
+            if (saved) {
+                const end = 8 + new TextEncoder().encode(data.security || 'Open').length;
+                assert(colors.includes(`8 ${end} foreground #ffffffffffff`), 'Saved security text is white');
+            }
+            const color = row.marker.get_style_context().get_color();
+            assert(['red', 'green', 'blue', 'alpha'].every(channel => Math.abs(color[channel] - 1) < 0.01), 'Wi-Fi icon is white');
+        } else assert(!colors, 'Wired title styling is unchanged');
+        assert(row.status instanceof Gtk.Label && row.status.has_css_class('network-status')
+            && row.status.get_parent() === row.heading && row.name.get_next_sibling() === row.status
+            && row.status.get_next_sibling() === row.connect,
+        `${data.key}: a dedicated status label sits immediately after the title, before actions`);
+        equal(row.status.visible, Boolean(data.wireless && !saved), `${data.key}: only Nearby Wi-Fi shows heading status`);
+        if (data.wireless && !saved) {
+            equal(row.status.label, [data.security || 'Open', Number.isFinite(data.strength) ? signalLabel(data.strength) : '']
+                .filter(Boolean).join(' · '), `${data.key}: heading shows security and only a finite signal percentage`);
+            assert(!row.status.use_markup && row.status.get_text() === row.status.label,
+                `${data.key}: heading security is literal text`);
+            const color = row.status.get_style_context().get_color();
+            assert(['red', 'green', 'blue', 'alpha'].every(channel => Math.abs(color[channel] - 1) < 0.01),
+                `${data.key}: heading security and signal are opaque white`);
+        }
+        assertConnectionAction(row, data);
+        equal(row.connect.visible, !saved, `${data.key}: Saved has no connection action`);
+        equal(row.metadata.visible, !saved && Boolean(row.metadata.label),
+            `${data.key}: Saved rows and empty status lines stay hidden`);
+        assert(row.info.get_parent() === row.secondary && row.metadata.get_parent() === row.secondary
+            && row.secondary.get_parent() === row.widget && row.heading.get_next_sibling() === row.secondary,
+            `${data.key}: details chevron shares the second line with connection status`);
+        equal(row.secondary.visible, row.info.visible || row.metadata.visible,
+            `${data.key}: empty second lines are hidden`);
+        assert(!row.name.has_tooltip && !row.name.tooltip_text && !row.name.tooltip_markup,
+            `${data.key}: even a long or ellipsized title has no hover substitute`);
+        if (!saved) {
+            equal(row.metadata.label, [data.connected ? 'Connected' : data.wireless ? '' : data.known ? 'Saved' : 'Not saved',
+                data.wireless ? '' : data.interface, data.wireless ? '' : data.security,
+                data.changing ? 'Working…' : ''].filter(Boolean).join(' · '),
+            `${data.key}: Nearby Wi-Fi metadata keeps only connection/working state; wired metadata is unchanged`);
+        }
+        assert(row.widget.has_css_class('network-row'), `${data.key}: full-row styling belongs on the network widget`);
+        equal(row.widget.has_css_class('saved-network-row'), saved, `${data.key}: Saved styling follows tab migration`);
+        equal(row.widget.has_css_class('connected'), Boolean(data.connected), `${data.key}: full-row connected styling follows live state`);
+        equal(row.widget.has_css_class('expanded'), row.details.reveal_child, `${data.key}: full-row expansion styling matches the revealer`);
+        if (row.marker) {
+            assert(row.marker instanceof Gtk.Image
+                && row.marker.icon_name === (data.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic')
+                && row.marker.get_parent() === row.heading && row.marker.get_next_sibling() === row.name
+                && !row.marker.can_target && !row.marker.focusable,
+            'The decorative network-type icon sits immediately before the name');
+        }
+    }
+    function assertInline(view, controller, key) {
+        equal([controller.page, view.pages.visible_child_name], ['info', 'list'], 'Info remains controller state, not a separate UI page');
+        assert(!view.pages.get_child_by_name('info'),
+            'Inline Info has no standalone stack child or Back/navigation');
+        const row = view.rows.get(key);
+        assert(row.details instanceof Gtk.Revealer && row.details.get_parent() === row.widget,
+            'Details are attached directly to their network row');
+        assert(row.details.get_child() === view.infoContent && view.infoContent.get_parent() === row.details,
+            'The single shared Info content is reparented into the selected row');
+        equal(view.infoContent.get_style_context().get_border().left, 0,
+            'Expanded details have no extra thin left divider beside the inset accent');
+        equal([...view.rows.values()].filter(item => item.details.reveal_child).map(item => item.key), [key],
+            'Only the selected row is expanded');
+        equal([...view.rows.values()].filter(item => item.widget.has_css_class('expanded')).map(item => item.key), [key],
+            'Only the selected full row receives the red expanded outline, not just its Info chevron');
+        assert(view.summary.label.split('\n').every(line => line.startsWith('• ')), 'Network summary entries are bullets');
+        for (const [key, widget] of view.detailLabels) {
+            assert(widget.label.startsWith('• '), `${key} detail is a bullet`);
+            const color = widget.get_style_context().get_color();
+            assert(['red', 'green', 'blue', 'alpha'].every(channel => Math.abs(color[channel] - 1) < 0.01),
+                `${key} detail text is white`);
+        }
+        assert(view.profileGroup.get_first_child().label === 'Profiles'
+            && view.addressGroup.get_first_child().label === 'IP addresses'
+            && view.linkHeading.label === (row.data.wireless ? 'Wireless link' : 'Wired link'),
+            'Details are grouped under profile, address and link headings');
+        equal([view.addressGroup.visible, view.linkGroup.visible], [Boolean(row.data.connected), Boolean(row.data.connected)],
+            'Disconnected profiles do not show empty live-information groups');
+        for (const data of controller.rows) assertRowPresentation(view, data);
+    }
     function network(key, properties = {}) {
         return { key, name: '<b>Literal SSID</b> ' + 'Long network name '.repeat(8), ssid: 'test', interface: 'wlan0',
             kind: 'WI-FI', wireless: true, connected: true, changing: false, known: true,
@@ -3865,8 +3688,8 @@ async function gjsUITests() {
             Object.assign(this, { rows: [network('wifi'), network('wired', { kind: 'WIRED', wireless: false, profiles: [] })],
                 available: true, wifiAvailable: true, wifiEnabled: true, wifiHardwareEnabled: true,
                 opened: false, monitor: '', page: 'list', error: '', credentialKey: '', credentialRow: null,
-                selectedRow: null, selectedProfileUuid: '', forgetKey: '', pendingKey: '', details: {}, secret: '', qrImage: '',
-                secretLoading: false, qrLoading: false, secretRequested: false, calls: [] });
+                selectedRow: null, selectedProfileUuid: '', forgetKey: '', pendingKey: '', details: {}, secret: '',
+                secretLoading: false, secretRequested: false, calls: [] });
         }
         emit() { this.onChange?.(); }
         record(...args) { this.calls.push(args); }
@@ -3874,7 +3697,7 @@ async function gjsUITests() {
         reset() {
             Object.assign(this, { page: 'list', selectedRow: null, selectedKey: '', selectedProfileUuid: '', details: {},
                 credentialKey: '', credentialRow: null, forgetKey: '', pendingKey: '', error: '',
-                secret: '', secretRequested: false, secretLoading: false, qrLoading: false, qrImage: '' });
+                secret: '', secretRequested: false, secretLoading: false });
         }
         close() { this.record('close'); this.opened = false; this.reset(); this.emit(); }
         back() { this.record('back'); this.reset(); this.emit(); }
@@ -3911,11 +3734,6 @@ async function gjsUITests() {
             this.secret = ''; this.secretRequested = false; this.secretLoading = false;
             this.details = { ...this.details, profileId: profile.id, profileUuid: profile.uuid };
             this.emit();
-        }
-        qr(key) {
-            const row = this.rows.find(row => row.key === key);
-            if (!row?.connected || !row.wireless) return;
-            this.record('qr', key); this.reset(); this.page = 'qr'; this.selectedRow = row; this.selectedKey = key; this.emit();
         }
         revealSecret() {
             const row = this.selectedRow;
@@ -3955,6 +3773,7 @@ async function gjsUITests() {
         for (const [key, row] of panel.rows) {
             assert(row.widget.get_parent() === (saved.includes(key) ? panel.savedRows : panel.networkRows),
                 `${key} is parented to exactly its own list`);
+            assertRowPresentation(panel, row.data);
         }
         equal(panel.empty.visible, nearbyKeys.length === 0, 'Nearby empty state uses only Nearby count');
         equal(panel.savedEmpty.visible, saved.length === 0, 'Saved empty state uses only Saved count');
@@ -3962,6 +3781,225 @@ async function gjsUITests() {
         equal(panel.savedTab.get_child().label, `SAVED (${saved.length})`, 'Saved tab shows its uppercase live count');
         for (const [name, tab] of [['nearby', panel.nearbyTab], ['saved', panel.savedTab]])
             equal(tab.has_css_class('active'), panel.listTab === name, 'Only the selected tab has the active style');
+    }
+    async function inlineControllerTests(app, palette) {
+        // This is the real controller driving the real GTK tree. Only the backend
+        // is fake; cancelled promises intentionally deliver late secret replies.
+        const freshRows = () => [network('active'), network('second'),
+            network('saved', { connected: false, strength: 50 }),
+            network('detected', { connected: false, strength: 50 })];
+        const backend = {
+            rows: freshRows(), available: true, wifiAvailable: true, wifiEnabled: true, wifiHardwareEnabled: true,
+            requests: [], mutations: [],
+            start() {}, dispose() {}, setOpened() {},
+            notify() { this.onChange?.(); },
+            getIdentity(key) {
+                const row = this.rows.find(row => row.key === key);
+                return row?.connected ? { interface: row.interface, ssid: row.ssid, profileUuid: row.profiles[0].uuid,
+                    bssid: '02:00:00:00:00:01', activePath: `/fake/active/${key}` } : null;
+            },
+            details(key) {
+                const row = this.rows.find(row => row.key === key);
+                return { identity: this.getIdentity(key), ssid: row.ssid, interface: row.interface,
+                    profileId: row.profiles[0].id, profileUuid: row.profiles[0].uuid };
+            },
+            readSecret(key, identity, io) { return this.defer({ key, identity, io }); },
+            readSavedSecret(key, profileUuid, io) { return this.defer({ key, profileUuid, io }); },
+            defer(context) {
+                const request = { ...context };
+                request.promise = new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
+                this.requests.push(request);
+                return request.promise;
+            },
+            activate(key) { this.mutations.push(['connect', key]); return Promise.resolve(); },
+            disconnect(key) { this.mutations.push(['disconnect', key]); return Promise.resolve(); },
+            forget(key) { this.mutations.push(['forget', key]); return Promise.resolve(); },
+        };
+        let view, window;
+        const controller = new NetworkController({ backend, onChange: () => {
+            if (view) { view.render(); assertTooltipFree(view, 'Real-controller rerender'); }
+        },
+            createCancellable: () => new Gio.Cancellable() });
+        const complete = async (request, password = 'fake-password-current') => {
+            request.resolve({ password, authentication: 'WPA', hidden: false });
+            await wait(10);
+        };
+        const open = key => {
+            const count = backend.requests.length;
+            view.rows.get(key).info.emit('clicked');
+            assertInline(view, controller, key);
+            equal(backend.requests.length, count, 'Opening inline Info never reads credentials');
+            assertMasked(view, controller);
+        };
+        const reveal = () => {
+            const count = backend.requests.length;
+            view.reveal.emit('clicked');
+            equal(backend.requests.length, count + 1, 'One explicit reveal starts exactly one fake backend request');
+            assert(view.reveal.sensitive && controller.secretLoading && view.secretLoading.visible,
+                'Pending authorization leaves the eye usable');
+            assertMasked(view, controller);
+            assertEye(view, true);
+            return backend.requests.at(-1);
+        };
+        const assertClosed = row => {
+            assert(controller.page === 'list' && !controller.selectedKey && !controller.secretRequested
+                && !controller.secretLoading && !row.details.reveal_child, 'Closing details clears controller selection and authorization synchronously');
+            assert(!row.widget.has_css_class('expanded')
+                && ![...view.rows.values()].some(item => item.widget.has_css_class('expanded')),
+            'Collapse/reset immediately removes the full-row highlight, including detached rows');
+            assertMasked(view, controller, 'The shared plaintext label is masked before a collapse animation can finish');
+            assert(![...widgets(view.root)].some(widget => widget instanceof Gtk.Label
+                && /fake-password-/.test(widget.label)), 'No row keeps a plaintext credential label after closing');
+        };
+        const reset = () => {
+            controller.back();
+            backend.rows = freshRows(); backend.wifiEnabled = backend.wifiHardwareEnabled = true; backend.notify();
+            view.selectListTab('nearby');
+            if (!controller.opened) view.toggle();
+        };
+        try {
+            controller.start();
+            view = new NetworkPanel({ app, controller, palette, dismiss: () => {} });
+            assertTooltipFree(view, 'Real-controller initial tree');
+            controller.error = 'Network operation failed'; controller.emit();
+            assert(view.errorRow.visible && view.dismissError.visible && view.error.visible, 'Errors show a dismiss button beside the message');
+            view.dismissError.emit('clicked');
+            assert(!controller.error && !view.errorRow.visible, 'Clicking the dismiss button clears the error and its row');
+            controller.error = 'Later failure'; controller.emit();
+            assert(view.errorRow.visible && view.error.label === 'Later failure', 'Later errors remain visible after dismissal');
+            view.dismissError.emit('clicked');
+            view.toggle();
+            view.window.set_child(null);
+            window = new Gtk.Window({ child: view.root, decorated: false, default_width: 1280, default_height: 800,
+                css_classes: ['network-panel'] });
+            window.present();
+            await wait();
+            const shared = [view.infoContent, view.summary, view.savedProfiles, view.infoProfile,
+                view.detailLabels, view.reveal, view.secret, view.secretLoading];
+            open('active');
+            const row = view.rows.get('active'), second = view.rows.get('second');
+            await complete(reveal());
+            assert(view.secret.label === 'fake-password-current' && view.secret.selectable, 'Only a successful explicit reply becomes selectable plaintext');
+            assertEye(view, true);
+            await waitFor(() => row.details.child_revealed, 'The mapped real-GTK slide reaches its expanded state');
+            const collapseStates = [];
+            row.details.connect('notify::reveal-child', () => {
+                if (!row.details.reveal_child) collapseStates.push([view.secret.label, view.secret.selectable, controller.secret]);
+            });
+            view.password.set_text('fake-input-before-other-info');
+            second.info.emit('clicked');
+            assertInline(view, controller, 'second');
+            assertMasked(view, controller);
+            assert(!view.password.text && row.details.get_child() === null, 'Selecting another Info clears input and detaches the shared details from the old row');
+            equal(collapseStates.at(-1), ['*******', false, ''], 'The closing revealer observes masking before its collapse starts');
+            const nextShared = [view.infoContent, view.summary, view.savedProfiles, view.infoProfile,
+                view.detailLabels, view.reveal, view.secret, view.secretLoading];
+            assert(shared.every((field, index) => field === nextShared[index]), 'Selection changes reuse every shared testing field, not per-row secret caches');
+            await complete(reveal(), 'fake-password-second');
+            view.password.set_text('fake-input-before-collapse');
+            second.info.emit('clicked');
+            assertClosed(second);
+            assert(!view.password.text, 'Toggling the selected Info closed clears password input');
+            await wait(second.details.transition_duration + 30);
+            assert(!second.details.child_revealed, 'The real-GTK slide reaches its collapsed state without plaintext');
+            open('active');
+            let old = reveal();
+            view.reveal.emit('clicked');
+            assert(old.io.is_cancelled() && !controller.secretLoading && !controller.secretRequested,
+                'Clicking the eye during authorization cancels the real Gio.Cancellable');
+            assertMasked(view, controller);
+            assertEye(view);
+            const current = reveal();
+            await complete(old, 'fake-password-cancelled');
+            assert(controller.secretLoading && controller.secretRequested && view.secretLoading.visible,
+                'A cancelled late reply cannot clear a newer read or loading state');
+            assertMasked(view, controller);
+            assertEye(view, true);
+            await complete(current);
+            view.reveal.emit('clicked');
+            const failed = reveal();
+            failed.reject(new Error('Fake authorization denied.')); await wait(10);
+            assert(controller.page === 'info' && !controller.secretRequested && !view.secretLoading.visible
+                && view.error.label === 'Fake authorization denied.', 'Authorization failure preserves inline selection and a safe retryable error');
+            assertMasked(view, controller);
+            assertEye(view);
+            await complete(reveal());
+            assert(view.secret.label === 'fake-password-current' && !view.error.visible, 'A fresh explicit retry succeeds after failure');
+
+            reset(); open('saved');
+            equal(controller.selectedProfileUuid, 'uuid-a', 'Saved Info starts with the exact snapshot profile UUID');
+            old = reveal();
+            view.infoProfile.selected = 1;
+            assert(old.io.is_cancelled() && controller.selectedProfileUuid === 'uuid-b', 'Profile selection cancels the old UUID read');
+            assertMasked(view, controller);
+            const profileRead = reveal();
+            equal(profileRead.profileUuid, 'uuid-b', 'Duplicate display names still request the selected UUID exactly');
+            await complete(old, 'fake-password-old-profile');
+            assert(controller.secretLoading && !controller.secret, 'An obsolete profile reply cannot clear the new profile loading state');
+            assertMasked(view, controller);
+            await complete(profileRead, 'fake-password-profile-b');
+            view.infoProfile.selected = 0;
+            assertMasked(view, controller, 'Switching profiles also masks an already displayed password synchronously');
+            assertEye(view);
+
+            for (const pending of [false, true]) {
+                for (const action of ['collapse', 'other Info', 'tab', 'close', 'migration to Saved',
+                    'deletion', 'forget confirmation', 'connection', 'software radio', 'hardware radio', 'connect action']) {
+                    reset();
+                    const key = ['forget confirmation', 'connection'].includes(action) ? 'saved'
+                        : ['migration to Saved', 'connect action'].includes(action) ? 'detected' : 'active';
+                    open(key);
+                    const selected = view.rows.get(key);
+                    const request = reveal();
+                    if (!pending) await complete(request);
+                    const closing = [];
+                    const signal = selected.details.connect('notify::reveal-child', () => {
+                        if (!selected.details.reveal_child) closing.push([view.secret.label, view.secret.selectable, controller.secret]);
+                    });
+                    view.password.set_text('fake-input-before-transition');
+                    if (action === 'collapse') selected.info.emit('clicked');
+                    else if (action === 'other Info') second.info.emit('clicked');
+                    else if (action === 'tab') view.savedTab.emit('clicked');
+                    else if (action === 'close') view.close();
+                    else if (action === 'forget confirmation') selected.remove.emit('clicked');
+                    else if (action === 'connect action') selected.connect.emit('clicked');
+                    else {
+                        if (action === 'migration to Saved') backend.rows = backend.rows.map(item => item.key === key ? { ...item, strength: null } : item);
+
+                        if (action === 'deletion') backend.rows = backend.rows.filter(item => item.key !== key);
+                        if (action === 'connection') backend.rows = backend.rows.map(item => item.key === key ? { ...item, connected: true } : item);
+                        if (action === 'software radio') backend.wifiEnabled = false;
+                        if (action === 'hardware radio') backend.wifiHardwareEnabled = false;
+                        backend.notify();
+                    }
+                    selected.details.disconnect(signal);
+                    assert(!selected.details.reveal_child && !view.password.text && !controller.secret && !controller.secretRequested,
+                        `${action} immediately collapses details and clears both passwords (${pending ? 'pending' : 'shown'})`);
+                    assert(!selected.widget.has_css_class('expanded'), `${action} clears the old full-row expanded class before animation finishes`);
+                    for (const data of backend.rows) assertRowPresentation(view, data);
+                    assertMasked(view, controller);
+                    equal(closing.at(-1), ['*******', false, ''], `${action} masks before the revealer begins closing`);
+                    if (action === 'other Info') assertInline(view, controller, 'second');
+                    else assertClosed(selected);
+                    if (action.startsWith('migration')) {
+                        assert(selected.widget.get_parent() === (action === 'migration to Saved' ? view.savedRows : view.networkRows),
+                            'Migration keeps the original row in the destination list, but closes its details');
+                    }
+                    if (pending) {
+                        assert(request.io.is_cancelled(), `${action} cancels the pending credential authorization`);
+                        await complete(request, 'fake-password-obsolete');
+                        assertMasked(view, controller, `${action} ignores the late fake credential reply`);
+                    }
+                }
+            }
+            assert(backend.mutations.every(([action, key]) => action === 'connect' && key === 'detected'),
+                'Only the explicitly tested fake Connect actions reach backend mutations; no real networks are touched');
+            print('PASS real-controller GTK inline selection, slide timing, mask-before-collapse, cancellation, UUID/stale replies and transition cleanup');
+        } finally {
+            controller.dispose();
+            window?.set_child(null); window?.destroy();
+            view?.dispose();
+        }
     }
     async function smoke() {
         const services = ['org.freedesktop.NetworkManager', 'org.bluez', 'org.freedesktop.Notifications'];
@@ -3973,8 +4011,8 @@ async function gjsUITests() {
         app.register(null);
         const c = new FakeController();
         let dismissals = 0;
-        // Preserve real GTK drawing while retaining the list-outline callback for
-        // path assertions that do not depend on screenshots or compositor output.
+        // Preserve real GTK drawing while retaining both frame callbacks for
+        // path/color assertions independent of screenshots or compositor output.
         const drawFunctions = new Map();
         const setDrawFunc = Gtk.DrawingArea.prototype.set_draw_func;
         Gtk.DrawingArea.prototype.set_draw_func = function (callback) {
@@ -3983,7 +4021,8 @@ async function gjsUITests() {
         };
         try { panel = new NetworkPanel({ app, controller: c, palette, dismiss: () => { dismissals++; } }); }
         finally { Gtk.DrawingArea.prototype.set_draw_func = setDrawFunc; }
-        c.onChange = () => panel.render();
+        c.onChange = () => { panel.render(); assertTooltipFree(panel, 'Fake-controller rerender'); };
+        assertTooltipFree(panel, 'Initial tree');
         app.controller = c;
         app.panel = panel;
         assert(c.calls.length === 0, 'Constructing widgets does not call the controller or native backend');
@@ -4012,8 +4051,13 @@ async function gjsUITests() {
             host.present();
             print(`LAYOUT checking ${width}x${height}`);
             await wait(150);
+            // Reparenting replaces the window's CSS scope; measure again once those styles are resolved.
+            panel.monitor = { get_geometry: () => ({ width, height }) };
+            panel.position();
+            panel.monitor = original;
+            await wait(150);
             equal([host.get_width(), host.get_height()], [width, height], `Host remains ${width}x${height}`);
-            const cardW = Math.max(0, Math.min(420, width - 16)), cardH = Math.max(0, Math.min(520, height - 54));
+            const cardW = Math.max(0, Math.min(380, width - 16)), cardH = Math.max(0, Math.min(panel.preferredHeight(cardW), height - 54));
             equal([panel.card.width_request, panel.card.height_request], [cardW, cardH], 'Exact bounded card size requests');
             equal([panel.card.margin_top, panel.card.margin_end],
                 [Math.min(46, Math.max(0, height - cardH - 8)), Math.min(72, Math.max(8, width - cardW - 8))], 'Exact original margins');
@@ -4026,32 +4070,64 @@ async function gjsUITests() {
             } else assert(!panel.card.visible, 'Degenerate monitor bounds hide the card');
         }
         await layout(1280, 800);
-        print('PASS initial layout, monitor resolution and opening-only handoff');
+        const outer = panel.card.get_child(), outerDraw = drawFunctions.get(outer);
+        assert(outer instanceof Gtk.DrawingArea && !outer.can_target && typeof outerDraw === 'function',
+            'The outer card retains its non-interactive real Cairo frame');
+        const { strokes: outerStrokes, fills: outerFills } = captureDrawing(outerDraw, outer);
+        assert(outerStrokes.some(stroke => matchesColor(stroke.color, palette.yellow, 1) && stroke.path.length >= 4),
+            'The outer cut-corner frame matches the audio panel’s yellow outline');
+        assert(!outerStrokes.some(stroke => matchesColor(stroke.color, palette.cyan)),
+            'The outer frame does not retain a cyan outline');
+        assert(outerFills.some(fill => matchesColor(fill.color, '#25252f', 0.9)),
+            'The outer card matches the audio panel’s dark background at 90% opacity without fading text or outlines');
+        assert(![...outerStrokes, ...outerFills].some(paint => matchesColor(paint.color, palette.cyan)
+            && paint.color[3] > 0 && paint.color[3] < 1
+            && paint.path.some(([[x1, y1], [x2, y2]]) => Math.max(x1, x2) <= 16
+                && Math.min(x1, x2) > 0 && Math.abs(y2 - y1) >= outer.get_height() / 4)),
+        'The dark frame has no translucent cyan inner rail');
+        print('PASS audio-matched yellow outer frame, 90%-opaque dark background, no inner rail, original layout and opening-only handoff');
         assert(panel.pages.get_height() > 200, 'Network list occupies the remaining card height');
         const tree = [...widgets(panel.root)];
         assert(panel.content.get_first_child() === panel.wifiNotice, 'Content begins with network notices, with no empty header row');
         assert(!tree.some(widget => widget instanceof Gtk.Label && widget.label === 'NETWORK'), 'No NETWORK title is present in the native widget tree');
-        const rowRemovals = new Set([...panel.rows.values()].map(row => row.remove));
-        assert(!tree.some(widget => widget instanceof Gtk.Button && !rowRemovals.has(widget)
+        assert(!panel.pages.get_child_by_name('info'), 'The page stack has no standalone Info child');
+        for (const row of panel.rows.values()) {
+            assert(row.info instanceof Gtk.Button && row.info.get_child() instanceof Gtk.Image
+                && row.info.get_parent() === row.secondary,
+            'The small Info chevron belongs on the second line beside connection status');
+            assert(/(?:down|end|right|up).*symbolic/.test(row.info.get_child().icon_name || ''), 'Info uses a symbolic chevron image');
+            assert(row.details instanceof Gtk.Revealer && row.details.get_parent() === row.widget
+                && row.details.transition_type === Gtk.RevealerTransitionType.SLIDE_DOWN
+                && row.details.transition_duration >= 150 && row.details.transition_duration <= 220 && !row.details.reveal_child,
+            'Each row starts collapsed with a roughly 180 ms slide-down revealer');
+            assert(accessibleProperties.get(row.info)?.get(Gtk.AccessibleProperty.LABEL), 'The icon-only Info chevron has an accessible label');
+            assert(row.forget.get_parent() === row.heading && row.forget.get_prev_sibling() === row.connect
+                && row.forget.get_child().label === '×', 'Forget is a cross immediately to the right of Connect');
+            assert(accessibleProperties.get(row.forget)?.get(Gtk.AccessibleProperty.LABEL)?.startsWith('Forget saved network '),
+                'The cross has an accessible description of the forget action');
+        }
+        assert(typeof panel.toggleInfo === 'function', 'The panel exposes the shared inline Info toggle');
+        const rowRemovals = new Set([...panel.rows.values()].flatMap(row => [row.remove, row.forget]));
+        assert(!tree.some(widget => widget instanceof Gtk.Button && !rowRemovals.has(widget) && widget !== panel.dismissError
             && (/^(?:Wi-Fi (?:on|off)|↻|×|Advanced(?:…|\.{3})?)$/.test(widget.get_child()?.label || widget.label || '')
-                || widget.has_css_class('wifi-toggle') || ['Refresh networks', 'Close network panel'].includes(widget.tooltip_text))),
+                || widget.has_css_class('wifi-toggle') || ['Refresh networks', 'Close network panel'].includes(
+                    accessibleProperties.get(widget)?.get(Gtk.AccessibleProperty.LABEL)))),
         'No global Wi-Fi, manual scan, close or Advanced button is present in the native widget tree');
         assert(panel.nearbyTab instanceof Gtk.Button && panel.savedTab instanceof Gtk.Button
             && panel.networkLists instanceof Gtk.Stack, 'Nearby/Saved use real buttons and a list stack');
-        assert(panel.listFrame instanceof Gtk.Overlay && panel.listFrame.get_child() === panel.listBorder,
-            'The shared list frame uses the sibling-panel drawing-under-content layering');
-        assert(panel.listBorder instanceof Gtk.DrawingArea && !panel.listBorder.can_target,
-            'The full-frame outline is a non-interactive base drawing');
+        assert(panel.listFrame instanceof Gtk.Overlay && panel.listFrame.get_child() instanceof Gtk.Box,
+            'The shared list area has an unpainted base, without an inner outline');
+        assert(!panel.listBorder, 'There is no list-border drawing widget');
         assert(panel.networkLists.get_parent() === panel.listFrame && !panel.listFrame.get_measure_overlay(panel.networkLists),
-            'Both network lists share a non-measuring content overlay above the outline');
+            'Both network lists share a non-measuring content overlay');
         equal([panel.networkLists.margin_top, panel.networkLists.margin_bottom,
-            panel.networkLists.margin_start, panel.networkLists.margin_end], [12, 12, 12, 12],
-        'List content has the sibling-panel 12-pixel inset on every side');
+            panel.networkLists.margin_start, panel.networkLists.margin_end], [6, 6, 6, 6],
+        'List content has a compact six-pixel inset on every side');
         const tabs = panel.nearbyTab.get_parent();
-        assert(tabs instanceof Gtk.Box && panel.savedTab.get_parent() === tabs && tabs.spacing === 0 && tabs.homogeneous,
-            'The two equal-width tabs form one zero-gap strip');
+        assert(tabs instanceof Gtk.Box && panel.savedTab.get_parent() === tabs && tabs.spacing === 4 && tabs.homogeneous,
+            'The two equal-width underlined tabs have a small horizontal gap');
         assert(tabs.get_parent() === panel.listFrame.get_parent() && tabs.get_parent().spacing === 0,
-            'The tab strip joins its bordered list frame without a vertical gap');
+            'The tab strip sits directly above the borderless list');
         async function assertJoinedTabs(selected) {
             await wait(150);
             const page = tabs.get_parent();
@@ -4059,63 +4135,34 @@ async function gjsUITests() {
             const [savedOK, savedBounds] = panel.savedTab.compute_bounds(page);
             const [frameOK, frameBounds] = panel.listFrame.compute_bounds(page);
             assert(nearbyOK && savedOK && frameOK, 'Joined tabs and list frame have real GTK allocations');
-            equal([panel.nearbyTab.height_request, panel.savedTab.height_request], [40, 40], 'Both sibling-panel tabs request 40 pixels');
-            equal([panel.nearbyTab.get_allocated_height(), panel.savedTab.get_allocated_height()], [40, 40],
-                'Both sibling-panel tabs receive exactly 40 pixels of layout height');
-            // Content getters exclude CSS borders; the Audio-style 1.5px active
-            // border can extend full bounds by half a pixel after GTK rounding.
-            assert([nearbyBounds, savedBounds].every(bounds => Math.abs(bounds.get_height() - 40) <= 0.5),
-                'Tab bounds preserve the 40-pixel strip within fractional-border rounding');
-            assert(Math.abs(nearbyBounds.get_x() + nearbyBounds.get_width() - savedBounds.get_x()) < 1,
-                'Adjacent tab edges touch with no horizontal gap');
+            equal([panel.nearbyTab.height_request, panel.savedTab.height_request], [32, 32], 'Both sibling-panel tabs request 32 pixels');
+            equal([panel.nearbyTab.get_allocated_height(), panel.savedTab.get_allocated_height()], [32, 32],
+                'Both sibling-panel tabs receive exactly 32 pixels of layout height');
+
+            assert([nearbyBounds, savedBounds].every(bounds => Math.abs(bounds.get_height() - 32) <= 0.5),
+                'Tab bounds preserve the 32-pixel strip within fractional-border rounding');
+            assert(Math.abs(savedBounds.get_x() - nearbyBounds.get_x() - nearbyBounds.get_width() - 4) < 1,
+                'The underline tabs have a four-pixel gap');
             assert(Math.abs(nearbyBounds.get_y() + nearbyBounds.get_height() - frameBounds.get_y()) < 1
                 && Math.abs(savedBounds.get_y() + savedBounds.get_height() - frameBounds.get_y()) < 1,
-            'Tabs touch the cyan list outline without a vertical gap');
+            'Tabs sit immediately above the borderless list area');
             for (const [name, tab] of [['nearby', panel.nearbyTab], ['saved', panel.savedTab]]) {
-                const expected = new Gdk.RGBA(); expected.parse(palette[name === selected ? 'cyan' : 'pink']);
+                const expected = new Gdk.RGBA(); expected.parse(palette[name === selected ? 'red' : 'cyan']);
                 const actual = tab.get_style_context().get_color();
                 assert(['red', 'green', 'blue', 'alpha'].every(channel => Math.abs(actual[channel] - expected[channel]) < 0.01),
-                    'Selected tab is cyan and inactive tab is pink in the real theme');
+                    'Selected tab text is red and inactive tab text is cyan in the real theme');
             }
-            assert(panel.listBorder.get_width() === panel.listFrame.get_width()
-                && panel.listBorder.get_height() === panel.listFrame.get_height(), 'The cyan outline covers the full list frame');
+
             const [listsOK, listsBounds] = panel.networkLists.compute_bounds(panel.listFrame);
-            assert(listsOK && listsBounds.get_x() === 12 && listsBounds.get_y() === 12
-                && listsBounds.get_width() === panel.listFrame.get_width() - 24
-                && listsBounds.get_height() === panel.listFrame.get_height() - 24,
-            'The real list allocation stays inset within the full-frame outline');
-            const draw = drawFunctions.get(panel.listBorder);
-            assert(typeof draw === 'function', 'The list outline has a real drawing callback');
-            const strokes = [];
-            let point = null, origin = null, path = [], color = [];
-            const lineTo = (x, y) => { if (point) path.push([point, [x, y]]); point = [x, y]; };
-            const stroke = () => { strokes.push({ path: [...path], color: [...color] }); path = []; };
-            const cairo = new Proxy({
-                moveTo(x, y) { point = origin = [x, y]; }, lineTo,
-                closePath() { if (origin) lineTo(...origin); },
-                rectangle(x, y, width, height) {
-                    point = origin = [x, y]; lineTo(x + width, y); lineTo(x + width, y + height);
-                    lineTo(x, y + height); lineTo(x, y);
-                },
-                setSourceRGBA(...rgba) { color = rgba; },
-                setSourceRGB(...rgb) { color = [...rgb, 1]; },
-                stroke, strokePreserve() { const saved = [...path]; stroke(); path = saved; },
-                newPath() { point = origin = null; path = []; }, fill() { path = []; },
-            }, { get: (target, name) => target[name] || (() => {}) });
-            draw(panel.listBorder, cairo, panel.listBorder.get_width(), panel.listBorder.get_height());
-            const cyan = new Gdk.RGBA(); cyan.parse(palette.cyan);
-            const cyanLines = strokes.filter(stroke => stroke.color.length === 4
-                && ['red', 'green', 'blue', 'alpha'].every((channel, index) => Math.abs(stroke.color[index] - cyan[channel]) < 0.01))
-                .flatMap(stroke => stroke.path);
-            const hasTopStroke = x => cyanLines.some(([[x1, y1], [x2, y2]]) => Math.abs(y1 - y2) < 0.01
-                && y1 >= 0 && y1 <= 1 && x >= Math.min(x1, x2) && x <= Math.max(x1, x2));
-            const midpoint = bounds => bounds.get_x() - frameBounds.get_x() + bounds.get_width() / 2;
-            assert(hasTopStroke(midpoint(selected === 'nearby' ? savedBounds : nearbyBounds)),
-                'The cyan frame retains its top outline below the inactive tab');
-            assert(!hasTopStroke(midpoint(selected === 'nearby' ? nearbyBounds : savedBounds)),
-                'The cyan frame leaves its top gap below the selected tab, and moves the gap on selection');
-            assert(cyanLines.some(([[, y1], [, y2]]) => Math.abs(y1 - y2) < 0.01
-                && y1 >= panel.listBorder.get_height() - 1), 'The cyan outline still closes the bottom of the list');
+            assert(listsOK && listsBounds.get_x() === 6 && listsBounds.get_y() === 6
+                && listsBounds.get_width() === panel.listFrame.get_width() - 12
+                && listsBounds.get_height() === panel.listFrame.get_height() - 12,
+            'The real list allocation keeps its inset without an outline');
+            for (const tab of [panel.nearbyTab, panel.savedTab]) {
+                const border = tab.get_style_context().get_border();
+                equal([border.top, border.right, border.bottom, border.left], [0, 0, 2, 0],
+                    'Tabs draw only a two-pixel underline, never a surrounding outline');
+            }
         }
         await assertJoinedTabs('nearby');
         panel.savedTab.emit('clicked');
@@ -4127,18 +4174,19 @@ async function gjsUITests() {
         let wifi = panel.rows.get('wifi');
         assert(wifi.name.label.includes('<b>Literal SSID</b>') && !wifi.name.use_markup, 'SSID is always literal text');
         assert(wifi.profile.visible && !panel.rows.get('wired').profile.visible, 'Profile chooser appears only for multiple profiles');
+        await assertDropdownTooltipFree(panel, wifi.profile, 'Connection profile chooser');
         wifi.profile.selected = 2;
         equal(panel.profileChoices.get('wifi'), 'uuid-b', 'Duplicate profile names select by UUID');
-        equal(wifi.connect.get_child().label, 'Disconnect', 'Connected network displays Disconnect');
+        assertConnectionAction(wifi, c.rows.find(row => row.key === 'wifi'));
         wifi.connect.emit('clicked');
         equal(c.calls.at(-1), ['disconnect', 'wifi'], 'Connected row dispatches disconnect by stable key');
         // Replace the live row without rendering: the callback must not trust the
-        // old delegate data or its still-visible Disconnect label.
+        // old delegate data or its still-visible Disconnect icon.
         c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, connected: false } : row);
         wifi.connect.emit('clicked');
         equal(c.calls.at(-1), ['connect', 'wifi', 'uuid-b'], 'Disconnected live row dispatches connect with the selected UUID');
         c.emit();
-        equal(wifi.connect.get_child().label, 'Connect', 'Disconnected network displays Connect');
+        assertConnectionAction(wifi, c.rows.find(row => row.key === 'wifi'));
         const currentRows = c.rows, callsBeforeRemoval = c.calls.length;
         c.rows = c.rows.filter(row => row.key !== 'wifi');
         wifi.connect.emit('clicked');
@@ -4189,12 +4237,12 @@ async function gjsUITests() {
             const unsaved = panel.rows.get('new-wifi'), joining = panel.rows.get('joining-wifi');
             const connected = panel.rows.get('connected-only'), wired = panel.rows.get('saved-wired');
             const availableModel = unsaved.profile.get_model();
+            for (const data of c.rows) assertRowPresentation(panel, data);
             for (const row of [wifi, unsaved, joining, wired]) {
                 assert(row.widget.get_first_child() === row.heading && row.heading.orientation === Gtk.Orientation.HORIZONTAL
                     && row.name.get_parent() === row.heading && row.connect.get_parent() === row.heading
-                    && row.heading.get_first_child() === row.name,
-                'The name and Connect/Disconnect button share the top horizontal row');
-                assert(![...widgets(row.actions)].includes(row.connect), 'Connect is not repeated in the secondary action row');
+                    && row.heading.get_first_child() === (row.marker || row.name),
+                'The optional decorative marker, name and Connect/Disconnect button share the top horizontal row');
             }
             const [inline, connectBounds] = unsaved.connect.compute_bounds(unsaved.heading);
             assert(inline && Math.abs(connectBounds.get_x() + connectBounds.get_width() - unsaved.heading.get_width()) <= 1,
@@ -4202,23 +4250,23 @@ async function gjsUITests() {
             assert(unsaved.name.wrap && unsaved.name.label === 'Wi-Fi · Never connected', 'Inline network names retain wrapping and the Wi-Fi prefix');
             for (const row of [unsaved, joining]) {
                 assert(!row.forget.visible && !row.forget.sensitive, 'Never-connected Wi-Fi has no visible or enabled Forget button');
-                assert(!row.info.visible && !row.qr.visible && !row.profile.visible && !row.actions.visible,
+                assert(!row.info.visible && !row.profile.visible,
                     'Unsaved Wi-Fi has no connected-only actions, profile chooser or empty secondary row');
             }
             assert(unsaved.connect.sensitive && !joining.connect.sensitive, 'An unsaved changing network stays in the available group with Connect disabled');
             unsaved.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'Unsaved inline Connect dispatches the current key without a saved UUID');
-            assert(!connected.forget.visible && !connected.forget.sensitive && connected.info.visible && connected.qr.visible && connected.actions.visible,
+            assert(!connected.forget.visible && !connected.forget.sensitive && connected.info.visible,
                 'A connected-only Wi-Fi network is remembered for grouping, but has no saved profile to forget');
             assert(wired.name.label === 'Wired · Saved Ethernet' && wired.forget.visible && wired.forget.sensitive
-                && wired.actions.visible && wired.info.visible && !wired.qr.visible, 'Disconnected saved Ethernet retains Forget and Info, but no Wi-Fi QR');
+                && wired.info.visible, 'Disconnected saved Ethernet retains heading Remove and Info, without secondary actions');
             wired.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'saved-wired', ''], 'Saved Ethernet still dispatches native default-profile activation');
             wired.forget.emit('clicked');
             equal(c.calls.at(-1), ['forget', 'saved-wired'], 'Saved Ethernet Forget still dispatches its own key');
             panel.forgetCancel.emit('clicked');
             const liveWired = panel.rows.get('wired');
-            assert(liveWired.forget.visible && liveWired.info.visible && !liveWired.qr.visible, 'Connected saved Ethernet keeps Forget and Info, never Wi-Fi QR');
+            assert(liveWired.forget.visible && liveWired.info.visible, 'Connected saved Ethernet keeps Forget and Info');
             liveWired.connect.emit('clicked');
             equal(c.calls.at(-1), ['disconnect', 'wired'], 'Connected Ethernet still dispatches Disconnect');
 
@@ -4227,14 +4275,14 @@ async function gjsUITests() {
                 'Losing known and connected state moves the existing row across the divider');
             assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
                 'Cross-group moves preserve the widget, unchanged profile model and selected UUID');
-            assert(!wifi.forget.visible && !wifi.forget.sensitive && !wifi.actions.visible, 'A newly unsaved row hides Forget and its empty secondary action row');
+            assert(!wifi.forget.visible && !wifi.forget.sensitive, 'A newly unsaved row hides Forget and its empty secondary action row');
             wifi.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'wifi', 'uuid-b'], 'The moved inline Connect retains UUID-based dispatch');
             c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, known: true } : row); c.emit();
             assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
                 'A newly saved disconnected row returns to the remembered group');
-            assert(wifi.forget.visible && wifi.forget.sensitive && wifi.actions.visible && wifi.info.visible && !wifi.qr.visible,
-                'Saving restores Forget and offline Info without exposing QR');
+            assert(wifi.forget.visible && wifi.forget.sensitive && wifi.info.visible,
+                'Saving restores Forget and offline Info without secondary actions');
             assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
                 'Saving does not recreate the row or lose its selected UUID');
 
@@ -4242,17 +4290,17 @@ async function gjsUITests() {
             assertNetworkOrder(['new-wifi', 'wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'joining-wifi'],
                 'Connecting an unsaved network moves it above the divider without marking it saved');
             assert(panel.rows.get('new-wifi') === unsaved && unsaved.profile.get_model() === availableModel
-                && !unsaved.forget.visible && !unsaved.forget.sensitive && unsaved.info.visible && unsaved.qr.visible && unsaved.actions.visible,
+                && !unsaved.forget.visible && !unsaved.forget.sensitive && unsaved.info.visible,
                 'The connected unsaved row keeps its widgets and gains only connected actions');
             unsaved.connect.emit('clicked');
             equal(c.calls.at(-1), ['disconnect', 'new-wifi'], 'The moved row now dispatches Disconnect');
             c.rows = c.rows.map(row => row.key === 'new-wifi' ? { ...row, connected: false } : row);
             unsaved.connect.emit('clicked');
-            equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'A stale Disconnect label still consults live data after a group change');
+            equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'A stale Disconnect icon still consults live data after a group change');
             c.emit();
             assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
                 'Disconnecting an unsaved network restores available-group order');
-            assert(!unsaved.actions.visible, 'Disconnecting the unsaved row removes the now-empty secondary actions');
+            assert(!unsaved.info.visible, 'Disconnecting the unsaved row hides connected-only Info');
 
             c.rows = c.rows.map(row => ({ ...row, known: true, connected: false })); c.emit();
             assertNetworkOrder(c.rows.map(row => row.key), 'The divider is hidden when only remembered networks remain');
@@ -4267,17 +4315,94 @@ async function gjsUITests() {
         }
 
         {
+            const originalRows = c.rows, before = c.calls.length;
+            const coffee = '_Black Sheep Coffee Free WiFi';
+            const cases = [
+                [network('saved-open-title', { name: coffee, security: 'Open' }), 'Wi-Fi - Open - _Black Sheep Coffee Free WiFi'],
+                [network('saved-wpa2-title', { name: coffee }), 'Wi-Fi - WPA2 - _Black Sheep Coffee Free WiFi'],
+                ...['', null, undefined].map((security, index) => [network(`saved-fallback-${index}`, { name: coffee, security }),
+                    'Wi-Fi - Open - _Black Sheep Coffee Free WiFi']),
+                [network('saved-literal-title', { name: '_<b>Coffee & "Tea"</b> — <span>Wi-Fi</span>', security: '<i>WPA2</i>' }),
+                    'Wi-Fi - <i>WPA2</i> - _<b>Coffee & "Tea"</b> — <span>Wi-Fi</span>'],
+                [network('saved-long-title', { name: `${coffee} ${'<b>Literal & very long SSID</b> '.repeat(24)}` }), null],
+            ].map(([data, title]) => [{ ...data, connected: false, strength: null }, title]);
+            c.rows = [...originalRows, ...cases.map(([data]) => data)]; c.emit();
+            panel.savedTab.emit('clicked');
+            await wait(150);
+            for (const [data, title] of cases) {
+                const row = panel.rows.get(data.key);
+                assertRowPresentation(panel, data);
+                if (title !== null) equal(row.name.label, title, 'Saved titles use the exact security-first hyphen format, without escaping or rearranging the SSID');
+                assert(!row.metadata.visible && !row.profile.visible && !row.details.reveal_child,
+                    'Collapsed Saved rows show no second status, profile or secondary-action line');
+                equal(row.name.get_layout().get_line_count(), 1, 'Saved labels occupy a single real Pango layout line');
+            }
+            const data = cases.at(-1)[0], row = panel.rows.get(data.key);
+            const title = `Wi-Fi - WPA2 - ${data.name}`;
+            assert(row.name.get_layout().is_ellipsized(), 'A long Saved title actually ellipsizes at the normal card width');
+            equal(row.name.label, title, 'The ellipsized Saved label retains the full untruncated literal title');
+            row.profile.selected = 2;
+            const model = row.profile.get_model(), dropdown = row.profile;
+            for (const strength of [64, null, 0, null]) {
+                c.rows = c.rows.map(item => item.key === data.key ? { ...item, strength } : item); c.emit();
+                const live = c.rows.find(item => item.key === data.key);
+                assertRowPresentation(panel, live);
+                assert(panel.rows.get(data.key) === row && row.profile === dropdown && row.profile.get_model() === model
+                    && panel.profileChoices.get(data.key) === 'uuid-b' && row.profile.selected === 2,
+                'Repeated Saved/Nearby migration preserves the widget, dropdown, model and exact chosen UUID');
+                assert(row.widget.get_parent() === (strength === null ? panel.savedRows : panel.networkRows),
+                    'Detection reparents the same widget, including real zero in Nearby');
+                if (strength !== null) {
+                    equal(row.name.label, `Wi-Fi · ${data.name}`, 'Nearby restores the original title without a Saved security prefix');
+                    assertTooltipFree(panel, 'Saved-to-Nearby title migration');
+                }
+            }
+            equal(c.calls.slice(before), [['back']], 'Formatting and scan migration only switch tabs; no metadata, password or network action is requested');
+            row.info.emit('clicked');
+            assert(!row.info.visible && !row.details.reveal_child, 'Long Saved titles have no expandable details');
+            equal(row.name.label, title, 'Saved retains the full long title text without hover');
+            c.rows = c.rows.map(item => item.key === data.key ? { ...item, strength: 64 } : item); c.emit();
+            panel.nearbyTab.emit('clicked'); row.info.emit('clicked');
+            assertInline(panel, c, data.key);
+            assert(panel.summary.label.startsWith(`• SSID / name: ${data.name}\n`) && !panel.summary.use_markup,
+                'Expanded details expose the complete literal SSID without a tooltip');
+            assertTooltipFree(panel, 'Expanded long Saved title');
+            row.info.emit('clicked');
+            panel.nearbyTab.emit('clicked');
+            c.rows = originalRows; c.emit();
+            print('PASS exact Saved titles, Open fallback, literal SSIDs, one-line ellipsis/full expanded text and reversible UUID-preserving migration');
+        }
+
+        {
+            const originalRows = c.rows, before = c.calls.length;
+            const cases = [
+                ...[0, 68, null, undefined, NaN, Infinity, -Infinity, '68', false].map((strength, index) =>
+                    network(`heading-signal-${index}`, { connected: true, strength })),
+                ...['', null, undefined, '<b>WPA2 & WPA3</b>'].map((security, index) =>
+                    network(`heading-security-${index}`, { connected: false, known: false, profiles: [], security, strength: 68 })),
+            ];
+            c.rows = [...originalRows, ...cases]; c.emit();
+            await wait();
+            for (const data of cases) assertRowPresentation(panel, data);
+            equal(c.calls.length, before, 'Heading formatting never requests a network action or secret');
+            c.rows = originalRows; c.emit();
+            print('PASS white heading security/signal, literal Open fallback and finite-only percentages');
+        }
+
+        {
             const originalRows = c.rows, model = wifi.profile.get_model();
             const choice = panel.profileChoices.get('wifi'), callsBefore = c.calls.length;
             const radios = [c.wifiAvailable, c.wifiEnabled, c.wifiHardwareEnabled];
             const signals = [[null, 'Not currently detected'], [64, '64%'], [null, 'Not currently detected'], [0, '0%']];
             for (const [strength, expected] of signals) {
                 c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, connected: false, strength } : row); c.emit();
-                equal(wifi.metadata.label, `Saved · wlan0 · ${expected} · WPA2`, `Saved row metadata displays ${expected}`);
+                assertRowPresentation(panel, c.rows.find(row => row.key === 'wifi'));
+                if (strength !== null)
+                    equal(wifi.status.label, `WPA2 · ${expected}`, `Nearby saved heading displays ${expected}`);
                 assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === choice,
                     'Detection transitions preserve the row widget, profile model and selected UUID');
                 const undetected = strength === null;
-                assert(wifi.info.visible && wifi.actions.visible && !wifi.qr.visible, 'Saved disconnected rows retain Info, never QR');
+                assert(wifi.info.visible === !undetected, 'Only detected saved rows retain heading Info in Nearby, without secondary actions');
                 equal([wifi.connect.visible, wifi.profile.visible, wifi.forget.visible, wifi.remove.visible],
                     undetected ? [false, false, false, true] : [true, true, true, false],
                     'Undetected rows use heading Remove and hide Connect/profile; detected rows use Nearby actions');
@@ -4289,16 +4414,20 @@ async function gjsUITests() {
 
             c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, connected: true, strength: null } : row); c.emit();
             wifi.info.emit('clicked');
-            assert(panel.pages.visible_child_name === 'info', 'Connected Wi-Fi still opens Info with unknown strength');
+            assertInline(panel, c, 'wifi');
             for (const [strength, expected] of signals) {
                 c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, strength } : row);
                 c.selectedRow = c.rows.find(row => row.key === 'wifi'); c.emit();
-                equal(panel.summary.label.split('\n').at(-1), `Signal: ${expected}`, `Info signal displays ${expected}`);
-                equal(wifi.metadata.label, `Connected · wlan0 · ${expected} · WPA2`, 'Connected metadata uses the same signal label as Info');
+                equal(panel.summary.label.split('\n').at(-1), `• Signal: ${expected}`, `Info signal displays ${expected}`);
+                equal(wifi.metadata.label, 'Connected', 'Connected Wi-Fi metadata does not duplicate heading security/signal');
+                equal(wifi.status.label, strength === null ? 'WPA2' : `WPA2 · ${expected}`,
+                    'Connected heading omits unknown signal while Info retains its explanatory text');
+                assertRowPresentation(panel, c.rows.find(row => row.key === 'wifi'));
             }
-            panel.backButton.emit('clicked');
+            wifi.info.emit('clicked');
+            assert(c.page === 'list' && !wifi.details.reveal_child, 'Clicking the same heading closes inline Info');
             c.rows = originalRows; c.emit();
-            print('PASS undetected saved signal labels, detection transitions, genuine zero and Info signal text');
+            print('PASS undetected saved signal labels, detection transitions, genuine zero and inline Info signal text');
         }
 
         {
@@ -4320,10 +4449,10 @@ async function gjsUITests() {
                 assert(entry.remove instanceof Gtk.Button && entry.remove.get_parent() === entry.heading
                     && (entry.remove.get_child()?.label || entry.remove.label) === '×', 'Saved removal is a small heading × button');
                 assert(entry.remove.visible && entry.remove.sensitive && !entry.connect.visible && !entry.profile.visible
-                    && !entry.forget.visible && entry.info.visible && entry.actions.visible && !entry.qr.visible,
-                'Offline saved rows show heading Remove and secondary Info, not Connect, profile choice, Forget or QR');
+                    && !entry.forget.visible && !entry.info.visible,
+                'Offline saved rows show heading Remove only, not Info, Connect, profile choice, Forget or an empty action row');
             }
-            assert(!wifi.remove.visible && wifi.connect.visible && wifi.info.visible && wifi.qr.visible,
+            assert(!wifi.remove.visible && wifi.connect.visible && wifi.info.visible,
                 'A connected Wi-Fi row without signal retains connected actions in Nearby');
             assert(!nearbyZero.remove.visible && nearbyZero.connect.visible && nearbyZero.forget.visible && nearbyZero.info.visible,
                 'A real zero remains a detected saved Nearby row');
@@ -4354,10 +4483,18 @@ async function gjsUITests() {
             equal(c.calls.slice(-2), [['forget', 'offline-a'], ['confirmForget']], 'Confirmation dispatches forgetting exactly once');
             assert(!c.forgetKey && !panel.forget.visible, 'Confirmed removal clears confirmation UI');
 
+            const beforeSavedInfo = c.calls.length;
+            row.info.emit('clicked');
+            panel.toggleInfo('offline-a');
+            equal(c.calls.length, beforeSavedInfo, 'Saved rows cannot expand through a hidden button or programmatic toggle');
+            assert(!row.details.reveal_child && c.page === 'list', 'Saved rows remain collapsed');
+            c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, strength: 64 } : item); c.emit();
+            panel.nearbyTab.emit('clicked');
             const beforeInfo = c.calls.length;
             row.info.emit('clicked');
-            equal(c.calls.slice(beforeInfo), [['info', 'offline-a']], 'Offline Info requests metadata only, never reveal or QR');
-            assert(panel.pages.visible_child_name === 'info' && panel.listTab === 'saved', 'Offline Info retains Saved as the return tab');
+            equal(c.calls.slice(beforeInfo), [['info', 'offline-a']], 'Detected saved Info requests metadata only, never reveal');
+            assertInline(panel, c, 'offline-a');
+            assert(panel.listTab === 'nearby', 'Detected saved Info expands only within Nearby');
             assert(panel.summary.label.includes(offline.name) && panel.summary.label.includes(offline.interface)
                 && !panel.summary.use_markup && panel.savedProfiles.label.includes('uuid-a') && panel.savedProfiles.label.includes('uuid-b'),
             'Offline Info presents literal saved SSID/interface and all profile UUIDs');
@@ -4365,38 +4502,54 @@ async function gjsUITests() {
                 'Offline Info displays the selected profile metadata');
             for (const field of ['ipv4', 'gateway4', 'ipv6', 'gateway6', 'dns', 'mac', 'bssid', 'frequency', 'band', 'channel', 'mode', 'rate'])
                 assert(!panel.detailLabels.get(field).visible, `Offline Info hides live ${field}`);
-            assert(panel.reveal.visible && panel.reveal.sensitive && !panel.secretLoading.visible && !panel.secret.visible && !panel.secret.label,
-                'Offline saved Wi-Fi offers explicit reveal without a credential request or stale secret');
+            assert(panel.passwordLine instanceof Gtk.Box && panel.secret.get_parent() === panel.passwordLine
+                && panel.reveal.get_parent() === panel.passwordLine && panel.passwordLine.visible
+                && panel.reveal.visible && panel.reveal.sensitive && panel.secret.visible && !panel.secretLoading.visible,
+            'Offline saved Wi-Fi displays one masked password line with an explicit eye control');
+            assertMasked(panel, c);
+            assertEye(panel);
             assert(panel.infoProfile instanceof Gtk.DropDown && panel.infoProfile.visible && panel.infoProfile.sensitive,
                 'Multiple disconnected saved Wi-Fi profiles expose the Info profile dropdown');
             equal(c.selectedProfileUuid, 'uuid-a', 'Offline Info begins with the safe snapshot profile UUID');
             equal(panel.infoProfile.selected, 0, 'Info dropdown maps its first actual profile, without an automatic activation choice');
-            for (const strength of [64, null, 0, null]) {
+            await assertDropdownTooltipFree(panel, panel.infoProfile, 'Saved-password profile chooser');
+            for (const strength of [null, 0, null, 64]) {
                 c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, strength } : item);
                 c.selectedRow = c.rows.find(item => item.key === 'offline-a'); c.emit();
-                assert(panel.pages.visible_child_name === 'info' && panel.listTab === 'saved'
-                    && panel.reveal.visible && panel.reveal.sensitive && panel.infoProfile.visible,
-                'Signal-only migration keeps offline reveal, profile selection and its return tab');
+                assert(c.page === 'list' && !row.details.reveal_child && !c.selectedKey && !c.secretRequested,
+                    'Signal migration closes the expanded row instead of hiding open details on another tab');
+                assertMasked(panel, c, 'Migration masks the shared label synchronously, before the slide finishes');
                 assert(panel.rows.get('offline-a') === row && row.profile.get_model() === model
                     && panel.profileChoices.get('offline-a') === 'uuid-b', 'Signal changes during Info retain the row, model and chosen UUID');
                 assertListPartition(strength === null
                     ? ['wifi', 'zero-signal', 'wired', 'changing-saved', 'divider', 'available']
                     : ['offline-a', 'wifi', 'zero-signal', 'wired', 'changing-saved', 'divider', 'available'],
-                strength === null ? ['offline-a', 'offline-b'] : ['offline-b'], 'Info remains open while its row reparents between lists');
+                strength === null ? ['offline-a', 'offline-b'] : ['offline-b'], 'The closed row reparents between the correct lists');
+                panel.selectListTab(strength === null ? 'saved' : 'nearby');
+                row.info.emit('clicked');
+                if (strength === null) {
+                    assert(!row.info.visible && !row.details.reveal_child && c.page === 'list', 'Undetected saved rows cannot reopen Info');
+                } else {
+                    assert(row.info.visible, 'Detected saved rows retain the Nearby Info control');
+                    assertInline(panel, c, 'offline-a');
+                }
             }
-            equal(c.calls.slice(beforeInfo), [['info', 'offline-a']], 'Offline signal changes do not automatically request credentials');
-            panel.backButton.emit('clicked');
-            equal([panel.listTab, panel.networkLists.visible_child_name, panel.pages.visible_child_name], ['saved', 'saved', 'list'],
-                'Back from offline Info returns to Saved');
+            assert(!c.calls.slice(beforeInfo).some(call => ['reveal', 'connect', 'disconnect'].includes(call[0])),
+                'Signal changes and explicit metadata reopens never request credentials or network operations');
+            row.info.emit('clicked');
+            equal(c.calls.at(-1), ['back'], 'Clicking the selected heading delegates only controller.back');
+            equal([panel.listTab, panel.networkLists.visible_child_name, panel.pages.visible_child_name], ['nearby', 'nearby', 'list'],
+                'Collapsing detected saved Info stays on Nearby without navigation');
             assert(panel.rows.get('offline-a') === row && row.profile.get_model() === model
-                && panel.profileChoices.get('offline-a') === 'uuid-b', 'Info/Back preserves row, model and profile UUID');
+                && panel.profileChoices.get('offline-a') === 'uuid-b', 'Expansion/collapse preserves row, model and profile UUID');
+            assertMasked(panel, c);
             row.info.emit('clicked');
             const infoModel = panel.infoProfile.get_model();
             equal(infoModel.get_n_items(), 2, 'Info dropdown contains actual saved profiles only');
             panel.infoProfile.selected = 1;
             equal(c.calls.at(-1), ['selectSavedProfile', 'uuid-b'], 'Duplicate IDs select the actual second profile UUID');
             assert(c.selectedProfileUuid === 'uuid-b' && panel.detailLabels.get('profileUuid').label.includes('uuid-b')
-                && !c.secretRequested && !panel.secret.label, 'Choosing a saved profile updates safe details without revealing');
+                && !c.secretRequested && panel.secret.label === '*******', 'Choosing a saved profile updates safe details without revealing');
             const beforeCosmeticUpdate = c.calls.length;
             c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, profiles: item.profiles.slice().reverse()
                 .map(profile => ({ ...profile, id: '<i>Renamed duplicate</i>' })) } : item);
@@ -4408,39 +4561,52 @@ async function gjsUITests() {
                 && panel.secret.label === '<b>literal secret</b>', 'Offline reveal displays only explicit literal, selectable credentials');
             equal(c.calls.at(-1), ['reveal'], 'Offline reveal is a user action, not a connection attempt');
             panel.reveal.emit('clicked');
-            assert(!c.secretRequested && !panel.secret.visible && !panel.secret.label,
-                'Offline Hide clears and hides the selectable password label');
+            assert(!c.secretRequested && panel.secret.visible, 'Offline Hide keeps the password line visible');
+            assertMasked(panel, c);
+            assertEye(panel);
             equal(c.calls.at(-1), ['hide'], 'Offline Hide delegates only credential clearing');
             const retryUuid = c.selectedProfileUuid, beforeFailedReveal = c.calls.length;
             c.holdReveal = true; panel.reveal.emit('clicked');
-            assert(c.secretLoading && !panel.reveal.sensitive, 'A saved reveal is pending before the simulated failure');
+            assert(c.secretLoading && panel.reveal.sensitive, 'The eye remains usable during pending saved authorization');
+            assertMasked(panel, c);
+            assertEye(panel, true);
             c.failReveal('Saved password authorization denied.');
-            assert(panel.pages.visible_child_name === 'info' && c.selectedProfileUuid === retryUuid
+            assert(panel.pages.visible_child_name === 'list' && row.details.reveal_child && c.selectedProfileUuid === retryUuid
                 && panel.error.visible && panel.error.label === 'Saved password authorization denied.',
             'Failed saved authorization keeps Info and its profile selection while displaying the safe error');
-            assert(!c.secretRequested && !panel.secretLoading.visible && !panel.secret.visible && !panel.secret.label
-                && panel.reveal.visible && panel.reveal.sensitive && panel.reveal.get_child().label === 'Reveal password',
-            'Failure clears loading and secret text and restores the enabled Reveal password button');
+            assert(!c.secretRequested && !panel.secretLoading.visible && panel.secret.visible
+                && panel.reveal.visible && panel.reveal.sensitive,
+            'Failure clears loading and restores an enabled reveal eye over the constant mask');
+            assertMasked(panel, c);
+            assertEye(panel);
             c.emit();
             equal(c.calls.slice(beforeFailedReveal), [['reveal']], 'Failure and rerender never automatically retry or dispatch Hide');
             c.holdReveal = false; panel.reveal.emit('clicked');
             equal(c.calls.slice(beforeFailedReveal), [['reveal'], ['reveal']], 'The next button click retries directly rather than hiding an empty value');
             assert(c.selectedProfileUuid === retryUuid && !panel.error.visible && c.secretRequested
-                && panel.secret.visible && panel.secret.label === '<b>literal secret</b>'
-                && panel.reveal.get_child().label === 'Hide password', 'Successful explicit retry clears the error and displays only the fake credential');
+                && panel.secret.visible && panel.secret.label === '<b>literal secret</b>',
+            'Successful explicit retry clears the error and displays only the fake credential');
+            assertEye(panel, true);
             panel.reveal.emit('clicked');
             c.holdReveal = true;
             panel.reveal.emit('clicked');
-            assert(panel.secretLoading.visible && !panel.reveal.sensitive && !panel.secret.label,
-                'Offline authorization shows loading and disables duplicate reveals without exposing old text');
+            assert(panel.secretLoading.visible && panel.reveal.sensitive, 'Offline authorization shows loading but allows eye cancellation');
+            assertMasked(panel, c);
+            assertEye(panel, true);
             panel.infoProfile.selected = 1;
             assert(c.selectedProfileUuid === 'uuid-a' && !c.secretLoading && !c.secretRequested && !c.secret
-                && !panel.secretLoading.visible && !panel.secret.visible && !panel.secret.label,
-            'A user profile switch clears a pending saved authorization and all displayed secret state');
+                && !panel.secretLoading.visible && panel.secret.label === '*******' && !panel.secret.selectable,
+            'A user profile switch clears a pending saved authorization and immediately masks the shared label');
+            assertEye(panel);
             c.holdReveal = false;
             panel.reveal.emit('clicked'); panel.infoProfile.selected = 0;
-            assert(c.selectedProfileUuid === 'uuid-b' && !c.secretRequested && !panel.secret.visible && !panel.secret.label,
-                'A profile switch also clears an already displayed saved password');
+            assert(c.selectedProfileUuid === 'uuid-b' && !c.secretRequested, 'A profile switch clears an already displayed saved password');
+            assertMasked(panel, c);
+            // Detect the row before testing a changing state: a Saved-to-Nearby
+            // migration now deliberately closes Info, even without credentials.
+            row.info.emit('clicked');
+            c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, strength: 50 } : item); c.emit();
+            panel.nearbyTab.emit('clicked'); row.info.emit('clicked');
             const beforeChanging = c.calls.length;
             c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, changing: true } : item);
             c.selectedRow = c.rows.find(item => item.key === 'offline-a'); c.emit();
@@ -4452,27 +4618,30 @@ async function gjsUITests() {
             assert(!panel.infoProfile.visible && panel.reveal.visible && panel.reveal.sensitive,
                 'A single saved profile needs no dropdown but still supports explicit offline reveal');
             equal(c.calls.length, beforeChanging, 'Changing/single-profile renders never automatically request a password');
-            c.rows = c.rows.map(item => item.key === 'offline-a' ? offline : item);
-            c.selectedRow = c.rows.find(item => item.key === 'offline-a'); c.emit();
-            assert(!c.calls.slice(beforeInfo).some(call => ['connect', 'disconnect', 'qr', 'password'].includes(call[0])),
+            row.info.emit('clicked');
+            c.rows = c.rows.map(item => item.key === 'offline-a' ? offline : item); c.emit();
+            assert(!c.calls.slice(beforeInfo).some(call => ['connect', 'disconnect', 'password'].includes(call[0])),
                 'Info profile selection, reveal and hide never activate or share the disconnected network');
-            panel.backButton.emit('clicked');
-            assert(!panel.infoProfile.visible && !panel.secret.visible && !panel.secret.label,
-                'Leaving Info hides the dropdown and clears the password label');
+            assert(!panel.infoProfile.visible && !row.details.reveal_child, 'Leaving Info hides the dropdown and collapses its row');
+            assertMasked(panel, c);
 
-            row.remove.emit('clicked'); panel.nearbyTab.emit('clicked');
+            panel.savedTab.emit('clicked'); row.remove.emit('clicked'); panel.nearbyTab.emit('clicked');
             assert(!c.forgetKey && !panel.forget.visible && panel.listTab === 'nearby', 'Tab switching cancels a pending removal confirmation');
-            row.info.emit('clicked'); c.secretLoading = true; c.secretRequested = true; c.emit();
+            c.rows = c.rows.map(item => item.key === 'offline-a' ? { ...item, strength: 50 } : item); c.emit();
+            panel.nearbyTab.emit('clicked'); row.info.emit('clicked'); c.secretLoading = true; c.secretRequested = true; c.emit();
             panel.password.set_text('clear-pending-reveal');
             panel.selectListTab('saved');
-            assert(c.page === 'list' && !c.secretLoading && !c.secretRequested && !c.secret && !panel.secret.label
-                && !panel.password.text, 'Programmatic tab switching clears pending reveal, selected details and password');
+            assert(c.page === 'list' && !c.secretLoading && !c.secretRequested && !c.secret
+                && !row.details.reveal_child && !panel.password.text,
+            'Programmatic tab switching clears pending reveal, selected details and password');
+            assertMasked(panel, c);
             equal([c.opened, c.monitor, dismissals], visibility, 'Pending-read cleanup does not close or move the panel');
-            row.info.emit('clicked'); panel.reveal.emit('clicked');
-            assert(panel.secret.visible, 'A saved password is displayed before explicit panel close');
+            panel.nearbyTab.emit('clicked'); row.info.emit('clicked'); panel.reveal.emit('clicked');
+            assert(panel.secret.label === '<b>literal secret</b>', 'A saved password is displayed before explicit panel close');
             panel.close();
-            assert(!c.secret && !c.selectedProfileUuid && !panel.secret.visible && !panel.secret.label && !panel.infoProfile.visible,
+            assert(!c.secret && !c.selectedProfileUuid && !row.details.reveal_child && !panel.infoProfile.visible,
                 'Closing clears offline credentials, profile selection and the Info dropdown');
+            assertMasked(panel, c);
             equal([panel.listTab, panel.networkLists.visible_child_name], ['nearby', 'nearby'], 'Closing resets the selected tab to Nearby');
             panel.toggle();
             equal([panel.listTab, panel.networkLists.visible_child_name], ['nearby', 'nearby'], 'Reopening starts in Nearby');
@@ -4494,15 +4663,62 @@ async function gjsUITests() {
             await layout(1280, 800);
             await layout(360, 240);
             await layout(160, 110);
-            panel.rows.get('offline-layout-0').info.emit('clicked');
-            await layout(360, 240);
-            await layout(160, 110);
-            panel.backButton.emit('clicked');
+            const expanded = panel.rows.get('offline-layout-0');
+            expanded.info.emit('clicked');
+            assert(c.page === 'list' && !expanded.details.reveal_child, 'Saved layout rows cannot expand');
+            for (const [width, height] of [[1280, 800], [360, 240], [160, 110]]) {
+                await layout(width, height);
+                assert(!expanded.info.visible && !expanded.metadata.visible && !expanded.name.wrap
+                    && expanded.name.ellipsize === Pango.EllipsizeMode.END && !expanded.details.reveal_child,
+                'Saved rows remain single-line and non-expandable at narrow bounds');
+                equal(expanded.name.get_layout().get_line_count(), 1, 'The Saved title remains one Pango line');
+                equal(expanded.name.label, `Wi-Fi - WPA2 - ${expanded.data.name}`,
+                    'Narrow bounds preserve the complete literal title text');
+                assertTooltipFree(panel, `${width}x${height} Saved rows`);
+                assertMasked(panel, c);
+            }
+            assert(!expanded.widget.has_css_class('expanded'), 'Saved rows never receive the expanded highlight');
             panel.nearbyTab.emit('clicked');
             c.rows = originalRows; c.emit();
             wifi = panel.rows.get('wifi');
             await layout(1280, 800);
-            print('PASS Saved partition/count, heading Remove confirmation, offline Info/Back, tab cleanup, empty states and bounded layout');
+            print('PASS Saved partition/count, heading Remove confirmation, no Saved expansion, Nearby saved Info, mask/eye, tab cleanup, empty states and bounded layout');
+        }
+
+        {
+            const originalRows = c.rows;
+            const unsaved = Array.from({ length: 8 }, (_, index) => network(`six-unsaved-${index}`, {
+                name: `Nearby network ${index + 1}`, known: false, connected: false, profiles: [],
+            }));
+            c.rows = [network('six-connected', { name: 'Connected network', profiles: [] }), ...unsaved];
+            c.emit();
+            await layout(1280, 800);
+            const viewport = panel.list.get_child();
+            viewport.vadjustment.value = 0;
+            await wait(150);
+            for (const data of unsaved.slice(0, 6)) {
+                const row = panel.rows.get(data.key);
+                assertRowPresentation(panel, data);
+                const [ok, bounds] = row.widget.compute_bounds(viewport);
+                assert(ok && bounds.get_y() >= -1
+                    && bounds.get_y() + bounds.get_height() <= viewport.get_height() + 1,
+                    `${data.key}: all six unsaved rows fit completely below the connected network`);
+            }
+            const [seventhOK, seventh] = panel.rows.get(unsaved[6].key).widget.compute_bounds(viewport);
+            assert(seventhOK && seventh.get_y() >= viewport.get_height() - 1,
+                'The seventh unsaved row scrolls instead of enlarging the six-row viewport');
+            const compactHeight = panel.card.get_height();
+            unsaved[0].name = 'A long nearby network name that needs more than one line '.repeat(2);
+            c.emit();
+            await layout(1280, 800);
+            const [wrappedOK, last] = panel.rows.get(unsaved[5].key).widget.compute_bounds(viewport);
+            assert(wrappedOK && last.get_y() + last.get_height() <= viewport.get_height() + 1
+                && panel.card.get_height() > compactHeight,
+                'Wrapped names grow the measured height without clipping the sixth unsaved row');
+            assert(c.page === 'list' && !c.selectedKey, 'Rendering connected networks does not select a row');
+            c.rows = originalRows; c.emit();
+            await layout(1280, 800);
+            wifi = panel.rows.get('wifi');
         }
 
         c.wifiEnabled = false; c.emit();
@@ -4522,48 +4738,47 @@ async function gjsUITests() {
         c.credentialRow = c.rows.find(row => row.key === 'wifi'); c.credentialKey = 'credential:4'; c.emit();
         panel.password.set_text('clear-on-page-change');
         wifi.info.emit('clicked');
-        assert(panel.pages.visible_child_name === 'info' && !panel.password.text, 'Info page change wipes credentials');
+        assertInline(panel, c, 'wifi');
+        assert(!panel.password.text, 'Expanding Info wipes credential input');
+        assertMasked(panel, c);
+        assertEye(panel);
         c.details = { ipv4: ['192.0.2.5/24'], dns: ['192.0.2.1', '2001:db8::1'], mode: { native: '<b>literal</b>' } }; c.emit();
-        equal(panel.detailLabels.get('ipv4').label, 'IPv4: 192.0.2.5/24', 'Detail fields format native values');
+        equal(panel.detailLabels.get('ipv4').label, '• IPv4: 192.0.2.5/24', 'Detail fields format native values');
         assert(panel.detailLabels.get('dns').label.includes('\n2001:db8::1') && !panel.summary.use_markup, 'Details use plain wrapped text');
         assert(panel.reveal.visible && panel.reveal.sensitive && !panel.infoProfile.visible,
             'Connected Info offers active-profile reveal without an offline profile dropdown');
-        c.secretLoading = true; c.emit();
-        assert(panel.secretLoading.visible && !panel.reveal.sensitive, 'Secret authorization gates repeated retrieval');
-        c.secretLoading = false; c.emit();
+        c.holdReveal = true; panel.reveal.emit('clicked');
+        assert(c.secretLoading && panel.secretLoading.visible && panel.reveal.sensitive,
+            'Authorization keeps the eye usable to cancel without exposing old text');
+        assertMasked(panel, c);
+        assertEye(panel, true);
+        panel.reveal.emit('clicked');
+        assert(!c.secretLoading && !c.secretRequested, 'The loading eye cancels and hides instead of requesting duplicate credentials');
+        equal(c.calls.at(-1), ['hide'], 'Cancelling authorization delegates hideSecret');
+        assertMasked(panel, c);
+        assertEye(panel);
+        c.holdReveal = false;
         panel.reveal.emit('clicked');
         assert(c.secretRequested && panel.secret.visible && panel.secret.label === '<b>literal secret</b>'
             && !panel.secret.use_markup && panel.secret.selectable, 'Reveal is literal, selectable text controlled by explicit secretRequested');
         panel.reveal.emit('clicked');
-        assert(!c.secretRequested && !panel.secret.label, 'Hide removes displayed secret');
-        panel.reveal.emit('clicked'); panel.backButton.emit('clicked');
-        assert(c.page === 'list' && !c.secretRequested && !panel.secret.label, 'Back hides the secret and returns to list');
-        c.info('wired');
+        assert(!c.secretRequested, 'Hide clears controller reveal state');
+        assertMasked(panel, c);
+        panel.reveal.emit('clicked'); wifi.info.emit('clicked');
+        assert(c.page === 'list' && !c.secretRequested && !wifi.details.reveal_child,
+            'Clicking the selected Info heading collapses and clears without Back navigation');
+        assertMasked(panel, c, 'Collapse replaces plaintext immediately, before the slide finishes');
+        panel.rows.get('wired').info.emit('clicked');
+        assertInline(panel, c, 'wired');
         assert(!panel.detailLabels.get('bssid').visible && !panel.reveal.visible && !panel.reveal.sensitive
             && !panel.infoProfile.visible, 'Wired info omits Wi-Fi fields, profile dropdown and secret reveal');
-        panel.backButton.emit('clicked');
+        panel.rows.get('wired').info.emit('clicked');
 
-        print('PASS Wi-Fi notices, forget confirmation and info/reveal/hide pages');
-        wifi.qr.emit('clicked');
-        c.qrLoading = true; c.emit();
-        equal(panel.qrStatus.label, 'Generating QR code…', 'QR loading state');
-        const image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 21, 21);
-        image.fill(0xffffffff);
-        const [ok, png] = image.save_to_bufferv('png', [], []);
-        assert(ok, 'Offline QR fixture encoded');
-        c.qrLoading = false; c.qrImage = `data:image/png;base64,${GLib.base64_encode(png)}`; c.emit();
-        await wait();
-        assert(panel.qrPixbuf && panel.qrStatus.label === 'Scan to join this network', 'QR PNG is decoded and rendered');
-        c.qrImage = 'data:image/png;base64,not-a-png'; c.emit();
-        equal(panel.qrStatus.label, 'Could not display QR code', 'Invalid QR data has a safe UI error');
-        panel.backButton.emit('clicked');
-        assert(!panel.qrPixbuf && !panel.qrKey, 'Leaving QR destroys its displayed image');
-
-        print('PASS QR PNG rendering and page cleanup');
+        print('PASS Wi-Fi notices, forget confirmation and inline Info/reveal/hide');
         c.error = '<b>Literal error</b> ' + 'An unusually long error '.repeat(60); c.emit();
         panel.root.grab_focus();
         await wait();
-        equal([panel.card.get_width(), panel.card.get_height()], [420, 520], 'Root focus, long SSIDs and errors never enlarge the frame');
+        equal([panel.card.get_width(), panel.card.get_height()], [380, 480], 'Root focus, long SSIDs and errors never enlarge the frame');
         assert(!panel.error.use_markup && panel.error.lines === 3, 'Errors are literal and bounded to three lines');
         c.error = ''; c.credentialKey = ''; c.credentialRow = null; c.emit();
         await layout(360, 240);
@@ -4629,15 +4844,19 @@ async function gjsUITests() {
         assert(panel.empty.visible && panel.savedEmpty.visible && panel.rows.size === 0 && panel.profileChoices.size === 0,
             'Removed rows and profile choices are cleaned up across both empty tabs');
         assertListPartition([], [], 'Empty network tabs have no visible rows or divider');
+        await inlineControllerTests(app, palette);
         assert(services.every(name => !owner(name)), 'No real service was started or mutated');
-        print(`PASS network GTK UI: ${checks} assertions; fake controller only, no native network mutations`);
+        print(`PASS network GTK UI: ${checks} assertions; fake credentials/backends only, no native network mutations`);
         print('LIMITATION Xvfb validates GTK layout/events, not compositor layer-shell placement or keyboard grabs.');
     }
 
     let exitCode = 0;
+    Gtk.Button.prototype.update_property = Gtk.DropDown.prototype.update_property = trackAccessible;
     try { await smoke(); }
     catch (error) { console.error(error); exitCode = 1; }
     finally {
+        Gtk.Button.prototype.update_property = updateAccessible;
+        Gtk.DropDown.prototype.update_property = updateDropdownAccessible;
         host?.destroy();
         panel?.dispose();
     }
@@ -4717,8 +4936,9 @@ async function gjsApplicationTests() {
             && !controller.rows.length && !backend.rows.length && !backend.client.get_devices().length,
         `${phase}: real native backend has no service or network devices`);
         assert(controller.secret === '' && !controller.secretRequested && !controller.credentialKey && !controller.credentialRow
-            && controller.qrImage === '' && panel.password.get_text() === '' && panel.secret.label === '' && !panel.qrPixbuf,
-        `${phase}: secrets, credentials and QR image remain empty`);
+            && panel.password.get_text() === '' && panel.secret.label === '*******'
+            && !panel.secret.selectable,
+        `${phase}: credentials remain empty, with the password label masked and non-selectable`);
         assert(backend._scanTimer === 0 && backend._scans.size === 0 && backend._scanMembers.size === 0
             && backend._operations.size === 0 && controller.read === null && controller.mutation === null,
         `${phase}: no scans, scan timer or native mutations are pending`);
@@ -4784,7 +5004,7 @@ async function gjsApplicationTests() {
         assert(backend._idle === 0 && backend._scanTimer === 0 && backend._scans.size === 0
             && backend._scanMembers.size === 0 && backend._operations.size === 0 && backend._watches.size === 0
             && backend._entries.size === 0, 'Disposed backend retains no idle source, scan, operation or signal watch');
-        assert(controller.secret === '' && controller.credentialKey === '' && controller.qrImage === '', 'Disposed controller retains no credential or QR state');
+        assert(controller.secret === '' && controller.credentialKey === '', 'Disposed controller retains no credential state');
         assert(serviceFree(), 'Private bus remains service-free after native backend disposal');
         print(`PASS network application bootstrap: ${checks} assertions; real backend, closed only, no native network mutations`);
     }

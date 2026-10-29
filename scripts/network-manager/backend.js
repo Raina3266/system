@@ -786,106 +786,6 @@ export class NetworkBackend {
     }
 }
 
-const MAX_REPLY = 2 * 1024 * 1024;
-
-function closeStream(stream) {
-    if (!stream || stream.is_closed() || stream.has_pending()) return;
-    stream.close_async(PRIORITY, null, (source, result) => {
-        try { source.close_finish(result); } catch (_) { /* A cancelled pipe may already be closed. */ }
-    });
-}
-
-// Only the encoder runs out of process. Native identity/secrets never leave
-// Astal/libnm except as request-local QR input over a private stdin pipe.
-export function encodeQr(request, cancellable = null) {
-    return new Promise((resolve, reject) => {
-        let input = new TextEncoder().encode(JSON.stringify(request));
-        if (input.length > 16 * 1024) { reject(new Error('The QR request is too large.')); return; }
-        const io = new Gio.Cancellable();
-        let child, stdin, stdout, timer = 0, cancelId = 0, done = false, exited = false, eof = false;
-        let bytes = 0;
-        let chunks = [];
-        const finish = error => {
-            if (done) return;
-            done = true;
-            if (timer) GLib.source_remove(timer);
-            if (cancelId) cancellable.disconnect(cancelId);
-            timer = cancelId = 0;
-            io.cancel();
-            if (error && child && !exited) child.force_exit();
-            input = null;
-            closeStream(stdin);
-            closeStream(stdout);
-            if (error) { chunks = []; reject(error); return; }
-            try {
-                const all = new Uint8Array(bytes);
-                let offset = 0;
-                for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.length; }
-                chunks = [];
-                const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(all));
-                if (typeof value.image !== 'string' || !/^data:image\/png;base64,[a-zA-Z0-9+/]+={0,2}$/.test(value.image))
-                    throw new Error();
-                const encoded = value.image.slice('data:image/png;base64,'.length);
-                const png = GLib.base64_decode(encoded);
-                if (encoded.length % 4 || GLib.base64_encode(png) !== encoded
-                    || ![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => png[index] === byte))
-                    throw new Error();
-                resolve(value.image);
-            } catch (_) { reject(new Error('Could not generate the Wi-Fi QR code.')); }
-        };
-        const complete = () => {
-            if (done || !eof || !exited) return;
-            finish(child.get_successful() ? null : new Error('Could not generate the Wi-Fi QR code.'));
-        };
-        const read = () => stdout.read_bytes_async(8192, PRIORITY, io, (stream, result) => {
-            try {
-                const chunk = stream.read_bytes_finish(result);
-                if (done) return;
-                if (!chunk.get_size()) { eof = true; complete(); return; }
-                bytes += chunk.get_size();
-                if (bytes > MAX_REPLY) throw new Error();
-                chunks.push(chunk.toArray());
-                read();
-            } catch (_) { finish(new Error('Could not read the Wi-Fi QR image.')); }
-            finally { if (done || eof) closeStream(stream); }
-        });
-        const write = () => stdin.write_bytes_async(new GLib.Bytes(input.subarray(0, 4096)), PRIORITY, io, (stream, result) => {
-            try {
-                const count = stream.write_bytes_finish(result);
-                if (done) return;
-                if (count <= 0) throw new Error();
-                input = input.subarray(count);
-                if (input.length) write();
-                else { input = null; closeStream(stream); }
-            } catch (_) { finish(new Error('Could not send the Wi-Fi QR request.')); }
-            finally { if (done) closeStream(stream); }
-        });
-        try {
-            if (cancellable?.is_cancelled()) throw new Error();
-            child = Gio.Subprocess.new([GLib.getenv('NETWORK_CUSTOM_HELPER') || 'network-manager', 'qr'],
-                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
-            stdin = child.get_stdin_pipe();
-            stdout = child.get_stdout_pipe();
-            // Never cancel the wait: even a cancelled encoder must be reaped.
-            child.wait_async(null, (source, result) => {
-                try { source.wait_finish(result); exited = true; complete(); }
-                catch (_) { finish(new Error('The Wi-Fi QR encoder failed.')); }
-            });
-            if (cancellable) cancelId = cancellable.connect(() => {
-                io.cancel();
-                // Disconnecting a Gio.Cancellable from its own callback deadlocks.
-                Promise.resolve().then(() => finish(new Error('The QR request was cancelled.')));
-            });
-            timer = GLib.timeout_add(PRIORITY, 12000, () => {
-                timer = 0;
-                finish(new Error('The Wi-Fi QR encoder timed out.'));
-                return GLib.SOURCE_REMOVE;
-            });
-            read();
-            write();
-        } catch (_) { finish(new Error('Could not start the Wi-Fi QR encoder.')); }
-    });
-}
 
 function spawn(argv) {
     const child = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
@@ -903,7 +803,6 @@ export function dismissOtherPanels() {
 
 export function controllerRuntime() {
     return {
-        encodeQr,
         createCancellable: () => new Gio.Cancellable(),
 
     };

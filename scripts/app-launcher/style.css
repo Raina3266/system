@@ -35,15 +35,18 @@ window.app-launcher {
     box-shadow: none;
     outline: none;
     color: #58ced9;
-    transition: background-color 140ms ease, border-color 140ms ease;
+    transition: border-color 140ms ease;
 }
-.app-launcher button.app-tile:hover,
 .app-launcher button.app-tile.selected,
-.app-launcher button.app-tile:focus-visible {
-    background: alpha(#236674, 0.19);
-    border-color: alpha(#66e7ef, 0.42);
+.app-launcher button.app-tile:hover,
+.app-launcher button.app-tile:focus-visible,
+.app-launcher button.app-tile:active {
+    background: alpha(#ff6b75, 0.1);
+    background-image: none;
+    box-shadow: none;
+    border-color: alpha(#FCEE0A, 0.45);
 }
-.app-launcher button.app-tile:active { background: alpha(#66e7ef, 0.23); }
+.app-launcher button.app-tile.selected { border-color: alpha(#ff6b75, 0.55); }
 .app-launcher .app-name {
     font-size: 9px;
     font-weight: 800;

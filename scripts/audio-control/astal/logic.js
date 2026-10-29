@@ -118,6 +118,16 @@ export function deviceChoices(entries, endpoints, cards = [], resolvedNodes = []
     return choices.sort((left, right) => (order.get(left.key) ?? entries.length) - (order.get(right.key) ?? entries.length));
 }
 
+export function bluetoothDeviceName(device) {
+    const address = device.address?.trim().toLowerCase();
+    for (const value of [device.name, device.alias]) {
+        const name = typeof value === 'string' ? value.trim() : '';
+        if (name && name.toLowerCase() !== address && !/^(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(name))
+            return name;
+    }
+    return device.address;
+}
+
 export function bluetoothDevices(devices) {
     const rank = device => device.connected ? 0 : device.paired ? 1 : 2;
     return [...devices].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));

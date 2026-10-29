@@ -406,7 +406,8 @@ export class DashboardPanel {
 
         this.screenTimeout = new ButtonSwitcher('Sleep timer', SCREEN_TIMEOUT_CHOICES,
             value => backend.setScreenTimeout(Number(value)), palette);
-        this.screenTimeout.widget.tooltip_text = 'Suspend the computer after inactivity. None disables automatic sleep. Locking is unchanged; keyboard/mouse wake depends on hardware.';
+        this.screenTimeout.widget.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+            ['Suspend the computer after inactivity. None disables automatic sleep. Locking is unchanged; keyboard/mouse wake depends on hardware.']);
         const powerControls = box(false, 10, [this.profile.widget, this.screenTimeout.widget]);
         powerControls.homogeneous = true;
         power.append(powerControls);
@@ -467,7 +468,8 @@ export class DashboardPanel {
             : `${Math.round(metrics.cpuTemperatureC)} °C`);
         this.historyCount.label = `HISTORY · ${notifications.history.length}`;
         (this.dnd.get_child() as Gtk.Label).label = notifications.dnd ? '󰂛' : '󰂚';
-        this.dnd.tooltip_text = notifications.dnd ? 'Disable do not disturb' : 'Enable do not disturb';
+        this.dnd.update_property([Gtk.AccessibleProperty.LABEL],
+            [notifications.dnd ? 'Disable do not disturb' : 'Enable do not disturb']);
         this.clear.sensitive = notifications.history.length > 0;
         this.empty.visible = notifications.history.length === 0;
         this.archive.visible = notifications.history.length > 0;

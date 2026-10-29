@@ -43,8 +43,9 @@ function box(vertical = false, spacing = 8) {
 function label(text = '', css = '') {
     return new Gtk.Label({ label: text, xalign: 0, use_markup: false, css_classes: css ? [css] : [] });
 }
-function button(text, tooltip, action) {
-    const widget = new Gtk.Button({ label: text, tooltip_text: tooltip });
+function button(text, description, action) {
+    const widget = new Gtk.Button({ label: text });
+    widget.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION], [text, description]);
     widget.connect('clicked', action);
     return widget;
 }
@@ -90,7 +91,7 @@ export class ClipboardPanel {
         this.card = new Gtk.Overlay({ width_request: PANEL_WIDTH, height_request: 560,
             halign: Gtk.Align.END, valign: Gtk.Align.START, margin_top: 40, css_classes: ['clipboard-card'] });
         this.card.set_child(frame(palette));
-        this.content = box(true, 12);
+        this.content = box(true, 0);
         this.content.add_css_class('clipboard-content');
         this.card.add_overlay(this.content);
         this.revealer = new Gtk.Revealer({ child: this.card, halign: Gtk.Align.END, valign: Gtk.Align.START, margin_end: 16,
@@ -115,19 +116,25 @@ export class ClipboardPanel {
     }
     build() {
         this.search = new Gtk.SearchEntry({ placeholder_text: 'Search clipboard history…', hexpand: true,
-            css_classes: ['clipboard-search'] });
+            margin_bottom: 6, css_classes: ['clipboard-search'] });
+        // SearchEntry has no public icon API for its built-in clear-icon tooltip.
+        const clear = this.search.get_last_child();
+        if (clear) {
+            clear.set_tooltip_text(null);
+            clear.update_property([Gtk.AccessibleProperty.LABEL], ['Clear search']);
+        }
         this.search.connect('search-changed', () => {
             if (!this.rendering) void this.model.filter(this.search.get_text());
         });
         this.content.append(this.search);
-        this.tabs = box(false, 0);
+        this.tabs = box(false, 4);
         this.tabs.homogeneous = true;
         this.tabButtons = TABS.map((tab, index) => {
             const widget = button(['MEMO', 'TEXT', 'FILES'][index], `Show ${tab} entries`,
                 () => void this.model.changeTab(tab));
             widget.add_css_class('tab');
             widget.hexpand = true;
-            widget.height_request = 40;
+            widget.height_request = 32;
             this.tabs.append(widget);
             return widget;
         });
@@ -148,8 +155,9 @@ export class ClipboardPanel {
             row.add_css_class('history-item');
             row.append(new Gtk.Label({ xalign: 0, use_markup: false, ellipsize: Pango.EllipsizeMode.END,
                 max_width_chars: 32, hexpand: true }));
-            row.append(new Gtk.Label({ label: 'PINNED', css_classes: ['pin-badge'],
-                valign: Gtk.Align.CENTER, tooltip_text: 'Pinned — kept at the top of history' }));
+            const badge = new Gtk.Label({ label: 'PINNED', css_classes: ['pin-badge'], valign: Gtk.Align.CENTER });
+            badge.update_property([Gtk.AccessibleProperty.DESCRIPTION], ['Pinned — kept at the top of history']);
+            row.append(badge);
             const actions = box(false, 2);
             const action = (text, css, perform) => {
                 const control = button(text, '', () => {
@@ -176,10 +184,12 @@ export class ClipboardPanel {
             const remove = row.get_last_child().get_last_child();
             row.get_first_child().set_label(item.get_item().get_string());
             badge.visible = pinned;
-            pin.tooltip_text = pinned ? 'Unpin this item' : 'Pin this item to the top';
-            pin.update_property([Gtk.AccessibleProperty.LABEL], [pinned ? 'Unpin item' : 'Pin item']);
-            remove.tooltip_text = localFilePath(entry) ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry';
-            remove.update_property([Gtk.AccessibleProperty.LABEL], ['Delete item']);
+            pin.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+                [pinned ? 'Unpin item' : 'Pin item', pinned ? 'Unpin this item' : 'Pin this item to the top']);
+            const localFile = Boolean(localFilePath(entry));
+            remove.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+                [localFile ? 'Move file to Trash' : 'Delete item',
+                    localFile ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry']);
             if (pinned) { row.add_css_class('pinned'); pin.add_css_class('pinned'); }
             else { row.remove_css_class('pinned'); pin.remove_css_class('pinned'); }
         });
@@ -202,8 +212,8 @@ export class ClipboardPanel {
         preview.vexpand = true;
 
         this.editor = new Gtk.TextView({ monospace: true, wrap_mode: Gtk.WrapMode.WORD_CHAR,
-            accepts_tab: true, hexpand: true, vexpand: true, left_margin: 12, right_margin: 12,
-            top_margin: 12, bottom_margin: 12, pixels_below_lines: 2, pixels_inside_wrap: 2,
+            accepts_tab: true, hexpand: true, vexpand: true, left_margin: 8, right_margin: 8,
+            top_margin: 8, bottom_margin: 8, pixels_below_lines: 2, pixels_inside_wrap: 2,
                         css_classes: ['editor'] });
         this.editor.buffer.connect('changed', () => {
             if (!this.rendering) {
@@ -224,6 +234,7 @@ export class ClipboardPanel {
         page.append(this.body);
 
         this.failure = label('', 'failure');
+        this.failure.margin_top = 12;
         this.failure.wrap = true;
         this.failure.max_width_chars = 40;
         this.content.append(this.failure);

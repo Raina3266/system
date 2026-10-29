@@ -3,7 +3,6 @@ members = [
   "audio-control/rust-custom",
   "clipboard/rust-custom",
   "media-control/rust-custom",
-  "network-manager/rust-custom",
   "ocr-screenshot",
   "panel-launcher",
 

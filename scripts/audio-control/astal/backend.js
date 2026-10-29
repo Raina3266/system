@@ -3,7 +3,7 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import Wp from 'gi://AstalWp';
 import Bluetooth from 'gi://AstalBluetooth';
-import { parseChoices, policyEvent, selectionPlan, deviceChoices, bluetoothDevices, volumeValue, pairingAnswer, waybarStatus } from './logic.js';
+import { parseChoices, policyEvent, selectionPlan, deviceChoices, bluetoothDeviceName, bluetoothDevices, volumeValue, pairingAnswer, waybarStatus } from './logic.js';
 
 const KINDS = ['output', 'input'];
 const PRIORITY = GLib.PRIORITY_DEFAULT;
@@ -417,7 +417,7 @@ export class AudioBackend {
         return { output: this.audioModel('output'), input: this.audioModel('input'), bluetooth: {
             available: Boolean(this.adapter), powered: Boolean(this.adapter?.powered),
             devices: bluetoothDevices([...this.bluetoothRecords].map(([device, record]) => ({
-                key: record.key, address: device.address, name: device.name || device.alias || device.address,
+                key: record.key, address: device.address, name: bluetoothDeviceName(device),
                 connected: device.connected, paired: device.paired, busy: record.busy,
                 battery: Number.isFinite(device.battery_percentage) && device.battery_percentage >= 0
                     ? Math.min(1, device.battery_percentage) : null,

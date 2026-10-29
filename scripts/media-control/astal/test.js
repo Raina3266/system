@@ -16,9 +16,51 @@ function accessibleWidget(properties = {}) {
     }, ...properties };
 }
 
-test('only the main title retains a GTK tooltip, including source-select and section ancestors', () => {
-    assert.deepEqual(viewSource.split('\n').filter(line => /tooltip/i.test(line)).map(line => line.trim()),
-        ["this.title.tooltip_text = player?.title || '';"]);
+test('source rows use dim yellow interactions with a later dim red current override and unchanged tint', () => {
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const matchingRules = (...selectors) => rules.filter(([, group]) => group.split(',').some(value => selectors.includes(value.trim())));
+    const rule = selector => {
+        const [match] = matchingRules(selector);
+        assert.ok(match, `Missing rule for ${selector}`);
+        return match[2];
+    };
+    const row = rule('.media-panel .source-row');
+    assert.match(row, /border: 1px solid transparent;/);
+    assert.match(row, /background: transparent;/);
+    assert.match(row, /background-image: none;/);
+    // Reserve the border inside the existing 42px height and 8px/6px side insets.
+    assert.match(row, /min-height: 40px;/);
+    assert.match(row, /padding: 0 7px 0 5px;/);
+    for (const state of ['.current', ':hover', ':focus-within', ':active']) {
+        const selected = rule(`.media-panel .source-row${state}`);
+        assert.match(selected, /border-color: alpha\(@mp_yellow, 0\.45\);/);
+        assert.match(selected, /background: alpha\(@mp_red, 0\.1\);/);
+        assert.doesNotMatch(selected, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
+    }
+    const current = '.media-panel .source-row.current';
+    const currentRules = matchingRules(current);
+    assert.equal(currentRules.length, 2);
+    assert.equal(currentRules[1][1].trim(), current);
+    assert.equal(currentRules[1][2].trim(), 'border-color: alpha(@mp_red, 0.55);');
+    for (const state of ['', ':hover', ':focus-within', ':active']) {
+        // Both selectors have equal specificity, so the last border color wins.
+        const colors = matchingRules(current, `.media-panel .source-row${state}`)
+            .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
+        assert.deepEqual(colors, ['alpha(@mp_yellow, 0.45)', 'alpha(@mp_red, 0.55)'], `Current must win over ${state || 'idle'}`);
+    }
+    for (const state of ['', ':hover', ':focus-visible', ':active']) {
+        const select = rule(`.media-panel button.source-select${state}`);
+        assert.match(select, /border: none;/);
+        assert.match(select, /background: transparent;/);
+        assert.match(select, /background-image: none;/);
+        assert.match(select, /box-shadow: none;/);
+        assert.match(select, /outline: none;/);
+    }
+});
+
+test('media never creates visual tooltips or query handlers, including metadata labels', () => {
+    assert.doesNotMatch(viewSource, /tooltip|Gtk\.Settings/i);
 });
 
 test('icon buttons retain accessible action labels and clicks without tooltips', () => {
@@ -39,6 +81,96 @@ test('icon buttons retain accessible action labels and clicks without tooltips',
     assert.equal(widget.tooltip_markup, undefined);
     widget.clicked();
     assert.equal(clicks, 1);
+});
+
+test('the entire built media tree stays tooltip-free through source, title and capability rerenders', () => {
+    class Widget {
+        constructor(properties = {}) {
+            this.children = [];
+            this.signals = new Map();
+            this.sensitive = true;
+            Object.assign(this, accessibleWidget(properties));
+            if (this.child) this.child.parent = this;
+        }
+        append(child) { this.children.push(child); child.parent = this; }
+        remove(child) { this.children.splice(this.children.indexOf(child), 1); child.parent = null; }
+        reorder_child_after(child, previous) {
+            this.remove(child);
+            this.children.splice(previous ? this.children.indexOf(previous) + 1 : 0, 0, child);
+            child.parent = this;
+        }
+        connect(name, callback) { this.signals.set(name, callback); }
+        emit(name) { this.signals.get(name)?.(this); }
+        get_child() { return this.child; }
+        set_label(text) { this.label = text; }
+        set_value(value) { this.value = value; }
+        get_value() { return this.value; }
+        set_format_value_func(callback) { this.format = callback; }
+        is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); }
+        add_css_class(name) { this.css_classes = [...new Set([...(this.css_classes || []), name])]; }
+        remove_css_class(name) { this.css_classes = this.css_classes?.filter(value => value !== name); }
+    }
+    const Gtk = { Box: Widget, Label: Widget, Button: Widget, Scale: Widget, Adjustment: Widget,
+        Separator: Widget, Revealer: Widget, ScrolledWindow: Widget, AccessibleProperty: accessibleProperty,
+        Orientation: { HORIZONTAL: 0, VERTICAL: 1 }, Align: { CENTER: 0 }, PositionType: { TOP: 0 },
+        ScrollType: { STEP_BACKWARD: 0, STEP_FORWARD: 1 }, PolicyType: { NEVER: 0, AUTOMATIC: 1 },
+        RevealerTransitionType: { SLIDE_DOWN: 0 } };
+    class Artwork {
+        constructor() { this.widget = new Widget(); }
+        set() {}
+        dispose() {}
+    }
+    class Credit { set() {} }
+    const MediaPanel = new Function('Gtk', 'Pango', 'Artwork', 'Credit', 'formatTime',
+        viewSource.slice(viewSource.indexOf('function box('), viewSource.indexOf('function frame('))
+        + viewSource.slice(viewSource.indexOf('class MediaPanel {'), viewSource.indexOf('\nlet backend, panel;'))
+        + '\nreturn MediaPanel;')(Gtk, { WrapMode: { WORD_CHAR: 0 }, EllipsizeMode: { END: 0 } }, Artwork, Credit, formatTime);
+    const actions = [];
+    let enabled = true;
+    const backend = { current: () => enabled, transport: () => ({ enabled, reason: enabled ? '' : 'Unavailable' }),
+        volume: () => ({ enabled, muteEnabled: enabled, value: 0.4, reason: '', muteReason: '', toggleMute() { actions.push('mute'); return true; } }),
+        player: bus => panel.groups.find(group => group.primary.bus === bus)?.primary,
+        action: (...args) => { actions.push(args); return true; } };
+    const panel = Object.assign(Object.create(MediaPanel.prototype), {
+        backend, content: new Widget(), groups: [], activePlayer: '', rows: new Map(), opened: true, failure: '', drag() {},
+    });
+    const checkTree = widget => {
+        assert.ok(!widget.tooltip_text && !widget.tooltip_markup && !widget.has_tooltip);
+        assert.equal(widget.signals.has('query-tooltip'), false);
+        widget.children.forEach(checkTree);
+        if (widget.child) checkTree(widget.child);
+    };
+    panel.build();
+    checkTree(panel.content);
+    const group = (bus, title) => ({ displayName: `Source ${bus}`, title,
+        primary: { bus, title, canPrevious: true, canNext: true, canSeek: true, length: 90 } });
+    for (const title of ['Long <literal> title & 🎵'.repeat(10), 'Renamed track', '']) {
+        panel.setModel([group('one', title), group('two', 'Other track')], 'one');
+        checkTree(panel.content);
+        assert.equal(panel.title.a11y.label, title || 'Unknown title');
+        assert.equal(panel.rows.get('one').widget.a11y.description, `Source one\n${title}`);
+    }
+    panel.play.emit('clicked');
+    panel.previous.emit('clicked');
+    panel.next.emit('clicked');
+    panel.rows.get('two').play.emit('clicked');
+    panel.volumeButton.emit('clicked');
+    assert.deepEqual(actions, [['toggle', 'one'], ['previous', 'one'], ['next', 'one'], ['toggle', 'two'], 'mute']);
+    for (enabled of [false, true]) {
+        panel.render();
+        checkTree(panel.content);
+        assert.equal(panel.play.sensitive, enabled);
+        assert.equal(panel.play.a11y.label, 'Play / pause');
+        assert.equal(panel.volumeButton.a11y.label, 'Mute / unmute');
+    }
+    panel.setModel([group('two', 'Replacement')], 'two');
+    checkTree(panel.content);
+    assert.equal(panel.rows.has('one'), false);
+    assert.equal(panel.title.a11y.label, 'Replacement');
+    panel.setModel([], '');
+    checkTree(panel.content);
+    assert.equal(panel.title.a11y.label, 'Unknown title');
+    assert.equal(panel.rows.size, 0);
 });
 
 test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
@@ -397,14 +529,14 @@ describe('Media view transport feedback', () => {
         });
         const assertNoControlTooltips = () => {
             for (const widget of [panel.play, panel.previous, panel.next, panel.volume, panel.volumeBar.widget,
-                panel.volumeButton, panel.section, panel.sources, panel.details, row.play, row.widget]) {
+                panel.volumeButton, panel.section, panel.sources, panel.details, panel.title, row.name, row.title, row.play, row.widget]) {
                 assert.equal(widget.tooltip_text, undefined);
                 assert.equal(widget.tooltip_markup, undefined);
             }
         };
         panel.render();
         assertNoControlTooltips();
-        assert.equal(panel.title.tooltip_text, 'Track', 'the main title keeps its tooltip');
+        assert.equal(panel.title.a11y.label, 'Track', 'the full title remains accessible without a tooltip');
         assert.equal(row.widget.a11y.description, 'Spotify\nTrack');
         assert.equal(panel.play.sensitive, false);
         assert.equal(row.play.sensitive, false);
@@ -438,6 +570,14 @@ describe('Media view transport feedback', () => {
         panel.render();
         assertNoControlTooltips();
         assert.deepEqual(volumeValues, [0, 0.74]);
+        group.primary.title = 'Renamed <track> & 🎵';
+        panel.render();
+        assertNoControlTooltips();
+        assert.equal(panel.title.a11y.label, group.primary.title);
+        group.primary.title = '';
+        panel.render();
+        assertNoControlTooltips();
+        assert.equal(panel.title.a11y.label, 'Unknown title');
     });
 
     test('stale and rejected source selection is not silently discarded', () => {

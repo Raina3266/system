@@ -19,6 +19,8 @@ export function sortRows(rows) {
     return rows.slice().sort((left, right) => Number(left.wireless) - Number(right.wireless)
         || rank(left) - rank(right)
         || (left.wireless ? signalBars(right.strength) - signalBars(left.strength) : 0)
+        || (isUndetectedSaved(left) && isUndetectedSaved(right)
+            ? Number(right.securityType === 'psk') - Number(left.securityType === 'psk') : 0)
         || left.name.toLowerCase().localeCompare(right.name.toLowerCase())
         || left.interface.localeCompare(right.interface) || left.key.localeCompare(right.key));
 }
@@ -86,10 +88,10 @@ const acceptsPassword = row => row && ['wep', 'psk', 'sae'].includes(row.securit
 // Request policy lives here; all service state and network mutations stay in the
 // native adapter. Injected runtime hooks also make races testable without NM.
 export class NetworkController {
-    constructor({ backend, onChange = () => {}, encodeQr, createCancellable }) {
+    constructor({ backend, onChange = () => {}, createCancellable }) {
         this.backend = backend;
         this.onChange = onChange;
-        this.encodeQr = encodeQr;
+
         this.createCancellable = createCancellable;
 
         this.rows = [];
@@ -156,7 +158,6 @@ export class NetworkController {
         this.read?.io.cancel();
         this.read = null;
         this.secretLoading = false;
-        this.qrLoading = false;
     }
 
     _reset() {
@@ -177,7 +178,6 @@ export class NetworkController {
         this.details = {};
         this.secretRequested = false;
         this.secret = '';
-        this.qrImage = '';
     }
 
     toggle(monitor = '') {
@@ -197,6 +197,11 @@ export class NetworkController {
     }
 
     back() { this._reset(); this.emit(); }
+
+    dismissError() {
+        this.error = '';
+        this.emit();
+    }
 
     toggleWifi() {
         this._reset();
@@ -307,11 +312,10 @@ export class NetworkController {
         this.changed();
     }
 
-    _select(key, page) {
+    _select(key) {
         const row = this.row(key);
         const savedStamp = savedInfoStamp(row);
-        if (!row || (!row.connected && (page !== 'info' || !savedStamp))
-            || (page === 'qr' && !row.wireless)) return false;
+        if (!row || (!row.connected && !savedStamp)) return false;
         this._reset();
         try {
             const identity = this.backend.getIdentity(key);
@@ -330,13 +334,13 @@ export class NetworkController {
             this.selectedKey = key;
             this.selectionIdentity = identity ? { ...identity } : null;
             this.selectionSavedStamp = savedStamp;
-            this.page = page;
+            this.page = 'info';
         } catch (error) { this.error = error.message; this.emit(); return false; }
         this.emit();
         return true;
     }
 
-    info(key) { this._select(key, 'info'); }
+    info(key) { this._select(key); }
 
     selectSavedProfile(uuid) {
         if (this.disposed || !this.opened || this.page !== 'info' || this.selectionIdentity
@@ -351,16 +355,10 @@ export class NetworkController {
         this._cancelRead();
         this.secretRequested = false;
         this.secret = '';
-        this.qrImage = '';
         this.error = '';
         this.selectedProfileUuid = profile.uuid;
         this.details = { ...this.details, profileId: profile.id ?? '', profileUuid: profile.uuid };
         this.emit();
-    }
-
-    async qr(key) {
-        if (!this._select(key, 'qr')) return;
-        return this._readSensitive('qr');
     }
 
     revealSecret() {
@@ -369,13 +367,13 @@ export class NetworkController {
             || !(row.connected ? this.selectionIdentity
                 : row.known && !row.changing && this.selectionSavedStamp && this.selectedProfileUuid)) return;
         this.secretRequested = true;
-        return this._readSensitive('secret');
+        return this._readSensitive();
     }
 
     hideSecret() {
         this.secretRequested = false;
         this.secret = '';
-        if (this.read?.kind === 'secret') this._cancelRead();
+        this._cancelRead();
         this.emit();
     }
 
@@ -393,15 +391,15 @@ export class NetworkController {
         return !this.disposed && this.opened && this.read === request && request.serial === this.serial
             && !request.io.is_cancelled() && request.radios === `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
             && request.key === this.selectedKey && request.page === this.page
-            && (request.kind !== 'secret' || this.secretRequested)
+            && this.secretRequested
             && request.savedInfoStamp === this.selectionSavedStamp
             && (request.identity || request.profileUuid === this.selectedProfileUuid)
             && this._selectionCurrent(request.key, request.identity, request.savedInfoStamp, request.profileUuid);
     }
 
-    async _readSensitive(kind) {
+    async _readSensitive() {
         const row = this.selectedRow;
-        const saved = kind === 'secret' && this.page === 'info' && this.selectionSavedStamp
+        const saved = this.page === 'info' && this.selectionSavedStamp
             && this.selectedProfileUuid && row?.known && !row.connected && !row.changing;
         if (this.disposed || !this.opened || !row?.wireless
             || (!saved && (!row.connected || !this.selectionIdentity))) return;
@@ -413,39 +411,29 @@ export class NetworkController {
         this._cancelRead();
         this.secret = '';
         this.error = '';
-        const request = { kind, key: this.selectedKey, page: this.page, serial: this.serial,
+        const request = { key: this.selectedKey, page: this.page, serial: this.serial,
             identity: this.selectionIdentity ? { ...this.selectionIdentity } : null,
             savedInfoStamp: this.selectionSavedStamp, profileUuid: this.selectedProfileUuid,
             radios: `${this.wifiEnabled}:${this.wifiHardwareEnabled}`, io: this.createCancellable() };
         this.read = request;
-        this.secretLoading = kind === 'secret';
-        this.qrLoading = kind === 'qr';
+        this.secretLoading = true;
         this.emit();
         try {
             const credentials = request.identity
                 ? await this.backend.readSecret(request.key, request.identity, request.io)
                 : await this.backend.readSavedSecret(request.key, request.profileUuid, request.io);
             if (!this._readCurrent(request)) return;
-            if (kind === 'secret') this.secret = credentials.password || 'No password (open network)';
-            else {
-                const image = await this.encodeQr({ ssid: request.identity.ssid, ...credentials }, request.io);
-                if (!this._readCurrent(request)) return;
-                if (typeof image !== 'string' || !image.startsWith('data:image/png;base64,'))
-                    throw new Error('Could not generate the Wi-Fi QR code.');
-                this.qrImage = image;
-            }
+            this.secret = credentials.password || 'No password (open network)';
         } catch (error) {
             if (this._readCurrent(request)) {
                 this.error = error.message;
-                if (kind === 'secret') this.secretRequested = false;
+                this.secretRequested = false;
                 this.secret = '';
-                this.qrImage = '';
             }
         } finally {
             if (this.read === request) {
                 this.read = null;
                 this.secretLoading = false;
-                this.qrLoading = false;
                 // A roam, profile replacement, or radio change can precede its
                 // queued notification. Do not retain the obsolete selection.
                 if (request.radios !== `${this.wifiEnabled}:${this.wifiHardwareEnabled}`

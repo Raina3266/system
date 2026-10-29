@@ -1,21 +1,28 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { existsSync, readFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { setImmediate as settle } from 'node:timers/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import vm from 'node:vm';
-import * as logic from '../logic.js';
-import {
+// One cross-runtime entry point; imports and fixtures stay scoped to their mode.
+// Node (default): node --test scripts/audio-control/astal/test.js
+// Node isolated GTK: node scripts/audio-control/astal/test.js --tooltips /absolute/path/to/panel-gjs
+// GJS: panel-gjs -m scripts/audio-control/astal/test.js native|dropdown|tooltips
+// native reads live state; dropdown/tooltips require their original isolated environments.
+
+async function nodeTests() {
+const { default: test } = await import('node:test');
+const { default: assert } = await import('node:assert/strict');
+const { existsSync, readFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } = await import('node:fs');
+const { spawnSync } = await import('node:child_process');
+const { setImmediate: settle } = await import('node:timers/promises');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
+const { default: vm } = await import('node:vm');
+const logic = await import('./logic.js');
+const {
     parseRequest, volumeValue, parseChoices, policyEvent, selectionPlan, deviceChoices,
-    bluetoothDevices, pairingAnswer, waybarStatus,
-} from '../logic.js';
+    bluetoothDeviceName, bluetoothDevices, pairingAnswer, waybarStatus,
+} = await import('./logic.js');
 
 
 // Tests consolidated from architecture.test.js.
 {
-const root = new URL('../../../../', import.meta.url);
+const root = new URL('../../../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 
 
@@ -29,7 +36,7 @@ test('audio application uses the public native request virtual and socket writer
     assert.doesNotMatch(source, /\.prototype\.|Object\.defineProperty|gi:\/\/Gio.*SocketService/);
 });
 
-test('inline audio device choices have a quiet transparent trigger and row-only highlights', () => {
+test('audio lists highlight user interaction without a persistent connected Bluetooth highlight', () => {
     const css = read('scripts/audio-control/astal/style.css');
     assert.doesNotMatch(css, /dropdown\.device-dropdown|popover|button\.device-dropdown:(?:hover|focus-visible)/);
     const trigger = css.match(/\.audio-panel button\.device-dropdown \{([^}]+)\}/)?.[1];
@@ -42,8 +49,44 @@ test('inline audio device choices have a quiet transparent trigger and row-only 
     assert.ok(options, 'inline options have a dedicated container style');
     assert.match(options, /background: transparent;/);
     assert.match(options, /border: 0\.35px solid color-mix\(in srgb, var\(--ap_foreground\) 50%, transparent\);/);
-    assert.match(css, /\.audio-panel listview\.device-list row:selected \{\s*background: color-mix\(in srgb, var\(--ap_dimPink\) 70%, transparent\);\s*\}/);
-    assert.match(css, /\.audio-panel listview\.device-list row:hover \{\s*background: color-mix\(in srgb, var\(--ap_pink\) 33\.3%, transparent\);\s*\}/);
+    const rows = css.slice(css.indexOf('.audio-panel listview.device-list row {'), css.indexOf('.audio-panel button.icon-button {'));
+    assert.match(rows, /padding: 5px 7px;\s*border: 1px solid transparent;/);
+    for (const state of ['selected', 'hover', 'focus-visible', 'active'])
+        assert.ok(rows.includes(`row:${state}`));
+    assert.match(rows, /border-color: color-mix\(in srgb, var\(--ap_yellow\) 45%, transparent\);/);
+    assert.match(rows, /row:selected \{\s*border-color: color-mix\(in srgb, var\(--ap_red\) 55%, transparent\);/);
+    assert.ok(rows.indexOf('row:selected {') > rows.indexOf('row:hover,'), 'selected outline wins over hover');
+    assert.match(rows, /background: color-mix\(in srgb, var\(--ap_red\) 10%, transparent\);/);
+    const bluetooth = css.slice(css.indexOf('.audio-panel .bluetooth-device {'), css.indexOf('.audio-panel .pairing-card {'));
+    assert.match(bluetooth, /border: 1px solid transparent;/);
+    assert.match(bluetooth, /border-color: color-mix\(in srgb, var\(--ap_yellow\) 45%, transparent\);/);
+    assert.doesNotMatch(bluetooth, /\.bluetooth-device\.connected/);
+    assert.match(bluetooth, /\.bluetooth-device:hover,\s*\.audio-panel \.bluetooth-device:focus-within/);
+    assert.match(bluetooth, /background: color-mix\(in srgb, var\(--ap_red\) 10%, transparent\);/);
+});
+
+test('audio content uses compact outer padding and page insets', () => {
+    const source = read('scripts/audio-control/astal/frontend.js');
+    const css = read('scripts/audio-control/astal/style.css');
+    assert.match(css, /\.audio-content \{ padding: 6px; \}/);
+    assert.match(source, /margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6/);
+});
+
+test('audio tabs use the network panel’s flat cyan/red underline styling', () => {
+    const source = read('scripts/audio-control/astal/frontend.js');
+    const css = read('scripts/audio-control/astal/style.css');
+    const tabs = css.slice(css.indexOf('.audio-panel button.tab {'), css.indexOf('.audio-panel .volume-bar {'));
+    assert.match(tabs, /border: none;\s*border-bottom: 2px solid var\(--ap_cyan\);/);
+    assert.match(tabs, /border-radius: 0;/);
+    assert.match(tabs, /min-height: 30px;/);
+    assert.match(tabs, /font-size: 14px; letter-spacing: 0\.5px;/);
+    assert.match(tabs, /button\.tab\.selected:focus-visible \{\s*border-color: var\(--ap_red\);\s*background: transparent;\s*color: var\(--ap_red\);/);
+    assert.match(tabs, /button\.tab\.selected:active \{ background: transparent; \}/);
+    assert.doesNotMatch(tabs, /background: (?!transparent;)/);
+    assert.doesNotMatch(tabs, /--ap_pink|border-width:/);
+    assert.match(source, /const tabs = box\(false, 4\);/);
+        assert.match(source, /tab\.height_request = 32;/);
+    assert.doesNotMatch(source, /pageBorder|pageFrame/);
 });
 
 test('audio theme generates scoped CSS variables for every stylesheet color', () => {
@@ -103,7 +146,7 @@ test('retired panel implementations and Rust status sources remain absent', () =
 {
 // Exercise the real coordinator and logic, replacing only GI imports and the
 // subprocess/pipe implementation. Each fixture gets an isolated module context.
-const source = readFileSync(new URL('../backend.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace(/export class HelperProcess[\s\S]*?(?=export class PolicyProcess)/, '')
     .replace(/^export /gm, '');
@@ -2181,7 +2224,7 @@ test('Bluetooth snapshots filter the active adapter, order devices, fall back na
         device({ address: '01', name: 'Zulu', connected: true, battery_percentage: 0.45 }),
         device({ address: '02', name: 'Alpha', connected: true, battery_percentage: 0 }),
         device({ address: '03', name: 'Paired', paired: true, battery_percentage: 1.2 }),
-        device({ address: '04', name: '', alias: 'Alias', battery_percentage: NaN }),
+        device({ address: '04', name: '04', alias: 'Alias', battery_percentage: NaN }),
         device({ address: '05', name: '', battery_percentage: -0.1 }),
         device({ address: '06', name: 'Infinity', battery_percentage: Infinity }),
         device({ address: '07', name: 'String', battery_percentage: '0.5' }),
@@ -3398,6 +3441,17 @@ test('deviceChoices ignores ambiguous card-wide route getters and uses only each
     assert.ok(deviceChoices(rows.map(row => ({ ...row, portActive: false })), nodes).every(row => !row.default));
 });
 
+test('Bluetooth display names prefer real names or aliases rather than address fallbacks', () => {
+    for (const [device, expected] of [
+        [{ name: '  Headset  ', alias: 'Alias', address: 'AA:BB:CC:DD:EE:FF' }, 'Headset'],
+        [{ name: 'AA:BB:CC:DD:EE:FF', alias: 'Keyboard', address: 'AA:BB:CC:DD:EE:FF' }, 'Keyboard'],
+        [{ name: '11-22-33-44-55-66', alias: 'Mouse', address: 'AA:BB:CC:DD:EE:FF' }, 'Mouse'],
+        [{ name: ' ', alias: '  Speaker  ', address: 'AA:BB:CC:DD:EE:FF' }, 'Speaker'],
+        [{ name: '05', alias: 'Alias', address: '05' }, 'Alias'],
+        [{ name: 'AA:BB:CC:DD:EE:FF', alias: 'aa-bb-cc-dd-ee-ff', address: 'AA:BB:CC:DD:EE:FF' }, 'AA:BB:CC:DD:EE:FF'],
+    ]) assert.equal(bluetoothDeviceName(Object.freeze(device)), expected);
+});
+
 test('bluetoothDevices orders connected, then paired, then discovered devices by name without mutation', () => {
     const devices = Object.freeze([
         { address: '1', name: 'Alpha', connected: false, paired: false },
@@ -3565,7 +3619,7 @@ test('waybarStatus serializes quoted, control-character, Unicode, and markup-lik
 
 // Exercise the real renderer with widget doubles, without loading GTK/GI.
 {
-const frontend = readFileSync(new URL('../frontend.js', import.meta.url), 'utf8');
+const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
 const accessibleDouble = () => ({
     accessibleProperties: new Map(),
     accessibleStates: new Map(),
@@ -3686,6 +3740,7 @@ const mockGtk = {
     EventControllerScrollFlags: { BOTH_AXES: 3 }, StackTransitionType: { NONE: 0 },
     Box: function(properties) {
         return Object.assign(boxDouble(), { sensitive: true,
+            measure() { return [0, 48, -1, -1]; },
             is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); },
         }, properties);
     },
@@ -3735,7 +3790,7 @@ const mockGtk = {
     SignalListItemFactory: function() { return { connect(name, callback) { this[name] = callback; } }; },
     INVALID_LIST_POSITION, StringList: stringListDouble, SingleSelection: SingleSelectionDouble,
     Entry: function(properties) { return { ...properties, text: '', set_text(text) { this.text = text; }, connect() {} }; },
-    Separator: function(properties) { return { ...properties }; },
+    Separator: function(properties) { return { ...properties, measure() { return [0, 1, -1, -1]; } }; },
     ScrolledWindow: function(properties) {
         const widget = { ...properties };
         widget.child.parent = widget;
@@ -3764,6 +3819,11 @@ function assertNoTooltip(widget) {
 function assertNoInheritedTooltip(widget) {
     for (let current = widget; current; current = current.parent) assertNoTooltip(current);
 }
+function assertTooltipFreeTree(widget) {
+    assertNoTooltip(widget);
+    for (const child of widget.children || []) assertTooltipFreeTree(child);
+    if (widget.child) assertTooltipFreeTree(widget.child);
+}
 function viewHarness(kind = 'output') {
     const state = {}, selections = [];
     const panel = Object.assign(Object.create(AudioPanel.prototype), {
@@ -3790,8 +3850,8 @@ function bluetoothViewHarness() {
     const panel = {
         deviceRows: new Map(), cardWidth: 400, failures: {}, backend: {}, action() {}, pairing: false,
     };
-    AudioPanel.prototype.buildBluetooth.call(panel);
-    return { panel, render(devices, model = {}) {
+    const content = AudioPanel.prototype.buildBluetooth.call(panel);
+    return { panel, content, render(devices, model = {}) {
         AudioPanel.prototype.renderBluetooth.call(panel, { available: true, powered: true, devices, ...model });
     }, order() {
         const keys = new Map([...panel.deviceRows].map(([key, row]) => [row.widget, key]));
@@ -3800,13 +3860,11 @@ function bluetoothViewHarness() {
     } };
 }
 
-test('audio creates tooltips only for preserved non-button metadata, never volume ancestors', () => {
-    assert.deepEqual(Array.from(frontend.matchAll(/^\s*([\w.]+)\.tooltip_text\s*=/gm), match => match[1]),
-        ['view.heading', 'row.name']);
-    assert.doesNotMatch(frontend, /tooltip_text\s*:|tooltip_markup|has_tooltip|set_tooltip|Gtk\.Settings/);
+test('audio never creates visual tooltips or query handlers, including metadata labels', () => {
+    assert.doesNotMatch(frontend, /tooltip|Gtk\.Settings/i);
 });
 
-test('constructed panel buttons and volume controls stay tooltip-free across enabled and disabled rerenders', () => {
+test('the whole constructed panel stays tooltip-free across enabled and disabled rerenders', () => {
     const state = { bluetooth: { available: true, powered: true } };
     for (const kind of ['output', 'input']) state[kind] = {
         available: true, nodeKey: `current:${kind}`, name: `${kind} device`, volume: 0.25,
@@ -3817,7 +3875,7 @@ test('constructed panel buttons and volume controls stay tooltip-free across ena
         audio: {}, content: boxDouble(), opened: true, currentTab: 1, cardWidth: 400, deviceRows: new Map(), failures: {},
         backend: { snapshot: () => state }, press() {},
     });
-    panel.build({ cyan: '#00ffff' });
+    panel.build();
     const checkButtons = widget => {
         let count = 0;
         if (widget.css_classes?.some(name => ['control-button', 'volume-step', 'device-dropdown'].includes(name))) {
@@ -3829,11 +3887,13 @@ test('constructed panel buttons and volume controls stay tooltip-free across ena
         if (widget.child) count += checkButtons(widget.child);
         return count;
     };
+    assertTooltipFreeTree(panel.content);
     assert.equal(checkButtons(panel.content), 13, 'tabs, mute, steppers, device toggles and pairing buttons are actually constructed');
     for (const patch of [{}, { muted: true }, { available: false },
         { available: true, nodeKey: '' }, { nodeKey: 'replacement', muted: false }, { busy: true }]) {
         for (const kind of ['output', 'input']) state[kind] = { ...state[kind], ...patch };
         panel.render();
+        assertTooltipFreeTree(panel.content);
         assert.equal(checkButtons(panel.content), 13);
         for (const kind of ['output', 'input']) {
             const view = panel.audio[kind], model = state[kind];
@@ -3846,7 +3906,8 @@ test('constructed panel buttons and volume controls stay tooltip-free across ena
             for (const control of [view.volume, view.mute])
                 assert.equal(control.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
                     enabled ? '' : 'No default audio device is available.');
-            assert.equal(view.heading.tooltip_text, `${kind === 'output' ? 'Output' : 'Input'} · ${model.available ? model.name : 'No device'}`);
+            assert.equal(view.heading.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL),
+                `${kind === 'output' ? 'Output' : 'Input'} · ${model.available ? model.name : 'No device'}`);
             assertNoInheritedTooltip(view.devices);
             assert.equal(view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), 'Default route',
                 'dropdown metadata is preserved for assistive technology, not a tooltip');
@@ -3869,6 +3930,7 @@ test('Bluetooth buttons retain accessible labels without tooltips through pairin
     ]) {
         const current = { ...device, ...properties };
         h.render([current], model);
+        assertTooltipFreeTree(h.content);
         const row = h.panel.deviceRows.get(device.key);
         for (const control of [row.action, row.forget, h.panel.dismissPairing, h.panel.send, h.panel.cancel]) {
             assertNoInheritedTooltip(control);
@@ -3879,11 +3941,93 @@ test('Bluetooth buttons retain accessible labels without tooltips through pairin
         assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), 'Dismiss pairing message');
         assert.equal(h.panel.dismissPairing.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION),
             model.pairing ? 'Answer or cancel pairing before dismissing this message' : '');
-        assert.equal(row.name.tooltip_text, current.name || current.address, 'non-button device-name metadata is preserved');
+        assert.equal(row.name.accessibleProperties.get(mockGtk.AccessibleProperty.LABEL), current.name || current.address,
+            'full device names remain accessible without hover tooltips');
     }
 });
 
-test('Bluetooth renderer groups remembered devices before available devices with a divider and paired-only forget', () => {
+test('Bluetooth connected rows keep their semantic status and action without selected state', () => {
+    const h = bluetoothViewHarness();
+    const device = { key: 'headset', name: 'Headset', paired: true, connected: true, battery: 0.6 };
+    h.render([device]);
+    const row = h.panel.deviceRows.get(device.key);
+    assert.equal(row.widget.connected, true, 'the semantic connected class is retained');
+    assert.equal(row.status.label, 'Connected · 60%');
+    assert.equal(row.action.get_child().label, 'Disconnect');
+    assert.notEqual(row.widget.selected, true, 'a connected device is not a selected list row');
+    h.render([{ ...device, connected: false }]);
+    assert.equal(h.panel.deviceRows.get(device.key), row);
+    assert.equal(row.widget.connected, false);
+    assert.equal(row.status.label, 'Paired · 60%');
+    assert.equal(row.action.get_child().label, 'Connect');
+});
+
+test('Bluetooth renderer puts named unpaired devices first without mistaking address fallbacks for names', () => {
+    const h = bluetoothViewHarness();
+    const devices = Object.freeze([
+        { key: 'unnamed', name: '', address: '01' },
+        { key: 'paired', name: 'Paired speaker', paired: true },
+        { key: 'named-z', name: 'New speaker' },
+        { key: 'connected', name: 'Connected headset', connected: true },
+        { key: 'address', name: 'AA:BB:CC:DD:EE:FF', address: 'AA:BB:CC:DD:EE:FF' },
+        { key: 'named-a', name: 'New keyboard' },
+        { key: 'address-alias', name: 'aa-bb-cc-dd-ee-ff', address: 'AA:BB:CC:DD:EE:FF' },
+        { key: 'blank', name: '   ', address: '02' },
+    ].map(Object.freeze));
+    h.render(devices);
+    assert.deepEqual(h.order(), ['named-z', 'named-a', 'divider', 'paired', 'connected',
+        'unnamed', 'address', 'address-alias', 'blank']);
+    assert.equal(h.panel.deviceRows.get('named-z').forget.visible, false);
+    assert.equal(h.panel.deviceRows.get('named-z').action.get_child().text, 'Pair');
+    assert.deepEqual(devices.map(device => device.key), ['unnamed', 'paired', 'named-z',
+        'connected', 'address', 'named-a', 'address-alias', 'blank']);
+    h.render(devices.filter(device => device.key.startsWith('named-')));
+    assert.deepEqual(h.order(), ['named-z', 'named-a']);
+    assert.equal(h.panel.bluetoothSeparator.visible, false);
+});
+
+test('Bluetooth viewport fits five unpaired rows and any remembered rows preceding them', () => {
+    const h = bluetoothViewHarness();
+    const available = Array.from({ length: 8 }, (_, index) => ({ key: `available-${index}` }));
+    h.render(available);
+    assert.equal(h.panel.bluetoothList.max_content_height, 5 * 48 + 4 * 6);
+    h.render([{ key: 'remembered-a', paired: true }, { key: 'remembered-b', connected: true }, ...available]);
+    assert.equal(h.panel.bluetoothList.max_content_height, 7 * 48 + 6 * 6 + 1 + 6);
+    assert.equal(h.panel.bluetoothList.propagate_natural_height, true);
+    assert.equal(h.panel.bluetoothPage.propagate_natural_height, true);
+});
+
+test('all named Bluetooth devices precede unnamed remembered devices and unrelated MAC aliases', () => {
+    const h = bluetoothViewHarness();
+    h.render([
+        { key: 'unnamed-paired', paired: true, name: 'AA-BB-CC-DD-EE-FF', address: 'AA:BB:CC:DD:EE:FF' },
+        { key: 'named-paired', paired: true, name: 'Speaker' },
+        { key: 'other-address', name: '11-22-33-44-55-66', address: 'AA:BB:CC:DD:EE:00' },
+        { key: 'named-unpaired', name: 'Keyboard' },
+    ]);
+    assert.deepEqual(h.order(), ['named-unpaired', 'divider', 'named-paired', 'unnamed-paired', 'other-address']);
+});
+
+test('Bluetooth name discovery promotes existing rows and pairing returns them to remembered devices', () => {
+    const h = bluetoothViewHarness();
+    const devices = [{ key: 'remembered', name: 'Speaker', paired: true },
+        { key: 'discovered', name: 'AA-BB-CC-DD-EE-FF', address: 'AA:BB:CC:DD:EE:FF' }];
+    h.render(devices);
+    const row = h.panel.deviceRows.get('discovered');
+    assert.deepEqual(h.order(), ['remembered', 'divider', 'discovered']);
+    devices[1].name = 'New headphones';
+    h.render(devices);
+    assert.deepEqual(h.order(), ['discovered', 'divider', 'remembered']);
+    assert.equal(h.panel.deviceRows.get('discovered'), row);
+    devices[1].paired = true;
+    h.render(devices);
+    assert.deepEqual(h.order(), ['remembered', 'discovered']);
+    assert.equal(row.forget.visible, true);
+    assert.equal(row.action.get_child().text, 'Connect');
+    assert.equal(h.panel.bluetoothSeparator.visible, false);
+});
+
+test('Bluetooth renderer keeps remembered devices above unnamed available devices with paired-only forget', () => {
     const h = bluetoothViewHarness();
     const devices = Object.freeze([
         { key: 'available-z' }, { key: 'paired-z', paired: true },
@@ -4205,6 +4349,7 @@ for (const kind of ['output', 'input']) {
         assert.equal(view.deviceArrow.label, '⌄');
         assert.equal(view.deviceSelection.autoselect, false);
         assert.equal(view.deviceSelection.can_unselect, true);
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'the default label does not select a row');
         assert.equal(view.deviceList.model, view.deviceSelection);
         assert.equal(view.deviceList.single_click_activate, true);
         assert.ok(view.deviceList.css_classes.includes('device-list'));
@@ -4377,7 +4522,7 @@ for (const kind of ['output', 'input']) {
             assert.equal(h.view.deviceArrow.label, '⌄');
             assert.equal(h.view.devices.accessibleStates.get(mockGtk.AccessibleState.EXPANDED), false);
             assert.equal(h.view.devices.focusCalls, before + 1);
-            assert.equal(h.view.deviceSelection.selected, 0, 'native default remains authoritative until backend confirmation');
+            assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION, 'activation clears the closed list selection');
             assert.equal(h.view.deviceLabel.label, choices[0].label);
         }
         assert.deepEqual(h.selections, [[kind, choices[1].key]]);
@@ -4410,41 +4555,73 @@ for (const kind of ['output', 'input']) {
         h.render({ choices });
         assert.deepEqual(h.labels(), choices.map(choice => choice.label));
         assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), choices.map(choice => choice.key));
-        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION);
         assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[0].description);
         h.select(0);
         assert.deepEqual(h.selections, [], 'selecting the native default is not a mutation');
         h.select(1);
         assert.deepEqual(h.selections, [[kind, choices[1].key]]);
         assert.equal(h.state[kind].choices, choices, 'GTK selection must not rewrite native state');
-        assert.equal(h.view.deviceSelection.selected, 0, 'the renderer still follows the native default');
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION, 'activation never highlights the native default');
+        assert.equal(h.view.deviceLabel.label, choices[0].label, 'the trigger still follows the native default');
     });
 
-    test(`${kind} dropdown follows native default changes and reordered keys without native writes`, () => {
+    test(`${kind} dropdown label follows native default changes and reordered keys without selecting a row or writing`, () => {
         const h = viewHarness(kind), notifications = [], activations = [];
         h.view.deviceSelection.connect('notify::selected', () => notifications.push(h.view.deviceSelection.selected));
         h.view.deviceList.connect('activate', (_, position) => activations.push(position));
         const entries = [choices[1], choices[0]];
         h.render({ choices: entries });
-        assert.equal(h.view.deviceSelection.selected, 1, 'model replacement must not select the first non-default item');
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION, 'model replacement selects neither the first item nor the native default');
         const model = h.view.deviceSelection.model;
         const switched = entries.map(choice => ({ ...choice, default: !choice.default }));
         h.render({ choices: switched });
         assert.equal(h.view.deviceSelection.model, model, 'changing only the native default keeps the string model');
-        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION);
         assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].description);
         h.render({ choices: [switched[1], switched[0]] });
         assert.notEqual(h.view.deviceSelection.model, model, 'key order matters even when both labels are identical');
         assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), [choices[0].key, choices[1].key]);
-        assert.equal(h.view.deviceSelection.selected, 1);
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION);
         assert.ok(h.view.deviceSelection.modelWrites.length >= 2);
         assert.ok(h.view.deviceSelection.selectionWrites.length >= 2);
-        assert.ok(notifications.length >= 4, 'model replacement and selected assignments emit notifications');
+        assert.ok(notifications.length >= 4, 'model replacement and unselection emit notifications');
+        assert.ok(notifications.every(position => position === INVALID_LIST_POSITION), 'render never selects a row');
         assert.deepEqual(activations, [], 'native model/selection notifications never activate a row');
         assert.equal(Object.hasOwn(h.view, 'updatingChoices'), false);
         assert.deepEqual(h.selections, []);
         h.select(0);
         assert.deepEqual(h.selections, [[kind, choices[0].key]], 'the reordered index resolves to its stored key');
+    });
+
+    test(`${kind} open list preserves user navigation through rerenders but clears selection on replacement or collapse`, () => {
+        const h = viewHarness(kind), { view, panel } = h;
+        h.render({ choices });
+        view.devices.click();
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'opening does not select the native default');
+        view.deviceSelection.selected = 1;
+        h.render({ choices, volume: 0.6, muted: true });
+        assert.equal(view.deviceSelection.selected, 1, 'unrelated refreshes preserve user keyboard selection');
+        assert.equal(view.deviceLabel.label, choices[0].label);
+        assert.equal(view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[0].description,
+            'user navigation does not change the native-default description');
+        const switched = choices.map(choice => ({ ...choice, default: !choice.default }));
+        view.deviceSelection.selected = 0;
+        h.render({ choices: switched });
+        assert.equal(view.deviceSelection.selected, 0, 'external defaults do not move the user selection');
+        assert.equal(view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].description);
+        h.render({ choices: [switched[1], switched[0]] });
+        assert.equal(view.deviceChoices.reveal_child, true);
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'replacement rows do not inherit an unrelated index');
+        view.deviceSelection.selected = 1;
+        view.devices.click();
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'closing clears the user selection');
+        view.devices.click();
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'reopening does not restore an old highlight');
+        view.deviceSelection.selected = 1;
+        panel.resetInteractions();
+        assert.equal(view.deviceSelection.selected, INVALID_LIST_POSITION, 'interaction reset clears the user selection');
+        assert.deepEqual(h.selections, [], 'selection navigation alone never writes native state');
     });
 
     test(`${kind} dropdown does not rebuild its string model for volume, mute or busy updates`, () => {
@@ -4491,7 +4668,7 @@ for (const kind of ['output', 'input']) {
         h.render({ choices: [...choices, third] });
         h.render({ choices: [{ ...choices[1], default: true }, third] });
         assert.deepEqual(Array.from(h.view.choiceItems, item => item.key), [choices[1].key, third.key]);
-        assert.equal(h.view.deviceSelection.selected, 0);
+        assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION);
         assert.equal(h.view.devices.accessibleProperties.get(mockGtk.AccessibleProperty.DESCRIPTION), choices[1].description);
         assert.deepEqual(h.selections, []);
         h.select(1);
@@ -4518,7 +4695,7 @@ for (const kind of ['output', 'input']) {
             h.render({ choices: entries, ...model });
             assert.deepEqual(h.labels(), [placeholder, ...entries.map(choice => choice.label)]);
             assert.equal(h.view.choiceItems[0].key, '');
-            assert.equal(h.view.deviceSelection.selected, 0);
+            assert.equal(h.view.deviceSelection.selected, INVALID_LIST_POSITION, 'even the placeholder is not preselected');
             assert.equal(h.view.deviceLabel.label, placeholder);
             assert.equal(h.view.devices.visible, true);
             assert.equal(h.view.devices.sensitive, true);
@@ -4831,4 +5008,1316 @@ test('built audio launcher', {
         }
     });
 });
+}
+}
+
+async function gjsNativeTests() {
+// Run with the audio package's AGS wrapper; no UI, discovery, or device writes.
+const { default: GLib } = await import('gi://GLib');
+const { default: GObject } = await import('gi://GObject');
+const { default: System } = await import('system');
+const { AudioBackend, HelperProcess } = await import('./backend.js');
+
+function assert(condition, message) { if (!condition) throw new Error(message); }
+const node = GLib.find_program_in_path('node');
+if (!node) throw new Error('Node.js is required for the pipe smoke test.');
+const run = (code, options = {}) => new Promise((resolve, reject) => {
+    new HelperProcess([node, '-e', code], { ...options,
+        onExit: (error, output) => error ? reject(error) : resolve(output) });
+});
+
+async function smoke() {
+    assert(await run('console.log("metadata")') === 'metadata\n', 'helper stdout');
+    assert(await run('process.stderr.write("diagnostic")') === 'diagnostic', 'helper stderr');
+    const chunks = [];
+    const unicode = await run('const fs = require("node:fs"), data = Buffer.from("🎧"); '
+        + 'fs.writeSync(1, data.subarray(0, 2)); setTimeout(() => fs.writeSync(1, data.subarray(2)), 50);',
+        { onChunk: chunk => chunks.push(chunk) });
+    assert(unicode === '🎧' && chunks.join('') === unicode, 'UTF-8 split across reads');
+    await new Promise((resolve, reject) => {
+        let worker;
+        worker = new HelperProcess([node, '-e', 'require("node:readline").createInterface({ input: process.stdin })'
+            + '.once("line", line => { require("node:fs").writeSync(1, line.trim() + "\\n"); process.exit(0); }); console.log("PIN:");'], {
+            interactive: true,
+            onChunk: text => { if (text.includes('PIN:')) worker.send('042311\n'); },
+            onExit: (error, output) => {
+                if (error) reject(error);
+                else { try { assert(output.includes('042311'), 'interactive answer'); resolve(); } catch (failure) { reject(failure); } }
+            },
+        });
+    });
+    for (const [code, options, expected] of [
+        ['require("node:fs").writeSync(1, "bad request\\n"); process.exit(2);', {}, 'bad request'],
+        ['setTimeout(() => {}, 30000);', { timeout: 50 }, 'timed out'],
+        ['require("node:fs").writeFileSync(1, "x".repeat(1100000));', {}, 'too large'],
+    ]) {
+        let error;
+        try { await run(code, options); } catch (failure) { error = failure; }
+        assert(error?.message.includes(expected), `expected helper failure: ${expected}`);
+    }
+    const backend = new AudioBackend();
+    try {
+        backend.start();
+        await new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1800, () => { resolve(); return GLib.SOURCE_REMOVE; }));
+        const model = backend.snapshot();
+        assert(typeof JSON.parse(backend.status()).tooltip === 'string', 'Waybar response');
+        assert(!model.output.loading && !model.input.loading, 'metadata helpers completed');
+        assert(!model.output.error && !model.input.error, `metadata: ${model.output.error || model.input.error}`);
+        const adapter = backend.adapter;
+        if (adapter) {
+            const path = new GObject.Value();
+            path.init(GObject.TYPE_STRING);
+            adapter.get_property('object-path', path);
+            const expected = backend.bluetooth.devices.filter(device => device.adapter === path.get_string());
+            assert(expected.length === model.bluetooth.devices.length, 'native adapter device filtering');
+        }
+        for (const kind of ['output', 'input']) {
+            if (!model[kind].available) continue;
+            assert(model[kind].nodeKey && model[kind].choices.length, `${kind} native state`);
+            assert(model[kind].choices.some(choice => choice.default), `${kind} live default selection`);
+        }
+        print('Native audio smoke passed: bounded pipes, UTF-8, interactive input, timeout/error handling, Astal state, and read-only status.');
+    } finally { backend.dispose(); }
+}
+
+const loop = new GLib.MainLoop(null, false);
+let failed = false;
+smoke().catch(error => { failed = true; logError(error); }).finally(() => loop.quit());
+loop.run();
+System.exit(failed ? 1 : 0);
+}
+
+async function gjsDropdownTests() {
+// Offline inline-selector/volume GTK4 integration smoke. Run with the audio launcher's AGS --gtk4
+// wrapper, AUDIO_PANEL_CONFIG/PALETTE, and AUDIO_DROPDOWN_ISOLATED=1 in private
+// Xvfb + service-free D-Bus (SYSTEM and SESSION addresses must be identical).
+// Optional AUDIO_DROPDOWN_TEST_PYTHON / AUDIO_DROPDOWN_TEST_X11 select Python
+// and libX11 for real XTEST mouse/keyboard input. No AudioBackend is imported.
+const { default: GLib } = await import('gi://GLib');
+const { default: Gio } = await import('gi://Gio');
+const { default: Gtk } = await import('gi://Gtk?version=4.0');
+const { default: Gdk } = await import('gi://Gdk?version=4.0');
+const { default: GdkX11 } = await import('gi://GdkX11?version=4.0');
+const { default: Pango } = await import('gi://Pango');
+const { default: Astal } = await import('gi://Astal?version=4.0');
+const { default: System } = await import('system');
+const { loadPanelStyle } = await import('../../live-style.js');
+
+if (GLib.getenv('AUDIO_DROPDOWN_ISOLATED') !== '1'
+    || GLib.getenv('GDK_BACKEND') !== 'x11'
+    || !GLib.getenv('DBUS_SESSION_BUS_ADDRESS')
+    || GLib.getenv('DBUS_SYSTEM_BUS_ADDRESS') !== GLib.getenv('DBUS_SESSION_BUS_ADDRESS'))
+    throw new Error('Use private Xvfb and service-free D-Bus, not the desktop session.');
+
+let checks = 0;
+function assert(condition, message) {
+    checks++;
+    if (!condition) throw new Error(message);
+}
+function equal(actual, expected, message) {
+    assert(JSON.stringify(actual) === JSON.stringify(expected),
+        `${message}: ${JSON.stringify(actual)} != ${JSON.stringify(expected)}`);
+}
+// Fractional CSS borders produce float bounds beside integer GTK allocations.
+// Accept subpixel rounding only, never a full pixel of layout drift.
+function geometryEqual(actual, expected, message) {
+    assert(Math.abs(actual - expected) < 1, `${message}: ${actual} != ${expected} (tolerance <1px)`);
+}
+function boundsEqual(actual, expected, message) {
+    for (const key of ['x', 'y', 'width', 'height', 'bottom'])
+        geometryEqual(actual[key], expected[key], `${message}: ${key}`);
+}
+function wait(milliseconds = 100) {
+    return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, milliseconds,
+        () => { resolve(); return GLib.SOURCE_REMOVE; }));
+}
+function read(path) {
+    if (!path) throw new Error('AUDIO_PANEL_CONFIG and AUDIO_PANEL_PALETTE are required.');
+    const [ok, bytes] = GLib.file_get_contents(path);
+    if (!ok) throw new Error(`Cannot read ${path}`);
+    return new TextDecoder().decode(bytes);
+}
+function walk(widget) {
+    const result = [widget];
+    for (let child = widget.get_first_child(); child; child = child.get_next_sibling())
+        result.push(...walk(child));
+    return result;
+}
+function noTooltip(widget, message) {
+    assert(!widget.has_tooltip && !widget.tooltip_text && !widget.tooltip_markup, message);
+}
+function noInheritedTooltip(widget, message) {
+    for (let current = widget; current; current = current.get_parent()) noTooltip(current, message);
+}
+function bounds(widget, relative = panel.card) {
+    const [ok, rect] = widget.compute_bounds(relative);
+    assert(ok && rect.get_width() > 0 && rect.get_height() > 0, 'Widget has real GTK bounds');
+    return { x: rect.get_x(), y: rect.get_y(), width: rect.get_width(), height: rect.get_height(),
+        bottom: rect.get_y() + rect.get_height() };
+}
+function expanded(view, value, message) {
+    equal([view.devices.active, view.deviceChoices.reveal_child, view.deviceArrow.label],
+        [value, value, value ? '⌃' : '⌄'], message);
+}
+function focused(widget, message) {
+    const focus = host.get_focus();
+    assert(focus === widget || (focus && focus.is_ancestor(widget)), message);
+}
+function listLabels(view) {
+    return walk(view.deviceList).filter(widget => widget instanceof Gtk.Label
+        && widget.get_mapped() && view.choiceItems.some(item => item.label === widget.label));
+}
+async function scrollIntoView(widget, viewport) {
+    const rect = bounds(widget, viewport), adjustment = viewport.get_vadjustment();
+    if (rect.y < 0) adjustment.value += rect.y;
+    else if (rect.bottom > viewport.get_height()) adjustment.value += rect.bottom - viewport.get_height();
+    await wait();
+}
+function noDevicePopups() {
+    assert(!walk(panel.root).some(widget => widget instanceof Gtk.DropDown || widget instanceof Gtk.Popover),
+        'Audio device selectors contain no native dropdown or popup');
+}
+function owner(name) {
+    return Gio.DBus.session.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus',
+        'org.freedesktop.DBus', 'NameHasOwner', new GLib.Variant('(s)', [name]),
+        new GLib.VariantType('(b)'), Gio.DBusCallFlags.NONE, 1000, null).deep_unpack()[0];
+}
+
+// Only evaluate the production helpers and AudioPanel, as the Node renderer
+// tests do. The application/bootstrap below monitorFor must never execute.
+const entry = GLib.getenv('AUDIO_PANEL_CONFIG');
+const source = read(entry);
+const boundary = source.indexOf('\nfunction monitorFor(');
+assert(boundary > source.indexOf('export class AudioPanel'), 'Production extraction boundary exists');
+const extracted = source.slice(0, boundary)
+    .replace(/^import .*;[ \t]*$/gm, '')
+    .replace('export class AudioPanel', 'class AudioPanel');
+assert(!/^\s*(?:import|export)\b/m.test(extracted), 'All imports/exports stripped before evaluation');
+const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib', 'loadPanelStyle',
+    `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib, loadPanelStyle);
+
+// XTEST uses the existing libX11 request allocator, so no xdotool, python-xlib,
+// libXtst, shell, or extra on-disk input harness is needed. All input is sent
+// exclusively to the authenticated private DISPLAY checked above.
+const inputCode = `
+import ctypes as C, ctypes.util, os, struct, sys
+assert os.environ['AUDIO_DROPDOWN_ISOLATED'] == '1'
+x = C.CDLL(os.environ.get('AUDIO_DROPDOWN_TEST_X11') or ctypes.util.find_library('X11'))
+def api(name, result, *args):
+    f = getattr(x, name); f.restype = result; f.argtypes = args; return f
+P, I, U, L = C.c_void_p, C.c_int, C.c_uint, C.c_ulong
+open_display = api('XOpenDisplay', P, C.c_char_p)
+d = open_display(None)
+assert d, 'Cannot open private Xvfb'
+try:
+    root = api('XDefaultRootWindow', L, P)(d)
+    opcode, event, error = I(), I(), I()
+    assert api('XQueryExtension', I, P, C.c_char_p, C.POINTER(I), C.POINTER(I), C.POINTER(I))(
+        d, b'XTEST', C.byref(opcode), C.byref(event), C.byref(error)), 'XTEST unavailable'
+    request = api('_XGetRequest', P, P, C.c_ubyte, C.c_size_t)
+    def send(kind, detail=0, px=0, py=0):
+        data = struct.pack('=BBHBBHII8xhh8x', opcode.value, 2, 9, kind, detail, 0, 0, root, px, py)
+        C.memmove(request(d, opcode.value, len(data)), data, len(data))
+    mode, xid = sys.argv[1], int(sys.argv[2])
+    if mode == 'key':
+        api('XSetInputFocus', I, P, L, I, L)(d, xid, 2, 0)
+        symbol = api('XStringToKeysym', L, C.c_char_p)(sys.argv[3].encode())
+        code = api('XKeysymToKeycode', C.c_ubyte, P, L)(d, symbol)
+        assert code, 'Missing X11 keycode'
+        send(2, code); send(3, code)
+    elif mode == 'pixels':
+        import hashlib
+        left, top, width, height = map(int, sys.argv[3:7])
+        image = api('XGetImage', P, P, L, I, I, U, U, L, I)(d, xid, left, top, width, height, L(-1).value, 2)
+        assert image, 'Cannot read private widget pixels'
+        try:
+            pixel = api('XGetPixel', L, P, I, I)
+            data = b''.join(pixel(image, col, row).to_bytes(8, 'little') for row in range(height) for col in range(width))
+            print(hashlib.sha256(data).hexdigest())
+        finally:
+            api('XDestroyImage', I, P)(image)
+    else:
+        px, py, child = I(), I(), L()
+        assert api('XTranslateCoordinates', I, P, L, L, I, I, C.POINTER(I), C.POINTER(I), C.POINTER(L))(
+            d, xid, root, int(sys.argv[3]), int(sys.argv[4]), C.byref(px), C.byref(py), C.byref(child))
+        send(6, px=px.value, py=py.value)
+        if mode == 'click': send(4, 1); send(5, 1)
+        elif mode == 'press': send(4, 1)
+        elif mode == 'release': send(5, 1)
+        elif mode == 'scroll': send(4, 4); send(5, 4)
+    api('XSync', I, P, I)(d, 0)
+finally:
+    api('XCloseDisplay', I, P)(d)
+`;
+function input(mode, widget, key = '') {
+    const native = widget.get_native();
+    const surface = native.get_surface();
+    assert(surface instanceof GdkX11.X11Surface, 'Input targets a private real X11 surface');
+    const args = [mode, String(surface.get_xid())];
+    if (mode === 'key') args.push(key);
+    else {
+        const [ok, rect] = widget.compute_bounds(native);
+        assert(ok && rect.get_width() > 0 && rect.get_height() > 0, 'Input widget is allocated');
+        const [sx, sy] = native.get_surface_transform();
+        if (mode === 'pixels') args.push(String(Math.round(rect.get_x() + sx)),
+            String(Math.round(rect.get_y() + sy)), String(Math.floor(rect.get_width())), String(Math.floor(rect.get_height())));
+        else args.push(String(Math.round(rect.get_x() + rect.get_width() / 2 + sx)),
+            String(Math.round(rect.get_y() + rect.get_height() / 2 + sy)));
+    }
+    const process = Gio.Subprocess.new([GLib.getenv('AUDIO_DROPDOWN_TEST_PYTHON')
+        || GLib.find_program_in_path('python3'), '-c', inputCode, ...args],
+    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+    const [, stdout, stderr] = process.communicate_utf8(null, null);
+    assert(process.get_successful(), `Private XTEST input: ${stdout}${stderr}`);
+    return stdout.trim();
+}
+
+function choices(kind) {
+    const duplicate = `<b>${kind} USB & 🎧</b> ` + 'very long literal device name '.repeat(24);
+    return [
+        { key: `native:${kind}:a`, label: duplicate, description: `<i>${kind} route A & literal</i>`, default: false },
+        { key: `policy:${kind}:b`, label: duplicate, description: `<i>${kind} route B & literal</i>`, default: true },
+        { key: `native:${kind}:c`, label: `${kind} Dock`, description: '', default: false },
+    ];
+}
+class FakeBackend {
+    constructor() {
+        this.calls = [];
+        this.activity = [];
+        this.starts = 0;
+        this.state = { bluetooth: { available: false, powered: false, devices: [] } };
+        for (const kind of ['output', 'input']) this.state[kind] = {
+            available: true, nodeKey: `current:${kind}`, name: `<b>${kind} native default</b>`,
+            volume: 0.25, muted: false, busy: false, choices: choices(kind),
+        };
+    }
+    start() { this.starts++; throw new Error('A fake-only UI smoke must never start a backend'); }
+    snapshot() { return this.state; }
+    select(...args) {
+        this.calls.push(['select', ...args]);
+        if (this.selectionError) throw new Error(this.selectionError);
+    }
+    setVolume(kind, value, key) {
+        this.calls.push(['volume', kind, value, key]);
+        this.state[kind] = { ...this.state[kind], volume: value };
+    }
+    toggleMute(kind, key) {
+        this.calls.push(['mute', kind, key]);
+        this.state[kind] = { ...this.state[kind], muted: !this.state[kind].muted };
+    }
+    setActive(...args) { this.activity.push(args); }
+}
+
+let panel, host, app;
+const backend = new FakeBackend();
+function allocation(message) {
+    equal(panel.card.get_width(), 400, `${message}: constrained width`);
+    const [, naturalHeight] = panel.content.measure(Gtk.Orientation.VERTICAL, 400);
+    equal(panel.card.get_height(), naturalHeight, `${message}: content-sized height`);
+    assert(panel.card.get_height() <= 520, `${message}: height stays within the monitor budget`);
+    equal([host.get_width(), host.get_height()], [1280, 800], 'Long names do not enlarge the host');
+}
+async function testCompactLayout() {
+    const before = backend.calls.length, original = backend.state.output;
+    const monitor = panel.monitor;
+    for (const view of Object.values(panel.audio)) expanded(view, false, 'Compact selectors start collapsed');
+    const rect = widget => {
+        const [ok, value] = widget.compute_bounds(panel.card);
+        assert(ok, 'Compact layout has native widget bounds');
+        return value;
+    };
+    const compactHeight = panel.card.get_height();
+    assert(compactHeight < 520, 'Audio card shrinks below the old fixed height');
+    const sections = walk(panel.audioPage).filter(widget => widget.has_css_class('audio-section'));
+    equal(sections.length, 2, 'One audio viewport contains both natural-height sections');
+    for (const [index, kind] of ['output', 'input'].entries()) {
+        const section = rect(sections[index]), trigger = rect(panel.audio[kind].devices);
+        geometryEqual(section.get_y() + section.get_height(), trigger.get_y() + trigger.get_height(),
+            `${kind}: no expanding gap below the collapsed selector`);
+    }
+    const last = rect(panel.audio.input.devices);
+    const padding = panel.content.get_style_context().get_padding();
+    geometryEqual(panel.card.get_height() - last.get_y() - last.get_height(), padding.bottom + panel.pages.margin_bottom,
+        'Only normal panel padding remains below the collapsed input selector');
+    backend.state.output = { ...original, choices: original.choices.filter(item => item.default) };
+    panel.render();
+    await wait();
+    assert(panel.card.get_height() < compactHeight, 'Hiding an unnecessary selector also shrinks the card');
+    backend.state.output = { ...original, error: 'A wrapped device error with useful details. '.repeat(60) };
+    panel.render();
+    await wait();
+    assert(panel.card.get_height() <= 520, 'Wrapped errors cannot enlarge the card beyond the budget');
+    let adjustment = panel.audioPage.get_vadjustment();
+    assert(adjustment.upper > adjustment.page_size, 'Long errors scroll within the single audio viewport');
+    backend.state.output = original;
+    panel.render();
+    await wait();
+    equal(panel.card.get_height(), compactHeight, 'Clearing errors restores the compact height');
+    panel.setTab(0);
+    await wait();
+    assert(panel.card.get_height() < 520, 'Bluetooth shrinks to its visible rows instead of reserving the old fixed height');
+    panel.setTab(1);
+    await wait();
+    equal(panel.card.get_height(), compactHeight, 'Returning to Audio restores content-sized height');
+    panel.monitor = { get_geometry: () => ({ width: 340, height: 300 }) };
+    panel.render();
+    await wait();
+    equal(panel.card.get_width(), 324, 'Short/narrow monitor preserves horizontal clearance');
+    assert(panel.card.get_height() <= 236, 'Short monitor preserves the existing vertical clearance');
+    adjustment = panel.audioPage.get_vadjustment();
+    assert(adjustment.upper > adjustment.page_size, 'Short monitor scrolls the compact audio page');
+    adjustment.value = adjustment.upper - adjustment.page_size;
+    await wait();
+    const [ok, inputBounds] = panel.audio.input.devices.compute_bounds(panel.audioPage);
+    assert(ok && inputBounds.get_y() >= 0
+        && inputBounds.get_y() + inputBounds.get_height() <= panel.audioPage.get_height(),
+    'Input selector remains reachable at the bottom of a short monitor');
+    panel.monitor = monitor;
+    panel.render();
+    await wait();
+    equal(panel.card.get_height(), compactHeight, 'Restoring monitor geometry restores compact height');
+    equal(backend.calls.length, before, 'Layout checks never mutate audio devices');
+    print(`LAYOUT compact audio card=400x${compactHeight}; collapsed selector gaps removed; short-monitor scrolling verified`);
+}
+async function testKind(kind) {
+    const view = panel.audio[kind], trigger = view.devices, selection = view.deviceSelection;
+    const initial = choices(kind);
+    const update = properties => {
+        backend.state[kind] = { ...backend.state[kind], ...properties };
+        panel.render();
+    };
+    assert(trigger instanceof Gtk.ToggleButton && trigger.has_css_class('device-dropdown'),
+        `${kind}: selector trigger is the native toggle itself`);
+    assert(trigger.get_child() instanceof Gtk.Box && view.deviceLabel instanceof Gtk.Label
+        && view.deviceArrow instanceof Gtk.Label, `${kind}: trigger owns a label and arrow box`);
+    assert(view.deviceLabel.get_parent() === trigger.get_child()
+        && view.deviceArrow.get_parent() === trigger.get_child(), `${kind}: both labels belong to the trigger box`);
+    assert(selection instanceof Gtk.SingleSelection && !selection.autoselect && selection.can_unselect,
+        `${kind}: native single selection does not autoselect`);
+    assert(view.deviceList instanceof Gtk.ListView && view.deviceList.model === selection
+        && view.deviceList.single_click_activate && view.deviceList.has_css_class('device-list'),
+        `${kind}: native list activates on one click`);
+    const factory = view.deviceList.factory, bindings = [];
+    assert(factory instanceof Gtk.SignalListItemFactory, `${kind}: native row factory`);
+    const bindSignal = factory.connect('bind', (_, item) => {
+        const widget = item.get_child(), choice = view.choiceItems[item.get_position()];
+        const ancestors = [];
+        for (let current = widget; current; current = current.get_parent()) ancestors.push(current);
+        // Record inside GTK signals; assert outside them so GJS cannot swallow a failure.
+        bindings.push({ literal: widget instanceof Gtk.Label && !widget.use_markup && widget.label === choice?.label
+            && widget.ellipsize === Pango.EllipsizeMode.END,
+            tooltipFree: ancestors.every(value => !value.has_tooltip && !value.tooltip_text && !value.tooltip_markup) });
+    });
+    assert(view.deviceChoices instanceof Gtk.Revealer, `${kind}: inline choices use a native revealer`);
+    equal([view.deviceChoices.transition_type, view.deviceChoices.transition_duration],
+        [Gtk.RevealerTransitionType.SLIDE_DOWN, 180], `${kind}: native slide-down animation`);
+    const options = view.deviceChoices.get_child();
+    assert(options instanceof Gtk.ScrolledWindow && options.get_child() === view.deviceList
+        && options.propagate_natural_height && options.max_content_height === 240
+        && options.margin_top === 6 && options.has_css_class('device-options'),
+        `${kind}: inline list has a naturally sized, capped scroller`);
+    noDevicePopups();
+    for (let widget = view.deviceChoices; widget && widget !== panel.audioPage; widget = widget.get_parent())
+        assert(!(widget instanceof Gtk.Overlay), `${kind}: inline choices are not hosted in an overlay`);
+    expanded(view, false, `${kind}: starts collapsed`);
+    // Replace metadata after observing the actual factory lifecycle.
+    update({ choices: initial.map(item => ({ ...item,
+        description: item.description ? item.description + ' [bound]' : '' })) });
+    await wait();
+    const entries = backend.state[kind].choices;
+    assert(selection.model instanceof Gtk.StringList, `${kind}: real native string model`);
+    equal(Array.from({ length: selection.model.get_n_items() }, (_, i) => selection.model.get_string(i)),
+        entries.map(item => item.label), `${kind}: literal ordered model without an unnecessary placeholder`);
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: native default label does not preselect a row`);
+    assert(view.deviceLabel.label === entries[1].label && !view.deviceLabel.use_markup
+        && view.deviceLabel.ellipsize === Pango.EllipsizeMode.END,
+        `${kind}: collapsed trigger shows literal ellipsized default text`);
+    for (const widget of walk(trigger)) noInheritedTooltip(widget, `${kind}: trigger has no tooltip`);
+    input('move', view.devicesHeading);
+    await wait(250);
+    const restingPixels = input('pixels', trigger);
+    input('move', trigger);
+    await wait(250);
+    assert(trigger.get_state_flags() & Gtk.StateFlags.PRELIGHT, `${kind}: real pointer enters native toggle`);
+    equal(input('pixels', trigger), restingPixels, `${kind}: closed native toggle pixels are hover-invariant`);
+    input('move', view.devicesHeading);
+    await wait(250);
+    assert(!view.heading.use_markup && view.heading.label.includes('<b>'), `${kind}: heading is literal`);
+    assert(!('rows' in view) && !('choices' in view), `${kind}: old per-device button rows are absent`);
+    assert(!walk(view.deviceList).some(widget => widget instanceof Gtk.Button), `${kind}: choices are native list rows, not buttons`);
+    allocation(`${kind}: long collapsed labels retain the compact frame`);
+    let before = backend.calls.length;
+    const model = selection.model;
+    update({ volume: 0.61, muted: true });
+    assert(selection.model === model, `${kind}: volume/mute render preserves the model`);
+    equal(view.volume.get_layout().get_text(), '61%', `${kind}: native volume snapshot rendered`);
+    selection.selected = 0;
+    selection.notify('selected');
+    equal(backend.calls.length, before, `${kind}: selection notification is read-only`);
+    panel.render();
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: closed render clears selection without highlighting the default`);
+    panel.setDeviceExpanded(view, true);
+    view.deviceList.emit('activate', 0);
+    equal(backend.calls.slice(before), [['select', kind, entries[0].key]], `${kind}: activation selects the first duplicate by key`);
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: activation clears the closed list selection`);
+    equal(view.deviceLabel.label, entries[1].label, `${kind}: pending activation cannot invent a native default label`);
+    expanded(view, false, `${kind}: activation collapses the list`);
+    focused(trigger, `${kind}: activation focuses the trigger`);
+    before = backend.calls.length;
+    update({ choices: entries.map((item, i) => ({ ...item, default: i === 0 })) });
+    assert(selection.model === model && selection.selected === Gtk.INVALID_LIST_POSITION,
+        `${kind}: external default leaves selection empty without rebuilding`);
+    equal(view.deviceLabel.label, entries[0].label, `${kind}: the trigger follows the external native default`);
+    equal(backend.calls.length, before, `${kind}: external native default change never mutates`);
+    panel.setDeviceExpanded(view, true);
+    view.deviceList.emit('activate', 1);
+    equal(backend.calls.slice(before), [['select', kind, entries[1].key]], `${kind}: second duplicate retains a distinct key`);
+    before = backend.calls.length;
+    panel.setDeviceExpanded(view, true);
+    update({ busy: true });
+    assert(!trigger.sensitive && view.volume.sensitive && view.mute.sensitive, `${kind}: busy disables only device selection`);
+    expanded(view, false, `${kind}: busy render collapses choices`);
+    panel.setDeviceExpanded(view, true);
+    expanded(view, false, `${kind}: busy cannot expand choices`);
+    view.deviceList.emit('activate', 2);
+    equal(backend.calls.length, before, `${kind}: busy activation is ignored`);
+    update({ busy: false });
+    await wait(260);
+
+    const compact = bounds(panel.card, panel.root), inputBefore = bounds(panel.audio.input.heading);
+    const triggerBefore = bounds(trigger);
+    input('click', trigger);
+    await wait(260);
+    expanded(view, true, `${kind}: real pointer expands inline choices`);
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: pointer expansion does not select a default row`);
+    const grown = bounds(panel.card, panel.root), listBounds = bounds(options);
+    assert(grown.height > compact.height, `${kind}: expansion grows the actual card`);
+    boundsEqual(bounds(trigger), triggerBefore, `${kind}: expansion does not move the trigger inside the card`);
+    assert(bindings.length >= entries.length, `${kind}: real inline factory binds all three rows`);
+    const labels = listLabels(view);
+    equal(labels.length, entries.length, `${kind}: all small-list choices have real native labels`);
+    for (const widget of labels) {
+        const row = bounds(widget.get_parent());
+        assert(row.y >= listBounds.y && row.bottom <= listBounds.bottom,
+            `${kind}: actual native row lies inside the inline scroller`);
+        if (kind === 'output') assert(row.bottom <= bounds(panel.audio.input.heading).y,
+            'Actual output row bounds do not overlap input controls');
+        noInheritedTooltip(widget, `${kind}: expanded labels and ancestors have no tooltip`);
+    }
+    if (kind === 'output') {
+        geometryEqual(bounds(panel.audio.input.heading).y - inputBefore.y, grown.height - compact.height,
+            'Output list pushes the actual input section down by the card growth');
+        assert(bounds(panel.audio.input.heading).y >= listBounds.bottom,
+            'Output choice rows end before the input section, never overlay it');
+    } else {
+        boundsEqual(bounds(panel.audio.input.heading), inputBefore, 'Input expansion leaves the upper input controls in place');
+        assert(grown.y + grown.height > compact.y + compact.height, 'Input choices expand the lower frame edge');
+    }
+    allocation(`${kind}: inline expansion stays content-sized`);
+    input('click', trigger);
+    await wait(260);
+    expanded(view, false, `${kind}: clicking the active toggle collapses choices`);
+    equal(bounds(panel.card, panel.root), compact, `${kind}: toggling closed exactly restores the compact frame`);
+    boundsEqual(bounds(panel.audio.input.heading), inputBefore, `${kind}: toggling closed restores input placement within subpixel rounding`);
+    equal(backend.calls.length, before, `${kind}: toggling choices never selects a device`);
+    input('click', trigger);
+    await wait(260);
+    input('click', listLabels(view)[2]);
+    await wait(260);
+    equal(backend.calls.slice(before), [['select', kind, entries[2].key]], `${kind}: real pointer activates the exact row key`);
+    expanded(view, false, `${kind}: real pointer selection collapses choices`);
+    focused(trigger, `${kind}: pointer selection returns focus to the trigger`);
+    equal(bounds(panel.card, panel.root), compact, `${kind}: closing exactly restores the compact frame`);
+    boundsEqual(bounds(panel.audio.input.heading), inputBefore, `${kind}: closing restores input placement within subpixel rounding`);
+    assert(panel.opened, `${kind}: selecting an inline row does not dismiss the panel`);
+
+    // Description-only replacements must rebind native rows, not leave stale metadata.
+    before = backend.calls.length;
+    const oldModel = selection.model, oldBinds = bindings.length;
+    const rebound = backend.state[kind].choices.map(item => ({ ...item, description: `Rebound <b>${item.key}</b>` }));
+    update({ choices: rebound });
+    assert(selection.model !== oldModel, `${kind}: metadata replacement replaces the native string model`);
+    equal(backend.calls.length, before, `${kind}: replacing model and clearing selection is read-only`);
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: replacement model starts unselected`);
+    input('click', trigger);
+    await wait(260);
+    assert(bindings.length > oldBinds, `${kind}: metadata replacement rebinds the actual list factory`);
+    noInheritedTooltip(view.deviceLabel, `${kind}: rebound trigger remains tooltip-free`);
+    assert(listLabels(view)[0].get_parent().grab_focus(), `${kind}: native first row takes keyboard focus`);
+    // Use actual Gtk.ListView keyboard navigation, not selection notifications.
+    input('key', host, 'Home');
+    await wait();
+    input('key', host, 'Down');
+    await wait();
+    equal(selection.selected, 1, `${kind}: real keyboard navigation selects the second row`);
+    update({ volume: 0.62 });
+    await wait();
+    equal(selection.selected, 1, `${kind}: snapshot refresh preserves open keyboard selection`);
+    equal(view.deviceLabel.label, rebound[0].label, `${kind}: keyboard navigation does not change the default label`);
+    equal(backend.calls.length, before, `${kind}: real keyboard navigation alone never activates a device`);
+    input('key', host, 'Return');
+    await wait(260);
+    equal(backend.calls.slice(before), [['select', kind, rebound[1].key]], `${kind}: real keyboard picks the duplicate by key`);
+    expanded(view, false, `${kind}: keyboard selection collapses inline choices`);
+    equal(selection.selected, Gtk.INVALID_LIST_POSITION, `${kind}: keyboard activation clears selection after collapse`);
+    focused(trigger, `${kind}: keyboard selection returns focus to the trigger`);
+    equal(bounds(panel.card, panel.root), compact, `${kind}: keyboard selection exactly restores the compact frame`);
+    assert(panel.opened, `${kind}: keyboard activation leaves the panel open`);
+    before = backend.calls.length;
+    input('click', trigger);
+    await wait(260);
+    input('click', listLabels(view)[0]);
+    await wait(260);
+    equal(backend.calls.length, before, `${kind}: choosing the existing default does not mutate`);
+    expanded(view, false, `${kind}: choosing the existing default still collapses`);
+    focused(trigger, `${kind}: existing-default selection focuses the trigger`);
+
+    for (const [properties, placeholder] of [
+        [{ available: true, name: 'Unlisted <native> & name' }, 'Unlisted <native> & name'],
+        [{ available: false, nodeKey: '', name: 'Stale name' }, 'Select a device…'],
+    ]) {
+        update({ ...properties, choices: rebound.map(item => ({ ...item, default: false })) });
+        equal(selection.model.get_n_items(), rebound.length + 1, `${kind}: missing default prepends one placeholder`);
+        equal([selection.selected, selection.model.get_string(0), view.choiceItems[0].key, view.deviceLabel.label],
+            [Gtk.INVALID_LIST_POSITION, placeholder, '', placeholder], `${kind}: placeholder labels the trigger but stays unselected and non-actionable`);
+        selection.notify('selected');
+        view.deviceList.emit('activate', 0);
+        equal(backend.calls.length, before, `${kind}: placeholder cannot call select`);
+    }
+    update({ available: true, nodeKey: `current:${kind}`, choices: initial });
+    panel.setDeviceExpanded(view, true);
+    update({ choices: [initial[1]] });
+    assert(!trigger.visible && !view.devicesHeading.visible && !trigger.sensitive,
+        `${kind}: sole default hides selector and Devices heading`);
+    expanded(view, false, `${kind}: hotplug leaving no alternatives collapses choices`);
+    panel.setDeviceExpanded(view, true);
+    expanded(view, false, `${kind}: hidden selector cannot expand`);
+    update({ available: false, nodeKey: '', choices: [] });
+    assert(!trigger.visible && !view.devicesHeading.visible && !view.mute.sensitive && !view.volume.sensitive,
+        `${kind}: empty hardware leaves no old rows or active controls`);
+    equal(selection.model.get_n_items(), 1, `${kind}: removed choices are absent from the native model`);
+    equal(backend.calls.length, before, `${kind}: hotplug/placeholder renders never mutate`);
+    update({ available: true, nodeKey: `current:${kind}`, choices: initial, name: `${kind} default` });
+    await wait(260);
+    assert(bindings.length > 0 && bindings.every(item => item.literal && item.tooltipFree),
+        `${kind}: every factory binding is literal, ellipsized and tooltip-free, including after rebinding`);
+    factory.disconnect(bindSignal);
+}
+
+async function testVolume(kind) {
+    const view = panel.audio[kind], scale = view.volume, bar = view.volumeBar.widget;
+    const backward = bar.get_first_child(), forward = bar.get_last_child();
+    const original = { ...backend.state[kind] };
+    const noVolumeTooltips = message => {
+        for (const control of [view.mute, backward, scale, forward, bar])
+            noInheritedTooltip(control, `${kind}: ${message} has no control or ancestor tooltip`);
+        for (const control of [view.mute, backward, forward])
+            for (const child of walk(control)) noTooltip(child, `${kind}: ${message} has no button-child tooltip`);
+    };
+    const update = properties => {
+        backend.state[kind] = { ...backend.state[kind], ...properties };
+        panel.render();
+    };
+    const geometry = message => {
+        equal([bar.get_allocated_height(), scale.get_height(), backward.get_height(), forward.get_height()],
+            [20, 20, 20, 20], `${kind}: ${message} keeps the compact flat 20px bar`);
+        const [start, end] = scale.get_slider_range();
+        const [x, y] = scale.get_layout_offsets();
+        const [, text] = scale.get_layout().get_pixel_extents();
+        equal(end - start, 43, `${kind}: ${message} retains the compact native thumb with the thin button-matched outline`);
+        assert(x >= start && x + text.width <= end && y >= 0 && y + text.height <= scale.get_height(),
+            `${kind}: ${message} keeps the native percent inside the native thumb`);
+    };
+    assert(scale instanceof Gtk.Scale && backward instanceof Gtk.Button && forward instanceof Gtk.Button,
+        `${kind}: existing native scale between native stepper buttons`);
+    assert(backward.get_next_sibling() === scale && scale.get_next_sibling() === forward,
+        `${kind}: no standalone percent widget`);
+    assert(!('percent' in view), `${kind}: obsolete view.percent is removed`);
+    noVolumeTooltips('constructed volume bar');
+    for (const control of [backward, forward]) {
+        assert(control.has_css_class('volume-step') && !control.has_css_class('control-button'),
+            `${kind}: arrows do not inherit unrelated button sizing`);
+        equal(control.get_width(), 20, `${kind}: arrow is 20px wide`);
+    }
+    equal([backward.get_child().label, forward.get_child().label], ['◁', '▷'], `${kind}: hollow arrows`);
+    equal(scale.get_adjustment().step_increment, 0.01, `${kind}: native 1% increment is unchanged`);
+    equal([scale.get_adjustment().lower, scale.get_adjustment().upper], [0, view.maximum], `${kind}: native volume limits`);
+    equal(scale.round_digits, -1, `${kind}: displaying the percent does not quantize native volume`);
+    let before = backend.calls.length;
+    // Every percentage, including both endpoints and output amplification, uses
+    // only GTK's value layout and slider allocation, never custom geometry.
+    for (let percent = 0; percent <= view.maximum * 100; percent++) {
+        update({ volume: percent / 100 });
+        await wait(20);
+        equal(scale.get_layout().get_text(), `${percent}%`, `${kind}: native label at ${percent}%`);
+        geometry(`${percent}%`);
+    }
+    update({ volume: 0.3749 });
+    equal(scale.get_value(), 0.3749, `${kind}: native fractional volume is preserved`);
+    equal(scale.get_layout().get_text(), '37%', `${kind}: only displayed text rounds`);
+    for (const available of [false, true, false, true]) {
+        update({ available });
+        await wait(30);
+        equal(scale.get_layout().get_text(), available ? '37%' : '—', `${kind}: same-value availability invalidates cached text`);
+        equal([bar.sensitive, backward.is_sensitive(), forward.is_sensitive()],
+            [available, available, available], `${kind}: availability covers the entire bar`);
+        geometry(available ? 'available' : 'disabled');
+        noVolumeTooltips(available ? 'enabled rerender' : 'disabled rerender');
+    }
+    for (const flags of [Gtk.StateFlags.PRELIGHT, Gtk.StateFlags.ACTIVE]) {
+        scale.set_state_flags(flags, false);
+        await wait(30);
+        geometry(`native state ${flags}`);
+        scale.unset_state_flags(flags);
+    }
+    scale.grab_focus();
+    await wait(30);
+    geometry('focused');
+    view.dragging = true;
+    view.volumeTarget = view.nodeKey;
+    scale.set_value(0.63);
+    update({ volume: 0.42 });
+    equal(scale.get_value(), 0.63, `${kind}: native updates remain suppressed during an owned drag`);
+    equal(scale.get_layout().get_text(), '63%', `${kind}: native label follows the live drag, not the suppressed snapshot`);
+    equal(backend.calls.length, before, `${kind}: all volume rendering and allocation checks are read-only`);
+    view.dragging = false;
+    view.volumeTarget = null;
+    update({ volume: 0.4 });
+    let moves = 0;
+    const moveSignal = scale.connect('move-slider', () => { moves++; });
+    for (const [name, disabled] of [['scale', scale], ['ancestor', bar.get_parent()]]) {
+        const value = scale.get_value(), target = `disabled:${kind}:${name}`;
+        view.dragging = true;
+        view.volumeTarget = target;
+        disabled.sensitive = false;
+        try {
+            noVolumeTooltips(`disabled ${name}`);
+            equal(scale.sensitive, name === 'ancestor', `${kind}: disabling ${name} preserves the scale's own sensitivity semantics`);
+            assert(!scale.is_sensitive(), `${kind}: disabled ${name} makes the native scale effectively insensitive`);
+            backward.emit('clicked');
+            forward.emit('clicked');
+            equal(moves, 0, `${kind}: disabled ${name} blocks both native move-slider emissions`);
+            equal([view.dragging, view.volumeTarget], [true, target], `${kind}: disabled ${name} cannot clear drag ownership`);
+            equal(scale.get_value(), value, `${kind}: disabled ${name} cannot change the native value`);
+            equal(backend.calls.length, before, `${kind}: disabled ${name} cannot mutate the backend`);
+        } finally { disabled.sensitive = true; }
+    }
+    scale.disconnect(moveSignal);
+    view.dragging = false;
+    view.volumeTarget = null;
+    const expectVolume = (value, message) => {
+        const calls = backend.calls.slice(before);
+        equal(calls.length, 1, `${kind}: ${message} makes one guarded mutation`);
+        equal([calls[0][0], calls[0][1], calls[0][3]], ['volume', kind, view.nodeKey], `${kind}: ${message} uses the current native identity`);
+        assert(Math.abs(calls[0][2] - value) < 1e-9, `${kind}: ${message} uses the native step increment`);
+        before = backend.calls.length;
+    };
+    for (const [control, value, description] of [[forward, 0.41, 'Increase volume'], [backward, 0.4, 'Decrease volume']]) {
+        view.dragging = true;
+        view.volumeTarget = 'stale-drag-owner';
+        control.emit('clicked');
+        expectVolume(value, description);
+        assert(!view.dragging && view.volumeTarget === null, `${kind}: step clears old drag ownership before the native signal`);
+    }
+    input('click', forward);
+    await wait();
+    expectVolume(0.41, 'real pointer step');
+    scale.grab_focus();
+    view.dragging = true;
+    view.volumeTarget = 'stale-keyboard-owner';
+    input('key', host, 'Right');
+    await wait();
+    expectVolume(0.42, 'real keyboard step');
+    view.dragging = true;
+    view.volumeTarget = 'stale-scroll-owner';
+    input('scroll', scale);
+    await wait();
+    assert(backend.calls.length > before && backend.calls.slice(before).every(call =>
+        call[0] === 'volume' && call[1] === kind && call[3] === view.nodeKey), `${kind}: native scroll uses the guarded current identity`);
+    assert(!view.dragging && view.volumeTarget === null, `${kind}: scroll clears stale drag ownership`);
+    before = backend.calls.length;
+    input('click', view.mute);
+    await wait();
+    equal(backend.calls.slice(before), [['mute', kind, view.nodeKey]], `${kind}: native mute control is unchanged`);
+    noVolumeTooltips('mute rerender');
+    before = backend.calls.length;
+    for (const configure of [
+        () => { panel.opened = false; },
+        () => { panel.currentTab = 0; },
+        () => { backend.state[kind] = { ...original, available: false }; },
+        () => { backend.state[kind] = { ...original, nodeKey: 'unrendered-replacement' }; },
+    ]) {
+        update(original);
+        configure();
+        forward.emit('clicked');
+        equal(backend.calls.length, before, `${kind}: arrow cannot bypass nodeCurrent availability/ownership/lifecycle guards`);
+        panel.opened = true;
+        panel.currentTab = 1;
+    }
+    update({ ...original, volume: 0.4 });
+    input('press', scale);
+    await wait();
+    assert(view.dragging && view.volumeTarget === view.nodeKey, `${kind}: real native drag captures its original node`);
+    before = backend.calls.length;
+    update({ nodeKey: 'replacement-during-drag', volume: 0.2 });
+    equal(scale.get_value(), 0.2, `${kind}: new native identity is not suppressed by the old drag`);
+    input('move', forward);
+    input('release', forward);
+    await wait();
+    equal(backend.calls.length, before, `${kind}: old native drag cannot mutate the replacement node`);
+    assert(!view.dragging, `${kind}: native release ends dragging`);
+    view.volumeTarget = null;
+    for (const [value, control] of [[0, backward], [view.maximum, forward]]) {
+        update({ volume: value });
+        before = backend.calls.length;
+        control.emit('clicked');
+        equal(scale.get_value(), value, `${kind}: native step clamps at ${value * 100}%`);
+        assert(backend.calls.slice(before).every(call => call[2] === value), `${kind}: step never writes outside the native range`);
+    }
+    update(original);
+    await wait();
+    allocation(`${kind}: volume bar does not resize the frame`);
+}
+
+function testButtonTooltips() {
+    const original = backend.state.bluetooth;
+    const device = { key: 'fake-headset', name: 'Fake <headset>', address: 'AA:01', paired: true };
+    const before = backend.calls.length;
+    try {
+        for (const model of [
+            {},
+            { devices: [{ ...device, connected: true }] },
+            { pairing: true, pairingMessage: { text: 'Pairing…', prompt: 'Enter PIN:' } },
+            { devices: [{ ...device, busy: true }] },
+            { powered: false, devices: [{ ...device, name: 'Renamed fake headset' }] },
+            {},
+        ]) {
+            backend.state.bluetooth = { available: true, powered: true, devices: [device], ...model };
+            panel.render();
+            const row = panel.deviceRows.get(device.key);
+            for (const control of [...panel.tabs, panel.dismissPairing, panel.send, panel.cancel, row.action, row.forget]) {
+                noInheritedTooltip(control, 'Constructed button and its ancestors have no tooltip after rerender');
+                for (const child of walk(control)) noTooltip(child, 'Button children do not introduce tooltips');
+            }
+            equal(row.name.label, backend.state.bluetooth.devices[0].name, 'Full Bluetooth name remains literal label text');
+            if (backend.state.bluetooth.devices[0].connected) {
+                assert(row.widget.has_css_class('connected'), 'Connected Bluetooth device keeps its semantic class');
+                equal(row.status.label, 'Connected', 'Connected Bluetooth status remains explicit');
+                equal(row.action.get_child().label, 'Disconnect', 'Connected Bluetooth action stays unchanged');
+                assert(!(row.widget.get_state_flags() & Gtk.StateFlags.SELECTED), 'Connected Bluetooth row is not selected');
+            }
+            for (const widget of walk(panel.root))
+                noTooltip(widget, 'Every constructed native widget stays tooltip-free after rerender');
+        }
+        equal(backend.calls.length, before, 'Button tooltip regression checks never invoke backend operations');
+    } finally {
+        backend.state.bluetooth = original;
+        panel.render();
+    }
+}
+
+async function testSelectorGuards() {
+    const view = panel.audio.output, other = panel.audio.input;
+    const original = backend.state.output;
+    const before = backend.calls.length;
+    panel.setDeviceExpanded(view, true);
+    panel.setDeviceExpanded(other, true);
+    expanded(view, false, 'Opening input collapses output');
+    expanded(other, true, 'Only the input list remains expanded');
+    panel.setDeviceExpanded(view, true);
+    expanded(other, false, 'Opening output collapses input');
+    panel.setTab(0);
+    for (const item of Object.values(panel.audio)) expanded(item, false, 'Tab reset collapses every list');
+    panel.setDeviceExpanded(view, true);
+    expanded(view, false, 'Bluetooth tab cannot expand an audio selector');
+    view.deviceList.emit('activate', 0);
+    panel.setTab(1);
+    for (const item of Object.values(panel.audio)) expanded(item, false, 'Returning to Audio does not reopen choices');
+    panel.setDeviceExpanded(view, true);
+    panel.close();
+    for (const item of Object.values(panel.audio)) expanded(item, false, 'Panel close resets every selector');
+    panel.setDeviceExpanded(view, true);
+    expanded(view, false, 'Closed panel cannot expand choices');
+    view.deviceList.emit('activate', 0);
+    panel.opened = true;
+    panel.render();
+    equal(backend.calls.length, before, 'Expansion, tab and closed-panel guards never mutate audio');
+
+    // Keep the rendered keys stale deliberately: activation must validate the live snapshot.
+    panel.setDeviceExpanded(view, true);
+    const stale = view.choiceItems[0].key;
+    backend.state.output = { ...original, choices: original.choices.filter(item => item.key !== stale) };
+    view.deviceList.emit('activate', 0);
+    equal(backend.calls.length, before, 'A removed native key never reaches backend.select');
+    assert(view.error.visible && /no longer available/i.test(view.error.label),
+        'Stale native keys report through the existing action error path');
+    expanded(view, false, 'Stale selection collapses choices');
+    focused(view.devices, 'Stale selection returns focus to the trigger');
+    backend.state.output = original;
+    panel.failures.output = '';
+    panel.render();
+    panel.setDeviceExpanded(view, true);
+    backend.state.output = { ...original, busy: true };
+    view.deviceList.emit('activate', 0);
+    equal(backend.calls.length, before, 'Live busy state blocks activation before a rerender');
+    backend.state.output = original;
+    panel.render();
+    panel.setDeviceExpanded(view, true);
+    backend.state.output = { ...original, choices: original.choices.map((item, i) => ({ ...item, default: i === 0 })) };
+    view.deviceList.emit('activate', 0);
+    equal(backend.calls.length, before, 'A live default change prevents a redundant stale-view mutation');
+    expanded(view, false, 'A newly authoritative default still collapses choices');
+    focused(view.devices, 'A newly authoritative default returns focus to the trigger');
+    backend.state.output = original;
+    panel.render();
+    panel.setDeviceExpanded(view, true);
+    backend.selectionError = 'Fake native device selection failed';
+    try {
+        view.deviceList.emit('activate', 0);
+        equal(backend.calls.slice(before), [['select', 'output', original.choices[0].key]],
+            'A failing selection dispatches the validated native key once');
+        assert(view.error.visible && view.error.label === backend.selectionError,
+            'Backend selection errors use the existing visible action failure');
+        expanded(view, false, 'A failed selection collapses choices');
+        focused(view.devices, 'A failed selection returns focus to the trigger');
+    } finally {
+        backend.selectionError = '';
+        panel.failures.output = '';
+        panel.render();
+    }
+    for (const position of [Gtk.INVALID_LIST_POSITION, original.choices.length + 10])
+        view.deviceList.emit('activate', position);
+    equal(backend.calls.length, before + 1, 'Invalid native list positions never dispatch mutations');
+    await wait(260);
+}
+
+async function testLargeInlineLists() {
+    const monitor = panel.monitor, originals = { output: backend.state.output, input: backend.state.input };
+    const before = backend.calls.length;
+    try {
+        for (const kind of ['output', 'input']) {
+            const view = panel.audio[kind], seen = new Set(), bindings = [];
+            const factory = view.deviceList.factory;
+            const signal = factory.connect('bind', (_, item) => {
+                const widget = item.get_child();
+                seen.add(widget.label);
+                bindings.push({ literal: !widget.use_markup && widget.ellipsize === Pango.EllipsizeMode.END,
+                    tooltipFree: !widget.has_tooltip && !widget.tooltip_text && !widget.tooltip_markup });
+            });
+            try {
+                for (const short of [false, true]) {
+                    const entries = Array.from({ length: 40 }, (_, i) => ({ key: `native:${kind}:inline:${i}`,
+                        label: `Inline ${kind} choice ${i} <b>& literal</b> ` + 'long name '.repeat(12),
+                        description: `Inline ${kind} route ${i} <literal>`, default: i === 1 }));
+                    seen.clear();
+                    panel.monitor = short ? { get_geometry: () => ({ width: 340, height: 300 }) } : monitor;
+                    backend.state[kind] = { ...originals[kind], choices: entries };
+                    panel.render();
+                    await wait(260);
+                    await scrollIntoView(view.devices, panel.audioPage);
+                    input('click', view.devices);
+                    await wait(260);
+                    expanded(view, true, `${kind}: large list expands on a ${short ? 'short' : 'normal'} monitor`);
+                    const options = view.deviceChoices.get_child(), adjustment = options.get_vadjustment();
+                    equal(options.max_content_height, 240, `${kind}: large-list viewport retains its native 240px cap`);
+                    assert(adjustment.page_size > 0 && adjustment.page_size <= 240
+                        && adjustment.upper > adjustment.page_size,
+                                            `${kind}: many devices scroll inside the capped list (upper=${adjustment.upper}, page=${adjustment.page_size}, options=${options.get_height()}, card=${panel.card.get_height()})`);
+                    assert(panel.card.get_height() <= (short ? 236 : 520), `${kind}: expanded list respects the monitor budget`);
+                    equal(panel.card.get_width(), short ? 324 : 400, `${kind}: long inline names cannot widen the card`);
+                    if (short) {
+                        const page = panel.audioPage.get_vadjustment();
+                        assert(page.upper > page.page_size, `${kind}: short monitor also scrolls the whole audio page`);
+                    }
+                    // Visit the entire native scroll range, including recycled factory rows.
+                    const maximum = adjustment.upper - adjustment.page_size;
+                    for (let value = 0; value < maximum; value += Math.max(1, adjustment.page_size / 2)) {
+                        adjustment.value = value;
+                        await wait(30);
+                        for (const widget of listLabels(view)) noInheritedTooltip(widget, `${kind}: large-list labels remain tooltip-free`);
+                    }
+                    adjustment.value = maximum;
+                    await wait();
+                    const last = listLabels(view).find(widget => widget.label === entries.at(-1).label);
+                    assert(last, `${kind}: native scrolling reaches the last device`);
+                    const row = bounds(last.get_parent(), options);
+                    assert(row.y >= 0 && row.bottom <= options.get_height(), `${kind}: last native row is allocated inside the capped viewport`);
+                    assert(entries.every(item => seen.has(item.label)), `${kind}: every large-list label was bound without a tooltip`);
+                    panel.setDeviceExpanded(view, false);
+                    await wait(260);
+                    expanded(view, false, `${kind}: large list collapses within the frame`);
+                    noDevicePopups();
+                    backend.state[kind] = originals[kind];
+                    panel.render();
+                    await wait(260);
+                }
+                assert(bindings.length > 0 && bindings.every(item => item.literal && item.tooltipFree),
+                    `${kind}: all large-list and recycled bindings are literal, ellipsized and tooltip-free`);
+            } finally { factory.disconnect(signal); }
+        }
+    } finally {
+        panel.monitor = monitor;
+        for (const kind of ['output', 'input']) {
+            backend.state[kind] = originals[kind];
+            panel.setDeviceExpanded(panel.audio[kind], false);
+        }
+        panel.render();
+    }
+    await wait(260);
+    equal(backend.calls.length, before, 'Large-list layout and scrolling never mutate devices');
+    allocation('Large-list cleanup restores the compact frame');
+}
+
+async function testRootDismissal() {
+    const view = panel.audio.output, before = backend.calls.length;
+    const compact = bounds(panel.card, panel.root);
+    const activity = backend.activity.length;
+    input('click', view.devices);
+    await wait(260);
+    assert(listLabels(view)[0].get_parent().grab_focus(), 'Escape starts with focus inside a real list row');
+    input('key', host, 'Escape');
+    await wait(260);
+    expanded(view, false, 'First real Escape collapses the open list');
+    focused(view.devices, 'First Escape focuses the trigger');
+    assert(panel.opened && backend.activity.length === activity, 'First Escape is consumed before panel close');
+    equal(bounds(panel.card, panel.root), compact, 'Escape exactly restores compact geometry');
+    input('key', host, 'Escape');
+    await wait(260);
+    assert(!panel.opened && backend.activity.length === activity + 1 && backend.activity.at(-1)?.[0] === false,
+        'Second real Escape reaches the hosted root controller and closes the panel');
+    for (const item of Object.values(panel.audio)) expanded(item, false, 'Escape close leaves every selector collapsed');
+    panel.opened = true;
+    panel.render();
+    await wait(260);
+    input('click', panel.root);
+    await wait(260);
+    assert(!panel.opened && backend.activity.at(-1)?.[0] === false,
+        'An actual root click outside the card still closes the panel');
+    equal(backend.calls.length, before, 'Escape and outside dismissal never mutate audio');
+}
+
+async function smoke() {
+    const services = ['org.bluez', 'org.PulseAudio1', 'org.freedesktop.NetworkManager'];
+    assert(services.every(name => !owner(name)), 'Private bus has no live audio/Bluetooth/network services');
+    Gtk.init();
+    GLib.unsetenv('LD_PRELOAD');
+    const palette = loadTheme(entry, GLib.getenv('AUDIO_PANEL_PALETTE'));
+    assert(Boolean(palette.yellow), 'Actual custom CSS parses in GTK without parsing errors');
+    const css = read(GLib.build_filenamev([GLib.path_get_dirname(entry), 'style.css']));
+    assert(/background(?:-color)?:\s*alpha\(\s*shade\(\s*@ap_red\s*,\s*0?\.45\s*\)\s*,\s*0?\.5\s*\)/.test(css),
+        'Inline selector stylesheet uses the requested half-transparent dark-red shade');
+    app = new Astal.Application({ instance_name: 'audio-dropdown-offline' });
+    app.register(null);
+    assert(!app.get_is_remote(), 'Application instance belongs to the private bus');
+    panel = new AudioPanel({ app, backend, palette });
+    assert(!panel.window.visible && backend.starts === 0 && backend.calls.length === 0,
+        'Real AudioPanel constructs hidden with fake snapshot only');
+    // Never present the layer-shell window on X11; retain the production root
+    // and its capture-phase key/click-outside controllers for real XTEST input.
+    panel.window.set_child(null);
+    host = new Gtk.Window({ child: panel.root, decorated: false, default_width: 1280,
+        default_height: 800, css_classes: ['audio-panel'] });
+    panel.opened = true;
+    panel.monitor = { get_geometry: () => ({ width: 1280, height: 800 }) };
+    panel.render();
+    host.present();
+    await wait(200);
+    for (const tab of panel.tabs) {
+        const rgb = (tab.has_css_class('selected') ? palette.cyan : palette.pink)
+            .slice(1).match(/../g).map(value => parseInt(value, 16) / 255);
+        for (const state of [Gtk.StateFlags.NORMAL, Gtk.StateFlags.PRELIGHT, Gtk.StateFlags.FOCUS_VISIBLE]) {
+            tab.set_state_flags(state, false);
+            await wait(150);
+            const color = tab.get_child().get_color();
+            assert([color.red, color.green, color.blue].every((value, index) => Math.abs(value - rgb[index]) < 0.01),
+                'Selected and inactive tabs must retain their text colors at rest, on hover and keyboard focus');
+            tab.unset_state_flags(state);
+        }
+    }
+    await testCompactLayout();
+    for (const kind of ['output', 'input']) await testKind(kind);
+    await testSelectorGuards();
+    await testLargeInlineLists();
+    assert(backend.calls.every(call => call[0] === 'select'), 'Selector rendering never invokes volume/mute mutations');
+    for (const kind of ['output', 'input']) await testVolume(kind);
+    testButtonTooltips();
+    await testRootDismissal();
+    allocation('Final real GTK frame remains content-sized');
+    assert(backend.starts === 0 && !panel.window.visible, 'Backend never started and Astal window stayed hidden');
+
+    assert(services.every(name => !owner(name)), 'No live service appeared during the fake-only test');
+    print(`PASS audio inline-selector/volume GTK smoke: ${checks} assertions; fake backend only; actual source, CSS, native scale geometry, inline factories, capped scrolling and root XTEST Escape`);
+    print('LIMITATION Xvfb does not validate Wayland layer-shell placement, exclusive key grabs, accessibility announcements, or tooltip painting.');
+}
+
+let exitCode = 0;
+try { await smoke(); }
+catch (error) { console.error(`FAIL audio inline-selector/volume GTK smoke after ${checks} assertions`, error); exitCode = 1; }
+finally {
+    host?.destroy();
+    panel?.dispose();
+    app?.quit();
+}
+System.exit(exitCode);
+}
+
+// node test.js --tooltips /absolute/path/to/panel-gjs
+// Real GTK widget trees; private Xvfb/service-free D-Bus; in-memory models only.
+// Never import a panel backend or use the system clipboard, devices or history.
+async function isolatedTooltips(runtime) {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { spawn } = await import('node:child_process');
+    const { setTimeout: delay } = await import('node:timers/promises');
+    if (!runtime || !path.isAbsolute(runtime)) throw new Error('Pass an absolute path to panel-gjs.');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-tooltip-smoke-'));
+    const env = { ...process.env };
+    for (const name of ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'DBUS_SESSION_BUS_ADDRESS',
+        'DBUS_SYSTEM_BUS_ADDRESS', 'XAUTHORITY', 'LD_PRELOAD', 'GTK_THEME', 'GTK_PATH', 'GTK_MODULES',
+        'GIO_EXTRA_MODULES', 'GI_TYPELIB_PATH']) delete env[name];
+    for (const name of ['home', 'config', 'data', 'cache', 'runtime']) fs.mkdirSync(path.join(root, name), { mode: 0o700 });
+    Object.assign(env, { HOME: path.join(root, 'home'), XDG_CONFIG_HOME: path.join(root, 'config'),
+        XDG_DATA_HOME: path.join(root, 'data'), XDG_CACHE_HOME: path.join(root, 'cache'),
+        XDG_RUNTIME_DIR: path.join(root, 'runtime'), GDK_BACKEND: 'x11', GSETTINGS_BACKEND: 'memory',
+        GTK_A11Y: 'none', GIO_USE_VFS: 'local', GSK_RENDERER: 'cairo', PANEL_TOOLTIP_ISOLATED: '1' });
+    const children = [];
+    function start(command, args, options = {}) {
+        const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], ...options });
+        const record = { child, log: '' };
+        child.stdout.on('data', bytes => { record.log += bytes; });
+        child.stderr.on('data', bytes => { record.log += bytes; });
+        record.done = new Promise(resolve => {
+            child.on('error', error => { record.error = error; resolve(-1); });
+            child.on('exit', code => { record.exited = true; resolve(code); });
+        });
+        children.push(record);
+        return record;
+    }
+    async function until(check, description) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+            const failed = children.find(record => record.error || record.exited);
+            if (failed) throw failed.error || new Error(failed.log);
+            const result = check();
+            if (result) return result;
+            await delay(25);
+        }
+        throw new Error(`Timed out waiting for ${description}\n${children.map(record => record.log).join('\n')}`);
+    }
+    try {
+        const display = start('Xvfb', ['-displayfd', '3', '-screen', '0', '1024x768x24', '-nolisten', 'tcp'],
+            { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+        let displayNumber = '';
+        display.child.stdio[3].on('data', bytes => { displayNumber += bytes; });
+        env.DISPLAY = ':' + (await until(() => displayNumber.includes('\n') && displayNumber, 'private display')).trim();
+        const config = path.join(root, 'bus.conf');
+        fs.writeFileSync(config, `<busconfig><type>session</type><listen>unix:tmpdir=${root}</listen>
+            <auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/>
+            <allow receive_sender="*"/><allow own="*"/></policy></busconfig>`);
+        const bus = start('dbus-daemon', ['--nofork', '--nopidfile', '--print-address=1', `--config-file=${config}`]);
+        env.DBUS_SESSION_BUS_ADDRESS = await until(() => bus.log.match(/unix:[^\n]+/)?.[0], 'private bus');
+        env.DBUS_SYSTEM_BUS_ADDRESS = env.DBUS_SESSION_BUS_ADDRESS;
+        const smoke = start(runtime, ['-m', fileURLToPath(import.meta.url), 'tooltips'], { timeout: 20000 });
+        const code = await smoke.done;
+        if (code !== 0) throw smoke.error || new Error(smoke.log || `GTK smoke exited ${code}`);
+        console.log(smoke.log.trim());
+    } finally {
+        children.forEach(({ child }) => child.kill('SIGTERM'));
+        await Promise.race([Promise.all(children.map(record => record.done)), delay(1000)]);
+        children.forEach(({ child, exited }) => { if (!exited) child.kill('SIGKILL'); });
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+}
+
+async function gjsTooltipTests() {
+    const { default: GLib } = await import('gi://GLib');
+    const { default: Gtk } = await import('gi://Gtk?version=4.0');
+    const { default: Gdk } = await import('gi://Gdk?version=4.0');
+    const { default: Pango } = await import('gi://Pango');
+    const scripts = GLib.canonicalize_filename('../..', GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]));
+    const { TABS, editable, localFilePath, title } = await import('../../clipboard/astal/logic.js');
+    const { formatTime } = await import('../../media-control/astal/logic.js');
+    if (GLib.getenv('PANEL_TOOLTIP_ISOLATED') !== '1' || GLib.getenv('GDK_BACKEND') !== 'x11'
+        || !GLib.getenv('DBUS_SESSION_BUS_ADDRESS')
+        || GLib.getenv('DBUS_SYSTEM_BUS_ADDRESS') !== GLib.getenv('DBUS_SESSION_BUS_ADDRESS'))
+        throw new Error('Run through the Node isolation wrapper, not the desktop session.');
+    GLib.unsetenv('LD_PRELOAD');
+    Gtk.init();
+    class Artwork {
+        constructor() { this.widget = new Gtk.Box(); }
+        set() {}
+        dispose() {}
+    }
+    class Credit { set() {} }
+    const bindings = { Gtk, Gdk, Pango, TABS, editable, localFilePath, title, formatTime, Artwork, Credit };
+    function panelClass(scope, name, boundary) {
+        const [ok, bytes] = GLib.file_get_contents(GLib.build_filenamev([scripts, scope, 'astal', 'frontend.js']));
+        if (!ok) throw new Error(`Cannot read ${scope} frontend`);
+        const source = new TextDecoder().decode(bytes);
+        const start = source.indexOf(`class ${name}`), end = source.indexOf(boundary);
+        if (start < 0 || end < start) throw new Error(`Missing ${scope} extraction boundary`);
+        const code = source.slice(source.indexOf('function box('), source.indexOf('function frame('))
+            + source.slice(start, end);
+        return new Function(...Object.keys(bindings), `${code}\nreturn ${name};`)(...Object.values(bindings));
+    }
+    const wait = () => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 60,
+        () => { resolve(); return GLib.SOURCE_REMOVE; }));
+    let checks = 0;
+    function checkTree(widget) {
+        checks++;
+        if (widget.has_tooltip || widget.tooltip_text || widget.tooltip_markup)
+            throw new Error(`Visual tooltip on ${widget.constructor.name}: ${widget.tooltip_text || widget.tooltip_markup}`);
+        for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) checkTree(child);
+    }
+    async function exercise(name, panel, renderCases) {
+        const host = new Gtk.Window({ child: panel.content, default_width: 500, default_height: 650 });
+        try {
+            host.present();
+            for (const update of renderCases) {
+                update();
+                panel.render();
+                await wait();
+                checkTree(host);
+            }
+            print(`PASS ${name}: real GTK tree has no tooltip text, markup or enabled hover tips across rerenders`);
+        } finally { host.destroy(); }
+    }
+    const AudioPanel = panelClass('audio-control', 'AudioPanel', '\nfunction monitorFor(');
+    const audioState = { bluetooth: { available: true, powered: true, devices: [] } };
+    for (const kind of ['output', 'input']) audioState[kind] = {
+        available: true, nodeKey: kind, name: `Fake ${kind}`, volume: 0.4,
+        choices: [{ key: 'one', label: 'Default <literal>', description: 'Full route name', default: true },
+            { key: 'two', label: 'Other route', description: 'Another full route name' }],
+    };
+    const audio = Object.assign(Object.create(AudioPanel.prototype), {
+        content: new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL }), audio: {}, deviceRows: new Map(),
+        failures: {}, opened: true, currentTab: 1, cardWidth: 400, backend: { snapshot: () => audioState },
+    });
+    audio.build({ cyan: '#00ffff' });
+    await exercise('audio', audio, [() => {}, () => { audio.setDeviceExpanded(audio.audio.output, true); },
+        () => { audioState.output = { ...audioState.output, name: 'Renamed output', muted: true }; },
+        () => { audioState.input = { ...audioState.input, available: false, nodeKey: '' }; },
+        ...['Fake <headset>', 'Renamed headset', ''].map(name => () => {
+            audio.currentTab = 0;
+            audioState.bluetooth.devices = [{ key: 'fake', address: 'AA:01', name, paired: true }];
+        }), () => { audioState.bluetooth.devices = []; }]);
+
+    {
+        const [, cssBytes] = GLib.file_get_contents(GLib.build_filenamev([scripts, 'audio-control', 'astal', 'style.css']));
+        const colors = { cyan: '#00ffff', yellow: '#ffff00', red: '#ff0000', pink: '#ff00ff',
+            dimPink: '#330022', foreground: '#eeeeee', separator: '#777777',
+            background: '#25252f', chromeBackground: '#25252f' };
+        const provider = new Gtk.CssProvider();
+        provider.load_from_string('.audio-panel {' + Object.entries(colors)
+            .map(([key, value]) => `--ap_${key}: ${value};`).join('') + '}\n' + new TextDecoder().decode(cssBytes));
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        let monitorHeight = 800;
+        const available = Array.from({ length: 8 }, (_, index) => ({
+            key: `nearby-${index}`, name: `AA-BB-CC-DD-EE-${String(index).padStart(2, '0')}`,
+            address: `AA:BB:CC:DD:EE:${String(index).padStart(2, '0')}`,
+        }));
+        const state = { ...audioState, bluetooth: { available: true, powered: true, devices: [
+            { key: 'paired-one', name: 'Headphones', paired: true },
+            { key: 'paired-two', name: 'Mouse', paired: true }, ...available,
+        ] } };
+        const panel = Object.assign(Object.create(AudioPanel.prototype), {
+            content: new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, css_classes: ['audio-content'] }),
+            card: new Gtk.Overlay({ width_request: 400, halign: Gtk.Align.START, valign: Gtk.Align.START,
+                css_classes: ['audio-card'] }),
+            audio: {}, deviceRows: new Map(), failures: {}, opened: true, currentTab: 0, cardWidth: 400,
+            backend: { snapshot: () => state }, monitor: { get_geometry: () => ({ width: 1280, height: monitorHeight }) },
+        });
+        panel.card.set_child(new Gtk.Box());
+        panel.card.add_overlay(panel.content);
+        panel.card.set_measure_overlay(panel.content, true);
+        panel.build();
+        const host = new Gtk.Window({ child: panel.card, default_width: 500, default_height: 650,
+            css_classes: ['audio-panel'] });
+        try {
+            panel.render(); host.present(); await wait();
+            panel.render(); await wait();
+            const viewport = panel.bluetoothList;
+            for (const device of available.slice(0, 5)) {
+                const [ok, bounds] = panel.deviceRows.get(device.key).widget.compute_bounds(viewport);
+                if (!ok || bounds.get_y() < -1 || bounds.get_y() + bounds.get_height() > viewport.get_height() + 1)
+                    throw new Error(`${device.key}: five unpaired devices must fit below remembered rows`);
+                checks++;
+            }
+            const [ok, sixth] = panel.deviceRows.get(available[5].key).widget.compute_bounds(viewport);
+            if (!ok || sixth.get_y() < viewport.get_height() - 1)
+                throw new Error('The sixth unpaired row must scroll rather than enlarge the viewport');
+            if (panel.card.get_height() >= 520) throw new Error('Bluetooth must shrink below its old fixed height');
+            monitorHeight = 300;
+            panel.render(); await wait();
+            if (panel.card.get_height() > 236) throw new Error('Bluetooth must stay inside the short-monitor budget');
+            checkTree(host);
+            print('PASS Bluetooth: five unpaired rows fit below remembered devices; extra rows scroll; short monitors stay bounded');
+        } finally {
+            host.destroy();
+            Gtk.StyleContext.remove_provider_for_display(Gdk.Display.get_default(), provider);
+        }
+    }
+
+    const MediaPanel = panelClass('media-control', 'MediaPanel', '\nlet backend, panel;');
+    let enabled = true;
+    const media = Object.assign(Object.create(MediaPanel.prototype), {
+        content: new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL }), groups: [], activePlayer: '', rows: new Map(),
+        opened: true, failure: '', backend: { current: () => enabled,
+            transport: () => ({ enabled, reason: enabled ? '' : 'Unavailable' }),
+            volume: () => ({ enabled, muteEnabled: enabled, value: 0.4, reason: '', muteReason: '' }),
+            player: bus => media.groups.find(group => group.primary.bus === bus)?.primary },
+    });
+    media.build();
+    const group = (bus, text) => ({ displayName: `Fake ${bus}`, title: text,
+        primary: { bus, title: text, canSeek: true, length: 90 } });
+    await exercise('media', media, [() => {}, () => {
+        media.groups = [group('one', 'Long <literal> title & 🎵'.repeat(10)), group('two', 'Other track')];
+        media.activePlayer = 'one';
+        media.sources.reveal_child = true;
+    }, () => { media.groups[0].primary.title = 'Renamed track'; enabled = false; },
+    () => { media.groups = [group('two', '')]; media.activePlayer = 'two'; enabled = true; },
+    () => { media.groups = []; }]);
+
+    const ClipboardPanel = panelClass('clipboard', 'ClipboardPanel', '\nexport function createApplication(');
+    const model = { rows: [], editor: null, tab: 'memo', query: '', busy: false, failure: '',
+        filter(query) { this.query = query; } };
+    const clipboard = Object.assign(Object.create(ClipboardPanel.prototype), {
+        content: new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL }), model, opened: false,
+        viewRows: [], rowTitles: [], titleCache: new WeakMap(), home: '/fixture', bufferText: '',
+    });
+    clipboard.build();
+    await exercise('clipboard', clipboard, [() => {},
+        ...[[1, 'memo', false, ''], [2, 'file', true, '/fixture/local.txt'], [3, 'text', false, '']]
+            .map(([id, kind, pinned, name]) => () => {
+                model.rows = [{ id, kind, pinned, name, text: `Fake entry ${id}` }];
+                model.tab = kind;
+                model.query = id % 2 ? 'fixture' : '';
+            }), () => { model.busy = true; }, () => { model.rows = []; }]);
+    print(`PASS ${checks} native widget checks; only fixture strings and model doubles; no backends or clipboard access`);
+    print('LIMITATION: Xvfb checks GTK tooltip properties, not Wayland placement, tooltip painting or screen-reader announcements.');
+}
+
+const usage = 'Usage:\n'
+    + '  node --test scripts/audio-control/astal/test.js (Node-only units)\n'
+    + '  node scripts/audio-control/astal/test.js --tooltips /absolute/path/to/panel-gjs\n'
+    + '  panel-gjs -m scripts/audio-control/astal/test.js native|dropdown|tooltips\n'
+    + 'native reads live services; dropdown requires AUDIO_DROPDOWN_ISOLATED=1 and private X11/D-Bus; '
+    + 'tooltips requires the Node isolation wrapper.';
+
+if (globalThis.process?.versions?.node) {
+    const args = process.argv.slice(2);
+    if (!args.length) await nodeTests();
+    else if (args.length === 2 && args[0] === '--tooltips') await isolatedTooltips(args[1]);
+    else throw new Error(`Unknown or invalid Node test mode: ${args.join(' ')}\n${usage}`);
+} else {
+    const args = typeof ARGV === 'undefined' ? [] : ARGV;
+    if (args.length !== 1) throw new Error(usage);
+    switch (args[0]) {
+    case 'native': await gjsNativeTests(); break;
+    case 'dropdown': await gjsDropdownTests(); break;
+    case 'tooltips': await gjsTooltipTests(); break;
+    default: throw new Error(`Unknown GJS test mode: ${args[0]}\n${usage}`);
+    }
 }

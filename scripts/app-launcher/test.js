@@ -105,6 +105,43 @@ async function unitTests() {
         assert.ok(panelLayout(320, 600).columns < GRID_COLUMNS);
     });
 
+    test('app tiles use dim yellow interactions with a later dim red selected override and unchanged tint', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+        const matchingRules = (...selectors) => rules.filter(([, group]) => group.split(',').some(value => selectors.includes(value.trim())));
+        const rule = selector => {
+            const [match] = matchingRules(selector);
+            assert.ok(match, `Missing rule for ${selector}`);
+            return match[2];
+        };
+        const base = rule('.app-launcher button.app-tile');
+        assert.match(base, /border: 1px solid transparent;/);
+        assert.match(base, /background: transparent;/);
+        assert.match(base, /background-image: none;/);
+        assert.match(base, /box-shadow: none;/);
+        assert.match(base, /outline: none;/);
+        assert.match(base, /transition: border-color 140ms ease;/);
+        for (const state of ['.selected', ':hover', ':focus-visible', ':active']) {
+            const tile = rule(`.app-launcher button.app-tile${state}`);
+            assert.match(tile, /border-color: alpha\(#FCEE0A, 0\.45\);/);
+            assert.match(tile, /background: alpha\(#ff6b75, 0\.1\);/);
+            assert.match(tile, /background-image: none;/);
+            assert.match(tile, /box-shadow: none;/);
+            assert.doesNotMatch(tile, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
+        }
+        const selected = '.app-launcher button.app-tile.selected';
+        const selectedRules = matchingRules(selected);
+        assert.equal(selectedRules.length, 2);
+        assert.equal(selectedRules[1][1].trim(), selected);
+        assert.equal(selectedRules[1][2].trim(), 'border-color: alpha(#ff6b75, 0.55);');
+        for (const state of ['', ':hover', ':focus-visible', ':active']) {
+            // Both selectors have equal specificity, so the last border color wins.
+            const colors = matchingRules(selected, `.app-launcher button.app-tile${state}`)
+                .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
+            assert.deepEqual(colors, ['alpha(#FCEE0A, 0.45)', 'alpha(#ff6b75, 0.55)'], `Selected must win over ${state || 'idle'}`);
+        }
+    });
+
     test('launcher opens and clears search without preselecting the first app', () => {
         const { panel, setQuery } = panelFixture();
         panel.render();
@@ -225,6 +262,11 @@ async function smokeTests() {
     const { LauncherApplication, LauncherPanel } = await import('./frontend.js');
 
     function assert(condition, message) { if (!condition) throw new Error(message); }
+    function assertTooltipFree(widget) {
+        assert(!widget.has_tooltip && !widget.tooltip_text && !widget.tooltip_markup,
+            'All launcher widgets, including search icons, must remain tooltip-free');
+        for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) assertTooltipFree(child);
+    }
     function wait(ms) {
         return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
             resolve();
@@ -254,7 +296,7 @@ async function smokeTests() {
             `Panel must finish sliding open: open=${panel.opened}, visible=${panel.window.visible}, revealed=${panel.revealer.child_revealed}`);
         assert(panel.results.length === panel.backend.applications.length, 'Unfiltered grid must include every visible app');
         assert(panel.tiles.length === panel.results.length, 'Every app must have a tile');
-        assert(panel.tiles.every(tile => !tile.get_has_tooltip()), 'Application tiles must not show tooltips');
+        assertTooltipFree(panel.root);
         const catalog = panel.backend.applications;
         const originalTiles = new Map(panel.results.map((application, index) => [application, panel.tiles[index]]));
         assert(panel.backend.applications === catalog && panel.backend.query('  ') === catalog,
@@ -307,6 +349,7 @@ async function smokeTests() {
         panel.search.set_text(application.name);
         await wait(150);
         assert(panel.results.some(result => result.entry === application.entry), 'Search must include an exact application name');
+        assertTooltipFree(panel.root);
         assert(panel.tiles.every((tile, index) => tile === originalTiles.get(panel.results[index])),
             'Filtering must reuse the existing native application tiles');
         assert(searchFocused(), 'Filtering must not steal focus from the search field');
@@ -322,6 +365,7 @@ async function smokeTests() {
         assert(panel.results.length === panel.backend.applications.length, 'Clearing search must restore every application');
         assert(panel.tiles.every((tile, index) => tile === originalTiles.get(panel.results[index])),
             'Clearing search must reuse the original tiles');
+        assertTooltipFree(panel.root);
         panel.tiles[0].add_css_class('launch-error');
         panel.render();
         assert(!panel.tiles[0].has_css_class('launch-error'), 'Rerendering must clear transient launch errors');
@@ -338,6 +382,7 @@ async function smokeTests() {
         assert(panel.tiles.every(tile => ![...originalTiles.values()].includes(tile)),
             'Native reloads must replace tiles rather than retain stale application metadata');
         assert(searchFocused(), 'Native catalog refresh must retain search focus');
+        assertTooltipFree(panel.root);
         const status = JSON.parse(await app.handleRequest('{"command":"status"}'));
         assert(status.opened && status.applications === panel.backend.applications.length, 'Status must expose native application count');
         await app.handleRequest('{"command":"close"}');

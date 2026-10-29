@@ -131,6 +131,12 @@ export class LauncherPanel {
         this.search = new Gtk.SearchEntry({ placeholder_text: 'Search applications',
             height_request: SEARCH_HEIGHT, hexpand: true, search_delay: 80,
             css_classes: ['launcher-search'] });
+        // Gtk.SearchEntry's built-in clear icon has its own hover tooltip.
+        const clear = this.search.get_last_child();
+        if (clear) {
+            clear.set_tooltip_text(null);
+            clear.update_property([Gtk.AccessibleProperty.LABEL], ['Clear search']);
+        }
         this.search.connect('search-changed', () => this.render());
         this.search.connect('activate', () => this.launch(this.selected));
         this.grid = new Gtk.Grid({ column_spacing: TILE_GAP, row_spacing: TILE_GAP,

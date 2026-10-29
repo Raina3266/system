@@ -90,7 +90,7 @@ in
       pkgs.mprisence
       packages.ycal.package
       packages.audioControl
-      packages.networkManager
+
     ];
     programs.google-chrome = {
       commandLineArgs = [

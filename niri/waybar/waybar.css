@@ -148,7 +148,6 @@ window#waybar.bottom {
 .scroll-arrow-left:hover,
 .scroll-arrow-right:hover {
     background-image: none;
-    background-color: rgba(255, 126, 219, 0.1);
 }
 
 /* ── Tooltips ── */

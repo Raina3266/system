@@ -458,7 +458,7 @@ class MediaPanel {
         this.empty.visible = !player;
         this.details.visible = Boolean(player);
         this.title.set_label(player?.title || 'Unknown title');
-        this.title.tooltip_text = player?.title || '';
+        this.title.update_property([Gtk.AccessibleProperty.LABEL], [player?.title || 'Unknown title']);
         this.credit.set(player, this.opened);
         this.art.set(player?.cover || '', player?.url || '', this.opened && Boolean(player));
         this.play.get_child().set_label(player?.playing ? '󰏤' : '󰐊');

@@ -1110,7 +1110,193 @@ async function unitTests() {
         assert.equal(calls.length, 1, 'invalid palettes never reach the stylesheet loader');
     });
     rowActionTests(test, assert, ClipboardModel);
+    await viewTests(test, assert);
     await backendTests(test, assert);
+}
+
+async function viewTests(test, assert) {
+    const { readFile } = await import('node:fs/promises');
+    const { TABS, editable, localFilePath, title } = await import('./logic.js');
+    const source = await readFile(new URL('./frontend.js', import.meta.url), 'utf8');
+    test('clipboard tabs use the network panel’s flat cyan/red underline styling', async () => {
+        const css = await readFile(new URL('./style.css', import.meta.url), 'utf8');
+        const tabs = css.slice(css.indexOf('.clipboard-panel button.tab {'), css.indexOf('.clipboard-panel entry,'));
+        assert.match(tabs, /border: none;\s*border-bottom: 2px solid var\(--cp_cyan\);/);
+        assert.match(tabs, /border-radius: 0;/);
+        assert.match(tabs, /min-height: 30px;/);
+        assert.match(tabs, /font-size: 14px;/);
+                assert.match(tabs, /letter-spacing: 0\.5px;/);
+        assert.match(tabs, /button\.tab\.selected:focus-visible \{\s*border-color: var\(--cp_red\);\s*background: transparent;\s*color: var\(--cp_red\);/);
+        assert.match(tabs, /button\.tab\.selected:active \{ background: transparent; \}/);
+        assert.doesNotMatch(tabs, /background: (?!transparent;)/);
+        assert.doesNotMatch(tabs, /--cp_pink|border-width:/);
+        assert.match(css, /\.clipboard-page-body \{\s*padding: 4px;\s*border: none;/);
+    });
+    test('clipboard history uses dim yellow hover and dim red selected outlines with a subtle tint', async () => {
+        const css = await readFile(new URL('./style.css', import.meta.url), 'utf8');
+        const rows = css.slice(css.indexOf('.clipboard-panel .history row {'), css.indexOf('.clipboard-panel .pin-badge {'));
+        for (const state of ['selected', 'hover', 'focus-within', 'active'])
+            assert.ok(rows.includes(`row:${state}`));
+        assert.match(rows, /box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--cp_yellow\) 45%, transparent\);/);
+        assert.match(rows, /row:selected \{\s*box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--cp_red\) 55%, transparent\);/);
+        assert.ok(rows.indexOf('row:selected {') > rows.indexOf('row:hover,'), 'selected outline wins over hover');
+        assert.match(rows, /min-height: 40px;/);
+        assert.match(rows, /background: color-mix\(in srgb, var\(--cp_red\) 10%, transparent\);/);
+        const actions = css.slice(css.indexOf('.clipboard-panel button.row-action {'), css.indexOf('.clipboard-panel .editor text {'));
+        assert.doesNotMatch(actions, /background: (?!transparent;)/);
+        assert.match(css, /\.clipboard-content \{ padding: 8px; \}/);
+        assert.match(css, /\.clipboard-page-body \{\s*padding: 4px;/);
+        assert.match(source, /left_margin: 8, right_margin: 8,\s*top_margin: 8, bottom_margin: 8/);
+    });
+    test('clipboard widgets never create visual tooltips or query handlers', () => {
+        const widgets = source.slice(0, source.indexOf('export function createApplication('));
+        assert.equal(widgets.match(/clear\.set_tooltip_text\(null\)/g)?.length, 1,
+            'only the built-in search clear tooltip needs an explicit local removal');
+        assert.doesNotMatch(widgets.replace('clear.set_tooltip_text(null);', ''),
+            /tooltip[_-]?(?:text|markup)|has[_-]?tooltip|(?:set|query)[_-]?tooltip|Gtk\.Settings/i);
+    });
+    test('clipboard status retains its tooltip metadata contract while open and closed', async () => {
+        let respond;
+        const createApplication = new Function('GObject', 'Astal', 'AstalIO',
+            source.slice(source.indexOf('export function createApplication('), source.indexOf('export function main(')).replace('export ', '')
+            + '\nreturn createApplication;')({ registerClass: value => value }, { Application: class {} }, {
+                write_sock(connection, response, callback) { respond(JSON.parse(response)); callback(null, {}); },
+                write_sock_finish() {},
+            });
+        const app = createApplication();
+        for (const opened of [false, true]) {
+            app.panel = { opened };
+            const response = new Promise(resolve => { respond = resolve; });
+            app.vfunc_request('{"command":"status"}', { close() {} });
+            assert.deepEqual(await response, { text: '󰅌', tooltip: 'Clipboard panel · history and preview', class: opened ? 'open' : 'closed' });
+        }
+    });
+    test('the whole clipboard tree stays tooltip-free and row accessibility refreshes on recycling', () => {
+        class Widget {
+            constructor(properties = {}) {
+                this.children = [];
+                this.signals = new Map();
+                this.a11y = {};
+                Object.assign(this, properties);
+                if (this.child) this.child.parent = this;
+            }
+            connect(name, callback) { this.signals.set(name, callback); }
+            emit(name, ...args) { this.signals.get(name)?.(this, ...args); }
+            update_property(properties, values) { properties.forEach((property, index) => { this.a11y[property] = values[index]; }); }
+            append(child) { this.children.push(child); child.parent = this; }
+            set_child(child) { this.child = child; child.parent = this; }
+            get_child() { return this.child; }
+            get_first_child() { return this.children[0]; }
+            get_last_child() { return this.children.at(-1); }
+            get_next_sibling() { return this.parent.children[this.parent.children.indexOf(this) + 1]; }
+            set_label(text) { this.label = text; }
+            set_tooltip_text(text) { this.tooltip_text = text; this.has_tooltip = Boolean(text); }
+            get_text() { return this.text || ''; }
+            set_text(text) { this.text = text; }
+            add_css_class(name) { this.css_classes = [...new Set([...(this.css_classes || []), name])]; }
+            remove_css_class(name) { this.css_classes = this.css_classes?.filter(value => value !== name); }
+            set_css_classes(names) { this.css_classes = names; }
+            add_named(child) { this.append(child); }
+            set_paintable() {}
+            scroll_to() {}
+        }
+        class TextView extends Widget { constructor(properties) { super(properties); this.buffer = new Widget(); } }
+        class SearchEntry extends Widget {
+            constructor(properties) {
+                super(properties);
+                this.append(new Widget({ tooltip_text: 'Clear Entry', has_tooltip: true }));
+            }
+        }
+        class ListView extends Widget {
+            constructor(properties) {
+                super(properties);
+                this.items = [];
+                this.model.model.changed = () => {
+                    const strings = this.model.model;
+                    this.children = [];
+                    for (let index = 0; index < strings.values.length; index++) {
+                        let item = this.items[index];
+                        if (!item) {
+                            item = this.items[index] = new Widget({ get_position: () => index,
+                                get_item: () => ({ get_string: () => strings.get_string(index) }) });
+                            this.factory.emit('setup', item);
+                        }
+                        this.factory.emit('bind', item);
+                        this.append(item.get_child());
+                    }
+                };
+            }
+        }
+        const Gtk = { Box: Widget, Label: Widget, Button: Widget, SearchEntry, TextView,
+            SignalListItemFactory: Widget, ListView, SingleSelection: Widget, ScrolledWindow: Widget,
+            Picture: Widget, Stack: Widget, AccessibleProperty: { LABEL: 'label', DESCRIPTION: 'description' },
+            Orientation: { HORIZONTAL: 0, VERTICAL: 1 }, Align: { CENTER: 0 }, WrapMode: { WORD_CHAR: 0 },
+            PolicyType: { NEVER: 0, AUTOMATIC: 1 }, ContentFit: { CONTAIN: 0 },
+            INVALID_LIST_POSITION: 0xffffffff, ListScrollFlags: { NONE: 0 },
+            StringList: { new(values) { return { values, get_string(index) { return this.values[index]; },
+                splice(start, count, additions) { this.values.splice(start, count, ...additions); this.changed?.(); } }; } } };
+        const ClipboardPanel = new Function('Gtk', 'Pango', 'TABS', 'editable', 'localFilePath', 'title',
+            source.slice(source.indexOf('function box('), source.indexOf('function frame('))
+            + source.slice(source.indexOf('export class ClipboardPanel'), source.indexOf('export function createApplication(')).replace('export ', '')
+            + '\nreturn ClipboardPanel;')(Gtk, { EllipsizeMode: { END: 0 } }, TABS, editable, localFilePath, title);
+        const actions = [];
+        const model = { rows: [], editor: null, query: '', tab: 'memo', failure: '', busy: false,
+            pin: id => actions.push(['pin', id]), remove: id => actions.push(['remove', id]),
+            changeTab: tab => actions.push(['tab', tab]) };
+        const panel = Object.assign(Object.create(ClipboardPanel.prototype), {
+            model, content: new Widget(), viewRows: [], rowTitles: [], titleCache: new WeakMap(), home: '/fixture', bufferText: '',
+        });
+        const checkTree = widget => {
+            assert.ok(!widget.tooltip_text && !widget.tooltip_markup && !widget.has_tooltip);
+            assert.equal(widget.signals.has('query-tooltip'), false);
+            widget.children.forEach(checkTree);
+            if (widget.child) checkTree(widget.child);
+        };
+        panel.build();
+        assert.equal(panel.tabs.spacing, 4);
+                assert.ok(panel.tabButtons.every(tab => tab.height_request === 32));
+        assert.equal(panel.tabs.homogeneous, true);
+        assert.equal(panel.search.get_last_child().a11y.label, 'Clear search');
+        assert.match(source, /this\.content = box\(true, 0\);/);
+        assert.equal(panel.search.margin_bottom, 6, 'search-to-tabs gap is compact');
+        assert.equal(panel.failure.margin_top, 12, 'inline errors keep their existing gap');
+        let recycledRow;
+        for (const [id, kind, pinned, name] of [[1, 'memo', false, ''], [2, 'file', true, '/fixture/local.txt'],
+            [3, 'file', false, 'https://example.invalid/remote'], [4, 'text', true, ''], [5, 'memo', false, '']]) {
+            model.rows = [{ id, kind, pinned, name, text: `Fixture ${id}` }];
+            model.query = id % 2 ? 'fixture' : '';
+            for (const busy of [false, true]) {
+                model.busy = busy;
+                panel.render();
+                checkTree(panel.content);
+                assert.equal(panel.list.sensitive, !busy);
+            }
+            const row = panel.list.get_first_child();
+            if (recycledRow) assert.equal(row, recycledRow, 'the same factory row is rebound to each fixture');
+            recycledRow = row;
+            const badge = row.get_first_child().get_next_sibling();
+            const pin = row.get_last_child().get_first_child(), remove = row.get_last_child().get_last_child();
+            assert.equal(badge.visible, pinned);
+            assert.equal(badge.a11y.description, 'Pinned — kept at the top of history');
+            assert.equal(pin.a11y.label, pinned ? 'Unpin item' : 'Pin item');
+            assert.equal(pin.a11y.description, pinned ? 'Unpin this item' : 'Pin this item to the top');
+            assert.equal(remove.a11y.label, localFilePath(model.rows[0]) ? 'Move file to Trash' : 'Delete item');
+            assert.equal(remove.a11y.description, localFilePath(model.rows[0])
+                ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry');
+            pin.emit('clicked');
+            remove.emit('clicked');
+            assert.deepEqual(actions.splice(0), [['pin', id], ['remove', id]], 'recycled buttons target only the current fake entry');
+        }
+        panel.tabButtons.forEach((widget, index) => {
+            assert.equal(widget.a11y.description, `Show ${TABS[index]} entries`);
+            widget.emit('clicked');
+        });
+        assert.deepEqual(actions, TABS.map(tab => ['tab', tab]));
+        model.rows = [];
+        panel.render();
+        checkTree(panel.content);
+        assert.equal(panel.list.children.length, 0);
+    });
 }
 
 function rowActionTests(test, assert, ClipboardModel) {
@@ -1975,9 +2161,9 @@ async function nativeTests() {
         assert(['top', 'right', 'bottom', 'left'].every(side => outerBorder[side] === 0),
             'The tab container must not add a cyan border around inactive tabs');
         const pageBorder = panel.body.get_style_context().get_border();
-        assert(pageBorder.top === 0 && pageBorder.left === 1 && pageBorder.right === 1 && pageBorder.bottom === 1,
-            'The cyan content outline must join the tabs below their own pink/cyan outlines');
-        assert(panel.tabs.homogeneous && panel.tabs.spacing === 0, 'Audio-style tabs must be equal-width and connected');
+        assert(['top', 'right', 'bottom', 'left'].every(side => pageBorder[side] === 0),
+            'The content must not have an outline joined to the tabs');
+        assert(panel.tabs.homogeneous && panel.tabs.spacing === 4, 'Network-style tabs must be equal-width with 4px gaps');
         const tabWidths = panel.tabButtons.map(tab => tab.get_width());
         assert(Math.max(...tabWidths) - Math.min(...tabWidths) <= 1, 'Tab widths must only differ by pixel rounding');
         const matchesColor = (widget, hex) => {
@@ -1987,16 +2173,19 @@ async function nativeTests() {
         };
         panel.tabButtons.forEach((tab, index) => {
             assert(tab.label === ['MEMO', 'TEXT', 'FILES'][index] && tab.has_css_class('tab'),
-                'Tabs must use the audio panel’s text-only uppercase labels');
+                'Tabs must use text-only uppercase labels');
             // get_height() is the content box; include CSS borders here.
-            assert(tab.get_allocated_height() === 40,
-                `Audio-style tabs must allocate 40px, got ${tab.get_allocated_height()}`);
+            assert(tab.get_allocated_height() === 32,
+                `Network-style tabs must allocate 32px, got ${tab.get_allocated_height()}`);
             assert(tab.has_css_class('selected') === (index === 0), 'Only the current tab may be selected');
-            assert(matchesColor(tab.get_child(), index === 0 ? palette.cyan : palette.pink),
-                'Selected tabs must be cyan and inactive tabs pink');
+            const border = tab.get_style_context().get_border();
+            assert(border.top === 0 && border.left === 0 && border.right === 0 && border.bottom === 2,
+                'Tabs must have only a 2px underline');
+            assert(matchesColor(tab.get_child(), index === 0 ? palette.red : palette.cyan),
+                'Selected tabs must be red and inactive tabs cyan');
         });
         for (const tab of panel.tabButtons) {
-            const color = tab.has_css_class('selected') ? palette.cyan : palette.pink;
+            const color = tab.has_css_class('selected') ? palette.red : palette.cyan;
             for (const state of [Gtk.StateFlags.PRELIGHT, Gtk.StateFlags.FOCUS_VISIBLE]) {
                 tab.set_state_flags(state, false);
                 await wait(150);
@@ -2043,8 +2232,8 @@ async function nativeTests() {
         assert(matchesColor(badge, palette.red), 'Pin badges must use the red accent');
         assert(pinnedRow.get_first_child().label === panel.strings.get_string(0), 'Pin badges must not alter item titles');
         const unpin = pinnedRow.get_last_child().get_first_child();
-        assert(unpin.has_css_class('pinned') && unpin.tooltip_text === 'Unpin this item',
-            'Pinned rows must expose a distinct red Unpin action');
+        assert(unpin.has_css_class('pinned') && !unpin.has_tooltip && !unpin.tooltip_text && !unpin.tooltip_markup,
+            'Pinned rows must expose a distinct red Unpin action without a hover tooltip');
         assert(model.editor === null && publications === 0 && panel.opened,
             'Pinning an unselected row must not select it, copy it or close the panel');
         unpin.grab_focus();
@@ -2086,7 +2275,7 @@ async function nativeTests() {
             'Explicit keyboard navigation must still select the first row');
         assert(await model.changeTab('file'), model.failure);
         assert(panel.tabButtons.every((tab, index) => tab.has_css_class('selected') === (index === 2)),
-            'Switching tabs must transfer the selected outline to Files');
+            'Switching tabs must transfer the selected underline to Files');
         assert(await model.select(2), model.failure);
         assert(!panel.editor.editable, 'File references must be read-only');
         assert(await model.copy(), model.failure);

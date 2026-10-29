@@ -43,7 +43,11 @@ window.media-panel {
     outline: none;
     transition: background 120ms ease-out, border-color 100ms ease-out;
 }
-.media-panel button:hover, .media-panel button:focus-visible {
+.media-panel button:hover {
+    border-color: @mp_yellow;
+    border-width: 1.5px;
+}
+.media-panel button:focus-visible {
     background: alpha(@mp_pink, 0.333);
     border-color: @mp_yellow;
     border-width: 1.5px;
@@ -149,17 +153,37 @@ window.media-panel {
 .media-panel scale.volume-track:disabled value { color: @mp_separator; }
 
 .media-panel .section-button { border: none; padding: 4px 4px 4px 8px; }
-.media-panel .section-button:hover { background: alpha(@mp_dimPink, 0.35); }
 .media-panel .section-glyph, .media-panel .section-label, .media-panel .chevron { color: @mp_pink; }
 .media-panel .section-label { font-size: 10px; letter-spacing: 2px; font-weight: bold; }
 .media-panel .source-name { color: @mp_cyan; font-size: 12px; font-weight: bold; }
 .media-panel .section-button:disabled .chevron { color: @mp_separator; }
 .media-panel .sources { margin-top: 4px; }
-.media-panel .source-row { border-radius: 4px; min-height: 42px; padding: 0 8px 0 6px; }
-.media-panel .source-row:hover { background: alpha(@mp_dimPink, 0.5); }
-.media-panel .source-row.current { background: @mp_dimPink; }
-.media-panel .source-select { border: none; background: transparent; }
-.media-panel .source-select:hover, .media-panel .source-select:active { background: transparent; }
+.media-panel .source-row {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    min-height: 40px;
+    padding: 0 7px 0 5px;
+    background: transparent;
+    background-image: none;
+}
+.media-panel .source-row.current,
+.media-panel .source-row:hover,
+.media-panel .source-row:focus-within,
+.media-panel .source-row:active {
+    border-color: alpha(@mp_yellow, 0.45);
+    background: alpha(@mp_red, 0.1);
+}
+.media-panel .source-row.current { border-color: alpha(@mp_red, 0.55); }
+.media-panel button.source-select,
+.media-panel button.source-select:hover,
+.media-panel button.source-select:focus-visible,
+.media-panel button.source-select:active {
+    border: none;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    outline: none;
+}
 .media-panel .source-title { color: @mp_foreground; font-size: 13px; }
 .media-panel .source-row .source-name { font-size: 13px; }
 .media-panel scrolledwindow { background: transparent; border: none; }

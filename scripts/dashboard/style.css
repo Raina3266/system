@@ -86,8 +86,13 @@ window.dashboard-ui,
 .dashboard-ui .icon-button { border-radius: 999px; }
 .dashboard-ui .icon-glyph { color: @dp_red; font-size: 14px; }
 .dashboard-ui .notification-close .icon-glyph { font-size: 10px; }
-.dashboard-ui .icon-button:hover, .dashboard-ui .icon-button:focus-visible,
-.dashboard-ui .notification-action:hover, .dashboard-ui .notification-action:focus-visible {
+.dashboard-ui .icon-button:hover,
+.dashboard-ui .notification-action:hover {
+    border-color: @dp_yellow;
+    border-width: 1.5px;
+}
+.dashboard-ui .icon-button:focus-visible,
+.dashboard-ui .notification-action:focus-visible {
     background: alpha(@dp_pink, 0.333);
     border-color: @dp_yellow;
     border-width: 1.5px;
@@ -105,7 +110,13 @@ window.dashboard-ui,
     border-radius: 2px;
     transition: background-color 120ms ease-out;
 }
-.dashboard-ui .notification-entry.hovered, .dashboard-ui .notification-entry:focus-visible { background: alpha(@dp_dimPink, 0.35); }
+.dashboard-ui .notification-entry:hover,
+.dashboard-ui .notification-entry:focus-visible,
+.dashboard-ui .notification-entry:active {
+    background: alpha(@dp_red, 0.1);
+    border-color: alpha(@dp_yellow, 0.45);
+}
+.dashboard-ui .notification-entry:focus-visible { border-color: alpha(@dp_red, 0.55); }
 .dashboard-ui .notification-layout { margin: 8px 23px 8px 11px; }
 .dashboard-ui .notification-stripe { min-width: 2px; background: @dp_cyan; }
 .dashboard-ui .notification-entry.critical .notification-stripe { background: @dp_red; }

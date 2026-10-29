@@ -240,7 +240,7 @@ rec {
   };
 
   inherit (panels {
-    inherit pkgs repoRoot panelLauncher audioControl mediaControl networkManager clipboardCustom;
+    inherit pkgs repoRoot panelLauncher audioControl mediaControl clipboardCustom;
   }) clipboardPanel audioPanel mediaPanel networkPanel dashboardPanel appLauncher;
 
   dashboardTypeEnvironment =
@@ -299,19 +299,6 @@ rec {
       test -s "$out/node_modules/@types/dashboard-gi/index.d.ts"
       test -s "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts"
     '';
-
-  networkManager = mkWorkspacePackage "network-manager" {
-    workspaceMember = "network-manager/rust-custom";
-    # Build only this small JSON/QR helper's dependency graph, not the full
-    # desktop workspace's D-Bus dependencies.
-    cargoArtifacts = mkCargoArtifacts "network-manager-deps" {
-      cargoExtraArgs = "--locked --package network-manager";
-    };
-    postInstall = ''
-      wrapProgram "$out/bin/network-manager" \
-        --set NETWORK_MANAGER_QRENCODE "${pkgs.lib.getExe' pkgs.qrencode "qrencode"}"
-    '';
-  };
 
   # Headless audio compatibility, pairing, and HID++ battery publication only.
   audioControl = mkWorkspacePackage "audio-control" {
