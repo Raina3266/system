@@ -166,12 +166,18 @@ impl Store {
         );
         // Validate before doing any I/O on behalf of a mutation. In particular,
         // an invalid cached filename must not cause an error after committing.
-        self.items(&history)?;
-        let previous_images: Vec<_> = history
-            .items
-            .iter()
-            .filter_map(|item| item.image_file.clone())
-            .collect();
+        for item in &history.items {
+            self.image_path(item)?;
+        }
+        let previous_images: Vec<_> = if write {
+            history
+                .items
+                .iter()
+                .filter_map(|item| item.image_file.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut pending = PendingImages::default();
         let mut reply = operation(&mut history, &mut pending)?;
         if write {

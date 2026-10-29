@@ -614,7 +614,12 @@ export class NotificationEntry {
 
 export class NotificationStack {
     readonly widget = box(true, 6);
-    readonly rows = new Map<string, { entry: NotificationEntry; widget: Gtk.Widget; frame?: CutCornerFrame }>();
+    readonly rows = new Map<string, {
+        entry: NotificationEntry;
+        widget: Gtk.Widget;
+        notification: NotificationRow;
+        frame?: CutCornerFrame;
+    }>();
 
     constructor(private readonly center: NotificationController, private readonly palette: Palette, readonly popup = false) {}
 
@@ -634,13 +639,17 @@ export class NotificationStack {
             if (!row) {
                 const entry = new NotificationEntry(notification, this.center, this.popup);
                 const frame = this.popup ? new CutCornerFrame(this.palette, entry.widget, { padding: 8 }) : undefined;
-                row = { entry, frame, widget: frame?.widget || entry.widget };
+                row = { entry, frame, notification, widget: frame?.widget || entry.widget };
+                frame?.setUrgency(notification.urgency, this.palette);
                 this.rows.set(notification.id, row);
                 this.widget.append(row.widget);
+            } else if (row.notification !== notification) {
+                row.notification = notification;
+                row.entry.update(notification);
+                row.frame?.setUrgency(notification.urgency, this.palette);
             }
-            row.entry.update(notification);
-            row.frame?.setUrgency(notification.urgency, this.palette);
-            this.widget.reorder_child_after(row.widget, previous);
+            if (row.widget.get_prev_sibling() !== previous)
+                this.widget.reorder_child_after(row.widget, previous);
             previous = row.widget;
         }
     }

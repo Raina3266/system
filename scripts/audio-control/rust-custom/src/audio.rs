@@ -270,8 +270,12 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
 
 pub(crate) fn clarify_selection_labels(choices: &mut [Choice], labels: &HashMap<String, String>) {
     let names: Vec<_> = choices.iter().map(|row| row.label.to_lowercase()).collect();
+    let counts = names.iter().fold(HashMap::new(), |mut counts, name| {
+        *counts.entry(name.as_str()).or_insert(0) += 1;
+        counts
+    });
     for (row, label) in choices.iter_mut().zip(&names) {
-        if names.iter().filter(|other| *other == label).count() > 1
+        if counts[label.as_str()] > 1
             && let Some(device) = labels.get(if row.card.is_empty() {
                 &row.name
             } else {
@@ -286,9 +290,13 @@ pub(crate) fn clarify_selection_labels(choices: &mut [Choice], labels: &HashMap<
         .iter()
         .map(|row| single_line(&row.label, 48).to_lowercase())
         .collect();
+    let counts = names.iter().fold(HashMap::new(), |mut counts, name| {
+        *counts.entry(name.as_str()).or_insert(0) += 1;
+        counts
+    });
     let mut used: std::collections::HashSet<_> = names.iter().cloned().collect();
     for (row, label) in choices.iter_mut().zip(&names) {
-        if names.iter().filter(|other| *other == label).count() > 1 {
+        if counts[label.as_str()] > 1 {
             let mut number = 1;
             loop {
                 let candidate = format!("#{number} {}", row.label);

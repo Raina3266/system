@@ -69,6 +69,10 @@ class Widget extends Signals {
         const siblings = this.parent?.children || [];
         return siblings[siblings.indexOf(this) + 1] || null;
     }
+    get_prev_sibling(): Widget | null {
+        const siblings = this.parent?.children || [];
+        return siblings[siblings.indexOf(this) - 1] || null;
+    }
     css_classes: string[] = [];
     accessible = new Map<number, unknown>();
     constructor(properties: Record<string, any> = {}) {
@@ -93,9 +97,15 @@ class Widget extends Signals {
 
 class Box extends Widget {
     children: Widget[] = [];
+    reorderCalls = 0;
     append(child: Widget) { child.parent = this; this.children.push(child); }
     remove(child: Widget) { this.children = this.children.filter(value => value !== child); child.parent = null; }
     get_first_child(): Widget | null { return this.children[0] || null; }
+    reorder_child_after(child: Widget, sibling: Widget | null) {
+        this.reorderCalls++;
+        this.children = this.children.filter(value => value !== child);
+        this.children.splice(sibling ? this.children.indexOf(sibling) + 1 : 0, 0, child);
+    }
 }
 class Label extends Widget { label = ''; constructor(properties: Record<string, any> = {}) { super(properties); Object.assign(this, properties); } }
 class Button extends Widget {
@@ -311,7 +321,7 @@ const hooks = registerHooks({
     },
 });
 const {
-    NotificationCenter, NotificationEntry, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
+    NotificationCenter, NotificationEntry, NotificationStack, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
     notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke, iconButton,
 } = await import('./notification.ts');
 const {
@@ -417,6 +427,33 @@ test('dashboard controls keep sleep descriptions and dynamic DND labels without 
     assert.equal(children.length, 0);
     panel.dispose();
     backend.dispose();
+});
+
+test('notification stacks skip unchanged row updates and already-correct ordering', () => {
+    const stack = new NotificationStack({
+        setHovered() {}, dismissNotification() {}, invokeNotificationAction() {},
+    }, palette);
+    const first = row('first', { icon: '' });
+    const second = row('second', { icon: '' });
+    stack.sync([first, second]);
+    const widget = stack.widget as unknown as Box;
+    const firstEntry = stack.rows.get('first')!.entry;
+    let updates = 0;
+    firstEntry.update = () => { updates++; };
+    widget.reorderCalls = 0;
+
+    stack.sync([first, second]);
+    assert.equal(updates, 0);
+    assert.equal(widget.reorderCalls, 0);
+
+    stack.sync([{ ...first, body: 'Updated' }, second]);
+    assert.equal(updates, 1);
+    assert.equal(widget.reorderCalls, 0);
+
+    stack.sync([second, first]);
+    assert.equal(widget.reorderCalls, 1);
+    assert.deepEqual(widget.children, [stack.rows.get('second')!.widget, stack.rows.get('first')!.widget]);
+    stack.dispose();
 });
 
 for (const popup of [false, true]) {
