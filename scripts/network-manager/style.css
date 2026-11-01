@@ -16,16 +16,18 @@ window.network-panel {
 }
 
 .network-panel .network-card { background: transparent; padding: 0; margin: 0; border: none; }
-.network-panel .network-content { padding: 12px; }
+.network-panel .network-content { padding: 12px 12px 7px 7px; }
+.network-panel .network-prompt-content { padding: 10px 12px 14px; }
 .network-panel label { background: transparent; color: @np_cyan; padding: 0; margin: 0; }
 
 .network-panel .network-row {
     border: 1px solid transparent;
     border-radius: 0;
-    padding: 6px 4px;
+    padding: 9px 4px;
     background: transparent;
     transition: background 120ms ease-out, border-color 120ms ease-out;
 }
+.network-panel .network-row:not(.saved-network-row) { padding: 7px 4px; }
 .network-panel .network-row:hover,
 .network-panel .network-row:focus-within,
 .network-panel .network-row.expanded {
@@ -78,7 +80,7 @@ window.network-panel {
 }
 .network-panel .network-details {
     border-left: none;
-    box-shadow: inset 2px 0 0 alpha(@np_cyan, 0.8);
+    box-shadow: none;
     border-top: 1px solid alpha(@np_pink, 0.18);
     background: transparent;
     padding: 6px 6px 6px 12px;
@@ -89,15 +91,15 @@ window.network-panel {
 .network-panel .network-details label { color: #ffffff; }
 .network-panel .network-details .network-info-heading { font-weight: bold; }
 
-/* Paint the extra hover stroke inward, so keyboard focus never resizes a row. */
+/* Use a single inset stroke without stacking a colored border on top. */
 .network-panel button.control-button:hover {
-    border-color: @np_yellow;
-    box-shadow: inset 0 0 0 1.15px @np_yellow;
+    border-color: transparent;
+    box-shadow: inset 0 0 0 0.5px @np_yellow;
 }
 .network-panel button.control-button:focus-visible {
     background: alpha(@np_pink, 0.333);
-    border-color: @np_yellow;
-    box-shadow: inset 0 0 0 1.15px @np_yellow;
+    border-color: transparent;
+    box-shadow: inset 0 0 0 0.5px @np_yellow;
 }
 .network-panel button.control-button:active { background: alpha(@np_pink, 0.45); }
 .network-panel button.control-button:disabled {

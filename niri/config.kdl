@@ -145,7 +145,6 @@ window-rule {
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "handy" "--start-hidden"
 spawn-at-startup "swaybg" "-i" "/home/raina/Pictures/Wallpaper.png" "-m" "fill"
-spawn-at-startup "sh" "-c" "sleep 3 && snixembed"
 
 hotkey-overlay {
     // skip-at-startup

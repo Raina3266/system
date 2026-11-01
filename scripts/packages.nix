@@ -2,6 +2,8 @@
 {
   pkgs,
   craneLib,
+  agsPackage,
+  astalPackages,
   kernelPackages ? pkgs.linuxPackages_latest,
   repoRoot ? "/home/raina/System",
 }:
@@ -240,7 +242,16 @@ rec {
   };
 
   inherit (panels {
-    inherit pkgs repoRoot panelLauncher audioControl mediaControl clipboardCustom;
+    inherit
+      pkgs
+      repoRoot
+      panelLauncher
+      audioControl
+      mediaControl
+      clipboardCustom
+      agsPackage
+      astalPackages
+      ;
   }) clipboardPanel audioPanel mediaPanel networkPanel dashboardPanel appLauncher;
 
   dashboardTypeEnvironment =

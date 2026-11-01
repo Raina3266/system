@@ -72,7 +72,6 @@ in
     wireplumber # PipeWire/WirePlumber control (wpctl for niri audio binds)
     brightnessctl # Screen brightness control
     xrandr # Display layout info for X11 apps
-    snixembed # System tray bridge for Qt5-xcb apps
     mediactl
   ];
 

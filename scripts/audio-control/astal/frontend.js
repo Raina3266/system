@@ -471,13 +471,11 @@ export class AudioPanel {
                 && name.replace(/[:-]/g, '').toLowerCase()
                     !== device.address?.replace(/[:-]/g, '').toLowerCase());
         };
-        const remembered = allDevices.filter(device => device.paired || device.connected)
-            .sort((left, right) => Number(hasName(right)) - Number(hasName(left)));
+        const connected = allDevices.filter(device => device.connected);
+        const paired = allDevices.filter(device => device.paired && !device.connected);
         const available = allDevices.filter(device => !device.paired && !device.connected);
-        const named = available.filter(hasName);
-        const unnamed = available.filter(device => !hasName(device));
-        const devices = [...named, ...remembered, ...unnamed];
-        const separatorIndex = named.length || remembered.length;
+        const devices = [...connected, ...paired, ...available.filter(hasName), ...available.filter(device => !hasName(device))];
+        const separatorIndex = connected.length + paired.length;
         this.bluetoothSeparator.visible = separatorIndex > 0 && separatorIndex < devices.length;
         const wanted = new Set(devices.map(device => device.key));
         for (const [key, row] of this.deviceRows) {

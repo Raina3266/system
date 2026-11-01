@@ -280,6 +280,35 @@ async function nodeControllerTests() {
     const { readFileSync } = await import('node:fs');
     const { default: vm } = await import('node:vm');
     const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    it('toggles the new Wi-Fi password eye without changing its text and remasks on reset', () => {
+        const method = name => {
+            const body = frontend.match(new RegExp(`    ${name}\\([^)]*\\) \\{([\\s\\S]*?)\\n    \\}`))?.[1];
+            assert.ok(body, `${name} is available`);
+            return vm.runInNewContext(`(function(visible) {${body}\n})`, {
+                Gtk: { AccessibleProperty: { LABEL: 'label' } },
+            });
+        };
+        const image = {};
+        const panel = {
+            password: { text: 'test-password', visibility: false, set_text(value) { this.text = value; } },
+            passwordReveal: { get_child: () => image, update_property(keys, values) { this.label = values[0]; } },
+            setPasswordVisible: method('setPasswordVisible'),
+        };
+        for (const visible of [false, true, false, true]) {
+            panel.setPasswordVisible(visible);
+            assert.equal(panel.password.visibility, visible);
+            assert.equal(image.icon_name, visible ? 'view-conceal-symbolic' : 'view-reveal-symbolic');
+            assert.equal(panel.passwordReveal.label, visible ? 'Hide password' : 'Reveal password');
+            assert.equal(panel.password.text, 'test-password', 'Toggling never changes the entered password');
+        }
+        method('clearPassword').call(panel);
+        assert.equal(panel.password.text, '');
+        assert.equal(panel.password.visibility, false);
+        assert.equal(image.icon_name, 'view-reveal-symbolic');
+        assert.match(frontend, /this\.setPasswordVisible\(!this\.password\.visibility\)/);
+        assert.match(frontend, /box\(false, 8, \[this\.password, this\.passwordReveal\]\)/);
+    });
+
     it('hides the password row for open and enhanced-open Wi-Fi details', () => {
         const expression = frontend.match(/const hasPassword = ([\s\S]*?);/)?.[1];
         assert.ok(expression, 'The real details password visibility condition is available');
@@ -304,10 +333,10 @@ async function nodeControllerTests() {
         for (const known of [false, true]) {
             const wifi = { wireless: true, known };
             assert.deepEqual(render(wifi), { label: '', visible: false });
-            assert.deepEqual(render({ ...wifi, connected: true }), { label: 'Connected', visible: true });
+            assert.deepEqual(render({ ...wifi, connected: true }), { label: '', visible: false });
             assert.deepEqual(render({ ...wifi, changing: true }), { label: 'Working…', visible: true });
             assert.deepEqual(render({ ...wifi, connected: true, changing: true }),
-                { label: 'Connected · Working…', visible: true });
+                { label: 'Working…', visible: true });
             assert.deepEqual(render({ wireless: false, known, interface: 'eth0' }),
                 { label: `${known ? 'Saved' : 'Not saved'} · eth0`, visible: true });
         }
@@ -336,7 +365,7 @@ async function nodeControllerTests() {
     });
 
     it('draws the panel frame without a translucent inner rail', () => {
-        const frame = frontend.match(/function frame\(palette\) \{([\s\S]*?)\n\}/)?.[1];
+        const frame = frontend.match(/function frame\(palette[^\n]*\{([\s\S]*?)\n\}/)?.[1];
         assert.ok(frame);
         assert.doesNotMatch(frame, /railX|railTop|setLineWidth\(3\)/);
         assert.match(frame, /cr\.setLineWidth\(1\)/);
@@ -346,7 +375,7 @@ async function nodeControllerTests() {
         const audio = readFileSync(new URL('../audio-control/astal/frontend.js', import.meta.url), 'utf8');
         const palette = { yellow: '#ffcc33', cyan: '#33ddff', background: '#110011' };
         const capture = (source, width, height) => {
-            const definition = source.match(/function frame\(palette\) \{[\s\S]*?\n\}/)?.[0];
+            const definition = source.match(/function frame\(palette[^\n]*\{[\s\S]*?\n\}/)?.[0];
             assert.ok(definition);
             const frame = vm.runInNewContext(`${definition}\nframe;`, {
                 Gtk: { DrawingArea: class {
@@ -366,6 +395,17 @@ async function nodeControllerTests() {
             assert.deepEqual(actual, capture(audio, width, height));
             assert.ok(actual.some(([name, ...args]) => name === 'setSourceRGBA'
                 && args.every((value, index) => value === [37 / 255, 37 / 255, 47 / 255, 0.9][index])));
+        }
+    });
+
+    it('uses a single half-pixel button stroke for hover and keyboard focus without changing border width', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        for (const state of ['hover', 'focus-visible']) {
+            const rule = css.match(new RegExp(`button\\.control-button:${state} \\{([^}]+)\\}`))?.[1];
+            assert.ok(rule);
+            assert.match(rule, /border-color: transparent;/);
+            assert.match(rule, /box-shadow: inset 0 0 0 0\.5px @np_yellow;/);
+            assert.doesNotMatch(rule, /border-width:/);
         }
     });
 
@@ -391,61 +431,190 @@ async function nodeControllerTests() {
         assert.match(details, /background: transparent;/);
     });
 
-    it('keeps tabs, network lists and forms inset from the outer frame', () => {
+    it('reduces bottom and left inner padding by five pixels without changing top and right padding', () => {
         const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
-        assert.match(css, /\.network-content \{ padding: 12px; \}/);
+        assert.match(css, /\.network-content \{ padding: 12px 12px 7px 7px; \}/);
     });
 
-    it('uses a taller network card while keeping it bounded by the monitor', () => {
+    it('uses the measured whole-row height without a fixed subtraction, bounded by the monitor', () => {
         const method = frontend.match(/    position\(\) \{([\s\S]*?)\n    \}/)?.[1];
         assert.ok(method);
         const position = vm.runInNewContext(`(function() {${method}\n})`);
         for (const [width, height, expected] of [[1280, 800, 480], [360, 240, 186], [16, 54, 0]]) {
-            const panel = { monitor: { get_geometry: () => ({ width, height }) }, card: {}, preferredHeight: () => 480 };
+            const panel = { monitor: { get_geometry: () => ({ width, height }) }, card: {},
+                preferredHeight: (cardWidth, maxHeight) => {
+                    assert.equal(maxHeight, height - 54);
+                    return Math.min(480, maxHeight);
+                } };
             position.call(panel);
             assert.equal(panel.card.height_request, expected);
+            assert.equal(panel.card.margin_top, 46, 'Top edge stays anchored');
             assert.ok(panel.card.margin_top + expected <= height);
         }
     });
 
-    it('fits six measured unsaved rows plus remembered rows, padding and the divider', () => {
-        const method = frontend.match(/    preferredHeight\(width\) \{([\s\S]*?)\n    \}/)?.[1];
+    describe('whole-row dynamic panel height', () => {
+        const method = frontend.match(/    preferredHeight\(width, maxHeight = 480\) \{([\s\S]*?)\n    \}/)?.[1];
         assert.ok(method);
-        const preferredHeight = vm.runInNewContext(`(function(width) {${method}\n})`, {
-            Gtk: { Orientation: { VERTICAL: 1 } }, isUndetectedSaved: () => false,
+        const preferredHeight = vm.runInNewContext(`(function(width, maxHeight = 480) {${method}\n})`, {
+            Gtk: { Orientation: { VERTICAL: 1 } },
         });
-        const available = Array.from({ length: 8 }, (_, index) => ({ key: `available-${index}`, height: index < 6 ? 40 : 999 }));
-        const remembered = { key: 'connected', known: true, height: 70, detailsHeight: 120 };
-        const rows = [remembered, ...available];
-        const panel = { controller: { rows }, rows: new Map(rows.map(data => [data.key, {
-            widget: { get_style_context: () => ({
-                get_padding: () => ({ left: 4, right: 4 }), get_border: () => ({ left: 1, right: 1 }),
-            }), measure: () => [0, data.height + (data.detailsHeight || 0)] },
-            details: { measure: () => [0, data.detailsHeight || 0] },
-        }])), content: { get_style_context: () => ({ get_padding: () => ({ top: 12, bottom: 12, left: 12, right: 12 }) }) },
-        networkLists: { margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6 },
-        networkRows: { spacing: 8 }, networkSeparator: { measure: () => [0, 1] }, listTabs: { measure: () => [0, 32] } };
-        assert.equal(preferredHeight.call(panel, 380), 435);
-        available[5].height = 60;
-        assert.equal(preferredHeight.call(panel, 380), 455, 'wrapped row heights increase the fit budget');
-        panel.controller.rows = [remembered, available[0]];
-        assert.equal(preferredHeight.call(panel, 380), 435, 'reserve six slots when fewer networks are found');
-        panel.controller.rows = [remembered];
-        assert.equal(preferredHeight.call(panel, 380), 480, 'retain a usable fallback without unsaved rows');
+        const widget = height => ({ visible: true, measure: (_, width) => [0, typeof height === 'function' ? height(width) : height] });
+        const container = (children, spacing) => {
+            children.forEach((child, index) => { child.get_next_sibling = () => children[index + 1] || null; });
+            return { spacing, get_first_child: () => children[0] || null };
+        };
+        function fixture(nearby = Array.from({ length: 20 }, () => widget(40)), saved = Array.from({ length: 20 }, () => widget(28)), extras = []) {
+            const pages = widget(0);
+            return {
+                pages, listTab: 'nearby', networkRows: container(nearby, 3), savedRows: container(saved, 8),
+                networkSeparator: widget(1),
+                content: { ...container([pages, ...extras], 8),
+                    get_style_context: () => ({ get_padding: () => ({ top: 12, bottom: 7, left: 7, right: 12 }) }) },
+                networkLists: { margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6 },
+                listFrame: { get_parent: () => ({ spacing: 5 }) }, listTabs: widget(32),
+            };
+        }
+        it('ends on a complete row in both tabs using their actual spacing', () => {
+            const panel = fixture();
+            assert.equal(preferredHeight.call(panel, 380), 452, 'Nine Nearby rows plus chrome, not part of a tenth');
+            panel.listTab = 'saved';
+            assert.equal(preferredHeight.call(panel, 380), 456, 'Eleven Saved rows plus chrome, not part of a twelfth');
+            assert.match(frontend, /this\.networkRows = box\(true, 3\)/);
+            const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+            assert.match(css, /\.network-row:not\(\.saved-network-row\) \{ padding: 7px 4px; \}/);
+            assert.match(css, /\.network-row \{[^}]*padding: 9px 4px;/);
+        });
+        it('shrinks for short lists instead of reserving empty row slots', () => {
+            const panel = fixture([widget(40), widget(40)], [widget(28)]);
+            assert.equal(preferredHeight.call(panel, 380), 151);
+            panel.listTab = 'saved';
+            assert.equal(preferredHeight.call(panel, 380), 96);
+        });
+        it('measures wrapped and expanded rows and respects short monitors', () => {
+            const panel = fixture(Array.from({ length: 20 }, () => widget(width => width < 300 ? 80 : 40)));
+            assert.equal(preferredHeight.call(panel, 380), 452);
+            assert.equal(preferredHeight.call(panel, 260), 480, 'Five complete wrapped rows');
+            assert.equal(preferredHeight.call(panel, 380, 240), 237, 'Four complete rows on a shorter screen');
+            assert.match(frontend, /row\.details\.connect\('notify::child-revealed', \(\) => this\.position\(\)\)/);
+        });
+        it('does not end on a divider or count invisible widgets', () => {
+            const divider = widget(1), hidden = { ...widget(100), visible: false };
+            const panel = fixture([widget(40), hidden, divider, widget(500)]);
+            panel.networkSeparator = divider;
+            assert.equal(preferredHeight.call(panel, 380), 108);
+        });
+        it('reserves space for visible prompts and notices before fitting rows', () => {
+            const prompt = widget(120), notice = widget(30);
+            const panel = fixture(undefined, undefined, [prompt, notice]);
+            assert.equal(preferredHeight.call(panel, 380), 446);
+            notice.visible = false;
+            assert.equal(preferredHeight.call(panel, 380), 451);
+        });
+        it('keeps empty lists and oversized details usable without exceeding the screen', () => {
+            assert.equal(preferredHeight.call(fixture([], []), 380), 116);
+            const panel = fixture([widget(600)]);
+            assert.equal(preferredHeight.call(panel, 380), 480);
+            assert.equal(preferredHeight.call(panel, 380, 54), 54);
+            assert.equal(preferredHeight.call(panel, 380, 0), 0);
+        });
     });
 
-    it('places the network expand button on a second line without reserving empty unsaved rows', () => {
-        assert.match(frontend, /row\.heading = box\(false, 4, \[row\.marker, row\.name, row\.status, row\.connect, row\.forget, row\.remove\]\)/);
-        assert.match(frontend, /row\.secondary = box\(false, 4, \[row\.metadata, row\.info\]\)/);
-        assert.match(frontend, /row\.secondary\.visible = row\.metadata\.visible \|\| row\.info\.visible/);
+    it('places the network expand button on the first line without reserving empty metadata rows', () => {
+        assert.match(frontend, /row\.heading = box\(false, 4, \[row\.marker, row\.name, row\.status, row\.connect, row\.remove, row\.info\]\)/);
+        assert.match(frontend, /row\.secondary = box\(false, 4, \[row\.metadata\]\)/);
+        assert.match(frontend, /row\.secondary\.visible = row\.metadata\.visible;/);
+        assert.match(frontend, /row\.info\.hexpand = false;/);
     });
 
-    it('leaves a gap between expanded details text and the left accent line', () => {
+    it('keeps all saved Wi-Fi networks in Saved, including nearby, connected and changing networks', () => {
+        const rows = [
+            { key: 'five', wireless: true, known: true, connected: true, strength: 68 },
+            { key: 'five-iot', wireless: true, known: true, connected: false, strength: 76 },
+            { key: 'away', wireless: true, known: true, connected: false, strength: null },
+            { key: 'joining', wireless: true, known: true, changing: true, strength: 40 },
+            { key: 'unsaved', wireless: true, known: false, strength: 50 },
+            { key: 'ethernet', wireless: false, known: true, connected: true },
+        ];
+        const savedExpression = frontend.match(/const saved = ([^;]+);/)?.[1];
+        assert.ok(savedExpression);
+        const saved = vm.runInNewContext(savedExpression, { c: { rows } });
+        assert.deepEqual(Array.from(saved, row => row.key), ['five', 'five-iot', 'away', 'joining']);
+        const isUndetectedSaved = row => Boolean(row.wireless && row.known && !row.connected
+            && !row.changing && !Number.isFinite(row.strength));
+        const nearby = rows.filter(row => !isUndetectedSaved(row));
+        assert(nearby.includes(saved[0]) && nearby.includes(saved[1]), 'Saved and Nearby deliberately overlap');
+        const viewExpression = frontend.match(/const viewKey = ([\s\S]*?);/)?.[1];
+        assert.ok(viewExpression);
+        const viewKey = (dataRow, undetected) => vm.runInNewContext(viewExpression,
+            { dataRow, undetected, isUndetectedSaved });
+        assert.notEqual(viewKey(rows[0], true), viewKey(rows[0], false), 'A connected saved network has independent widgets in both tabs');
+        assert.notEqual(viewKey(rows[1], true), viewKey(rows[1], false), 'A detected saved network has independent widgets in both tabs');
+        assert.equal(viewKey(rows[2], true), rows[2].key, 'An undetected saved network retains its canonical widget');
+    });
+
+    it('keeps removal exclusive to Saved and uses distinct disconnect icons', () => {
+        assert.doesNotMatch(frontend, /row\.forget\b/);
+        assert.match(frontend, /row\.remove\.visible = undetected;/);
+        const expression = frontend.match(/row\.connect\.get_child\(\)\.icon_name = ([\s\S]*?);/)?.[1];
+        assert.ok(expression);
+        const icon = dataRow => vm.runInNewContext(expression, { dataRow });
+        assert.equal(icon({ wireless: true, connected: true }), 'network-wireless-disabled-symbolic');
+        assert.equal(icon({ wireless: true, connected: false }), 'network-wireless-symbolic');
+        assert.equal(icon({ wireless: false, connected: true }), 'network-wired-disconnected-symbolic');
+        assert.equal(icon({ wireless: false, connected: false }), 'network-wired-symbolic');
+    });
+
+    it('uses connection-state markers for saved nearby networks without changing other network markers', () => {
+        const statements = frontend.match(/const savedNearby = [\s\S]*?row\.markerIcon\.icon_name = [^;]+;/)?.[0];
+        assert.ok(statements);
+        const marker = (dataRow, undetected = false) => {
+            const row = { markerSymbol: { set_label(text) { this.label = text; } }, markerIcon: {} };
+            vm.runInNewContext(statements, { row, dataRow, undetected });
+            return row.markerSymbol.visible ? row.markerSymbol.label : row.markerIcon.icon_name;
+        };
+        assert.equal(marker({ wireless: true, known: true, connected: true }), '✓');
+        assert.equal(marker({ wireless: true, known: true, connected: false }), '○');
+        assert.equal(marker({ wireless: true, known: false, connected: false }), 'network-wireless-symbolic');
+        assert.equal(marker({ wireless: true, known: true, connected: false }, true), 'network-wireless-symbolic');
+        assert.equal(marker({ wireless: false, known: false, connected: false }), 'network-wired-symbolic');
+    });
+
+    it('uses measured red clipped-corner prompts with a thin three-pixel top band', () => {
+        const source = frontend.match(/function prompt\(palette, children\) \{([\s\S]*?)\n\}/)?.[1];
+        assert.ok(source);
+        class Overlay {
+            constructor(properties) { Object.assign(this, properties); }
+            set_child(child) { this.child = child; }
+            add_overlay(child) { this.content = child; }
+            set_measure_overlay(child, measure) { assert.equal(child, this.content); this.measureContent = measure; }
+        }
+        const prompt = vm.runInNewContext(`(function(palette, children) {${source}\n})`, {
+            Gtk: { Overlay },
+            box: (vertical, spacing, children) => ({ vertical, spacing, children, add_css_class(name) { this.cssClass = name; } }),
+            frame: (palette, options) => ({ color: options.color, topBand: options.topBand }),
+        });
+        const children = ['message', 'actions'];
+        const widget = prompt({ red: '#ff0000' }, children);
+        assert.equal(widget.child.color, '#ff0000');
+        assert.equal(widget.child.topBand, 3);
+        assert.equal(widget.content.children, children);
+        assert.equal(widget.content.cssClass, 'network-prompt-content');
+        assert.equal(widget.measureContent, true, 'Prompt wraps its message and buttons without clipping them');
+        assert.match(frontend, /this\.forget = prompt\(palette,/);
+        assert.match(frontend, /this\.credentials = prompt\(palette,/);
+        assert.match(frontend, /this\.pages\.add_named\(box\(true, 5, \[tabs, this\.listFrame\]\), 'list'\)/);
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        assert.match(css, /\.network-prompt-content \{ padding: 10px 12px 14px; \}/);
+    });
+
+    it('keeps expanded details padding without a left accent line', () => {
         const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
         const details = css.match(/\.network-panel \.network-details \{([^}]+)\}/)?.[1];
         assert.ok(details);
         assert.match(details, /padding: 6px 6px 6px 12px;/);
-        assert.match(details, /box-shadow: inset 2px 0 0/);
+        assert.match(details, /border-left: none;/);
+        assert.match(details, /box-shadow: none;/);
     });
 
     const requestMethod = frontend.match(/        handleRequest\(request\) \{([\s\S]*?)\n        \}/);
@@ -2190,23 +2359,12 @@ async function nodeLauncherTests() {
             assert.notEqual(manifest.environment[key], '');
         }
         const keys = [...new Set([...Object.keys(manifest.environment), ...Object.keys(manifest.forced_environment), 'XDG_RUNTIME_DIR'])];
-        const fixtureManifest = { ...manifest, ags: join(fixture, 'ags'), gjs: join(fixture, 'panel-gjs') };
-        // Read the real prebuilt JavaScript without importing GTK, Astal or NetworkManager.
-        for (const [program, fake] of [['ags', fixtureManifest.ags], ['panel-gjs', fixtureManifest.gjs]]) {
+        const fixtureManifest = { ...manifest, astal: join(fixture, 'astal'), bundle: join(fixture, 'bundle') };
+        for (const [program, fake] of [['astal', fixtureManifest.astal], ['bundle', fixtureManifest.bundle]]) {
             writeFileSync(fake, `#!${process.execPath}\n`
-                + 'const fs = require("node:fs");\n'
                 + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
                 + 'const argv = process.argv.slice(2);\n'
-                + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
-                + 'if (program === "panel-gjs") {\n'
-                + '  data.bundle = argv.at(-1);\n'
-                + '  fs.readFileSync(data.bundle);\n'
-                + '}\n'
-                + 'console.log(JSON.stringify(data));\n'
-                + 'if (program === "ags" && argv[0] !== "request") {\n'
-                + '  console.error("AGS may only request: runtime bundling and AGS run are forbidden");\n'
-                + '  process.exit(41);\n'
-                + '}\n');
+                + 'console.log(JSON.stringify({program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))}));\n');
             chmodSync(fake, 0o700);
         }
         const configPath = join(fixture, 'launcher fixture.json');
@@ -2245,9 +2403,9 @@ async function nodeLauncherTests() {
             const records = success(args, overrides);
             assert.equal(records.length, 1, 'requests neither compile nor launch GJS');
             const [data] = records;
-            assert.equal(data.program, 'ags');
-            assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'network-panel', '--']);
-            assert.equal(data.argv.length, 5);
+            assert.equal(data.program, 'astal');
+            assert.deepEqual(data.argv.slice(0, 2), ['--instance', 'network-panel']);
+            assert.equal(data.argv.length, 3);
             assert.equal(data.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
                 'IPC uses the original runtime directory');
             assert.equal(data.env.NETWORK_PANEL_CONFIG, manifest.forced_environment.NETWORK_PANEL_CONFIG);
@@ -2256,11 +2414,10 @@ async function nodeLauncherTests() {
 
         function launch(overrides = {}) {
             const records = success(['run'], overrides);
-            assert.equal(records.length, 1, 'start GJS exactly once without invoking AGS');
+            assert.equal(records.length, 1, 'start the immutable bundle exactly once');
             const [runtime] = records;
-            assert.equal(runtime.program, 'panel-gjs');
-            assert.deepEqual(runtime.argv, ['-m', manifest.bundle]);
-            assert.equal(runtime.bundle, manifest.bundle, 'GJS reads only the installed immutable bundle');
+            assert.equal(runtime.program, 'bundle');
+            assert.deepEqual(runtime.argv, []);
             assert.equal(runtime.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
                 'the native socket namespace must not change');
             assert.equal(runtime.env.NETWORK_PANEL_CONFIG, manifest.forced_environment.NETWORK_PANEL_CONFIG);
@@ -3575,7 +3732,8 @@ async function gjsUITests() {
     function assertConnectionAction(row, data) {
         assert(row.connect instanceof Gtk.Button && row.connect.get_child() instanceof Gtk.Image,
             `${data.key}: connection action is an icon-only GTK button`);
-        equal(row.connect.get_child().icon_name, data.connected ? 'network-offline-symbolic'
+        equal(row.connect.get_child().icon_name, data.connected
+            ? data.wireless ? 'network-wireless-disabled-symbolic' : 'network-wired-disconnected-symbolic'
             : data.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic',
         `${data.key}: connection icon follows the current action and network type`);
         equal(accessibleProperties.get(row.connect)?.get(Gtk.AccessibleProperty.LABEL),
@@ -3584,11 +3742,11 @@ async function gjsUITests() {
         assert(!row.connect.has_tooltip && !row.connect.tooltip_text && !row.connect.tooltip_markup,
             `${data.key}: connection action has no tooltip`);
     }
-    function assertRowPresentation(view, data) {
-        const row = view.rows.get(data.key), saved = isUndetectedSaved(data);
+    function assertRowPresentation(view, data, row = view.rows.get(data.key)) {
+        const saved = row.widget.get_parent() === view.savedRows;
         const title = saved ? `Wi-Fi - ${data.security || 'Open'} - ${data.name}`
             : `${data.kind === 'WIRED' ? 'Wired' : 'Wi-Fi'} · ${data.name}`;
-        equal(row.name.label, title, `${data.key}: only undetected Saved titles put security before the literal SSID`);
+        equal(row.name.label, title, `${data.key}: Saved titles put security before the literal SSID`);
         assert(!row.name.use_markup && !row.name.use_underline && row.name.get_text() === title,
             `${data.key}: titles preserve literal markup, ampersands and underscores`);
         equal([row.name.wrap, row.name.ellipsize], [!saved, saved ? Pango.EllipsizeMode.END : Pango.EllipsizeMode.NONE],
@@ -3621,29 +3779,33 @@ async function gjsUITests() {
         equal(row.connect.visible, !saved, `${data.key}: Saved has no connection action`);
         equal(row.metadata.visible, !saved && Boolean(row.metadata.label),
             `${data.key}: Saved rows and empty status lines stay hidden`);
-        assert(row.info.get_parent() === row.secondary && row.metadata.get_parent() === row.secondary
+        assert(row.info.get_parent() === row.heading && row.metadata.get_parent() === row.secondary
             && row.secondary.get_parent() === row.widget && row.heading.get_next_sibling() === row.secondary,
-            `${data.key}: details chevron shares the second line with connection status`);
-        equal(row.secondary.visible, row.info.visible || row.metadata.visible,
+            `${data.key}: details chevron is on the first line, with metadata below`);
+        equal(row.secondary.visible, row.metadata.visible,
             `${data.key}: empty second lines are hidden`);
         assert(!row.name.has_tooltip && !row.name.tooltip_text && !row.name.tooltip_markup,
             `${data.key}: even a long or ellipsized title has no hover substitute`);
         if (!saved) {
-            equal(row.metadata.label, [data.connected ? 'Connected' : data.wireless ? '' : data.known ? 'Saved' : 'Not saved',
+            equal(row.metadata.label, [data.wireless ? '' : data.connected ? 'Connected' : data.known ? 'Saved' : 'Not saved',
                 data.wireless ? '' : data.interface, data.wireless ? '' : data.security,
                 data.changing ? 'Working…' : ''].filter(Boolean).join(' · '),
-            `${data.key}: Nearby Wi-Fi metadata keeps only connection/working state; wired metadata is unchanged`);
+            `${data.key}: Nearby Wi-Fi metadata keeps only working state; wired metadata is unchanged`);
         }
         assert(row.widget.has_css_class('network-row'), `${data.key}: full-row styling belongs on the network widget`);
         equal(row.widget.has_css_class('saved-network-row'), saved, `${data.key}: Saved styling follows tab migration`);
         equal(row.widget.has_css_class('connected'), Boolean(data.connected), `${data.key}: full-row connected styling follows live state`);
         equal(row.widget.has_css_class('expanded'), row.details.reveal_child, `${data.key}: full-row expansion styling matches the revealer`);
         if (row.marker) {
-            assert(row.marker instanceof Gtk.Image
-                && row.marker.icon_name === (data.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic')
+            const savedNearby = !saved && (data.known || data.connected);
+            equal(row.markerSymbol.visible, Boolean(savedNearby), 'Saved nearby networks show a status character');
+            equal(row.markerSymbol.label, data.connected ? '✓' : '○', 'Status uses the approved checkmark and circle');
+            equal(row.markerIcon.visible, !savedNearby, 'Other networks keep their network-type icon');
+            assert(row.marker instanceof Gtk.Box
+                && row.markerIcon.icon_name === (data.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic')
                 && row.marker.get_parent() === row.heading && row.marker.get_next_sibling() === row.name
                 && !row.marker.can_target && !row.marker.focusable,
-            'The decorative network-type icon sits immediately before the name');
+            'The decorative network marker sits immediately before the name');
         }
     }
     function assertInline(view, controller, key) {
@@ -3765,15 +3927,18 @@ async function gjsUITests() {
         assert(dividers.length === 1 && dividers[0] === panel.networkSeparator, 'The list owns one group divider, not per-row separators');
         equal(panel.networkSeparator.visible, expected.includes('divider'), 'The divider is visible only between two nonempty groups');
     }
-    function assertListPartition(nearby, saved, message) {
+    function assertListPartition(nearby, undetected, message) {
         assertNetworkOrder(nearby, message);
-        equal(visibleNetworkOrder(panel.savedRows), saved, 'Saved contains only undetected saved rows, in native order');
+        const saved = panel.controller.rows.filter(row => row.wireless && row.known).map(row => row.key);
+        assert(undetected.every(key => saved.includes(key)), 'Undetected saved networks remain included');
+        equal(visibleNetworkOrder(panel.savedRows), saved, 'Saved contains every saved Wi-Fi network, in native order');
         const nearbyKeys = nearby.filter(key => key !== 'divider');
-        equal(panel.rows.size, nearbyKeys.length + saved.length, 'Shared row-map count equals both tab counts, without duplicates');
-        for (const [key, row] of panel.rows) {
-            assert(row.widget.get_parent() === (saved.includes(key) ? panel.savedRows : panel.networkRows),
-                `${key} is parented to exactly its own list`);
-            assertRowPresentation(panel, row.data);
+        equal(panel.rows.size, nearbyKeys.length + saved.length, 'Row-map count includes independent views in both tabs');
+        for (const row of panel.rows.values()) {
+            const parent = row.widget.get_parent();
+            assert(parent === panel.savedRows ? saved.includes(row.key) : nearbyKeys.includes(row.key),
+                `${row.key} is parented to a list that contains it`);
+            assertRowPresentation(panel, row.data, row);
         }
         equal(panel.empty.visible, nearbyKeys.length === 0, 'Nearby empty state uses only Nearby count');
         equal(panel.savedEmpty.visible, saved.length === 0, 'Saved empty state uses only Saved count');
@@ -4057,7 +4222,7 @@ async function gjsUITests() {
             panel.monitor = original;
             await wait(150);
             equal([host.get_width(), host.get_height()], [width, height], `Host remains ${width}x${height}`);
-            const cardW = Math.max(0, Math.min(380, width - 16)), cardH = Math.max(0, Math.min(panel.preferredHeight(cardW), height - 54));
+            const cardW = Math.max(0, Math.min(380, width - 16)), cardH = Math.max(0, Math.min(panel.preferredHeight(cardW, height - 54), height - 54));
             equal([panel.card.width_request, panel.card.height_request], [cardW, cardH], 'Exact bounded card size requests');
             equal([panel.card.margin_top, panel.card.margin_end],
                 [Math.min(46, Math.max(0, height - cardH - 8)), Math.min(72, Math.max(8, width - cardW - 8))], 'Exact original margins');
@@ -4093,21 +4258,22 @@ async function gjsUITests() {
         assert(!panel.pages.get_child_by_name('info'), 'The page stack has no standalone Info child');
         for (const row of panel.rows.values()) {
             assert(row.info instanceof Gtk.Button && row.info.get_child() instanceof Gtk.Image
-                && row.info.get_parent() === row.secondary,
-            'The small Info chevron belongs on the second line beside connection status');
+                && row.info.get_parent() === row.heading,
+            'The small Info chevron belongs on the first line beside connection controls');
             assert(/(?:down|end|right|up).*symbolic/.test(row.info.get_child().icon_name || ''), 'Info uses a symbolic chevron image');
             assert(row.details instanceof Gtk.Revealer && row.details.get_parent() === row.widget
                 && row.details.transition_type === Gtk.RevealerTransitionType.SLIDE_DOWN
                 && row.details.transition_duration >= 150 && row.details.transition_duration <= 220 && !row.details.reveal_child,
             'Each row starts collapsed with a roughly 180 ms slide-down revealer');
             assert(accessibleProperties.get(row.info)?.get(Gtk.AccessibleProperty.LABEL), 'The icon-only Info chevron has an accessible label');
-            assert(row.forget.get_parent() === row.heading && row.forget.get_prev_sibling() === row.connect
-                && row.forget.get_child().label === '×', 'Forget is a cross immediately to the right of Connect');
-            assert(accessibleProperties.get(row.forget)?.get(Gtk.AccessibleProperty.LABEL)?.startsWith('Forget saved network '),
-                'The cross has an accessible description of the forget action');
+            assert(!row.forget, 'Nearby rows have no Forget button');
+            assert(row.remove.get_parent() === row.heading && row.remove.get_child().label === '×',
+                'The Saved tab retains its removal button');
+            equal(row.remove.visible, panel.savedRows === row.widget.get_parent(),
+                'The removal button is visible only in the Saved tab');
         }
         assert(typeof panel.toggleInfo === 'function', 'The panel exposes the shared inline Info toggle');
-        const rowRemovals = new Set([...panel.rows.values()].flatMap(row => [row.remove, row.forget]));
+        const rowRemovals = new Set([...panel.rows.values()].map(row => row.remove));
         assert(!tree.some(widget => widget instanceof Gtk.Button && !rowRemovals.has(widget) && widget !== panel.dismissError
             && (/^(?:Wi-Fi (?:on|off)|↻|×|Advanced(?:…|\.{3})?)$/.test(widget.get_child()?.label || widget.label || '')
                 || widget.has_css_class('wifi-toggle') || ['Refresh networks', 'Close network panel'].includes(
@@ -4126,8 +4292,8 @@ async function gjsUITests() {
         const tabs = panel.nearbyTab.get_parent();
         assert(tabs instanceof Gtk.Box && panel.savedTab.get_parent() === tabs && tabs.spacing === 4 && tabs.homogeneous,
             'The two equal-width underlined tabs have a small horizontal gap');
-        assert(tabs.get_parent() === panel.listFrame.get_parent() && tabs.get_parent().spacing === 0,
-            'The tab strip sits directly above the borderless list');
+        assert(tabs.get_parent() === panel.listFrame.get_parent() && tabs.get_parent().spacing === 5,
+            'The tab strip has a five-pixel gap above the borderless list');
         async function assertJoinedTabs(selected) {
             await wait(150);
             const page = tabs.get_parent();
@@ -4143,9 +4309,9 @@ async function gjsUITests() {
                 'Tab bounds preserve the 32-pixel strip within fractional-border rounding');
             assert(Math.abs(savedBounds.get_x() - nearbyBounds.get_x() - nearbyBounds.get_width() - 4) < 1,
                 'The underline tabs have a four-pixel gap');
-            assert(Math.abs(nearbyBounds.get_y() + nearbyBounds.get_height() - frameBounds.get_y()) < 1
-                && Math.abs(savedBounds.get_y() + savedBounds.get_height() - frameBounds.get_y()) < 1,
-            'Tabs sit immediately above the borderless list area');
+            assert(Math.abs(frameBounds.get_y() - nearbyBounds.get_y() - nearbyBounds.get_height() - 5) < 1
+                && Math.abs(frameBounds.get_y() - savedBounds.get_y() - savedBounds.get_height() - 5) < 1,
+            'Tabs sit five pixels above the borderless list area');
             for (const [name, tab] of [['nearby', panel.nearbyTab], ['saved', panel.savedTab]]) {
                 const expected = new Gdk.RGBA(); expected.parse(palette[name === selected ? 'red' : 'cyan']);
                 const actual = tab.get_style_context().get_color();
@@ -4203,14 +4369,22 @@ async function gjsUITests() {
         assert(wifi.profile.get_model() === profileModel, 'Unchanged profile model is not recreated');
         assert(panel.password.text === 'offline-test-password' && host.get_focus() === focus, 'Ordinary updates preserve password and keyboard focus');
         assert(!panel.password.visibility, 'Password entry is masked');
+        assert(panel.passwordReveal.get_parent() === panel.password.get_parent(), 'Eye button sits beside the password entry');
+        panel.passwordReveal.emit('clicked');
+        assert(panel.password.visibility, 'Eye reveals the typed password');
+        equal(panel.password.text, 'offline-test-password', 'Reveal preserves the input');
+        panel.passwordReveal.emit('clicked');
+        assert(!panel.password.visibility, 'Eye masks the password again');
+        panel.passwordReveal.emit('clicked');
         c.credentialKey = 'credential:2'; c.emit();
         equal(panel.password.text, '', 'Credential identity change clears the input');
+        assert(!panel.password.visibility, 'Credential identity change restores masking');
         panel.password.set_text('submit-on-enter');
         panel.password.emit('activate');
         assert(c.calls.some(call => call[0] === 'password' && call[1] === 'submit-on-enter') && panel.password.text === '', 'Enter submits only through the controller and wipes the input');
         c.credentialRow = c.rows.find(row => row.key === 'wifi'); c.credentialKey = 'credential:3'; c.emit();
         panel.password.set_text('cancel-me');
-        panel.credentials.get_last_child().get_last_child().emit('clicked');
+        panel.password.get_parent().get_parent().get_last_child().get_last_child().emit('clicked');
         assert(!c.credentialKey && !panel.password.text, 'Cancel clears credentials outside row delegates');
 
         const dataRow = c.rows.find(row => row.key === 'wifi'), profiles = dataRow.profiles;
@@ -4249,24 +4423,22 @@ async function gjsUITests() {
                 'The inline Connect button is right-aligned in the normal viewport');
             assert(unsaved.name.wrap && unsaved.name.label === 'Wi-Fi · Never connected', 'Inline network names retain wrapping and the Wi-Fi prefix');
             for (const row of [unsaved, joining]) {
-                assert(!row.forget.visible && !row.forget.sensitive, 'Never-connected Wi-Fi has no visible or enabled Forget button');
+                assert(!row.forget && !row.remove.visible, 'Nearby Wi-Fi has no Forget button');
                 assert(!row.info.visible && !row.profile.visible,
                     'Unsaved Wi-Fi has no connected-only actions, profile chooser or empty secondary row');
             }
             assert(unsaved.connect.sensitive && !joining.connect.sensitive, 'An unsaved changing network stays in the available group with Connect disabled');
             unsaved.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'new-wifi', ''], 'Unsaved inline Connect dispatches the current key without a saved UUID');
-            assert(!connected.forget.visible && !connected.forget.sensitive && connected.info.visible,
+            assert(!connected.remove.visible && connected.info.visible,
                 'A connected-only Wi-Fi network is remembered for grouping, but has no saved profile to forget');
-            assert(wired.name.label === 'Wired · Saved Ethernet' && wired.forget.visible && wired.forget.sensitive
-                && wired.info.visible, 'Disconnected saved Ethernet retains heading Remove and Info, without secondary actions');
+            assert(wired.name.label === 'Wired · Saved Ethernet' && !wired.remove.visible
+                && wired.info.visible, 'Disconnected saved Ethernet retains Info without Nearby removal');
             wired.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'saved-wired', ''], 'Saved Ethernet still dispatches native default-profile activation');
-            wired.forget.emit('clicked');
-            equal(c.calls.at(-1), ['forget', 'saved-wired'], 'Saved Ethernet Forget still dispatches its own key');
-            panel.forgetCancel.emit('clicked');
+
             const liveWired = panel.rows.get('wired');
-            assert(liveWired.forget.visible && liveWired.info.visible, 'Connected saved Ethernet keeps Forget and Info');
+            assert(!liveWired.remove.visible && liveWired.info.visible, 'Connected saved Ethernet keeps Info without Nearby removal');
             liveWired.connect.emit('clicked');
             equal(c.calls.at(-1), ['disconnect', 'wired'], 'Connected Ethernet still dispatches Disconnect');
 
@@ -4275,14 +4447,14 @@ async function gjsUITests() {
                 'Losing known and connected state moves the existing row across the divider');
             assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
                 'Cross-group moves preserve the widget, unchanged profile model and selected UUID');
-            assert(!wifi.forget.visible && !wifi.forget.sensitive, 'A newly unsaved row hides Forget and its empty secondary action row');
+            assert(!wifi.remove.visible, 'A newly unsaved row has no Nearby removal button');
             wifi.connect.emit('clicked');
             equal(c.calls.at(-1), ['connect', 'wifi', 'uuid-b'], 'The moved inline Connect retains UUID-based dispatch');
             c.rows = c.rows.map(row => row.key === 'wifi' ? { ...row, known: true } : row); c.emit();
             assertNetworkOrder(['wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'new-wifi', 'joining-wifi'],
                 'A newly saved disconnected row returns to the remembered group');
-            assert(wifi.forget.visible && wifi.forget.sensitive && wifi.info.visible,
-                'Saving restores Forget and offline Info without secondary actions');
+            assert(!wifi.remove.visible && wifi.info.visible,
+                'Saving restores offline Info without Nearby removal');
             assert(panel.rows.get('wifi') === wifi && wifi.profile.get_model() === model && panel.profileChoices.get('wifi') === 'uuid-b',
                 'Saving does not recreate the row or lose its selected UUID');
 
@@ -4290,7 +4462,7 @@ async function gjsUITests() {
             assertNetworkOrder(['new-wifi', 'wifi', 'saved-wired', 'connected-only', 'wired', 'divider', 'joining-wifi'],
                 'Connecting an unsaved network moves it above the divider without marking it saved');
             assert(panel.rows.get('new-wifi') === unsaved && unsaved.profile.get_model() === availableModel
-                && !unsaved.forget.visible && !unsaved.forget.sensitive && unsaved.info.visible,
+                && !unsaved.remove.visible && unsaved.info.visible,
                 'The connected unsaved row keeps its widgets and gains only connected actions');
             unsaved.connect.emit('clicked');
             equal(c.calls.at(-1), ['disconnect', 'new-wifi'], 'The moved row now dispatches Disconnect');
@@ -4778,7 +4950,8 @@ async function gjsUITests() {
         c.error = '<b>Literal error</b> ' + 'An unusually long error '.repeat(60); c.emit();
         panel.root.grab_focus();
         await wait();
-        equal([panel.card.get_width(), panel.card.get_height()], [380, 480], 'Root focus, long SSIDs and errors never enlarge the frame');
+        const expectedHeight = panel.preferredHeight(380, panel.monitor.get_geometry().height - 54);
+        equal([panel.card.get_width(), panel.card.get_height()], [380, expectedHeight], 'Root focus, long SSIDs and errors retain the measured bounded frame');
         assert(!panel.error.use_markup && panel.error.lines === 3, 'Errors are literal and bounded to three lines');
         c.error = ''; c.credentialKey = ''; c.credentialRow = null; c.emit();
         await layout(360, 240);

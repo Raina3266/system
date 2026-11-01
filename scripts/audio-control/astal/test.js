@@ -3962,7 +3962,7 @@ test('Bluetooth connected rows keep their semantic status and action without sel
     assert.equal(row.action.get_child().label, 'Connect');
 });
 
-test('Bluetooth renderer puts named unpaired devices first without mistaking address fallbacks for names', () => {
+test('Bluetooth renderer keeps connected and paired devices above named unpaired devices', () => {
     const h = bluetoothViewHarness();
     const devices = Object.freeze([
         { key: 'unnamed', name: '', address: '01' },
@@ -3975,7 +3975,7 @@ test('Bluetooth renderer puts named unpaired devices first without mistaking add
         { key: 'blank', name: '   ', address: '02' },
     ].map(Object.freeze));
     h.render(devices);
-    assert.deepEqual(h.order(), ['named-z', 'named-a', 'divider', 'paired', 'connected',
+    assert.deepEqual(h.order(), ['connected', 'paired', 'divider', 'named-z', 'named-a',
         'unnamed', 'address', 'address-alias', 'blank']);
     assert.equal(h.panel.deviceRows.get('named-z').forget.visible, false);
     assert.equal(h.panel.deviceRows.get('named-z').action.get_child().text, 'Pair');
@@ -3997,7 +3997,7 @@ test('Bluetooth viewport fits five unpaired rows and any remembered rows precedi
     assert.equal(h.panel.bluetoothPage.propagate_natural_height, true);
 });
 
-test('all named Bluetooth devices precede unnamed remembered devices and unrelated MAC aliases', () => {
+test('paired Bluetooth devices precede all unpaired devices regardless of names', () => {
     const h = bluetoothViewHarness();
     h.render([
         { key: 'unnamed-paired', paired: true, name: 'AA-BB-CC-DD-EE-FF', address: 'AA:BB:CC:DD:EE:FF' },
@@ -4005,10 +4005,10 @@ test('all named Bluetooth devices precede unnamed remembered devices and unrelat
         { key: 'other-address', name: '11-22-33-44-55-66', address: 'AA:BB:CC:DD:EE:00' },
         { key: 'named-unpaired', name: 'Keyboard' },
     ]);
-    assert.deepEqual(h.order(), ['named-unpaired', 'divider', 'named-paired', 'unnamed-paired', 'other-address']);
+    assert.deepEqual(h.order(), ['unnamed-paired', 'named-paired', 'divider', 'named-unpaired', 'other-address']);
 });
 
-test('Bluetooth name discovery promotes existing rows and pairing returns them to remembered devices', () => {
+test('Bluetooth name discovery retains unpaired ordering and pairing promotes the existing row', () => {
     const h = bluetoothViewHarness();
     const devices = [{ key: 'remembered', name: 'Speaker', paired: true },
         { key: 'discovered', name: 'AA-BB-CC-DD-EE-FF', address: 'AA:BB:CC:DD:EE:FF' }];
@@ -4017,7 +4017,7 @@ test('Bluetooth name discovery promotes existing rows and pairing returns them t
     assert.deepEqual(h.order(), ['remembered', 'divider', 'discovered']);
     devices[1].name = 'New headphones';
     h.render(devices);
-    assert.deepEqual(h.order(), ['discovered', 'divider', 'remembered']);
+    assert.deepEqual(h.order(), ['remembered', 'divider', 'discovered']);
     assert.equal(h.panel.deviceRows.get('discovered'), row);
     devices[1].paired = true;
     h.render(devices);
@@ -4034,7 +4034,7 @@ test('Bluetooth renderer keeps remembered devices above unnamed available device
         { key: 'connected', connected: true }, { key: 'available-a' }, { key: 'paired-a', paired: true },
     ].map(Object.freeze));
     h.render(devices);
-    assert.deepEqual(h.order(), ['paired-z', 'connected', 'paired-a', 'divider', 'available-z', 'available-a']);
+    assert.deepEqual(h.order(), ['connected', 'paired-z', 'paired-a', 'divider', 'available-z', 'available-a']);
     assert.equal(h.panel.bluetoothSeparator.visible, true);
     assert.deepEqual(devices.map(device => device.key), ['available-z', 'paired-z', 'connected', 'available-a', 'paired-a']);
     for (const device of devices) {
@@ -4855,23 +4855,12 @@ test('built audio launcher', {
         assert.notEqual(manifest.environment[key], '');
     }
     const keys = [...new Set([...Object.keys(manifest.environment), ...Object.keys(manifest.forced_environment), 'XDG_RUNTIME_DIR'])];
-    const fixtureManifest = { ...manifest, ags: join(root, 'ags'), gjs: join(root, 'panel-gjs') };
-    // Read the real prebuilt JavaScript without importing GTK or Astal.
-    for (const [program, fake] of [['ags', fixtureManifest.ags], ['panel-gjs', fixtureManifest.gjs]]) {
+    const fixtureManifest = { ...manifest, astal: join(root, 'astal'), bundle: join(root, 'bundle') };
+    for (const [program, fake] of [['astal', fixtureManifest.astal], ['bundle', fixtureManifest.bundle]]) {
         writeFileSync(fake, `#!${process.execPath}\n`
-            + 'const fs = require("node:fs");\n'
             + `const program = ${JSON.stringify(program)}, keys = ${JSON.stringify(keys)};\n`
             + 'const argv = process.argv.slice(2);\n'
-            + 'const data = {program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))};\n'
-            + 'if (program === "panel-gjs") {\n'
-            + '  data.bundle = argv.at(-1);\n'
-            + '  fs.readFileSync(data.bundle);\n'
-            + '}\n'
-            + 'console.log(JSON.stringify(data));\n'
-            + 'if (program === "ags" && argv[0] !== "request") {\n'
-            + '  console.error("AGS may only request: runtime bundling and AGS run are forbidden");\n'
-            + '  process.exit(41);\n'
-            + '}\n');
+            + 'console.log(JSON.stringify({program, argv, env: Object.fromEntries(keys.map(key => [key, process.env[key]]))}));\n');
         chmodSync(fake, 0o700);
     }
     const configPath = join(root, 'launcher fixture.json');
@@ -4910,9 +4899,9 @@ test('built audio launcher', {
         const records = success(args, overrides);
         assert.equal(records.length, 1, 'requests must not compile or start GJS');
         const [data] = records;
-        assert.equal(data.program, 'ags');
-        assert.deepEqual(data.argv.slice(0, 4), ['request', '--instance', 'audio-panel', '--']);
-        assert.equal(data.argv.length, 5);
+        assert.equal(data.program, 'astal');
+        assert.deepEqual(data.argv.slice(0, 2), ['--instance', 'audio-panel']);
+        assert.equal(data.argv.length, 3);
         assert.equal(data.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
             'IPC uses the original runtime directory');
         assert.equal(data.env.AUDIO_PANEL_CONFIG, manifest.forced_environment.AUDIO_PANEL_CONFIG);
@@ -4921,11 +4910,10 @@ test('built audio launcher', {
 
     function launch(overrides = {}) {
         const records = success(['run'], overrides);
-        assert.equal(records.length, 1, 'start GJS exactly once without invoking AGS');
+        assert.equal(records.length, 1, 'start the immutable bundle exactly once');
         const [runtime] = records;
-        assert.equal(runtime.program, 'panel-gjs');
-        assert.deepEqual(runtime.argv, ['-m', manifest.bundle]);
-        assert.equal(runtime.bundle, manifest.bundle, 'GJS reads only the installed immutable bundle');
+        assert.equal(runtime.program, 'bundle');
+        assert.deepEqual(runtime.argv, []);
         assert.equal(runtime.env.XDG_RUNTIME_DIR, overrides.XDG_RUNTIME_DIR ?? env.XDG_RUNTIME_DIR,
             'the native socket namespace must not change');
         assert.equal(runtime.env.AUDIO_PANEL_CONFIG, manifest.forced_environment.AUDIO_PANEL_CONFIG);

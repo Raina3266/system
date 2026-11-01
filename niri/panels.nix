@@ -21,6 +21,8 @@ rec {
       pkgs,
       repoRoot,
       panelLauncher,
+      agsPackage,
+      astalPackage,
       name,
       prefix,
       sourceDir,
@@ -59,7 +61,7 @@ rec {
       '';
       ags = mkAgsRuntime {
         inherit pkgs;
-        ags = (pkgs.ags.override {
+        ags = (agsPackage.override {
           # AGS uses the GTK3 hook; declare the GTK4 typelibs explicitly.
           extraPackages = [ pkgs.gtk4 pkgs.graphene pkgs.gtk4-layer-shell ] ++ extraPackages;
         }).overrideAttrs (old: lib.optionalAttrs imageLoaders {
@@ -72,6 +74,9 @@ rec {
       # CSS is excluded from source and remains live through PANEL_CSS_FILE.
       bundle = pkgs.runCommand "${name}-bundle.js" { } ''
         ${lib.getExe ags} bundle --gtk 4 -- ${lib.escapeShellArg entry} "$out"
+        substituteInPlace "$out" \
+          --replace-fail ${lib.escapeShellArg (lib.getExe pkgs.gjs)} ${lib.escapeShellArg "${ags}/bin/panel-gjs"} \
+          --replace-fail '-ags.js"' '-${name}-ags.js"'
       '';
       # --- Generated palette --------------------------------------------------
       palette = pkgs.writeText "${name}-palette.json" (
@@ -81,8 +86,7 @@ rec {
         inherit name commands;
         strict_help = strictHelp;
         check_response = checkResponse;
-        ags = lib.getExe ags;
-        gjs = "${ags}/bin/panel-gjs";
+        astal = lib.getExe' astalPackage "astal";
         inherit bundle;
         environment = {
           PANEL_CSS_FILE = "${repoRoot}/scripts/${sourceDir}/style.css";
@@ -110,9 +114,21 @@ rec {
   # Per-panel package declarations
   # ===========================================================================
   packages =
-    { pkgs, repoRoot, panelLauncher, audioControl, mediaControl, clipboardCustom }:
+    {
+      pkgs,
+      repoRoot,
+      panelLauncher,
+      audioControl,
+      mediaControl,
+      clipboardCustom,
+      agsPackage,
+      astalPackages,
+    }:
     let
-      panel = args: mkPanel ({ inherit pkgs repoRoot panelLauncher; } // args);
+      panel = args: mkPanel ({
+        inherit pkgs repoRoot panelLauncher agsPackage;
+        astalPackage = astalPackages.default;
+      } // args);
     in
     {
       # --- Audio / Bluetooth --------------------------------------------------
@@ -120,7 +136,7 @@ rec {
         name = "audio-panel";
         prefix = "AUDIO_PANEL";
         sourceDir = "audio-control/astal";
-        extraPackages = [ pkgs.astal.wireplumber pkgs.astal.bluetooth ];
+        extraPackages = [ astalPackages.wireplumber astalPackages.bluetooth ];
         environment.AUDIO_CONTROL_HELPER = pkgs.lib.getExe audioControl;
         commands = [ "run" "status" "toggle" "close" "bluetoothPower" ];
       };
@@ -129,7 +145,7 @@ rec {
         name = "media-panel";
         prefix = "MEDIA_PANEL";
         sourceDir = "media-control/astal";
-        extraPackages = [ pkgs.astal.mpris pkgs.astal.wireplumber ];
+        extraPackages = [ astalPackages.mpris astalPackages.wireplumber ];
         imageLoaders = true;
         strictHelp = false;
         environment = {
@@ -144,7 +160,7 @@ rec {
         prefix = "NETWORK_PANEL";
         sourceDir = "network-manager";
         # AstalNetwork's GIR references NM.Client; include libnm's typelib.
-        extraPackages = [ pkgs.astal.network pkgs.networkmanager ];
+        extraPackages = [ astalPackages.network pkgs.networkmanager ];
         environment = {
           DASHBOARD_PANEL = "dashboard-panel";
           MEDIA_PANEL = "media-panel";
@@ -158,7 +174,7 @@ rec {
         sourceDir = "dashboard";
         entryPoint = "power.ts";
         extraPackages = [
-          pkgs.astal.battery pkgs.astal.powerprofiles pkgs.astal.notifd
+          astalPackages.battery astalPackages.powerprofiles astalPackages.notifd
         ];
         imageLoaders = true;
         environment = {
@@ -174,7 +190,7 @@ rec {
         name = "app-launcher";
         prefix = "APP_LAUNCHER";
         sourceDir = "app-launcher";
-        extraPackages = [ pkgs.astal.apps ];
+        extraPackages = [ astalPackages.apps ];
         withPalette = false;
         environment.NIRI = pkgs.lib.getExe pkgs.niri;
         commands = [ "run" "toggle" "close" "status" ];

@@ -85,9 +85,9 @@ function formatted(value) {
     return String(value);
 }
 
-function frame(palette) {
+function frame(palette, { color = palette.yellow, topBand = 0 } = {}) {
     const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
-    const rgb = palette.yellow.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
+    const rgb = color.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
     drawing.set_draw_func((_, cr, width, height) => {
         if (width < 1 || height < 1) return;
         const cut = Math.min(10, Math.max(0, (width - 1) / 2), Math.max(0, (height - 1) / 2)), inset = 0.5;
@@ -103,9 +103,22 @@ function frame(palette) {
         cr.setSourceRGBA(...rgb, 1);
         cr.setLineWidth(1);
         cr.stroke();
-
+        if (topBand > 0) {
+            cr.rectangle(cut + inset, inset, Math.max(0, width - cut - 1), Math.min(topBand, height - 1));
+            cr.fill();
+        }
     });
     return drawing;
+}
+
+function prompt(palette, children) {
+    const content = box(true, 8, children);
+    content.add_css_class('network-prompt-content');
+    const widget = new Gtk.Overlay({ hexpand: true, vexpand: false, css_classes: ['network-prompt'] });
+    widget.set_child(frame(palette, { color: palette.red, topBand: 3 }));
+    widget.add_overlay(content);
+    widget.set_measure_overlay(content, true);
+    return widget;
 }
 
 const detailFields = [
@@ -190,7 +203,7 @@ export class NetworkPanel {
         this.content.append(this.errorRow);
         this.pages = new Gtk.Stack({ transition_type: Gtk.StackTransitionType.NONE,
             hhomogeneous: false, vhomogeneous: false, hexpand: true, vexpand: true });
-        this.networkRows = box(true, 8);
+        this.networkRows = box(true, 3);
         this.networkSeparator = new Gtk.Separator({ css_classes: ['network-divider'], visible: false });
         this.networkRows.append(this.networkSeparator);
         this.empty = label('No networks available');
@@ -201,7 +214,7 @@ export class NetworkPanel {
         this.list.add_overlay(this.empty);
         this.list.set_measure_overlay(this.empty, false);
         this.savedRows = box(true, 8);
-        this.savedEmpty = label('No undetected saved networks');
+        this.savedEmpty = label('No saved Wi-Fi networks');
         this.savedEmpty.halign = Gtk.Align.CENTER;
         this.savedEmpty.valign = Gtk.Align.CENTER;
         this.savedList = new Gtk.Overlay({ hexpand: true, vexpand: true });
@@ -215,7 +228,7 @@ export class NetworkPanel {
         this.nearbyTab = button('NEARBY', () => this.selectListTab('nearby'), ['network-tab']);
         this.savedTab = button('SAVED', () => this.selectListTab('saved'), ['network-tab']);
         this.savedTab.update_property([Gtk.AccessibleProperty.DESCRIPTION],
-            ['Saved Wi-Fi networks that are not currently detected']);
+            ['All saved Wi-Fi networks, including nearby and connected networks']);
         const tabs = box(false, 4, [this.nearbyTab, this.savedTab]);
         tabs.homogeneous = true;
         this.listTabs = tabs;
@@ -227,23 +240,27 @@ export class NetworkPanel {
         this.networkLists.margin_start = this.networkLists.margin_end = 6;
         this.listFrame.add_overlay(this.networkLists);
         this.listFrame.set_measure_overlay(this.networkLists, false);
-        this.pages.add_named(box(true, 0, [tabs, this.listFrame]), 'list');
+        this.pages.add_named(box(true, 5, [tabs, this.listFrame]), 'list');
         this.buildInfo();
         this.content.append(this.pages);
         this.credentialName = label();
         this.password = new Gtk.Entry({ visibility: false, placeholder_text: 'Network password',
             input_purpose: Gtk.InputPurpose.PASSWORD, input_hints: Gtk.InputHints.PRIVATE,
             width_chars: 1, max_width_chars: 1, hexpand: true, css_classes: ['network-password'] });
+        this.passwordReveal = iconButton('view-reveal-symbolic', () =>
+            this.setPasswordVisible(!this.password.visibility), ['password-reveal']);
+        this.setPasswordVisible(false);
         this.submit = button('Connect', () => this.submitPassword());
         this.password.connect('changed', () => { this.submit.sensitive = this.password.get_text().length > 0; });
         this.password.connect('activate', () => this.submitPassword());
         const cancel = button('Cancel', () => { this.clearPassword(); this.controller.cancelCredentials(); });
-        this.credentials = box(true, 8, [this.credentialName, this.password, box(false, 8, [this.submit, cancel])]);
+        this.credentials = prompt(palette, [this.credentialName,
+                    box(false, 8, [this.password, this.passwordReveal]), box(false, 8, [this.submit, cancel])]);
         this.content.append(this.credentials);
         this.forgetConfirm = button('Forget', () => this.controller.confirmForget());
         this.forgetCancel = button('Cancel', () => this.controller.cancelForget());
         this.forgetMessage = label();
-        this.forget = box(true, 8, [this.forgetMessage, box(false, 8, [this.forgetConfirm, this.forgetCancel])]);
+        this.forget = prompt(palette, [this.forgetMessage, box(false, 8, [this.forgetConfirm, this.forgetCancel])]);
         this.content.append(this.forget);
 
     }
@@ -292,10 +309,13 @@ export class NetworkPanel {
         this.maskSecret();
     }
 
-    createRow(key) {
+    createRow(key, viewKey = key) {
         const row = { key, profilesSignature: '', profileUuids: [''], updating: false };
-        row.marker = new Gtk.Image({ icon_name: 'network-wireless-symbolic', pixel_size: 12,
-            can_target: false, focusable: false, css_classes: ['network-marker'] });
+        row.markerIcon = new Gtk.Image({ icon_name: 'network-wireless-symbolic', pixel_size: 12 });
+        row.markerSymbol = new Gtk.Label({ label: '○', visible: false });
+        row.marker = box(false, 0, [row.markerIcon, row.markerSymbol]);
+        row.marker.can_target = false;
+        row.marker.add_css_class('network-marker');
         row.name = label('', ['network-name']);
         row.metadata = label('', ['metadata']);
         row.status = label('', ['network-status'], false);
@@ -327,18 +347,19 @@ export class NetworkPanel {
             if (current.connected) this.controller.disconnectNetwork(key);
             else this.controller.connectNetwork(key, this.profileChoices.get(key) || '');
         });
-        row.forget = button('×', () => this.controller.requestForget(key), ['network-remove']);
+
         row.remove = button('×', () => this.controller.requestForget(key), ['network-remove']);
         row.info = iconButton('pan-down-symbolic', () => this.toggleInfo(key), ['info-toggle']);
-        row.info.hexpand = true;
+        row.info.hexpand = false;
         row.info.halign = Gtk.Align.END;
-        row.heading = box(false, 4, [row.marker, row.name, row.status, row.connect, row.forget, row.remove]);
-        row.secondary = box(false, 4, [row.metadata, row.info]);
+        row.heading = box(false, 4, [row.marker, row.name, row.status, row.connect, row.remove, row.info]);
+        row.secondary = box(false, 4, [row.metadata]);
         row.details = new Gtk.Revealer({ transition_type: Gtk.RevealerTransitionType.SLIDE_DOWN,
             transition_duration: 180, reveal_child: false });
+        row.details.connect('notify::child-revealed', () => this.position());
         row.widget = box(true, 4, [row.heading, row.secondary, row.profile, row.details]);
         row.widget.add_css_class('network-row');
-        this.rows.set(key, row);
+        this.rows.set(viewKey, row);
         return row;
     }
 
@@ -365,11 +386,14 @@ export class NetworkPanel {
 
     renderRows() {
         const c = this.controller;
-        const saved = (c.rows || []).filter(isUndetectedSaved);
+        const saved = (c.rows || []).filter(row => row.wireless && row.known);
         const nearby = (c.rows || []).filter(row => !isUndetectedSaved(row));
         const remembered = nearby.filter(row => row.known || row.connected);
         const available = nearby.filter(row => !row.known && !row.connected);
-        const wanted = new Set((c.rows || []).map(row => row.key));
+        const wanted = new Set([
+            ...(c.rows || []).map(row => row.key),
+            ...saved.filter(row => !isUndetectedSaved(row)).map(row => JSON.stringify(['saved', row.key])),
+        ]);
         this.networkSeparator.visible = remembered.length > 0 && available.length > 0;
         for (const [key, row] of this.rows) {
             if (wanted.has(key)) continue;
@@ -381,7 +405,7 @@ export class NetworkPanel {
             row.details.reveal_child = false;
             row.widget.get_parent()?.remove(row.widget);
             this.rows.delete(key);
-            this.profileChoices.delete(key);
+            if (!wanted.has(row.key)) this.profileChoices.delete(row.key);
         }
         for (const [container, data] of [[this.networkRows, [...remembered, ...available]], [this.savedRows, saved]]) {
             let previous = null, separated = false;
@@ -392,14 +416,22 @@ export class NetworkPanel {
                     previous = this.networkSeparator;
                     separated = true;
                 }
-                const row = this.rows.get(dataRow.key) || this.createRow(dataRow.key);
+                // Nearby saved networks need independent widgets in both tabs.
+                const viewKey = undetected && !isUndetectedSaved(dataRow)
+                    ? JSON.stringify(['saved', dataRow.key]) : dataRow.key;
+                const row = this.rows.get(viewKey) || this.createRow(dataRow.key, viewKey);
                 if (row.widget.get_parent() !== container) {
-                    // Keep the same widget and profile choice as scan results move it between tabs.
                     row.widget.get_parent()?.remove(row.widget);
                     container.append(row.widget);
                 }
                 row.data = dataRow;
-                row.marker.icon_name = dataRow.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic';
+                const savedNearby = !undetected && (dataRow.known || dataRow.connected);
+                row.markerSymbol.set_label(dataRow.connected ? '✓' : '○');
+                row.markerSymbol.visible = savedNearby;
+                row.markerIcon.visible = !savedNearby;
+                row.markerIcon.icon_name = dataRow.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic';
+                row.marker.update_property([Gtk.AccessibleProperty.LABEL],
+                    [`${dataRow.connected ? 'Connected' : 'Not connected'}: ${dataRow.name}`]);
                 if (dataRow.wireless) row.marker.add_css_class('network-wifi-marker');
                 else row.marker.remove_css_class('network-wifi-marker');
                 const title = undetected ? `Wi-Fi - ${dataRow.security || 'Open'} - ${dataRow.name}`
@@ -428,7 +460,7 @@ export class NetworkPanel {
                     if (enabled) row.widget.add_css_class(name);
                     else row.widget.remove_css_class(name);
                 }
-                row.metadata.set_label([dataRow.connected ? 'Connected' : dataRow.wireless ? '' : dataRow.known ? 'Saved' : 'Not saved',
+                row.metadata.set_label([dataRow.wireless ? '' : dataRow.connected ? 'Connected' : dataRow.known ? 'Saved' : 'Not saved',
                     dataRow.wireless ? '' : dataRow.interface,
                     dataRow.wireless ? '' : dataRow.security, dataRow.changing ? 'Working…' : ''].filter(Boolean).join(' · '));
                 row.metadata.visible = !undetected && Boolean(row.metadata.label);
@@ -447,19 +479,18 @@ export class NetworkPanel {
                 row.profile.update_property([Gtk.AccessibleProperty.LABEL], [`Saved profile for ${dataRow.name}`]);
                 row.profile.visible = !undetected && profiles.length > 1;
                 row.connect.visible = !undetected;
-                row.connect.get_child().icon_name = dataRow.connected ? 'network-offline-symbolic'
+                row.connect.get_child().icon_name = dataRow.connected
+                    ? dataRow.wireless ? 'network-wireless-disabled-symbolic' : 'network-wired-disconnected-symbolic'
                     : dataRow.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic';
                 row.connect.update_property([Gtk.AccessibleProperty.LABEL],
                     [`${dataRow.connected ? 'Disconnect' : 'Connect'} ${dataRow.name}`]);
                 row.connect.sensitive = !dataRow.changing && (!dataRow.wireless || (c.wifiEnabled && c.wifiHardwareEnabled));
-                row.forget.visible = Boolean(dataRow.known && !undetected);
-                row.forget.sensitive = Boolean(dataRow.known && !dataRow.changing);
-                row.forget.update_property([Gtk.AccessibleProperty.LABEL], [`Forget saved network ${dataRow.name}`]);
+
                 row.remove.visible = undetected;
                 row.remove.sensitive = Boolean(dataRow.known && !dataRow.changing);
                 row.remove.update_property([Gtk.AccessibleProperty.LABEL], [`Forget saved network ${dataRow.name}`]);
                 row.info.visible = Boolean(!undetected && (dataRow.connected || dataRow.known));
-                row.secondary.visible = row.metadata.visible || row.info.visible;
+                row.secondary.visible = row.metadata.visible;
                 if (row.widget.get_prev_sibling() !== previous) container.reorder_child_after(row.widget, previous);
                 previous = row.widget;
             }
@@ -484,7 +515,16 @@ export class NetworkPanel {
         this.reveal.update_property([Gtk.AccessibleProperty.LABEL], ['Reveal password']);
     }
 
-    clearPassword() { this.password.set_text(''); }
+    setPasswordVisible(visible) {
+        this.password.visibility = visible;
+        this.passwordReveal.get_child().icon_name = visible ? 'view-conceal-symbolic' : 'view-reveal-symbolic';
+        this.passwordReveal.update_property([Gtk.AccessibleProperty.LABEL], [visible ? 'Hide password' : 'Reveal password']);
+    }
+
+    clearPassword() {
+        this.setPasswordVisible(false);
+        this.password.set_text('');
+    }
 
     submitPassword() {
         if (!this.controller.opened || !this.controller.credentialRow || !this.password.get_text()) return;
@@ -614,40 +654,44 @@ export class NetworkPanel {
         this.position();
     }
 
-    preferredHeight(width) {
-        const nearby = (this.controller.rows || []).filter(row => !isUndetectedSaved(row));
-        const remembered = nearby.filter(row => row.known || row.connected);
-        const available = nearby.filter(row => !row.known && !row.connected).slice(0, 6);
-        if (!available.length || available.some(row => !this.rows.has(row.key))) return 480;
+    preferredHeight(width, maxHeight = 480) {
+        const limit = Math.max(0, Math.min(480, maxHeight));
         const padding = this.content.get_style_context().get_padding();
-        const rowWidth = Math.max(1, width - padding.left - padding.right
+        const contentWidth = Math.max(1, width - padding.left - padding.right);
+        const rowWidth = Math.max(1, contentWidth
             - this.networkLists.margin_start - this.networkLists.margin_end);
-        const rowHeight = data => {
-            const row = this.rows.get(data.key);
-            if (!row) return 0;
-            const style = row.widget.get_style_context();
-            const padding = style.get_padding(), border = style.get_border();
-            const innerWidth = Math.max(1, rowWidth - padding.left - padding.right - border.left - border.right);
-            // Expanding details should scroll inside the list, not resize the whole card.
-            return row.widget.measure(Gtk.Orientation.VERTICAL, rowWidth)[1]
-                - row.details.measure(Gtk.Orientation.VERTICAL, innerWidth)[1];
-        };
-        const heights = [...remembered, ...available].map(rowHeight);
-        while (heights.length < remembered.length + 6) heights.push(rowHeight(available.at(-1)));
-        let height = heights.reduce((sum, value) => sum + value, 0)
-            + Math.max(0, heights.length - 1) * this.networkRows.spacing;
-        if (remembered.length) height += this.networkSeparator.measure(Gtk.Orientation.VERTICAL, rowWidth)[1]
-            + this.networkRows.spacing;
-        return Math.ceil(height + padding.top + padding.bottom
-            + this.listTabs.measure(Gtk.Orientation.VERTICAL, width - padding.left - padding.right)[1]
-            + this.networkLists.margin_top + this.networkLists.margin_bottom);
+        let overhead = padding.top + padding.bottom
+            + this.listTabs.measure(Gtk.Orientation.VERTICAL, contentWidth)[1]
+            + this.listFrame.get_parent().spacing
+            + this.networkLists.margin_top + this.networkLists.margin_bottom;
+        for (let child = this.content.get_first_child(); child; child = child.get_next_sibling()) {
+            if (child.visible && child !== this.pages)
+                overhead += child.measure(Gtk.Orientation.VERTICAL, contentWidth)[1] + this.content.spacing;
+        }
+        const list = this.listTab === 'saved' ? this.savedRows : this.networkRows;
+        const budget = Math.max(0, limit - overhead);
+        let used = 0, fitted = 0, count = 0, firstHeight = 0;
+        for (let child = list.get_first_child(); child; child = child.get_next_sibling()) {
+            if (!child.visible) continue;
+            const height = child.measure(Gtk.Orientation.VERTICAL, rowWidth)[1];
+            if (!count) firstHeight = height;
+            const next = used + (count ? list.spacing : 0) + height;
+            if (next > budget) break;
+            used = next;
+            count++;
+            // A divider is not a complete network row and must not end the viewport.
+            if (child !== this.networkSeparator) fitted = used;
+        }
+        // Oversized details or very short monitors still need a scrollable viewport.
+        const listHeight = fitted || Math.min(firstHeight || 48, budget);
+        return Math.ceil(Math.min(limit, overhead + listHeight));
     }
 
     position() {
         if (!this.monitor) return;
         const { width, height } = this.monitor.get_geometry();
         const cardW = Math.max(0, Math.min(380, width - 16));
-        const cardH = Math.max(0, Math.min(this.preferredHeight(cardW), height - 54));
+        const cardH = Math.max(0, Math.min(this.preferredHeight(cardW, height - 54), height - 54));
         this.card.width_request = cardW;
         this.card.height_request = cardH;
         this.card.margin_top = Math.min(46, Math.max(0, height - cardH - 8));

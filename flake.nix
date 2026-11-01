@@ -3,6 +3,17 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixGL.url = "github:nix-community/nixGL";
 
+    astal = {
+      url = "github:Aylur/astal";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    ags = {
+      url = "github:Aylur/ags";
+      inputs.astal.follows = "astal";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     

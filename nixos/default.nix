@@ -8,11 +8,14 @@
 }:
 let
   kernelPackages = pkgs.linuxPackages_latest;
+  system = pkgs.stdenv.hostPlatform.system;
   # One canonical checkout path for every live-linked desktop configuration.
   repoRoot = "/home/raina/System";
   repoPackages = import ../scripts/packages.nix {
     inherit pkgs kernelPackages repoRoot;
     craneLib = inputs.crane.mkLib pkgs;
+    agsPackage = inputs.ags.packages.${system}.ags;
+    astalPackages = inputs.astal.packages.${system};
   };
 in
 {
@@ -49,9 +52,6 @@ in
 
     security.pki.caCertificateBlacklist = [
       "Comodo AAA Services root"
-      "emSign ECC Root CA - G3"
-      "emSign Root CA - C1"
-      "emSign ECC Root CA - C3"
     ];
 
     # User account & home-manager

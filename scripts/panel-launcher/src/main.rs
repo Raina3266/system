@@ -14,8 +14,7 @@ struct Config {
     commands: Vec<String>,
     strict_help: bool,
     check_response: bool,
-    ags: PathBuf,
-    gjs: PathBuf,
+    astal: PathBuf,
     bundle: PathBuf,
     environment: BTreeMap<String, String>,
     forced_environment: BTreeMap<String, String>,
@@ -137,24 +136,21 @@ fn launch(config: &Config, action: Action<'_>) -> i32 {
             return 0;
         }
         Action::Run => {
-            let mut command = config.child_command(&config.gjs);
-            command.arg("-m").arg(&config.bundle);
+            let command = config.child_command(&config.bundle);
             if !has_runtime_dir(&command) {
                 eprintln!("{}: XDG_RUNTIME_DIR is required", config.name);
                 return 1;
             }
-            (command, &config.gjs)
+            (command, &config.bundle)
         }
         Action::Request(request) => {
-            let mut command = config.child_command(&config.ags);
+            let mut command = config.child_command(&config.astal);
             command.args([
-                "request",
                 "--instance",
                 &config.name,
-                "--",
                 &serde_json::to_string(&request).expect("request contains only strings"),
             ]);
-            (command, &config.ags)
+            (command, &config.astal)
         }
     };
 
