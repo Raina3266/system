@@ -3627,8 +3627,9 @@ const accessibleDouble = () => ({
         assert.equal(states.length, values.length, 'accessible states and values are paired');
         states.forEach((state, index) => {
             assert.ok(Object.values(mockGtk.AccessibleState).includes(state), 'known native accessible state');
-            assert.equal(typeof values[index], 'boolean');
-            this.accessibleStates.set(state, values[index]);
+            assert.equal(typeof values[index], 'number', 'GTK expanded states require integer GValues');
+            assert.ok([mockGtk.AccessibleTristate.FALSE, mockGtk.AccessibleTristate.TRUE].includes(values[index]));
+            this.accessibleStates.set(state, values[index] === mockGtk.AccessibleTristate.TRUE);
         });
     },
     update_property(properties, values) {
@@ -3733,6 +3734,7 @@ const volumeDouble = () => ({
 const mockGtk = {
     AccessibleProperty: { LABEL: 'label', DESCRIPTION: 'description' },
     AccessibleState: { EXPANDED: 'expanded' },
+    AccessibleTristate: { FALSE: 0, TRUE: 1 },
     RevealerTransitionType: { SLIDE_DOWN: 1 },
     Orientation: { VERTICAL: 1, HORIZONTAL: 0 }, Align: { END: 2, FILL: 0, START: 1, CENTER: 3 },
     PositionType: { TOP: 2 }, ScrollType: { STEP_BACKWARD: 6, STEP_FORWARD: 7 },
@@ -5143,9 +5145,23 @@ function bounds(widget, relative = panel.card) {
     return { x: rect.get_x(), y: rect.get_y(), width: rect.get_width(), height: rect.get_height(),
         bottom: rect.get_y() + rect.get_height() };
 }
+const accessibleStates = new WeakMap();
+const updateAccessibleState = Gtk.ToggleButton.prototype.update_state;
+function trackAccessibleState(states, values) {
+    states.forEach((state, index) => {
+        if (state === Gtk.AccessibleState.EXPANDED) {
+            assert(typeof values[index] === 'number' && [0, 1].includes(values[index]),
+                'Expanded accessibility states must marshal integer GValues, not booleans');
+            accessibleStates.set(this, values[index]);
+        }
+    });
+    return updateAccessibleState.call(this, states, values);
+}
 function expanded(view, value, message) {
     equal([view.devices.active, view.deviceChoices.reveal_child, view.deviceArrow.label],
         [value, value, value ? '⌃' : '⌄'], message);
+    equal(accessibleStates.get(view.devices), value ? Gtk.AccessibleTristate.TRUE : Gtk.AccessibleTristate.FALSE,
+        `${message}: real GTK receives numeric accessibility state`);
 }
 function focused(widget, message) {
     const focus = host.get_focus();
@@ -6039,9 +6055,11 @@ async function smoke() {
 }
 
 let exitCode = 0;
+Gtk.ToggleButton.prototype.update_state = trackAccessibleState;
 try { await smoke(); }
 catch (error) { console.error(`FAIL audio inline-selector/volume GTK smoke after ${checks} assertions`, error); exitCode = 1; }
 finally {
+    Gtk.ToggleButton.prototype.update_state = updateAccessibleState;
     host?.destroy();
     panel?.dispose();
     app?.quit();

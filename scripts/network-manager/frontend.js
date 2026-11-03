@@ -592,7 +592,8 @@ export class NetworkPanel {
             current.info.get_child().icon_name = expanded ? 'pan-up-symbolic' : 'pan-down-symbolic';
             current.info.update_property([Gtk.AccessibleProperty.LABEL],
                 [`${expanded ? 'Collapse' : 'Expand'} details for ${current.data?.name || current.key}`]);
-            current.info.update_state([Gtk.AccessibleState.EXPANDED], [expanded]);
+            current.info.update_state([Gtk.AccessibleState.EXPANDED],
+                [expanded ? Gtk.AccessibleTristate.TRUE : Gtk.AccessibleTristate.FALSE]);
             if (expanded) current.info.add_css_class('expanded');
             else current.info.remove_css_class('expanded');
         }

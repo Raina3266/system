@@ -424,7 +424,8 @@ export class AudioPanel {
         view.deviceChoices.reveal_child = show;
         if (!show) view.deviceSelection.selected = Gtk.INVALID_LIST_POSITION;
         view.deviceArrow.set_label(show ? '⌃' : '⌄');
-        view.devices.update_state([Gtk.AccessibleState.EXPANDED], [show]);
+        view.devices.update_state([Gtk.AccessibleState.EXPANDED],
+            [show ? Gtk.AccessibleTristate.TRUE : Gtk.AccessibleTristate.FALSE]);
     }
 
     selectAudioDevice(view, position = view.deviceSelection.selected) {

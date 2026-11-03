@@ -280,6 +280,52 @@ async function nodeControllerTests() {
     const { readFileSync } = await import('node:fs');
     const { default: vm } = await import('node:vm');
     const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    it('passes numeric GTK tristates for collapsed, expanded, and collapsed-again Info', () => {
+        const body = frontend.match(/    renderInfo\(active\) \{([\s\S]*?)\n    \}/)?.[1];
+        assert.ok(body, 'renderInfo is available');
+        const Gtk = {
+            AccessibleProperty: { LABEL: 'label' },
+            AccessibleState: { EXPANDED: 'expanded' },
+            AccessibleTristate: { FALSE: 0, TRUE: 1 },
+        };
+        const renderInfo = vm.runInNewContext(`(function(active) {${body}\n})`, {
+            Gtk, detailFields: [], formatted: value => value, signalLabel: () => '', message() {},
+        });
+        const updates = [];
+        const style = { add_css_class() {}, remove_css_class() {} };
+        const iconButton = () => ({ ...style, get_child: () => ({}), update_property() {} });
+        const row = {
+            key: 'wifi', data: { name: 'Wi-Fi' }, widget: style,
+            info: { ...iconButton(), update_state(states, values) {
+                assert.deepEqual(Array.from(states), [Gtk.AccessibleState.EXPANDED]);
+                assert.equal(typeof values[0], 'number', 'GJS must marshal an integer, not a boolean');
+                updates.push(values[0]);
+            } },
+            details: { reveal_child: false, set_child() {} },
+        };
+        const other = {
+            ...row, key: 'other', details: { ...row.details },
+            info: { ...iconButton(), update_state(states, values) {
+                assert.equal(values[0], 0, 'An unselected row always receives numeric FALSE');
+            } },
+        };
+        const controller = { selectedRow: null };
+        const panel = {
+            controller, rows: new Map([['wifi', row], ['other', other]]), maskSecret() {},
+            infoContent: { get_parent: () => row.details },
+            infoProfile: {}, infoProfileSignature: '[]', infoProfileUuids: [],
+            summary: { set_label() {} }, savedProfiles: {},
+            addressGroup: {}, linkGroup: {}, linkHeading: { set_label() {} },
+            reveal: iconButton(), passwordCaption: {}, passwordLine: {}, secretLoading: {},
+            secret: { set_label() {} },
+        };
+        for (const expanded of [false, true, false]) {
+            controller.selectedRow = expanded ? { key: 'wifi', profiles: [] } : null;
+            renderInfo.call(panel, expanded);
+            assert.equal(row.details.reveal_child, expanded);
+        }
+        assert.deepEqual(updates, [0, 1, 0]);
+    });
     it('toggles the new Wi-Fi password eye without changing its text and remasks on reset', () => {
         const method = name => {
             const body = frontend.match(new RegExp(`    ${name}\\([^)]*\\) \\{([\\s\\S]*?)\\n    \\}`))?.[1];
@@ -3600,6 +3646,19 @@ async function gjsUITests() {
     const accessibleProperties = new WeakMap();
     const updateAccessible = Gtk.Button.prototype.update_property;
     const updateDropdownAccessible = Gtk.DropDown.prototype.update_property;
+    const accessibleStates = new WeakMap();
+    const updateAccessibleState = Gtk.Button.prototype.update_state;
+    function trackAccessibleState(states, values) {
+        const state = accessibleStates.get(this) || new Map();
+        states.forEach((key, index) => {
+            if (key === Gtk.AccessibleState.EXPANDED)
+                assert(typeof values[index] === 'number' && [0, 1].includes(values[index]),
+                    'Expanded accessibility updates use numeric FALSE/TRUE, never boolean GValues');
+            state.set(key, values[index]);
+        });
+        accessibleStates.set(this, state);
+        return updateAccessibleState.call(this, states, values);
+    }
     function trackAccessible(properties, values) {
         const state = accessibleProperties.get(this) || new Map();
         properties.forEach((property, index) => state.set(property, values[index]));
@@ -3813,6 +3872,9 @@ async function gjsUITests() {
         assert(!view.pages.get_child_by_name('info'),
             'Inline Info has no standalone stack child or Back/navigation');
         const row = view.rows.get(key);
+        for (const current of view.rows.values())
+            equal(accessibleStates.get(current.info)?.get(Gtk.AccessibleState.EXPANDED),
+                current === row ? 1 : 0, 'Real GTK receives numeric TRUE only for the selected Info button');
         assert(row.details instanceof Gtk.Revealer && row.details.get_parent() === row.widget,
             'Details are attached directly to their network row');
         assert(row.details.get_child() === view.infoContent && view.infoContent.get_parent() === row.details,
@@ -4007,6 +4069,9 @@ async function gjsUITests() {
             return backend.requests.at(-1);
         };
         const assertClosed = row => {
+            for (const current of view.rows.values())
+                equal(accessibleStates.get(current.info)?.get(Gtk.AccessibleState.EXPANDED), 0,
+                    'Closing Info sends numeric FALSE to every real GTK Info button');
             assert(controller.page === 'list' && !controller.selectedKey && !controller.secretRequested
                 && !controller.secretLoading && !row.details.reveal_child, 'Closing details clears controller selection and authorization synchronously');
             assert(!row.widget.has_css_class('expanded')
@@ -5025,11 +5090,13 @@ async function gjsUITests() {
 
     let exitCode = 0;
     Gtk.Button.prototype.update_property = Gtk.DropDown.prototype.update_property = trackAccessible;
+    Gtk.Button.prototype.update_state = trackAccessibleState;
     try { await smoke(); }
     catch (error) { console.error(error); exitCode = 1; }
     finally {
         Gtk.Button.prototype.update_property = updateAccessible;
         Gtk.DropDown.prototype.update_property = updateDropdownAccessible;
+        Gtk.Button.prototype.update_state = updateAccessibleState;
         host?.destroy();
         panel?.dispose();
     }

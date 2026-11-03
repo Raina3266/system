@@ -84,6 +84,8 @@ in
     boot.kernel.sysctl = {
       "fs.inotify.max_user_watches" = 524288;
       "fs.inotify.max_user_instances" = 512;
+      # Favor reclaiming file cache over paging out interactive application state.
+      "vm.swappiness" = 20;
     };
 
     # File systems & swap
@@ -172,17 +174,6 @@ in
       enable = true;
       extraBackends = with pkgs; [
         sane-airscan
-      ];
-    };
-    hardware.printers = {
-      ensureDefaultPrinter = "Canon-TS3350";
-      ensurePrinters = [
-        {
-          name = "Canon-TS3350";
-          location = "Home";
-          deviceUri = "ipp://192.168.2.217/ipp/print";
-          model = "everywhere";
-        }
       ];
     };
 
