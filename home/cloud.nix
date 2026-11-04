@@ -1,4 +1,4 @@
-# Cloud sync and mounts: rclone bisync for GoogleDrive / Music / Onedrive
+# Cloud sync and mounts: rclone bisync for GoogleDrive / Music
 # plus an on-demand rclone mount of GoogleDrive:Video at ~/Videos.
 {
   config,
@@ -27,16 +27,6 @@ let
       localDir = "${config.home.homeDirectory}/Music";
       remote = "GoogleDrive:Music";
       description = "bisync GoogleDrive:Music";
-    }
-    {
-      name = "Onedrive";
-      localDir = "${config.home.homeDirectory}/Onedrive";
-      remote = "Onedrive:";
-      description = "bisync Onedrive";
-      excludes = [
-        "Scans/**"
-        "Attachments/**"
-      ];
     }
   ];
 
