@@ -18,7 +18,6 @@ let
         "Shared/**"
         "Video/**"
         "Music/**"
-        "Obsidian/**"
         ".Trash-1000/**"
       ];
     }

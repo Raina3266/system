@@ -10,7 +10,7 @@
 let
   # Portals are configured system-wide in ../nixos/services.nix; declaring
   # them here as well would install a second copy into the user profile.
-  # Qt applications only need to be pointed at the portal for theming.
+  # Only explicitly wrapped packages opt into portal-based Qt integration.
   portalizeQtPackage =
     package:
     pkgs.symlinkJoin {
@@ -27,25 +27,23 @@ let
       inherit (package) meta;
     };
 
-  # Patched to follow the portal's system theme; the fixes are commented
-  # inside postPatch. The menu entry and icon live in desktop.nix.
-  fastflix = portalizeQtPackage (
-    pkgs.fastflix.overrideAttrs (old: {
-      buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtimageformats ];
+  # Inherit the session's Qt platform theme; only patch FastFlix's own overrides.
+  # The menu entry and icon live in desktop.nix.
+  fastflix = pkgs.fastflix.overrideAttrs (old: {
+    buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtimageformats ];
 
-      postPatch = (old.postPatch or "") + ''
-        # Let the portal's palette style the default-theme status bar.
-        substituteInPlace fastflix/widgets/status_bar.py \
-          --replace-fail '"#StatusBarWidget {  background-color: #f0f0f0;  border-top: 1px solid #cccccc;}"' '""' \
-          --replace-fail '"color: #333333; background: transparent;"' '""'
+    postPatch = (old.postPatch or "") + ''
+      # Let the system palette style the default-theme status bar.
+      substituteInPlace fastflix/widgets/status_bar.py \
+        --replace-fail '"#StatusBarWidget {  background-color: #f0f0f0;  border-top: 1px solid #cccccc;}"' '""' \
+        --replace-fail '"color: #333333; background: transparent;"' '""'
 
-        # Group the window with the fastflix.desktop entry in desktop.nix.
-        substituteInPlace fastflix/application.py \
-          --replace-fail 'main_app.setApplicationDisplayName("FastFlix")' \
-            'QtGui.QGuiApplication.setDesktopFileName("fastflix"); main_app.setApplicationDisplayName("FastFlix")'
-      '';
-    })
-  );
+      # Group the window with the fastflix.desktop entry in desktop.nix.
+      substituteInPlace fastflix/application.py \
+        --replace-fail 'main_app.setApplicationDisplayName("FastFlix")' \
+          'QtGui.QGuiApplication.setDesktopFileName("fastflix"); main_app.setApplicationDisplayName("FastFlix")'
+    '';
+  });
 
   # nixpkgs' czkawka builds the legacy GTK GUI (czkawka_gui) alongside
   # Krokiet, its newer GUI; strip the legacy binary and its desktop entry,

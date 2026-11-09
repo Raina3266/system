@@ -14,6 +14,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Track upstream source through flake.lock instead of a fixed release tag.
+    niri-window-buttons = {
+      url = "github:adelmonte/niri_window_buttons";
+      flake = false;
+    };
+
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     

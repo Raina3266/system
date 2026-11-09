@@ -16,6 +16,7 @@ let
     craneLib = inputs.crane.mkLib pkgs;
     agsPackage = inputs.ags.packages.${system}.ags;
     astalPackages = inputs.astal.packages.${system};
+    niriWindowButtonsSrc = inputs.niri-window-buttons;
   };
 in
 {
@@ -232,24 +233,23 @@ in
         nerd-fonts.symbols-only
       ];
 
-      # Make a Nerd Font the system default so apps that use the
-      # fontconfig default sans/serif/monospace (niri's hotkey overlay,
-      # tab titles, etc.) pick up Nerd Font glyphs for icons.
+      # Use proportional fonts for GUI text, with Nerd Font fallbacks for icons.
+      # Keep JetBrains Mono as the default for terminals and other monospace text.
       fontconfig = {
         enable = true;
         defaultFonts = {
           sansSerif = [
+            "Noto Sans"
             "JetBrainsMono Nerd Font"
             "Symbols Nerd Font Mono"
-            "Noto Sans"
             "Noto Sans CJK SC"
             "Noto Sans CJK JP"
             "Noto Sans CJK KR"
           ];
           serif = [
+            "Noto Serif"
             "JetBrainsMono Nerd Font"
             "Symbols Nerd Font Mono"
-            "Noto Serif"
             "Noto Serif CJK SC"
             "Noto Serif CJK JP"
             "Noto Serif CJK KR"

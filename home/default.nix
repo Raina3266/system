@@ -71,6 +71,7 @@
 
     # media
     vlc
+    haruna
     spotube
     puddletag
     obs-studio

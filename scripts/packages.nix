@@ -4,6 +4,7 @@
   craneLib,
   agsPackage,
   astalPackages,
+  niriWindowButtonsSrc,
   kernelPackages ? pkgs.linuxPackages_latest,
   repoRoot ? "/home/raina/System",
 }:
@@ -347,17 +348,11 @@ rec {
     '';
   };
 
-  niriWindowButtons = pkgs.rustPlatform.buildRustPackage rec {
+  niriWindowButtons = pkgs.rustPlatform.buildRustPackage {
     pname = "niri_window_buttons";
-    version = "0.4.3";
-
-    src = pkgs.fetchFromGitHub {
-      owner = "adelmonte";
-      repo = "niri_window_buttons";
-      tag = "v${version}";
-      hash = "sha256-CUeeDe5DY7IRf6pCl9g7q5rHNs4ca4mAg0eKgZ0ErlY=";
-    };
-    cargoHash = "sha256-STrFRNLgytpLilx0o/StCAnaO1dyWDUQDoTzb7PA2hc=";
+    version = (lib.importTOML "${niriWindowButtonsSrc}/Cargo.toml").package.version;
+    src = niriWindowButtonsSrc;
+    cargoLock.lockFile = "${niriWindowButtonsSrc}/Cargo.lock";
 
     nativeBuildInputs = [ pkgs.pkg-config ];
     buildInputs = with pkgs; [

@@ -232,7 +232,7 @@ in
     // handledBy "google-chrome.desktop" webMimeTypes
     // handledBy "zed-new-window.desktop" codeMimeTypes
     // handledBy "org.kde.gwenview.desktop" imageMimeTypes
-    // handledBy "vlc.desktop" mediaMimeTypes;
+    // handledBy "org.kde.haruna.desktop" mediaMimeTypes;
   };
 
   home.activation.setGhosttyAsKdeTerminal = lib.hm.dag.entryAfter [ "linkGeneration" ] ''

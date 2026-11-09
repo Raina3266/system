@@ -122,16 +122,32 @@
         ]
       },
       "locked": {
-        "lastModified": 1793979366,
-        "narHash": "sha256-7OoWDsYO9teiPxl0QdlS5lYE20Pue8/5mpscSL32FUA=",
+        "lastModified": 1794241607,
+        "narHash": "sha256-kys0zaDDhAfM1eOTkmEmZhgsDiqJwV6pCwbGcQ1pHGc=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "2c0c1f01521469cf0271180c453c79782d53c2f6",
+        "rev": "ce296016f228162205cb2d1c9eadae6772db087d",
         "type": "github"
       },
       "original": {
         "owner": "nix-community",
         "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "niri-window-buttons": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793749188,
+        "narHash": "sha256-jJg90d3O0QtUKWAlRrk3eyPfhW71UU4TnLZrdsr+MlA=",
+        "owner": "adelmonte",
+        "repo": "niri_window_buttons",
+        "rev": "40d086aac925bfa6129a3aec49d2cfff9b7f7f59",
+        "type": "github"
+      },
+      "original": {
+        "owner": "adelmonte",
+        "repo": "niri_window_buttons",
         "type": "github"
       }
     },
@@ -230,6 +246,7 @@
         "crane": "crane",
         "delta": "delta",
         "home-manager": "home-manager",
+        "niri-window-buttons": "niri-window-buttons",
         "nixGL": "nixGL",
         "nixpkgs": "nixpkgs_3",
         "nixvim": "nixvim",
@@ -265,11 +282,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1794163304,
-        "narHash": "sha256-6LGCm940xPKjno3qo2ibnW6cRoFBo08yAiVP66kMYC0=",
+        "lastModified": 1794222496,
+        "narHash": "sha256-gBFr/qdIK3GUz135vOjQb7be1bybWZSrrxuUkNqK860=",
         "owner": "nolight132",
         "repo": "sonora",
-        "rev": "a3ba456f968053f03010318e250fd3412edcb9e3",
+        "rev": "ace5ea21771adc2d1b93ab9fc409a44b270e97a3",
         "type": "github"
       },
       "original": {
