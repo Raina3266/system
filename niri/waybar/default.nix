@@ -156,6 +156,9 @@ in
         systemd.user.services.waybar = {
           Unit = {
             ConditionEnvironment = lib.mkForce [ "XDG_CURRENT_DESKTOP=niri" ];
+            # The taskbar plugin retains stale widgets across in-process reloads.
+            X-Reload-Triggers = lib.mkForce [ ];
+            X-Restart-Triggers = [ config.xdg.configFile."waybar/config".source ];
             Wants = [
               "waybar-timer.service"
               "clipboard-collector.service"
@@ -178,6 +181,7 @@ in
             ];
           };
           Service = {
+            ExecReload = lib.mkForce [ ];
             Restart = lib.mkForce "on-failure";
             RestartSec = 3;
           };

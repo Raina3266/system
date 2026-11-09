@@ -31,6 +31,8 @@ AGS/Astal GTK4; Rust helpers handle custom policy and background tasks.
   red when selected, with no background tint on click.
 - Network scans, dashboard metrics, and audio compatibility refreshes stop while
   hidden. Notifications and native audio/Bluetooth state continue updating.
+- Hidden Network and Media panels defer GTK updates until opening, while native
+  state and Waybar badges stay live; closing still clears secrets and cancels lookups.
 
 ## Audio & Bluetooth
 
@@ -86,6 +88,8 @@ Sources: [`scripts/media-control/`](scripts/media-control/).
   matched audio stream. Ambiguous streams are not guessed; system output volume
   is never used as a fallback. Mute requires a matched stream and preserves volume.
 - Physical output selection belongs in Audio, not Media.
+- Badge requests reuse the current grouping model. Native changes still update it;
+  silent audio-property changes are checked at most every five seconds during badge polling.
 - Finds local/embedded artwork and YouTube/Bilibili author credits. Online credit
   lookups send the video ID to the site’s public endpoint, without cookies or credentials.
 

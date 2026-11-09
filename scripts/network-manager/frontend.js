@@ -535,6 +535,10 @@ export class NetworkPanel {
     render() {
         if (this.disposed) return;
         const c = this.controller;
+        const shown = Boolean(c.opened && (this.monitor || monitorFor(c.monitor)));
+        // Native state and Waybar status stay live without touching hidden widgets.
+        // Keep the final close pass to clear secrets and collapse animated details.
+        if (!shown && !this.presented) return;
         const infoRow = c.page === 'info' ? c.selectedRow : null;
         if (c.page === 'info' && (!infoRow || isUndetectedSaved(infoRow) || this.listTab !== 'nearby')) {
             // A scan can move a saved selection into the hidden tab without invalidating its identity.
@@ -551,7 +555,6 @@ export class NetworkPanel {
         const changed = identity !== this.interactionIdentity;
         if (changed) this.clearPassword();
         this.interactionIdentity = identity;
-        const shown = Boolean(c.opened && (this.monitor || monitorFor(c.monitor)));
         if (!shown) this.maskSecret();
         if (shown && (!this.monitor || this.monitor.get_connector() !== c.monitor)) this.setMonitor(monitorFor(c.monitor));
         if (shown !== this.presented) this.window.keymode = shown ? Astal.Keymode.EXCLUSIVE : Astal.Keymode.NONE;

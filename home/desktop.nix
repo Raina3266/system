@@ -231,7 +231,7 @@ in
     }
     // handledBy "google-chrome.desktop" webMimeTypes
     // handledBy "zed-new-window.desktop" codeMimeTypes
-    // handledBy "org.kde.showfoto.desktop" imageMimeTypes
+    // handledBy "org.kde.gwenview.desktop" imageMimeTypes
     // handledBy "vlc.desktop" mediaMimeTypes;
   };
 

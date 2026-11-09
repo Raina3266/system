@@ -276,7 +276,7 @@ async function isolatedUI(argv) {
 async function nodeControllerTests() {
     const { default: assert } = await import('node:assert/strict');
     const { describe, it } = await import('node:test');
-    const { NetworkController, parseRequest } = await import('./logic.js');
+    const { NetworkController, isUndetectedSaved, parseRequest } = await import('./logic.js');
     const { readFileSync } = await import('node:fs');
     const { default: vm } = await import('node:vm');
     const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
@@ -890,6 +890,170 @@ async function nodeControllerTests() {
             controller.close();
             assert.equal(backend.opened, false);
             assert.deepEqual(backend.calls.opened, [true, false]);
+        });
+    });
+
+    describe('hidden-panel render policy', () => {
+        const body = frontend.match(/    render\(\) \{([\s\S]*?)\n    \}/)?.[1];
+        assert.ok(body, 'The real frontend render method is available');
+        const monitor = { get_connector: () => 'DP-1' };
+        const render = vm.runInNewContext(`(function() {${body}\n})`, {
+            Astal: { Keymode: { NONE: 'none', EXCLUSIVE: 'exclusive' } },
+            monitorFor: () => monitor, isUndetectedSaved,
+            message(widget, text) { widget.set_label(text || ''); widget.visible = Boolean(text); },
+        });
+        function viewFixture(t, rows = [active()]) {
+            const { controller, backend } = fixture(t, rows, { opened: false });
+            const updates = [], frames = [], collapses = [];
+            const widget = (name, properties = {}) => new Proxy({
+                label: '', visible: false,
+                set_label(value) { this.label = value; },
+                get_text() { return this.text; },
+                set_text(value) { this.text = value; },
+                ...properties,
+            }, { set(target, key, value) {
+                updates.push(`${name}.${String(key)}`);
+                return Reflect.set(target, key, value);
+            } });
+            let infoParent = null;
+            const panel = {
+                controller, monitor, presented: false, interactionIdentity: '', listTab: 'nearby', rows: new Map(),
+                window: widget('window', { keymode: 'none' }), root: { grab_focus() { updates.push('focus'); } },
+                infoContent: { get_parent: () => infoParent },
+                password: widget('password', { text: '', visibility: false }),
+                secret: widget('secret', { label: '*******', selectable: false }), secretLoading: widget('loading'),
+                wifiNotice: widget('notice'), error: widget('error'), errorRow: widget('errorRow'), pages: widget('pages'),
+                credentials: widget('credentials'), credentialName: widget('credentialName'), submit: widget('submit'),
+                forget: widget('forget'), forgetMessage: widget('forgetMessage'),
+                maskSecret() {
+                    this.secret.set_label('*******'); this.secret.selectable = false; this.secretLoading.visible = false;
+                },
+                clearPassword() { this.password.visibility = false; this.password.set_text(''); },
+                setMonitor(value) { this.monitor = value; updates.push('monitor'); },
+                renderRows() {
+                    updates.push('rows');
+                    frames.push(JSON.parse(JSON.stringify(controller.rows)));
+                    this.rows = new Map(controller.rows.map(row => [row.key, { details: {} }]));
+                },
+                renderInfo(active) {
+                    updates.push('info');
+                    if (active) {
+                        infoParent = this.rows.get(controller.selectedKey)?.details;
+                        const revealed = Boolean(controller.secretRequested && !controller.secretLoading && controller.secret);
+                        this.secret.set_label(revealed ? controller.secret : '*******');
+                        this.secret.selectable = revealed;
+                    } else collapses.push([this.secret.label, this.secret.selectable, this.password.text, controller.secret]);
+                },
+                position() { updates.push('position'); }, render,
+            };
+            controller.onChange = () => panel.render();
+            panel.render();
+            return { controller, backend, panel, updates, frames, collapses };
+        }
+
+        it('does no hidden widget work while native rows, radios and Waybar status stay live', t => {
+            const { controller, backend, panel, updates, frames } = viewFixture(t);
+            for (const strength of [0, 25, 100]) {
+                backend.rows = [active({ strength })];
+                backend.detailValues.set('wifi', { ipv4: ['192.0.2.99/24'] });
+                backend.notify();
+                assert.equal(controller.row('wifi').strength, strength);
+                const badge = JSON.parse(handleRequest.call({ controller, panel }, '{"command":"status"}'));
+                assert.equal(badge.class, 'wifi');
+                assert.match(badge.tooltip, new RegExp(`Signal: ${strength}%`));
+                assert.match(badge.tooltip, /192\.0\.2\.99\/24/);
+            }
+            for (const [rows, expected] of [
+                [[active(), wired({ connected: true })], 'ethernet'],
+                [[saved({ changing: true })], 'connecting'], [[], 'offline'],
+            ]) {
+                backend.rows = rows; backend.notify();
+                assert.equal(JSON.parse(controller.status()).class, expected);
+            }
+            backend.available = backend.wifiAvailable = backend.wifiEnabled = backend.wifiHardwareEnabled = false;
+            backend.notify();
+            assert.equal(controller.available, false);
+            assert.equal(controller.wifiAvailable, false);
+            assert.equal(controller.wifiEnabled, false);
+            assert.equal(controller.wifiHardwareEnabled, false);
+            assert.match(JSON.parse(controller.status()).tooltip, /NetworkManager unavailable/);
+            assert.deepEqual(updates, [], 'No labels, visibility, focus, rows, details or layout change while hidden');
+            assert.deepEqual(frames, [], 'Even the initial hidden render defers row construction');
+        });
+
+        it('fully refreshes on every opening and still renders every visible native notification', t => {
+            const { controller, backend, panel, updates, frames } = viewFixture(t);
+            backend.rows = [saved({ key: 'replacement', name: 'New network', strength: null,
+                profiles: [{ id: 'New profile', uuid: 'new-profile' }] })];
+            backend.wifiEnabled = false; backend.notify();
+            assert.deepEqual(updates, []);
+            controller.toggle('DP-1');
+            assert.deepEqual(frames.at(-1), backend.rows);
+            assert.equal(panel.wifiNotice.label, 'Wi-Fi is off');
+            assert.equal(panel.window.visible, true);
+            assert.equal(panel.window.keymode, 'exclusive');
+            assert.equal(panel.presented, true);
+            backend.rows = [active({ name: 'Updated while visible', strength: 75 })]; backend.notify();
+            assert.equal(frames.length, 2);
+            assert.equal(frames.at(-1)[0].name, 'Updated while visible');
+            controller.error = 'Visible native failure'; controller.emit();
+            assert.equal(panel.error.label, controller.error);
+            assert.equal(panel.errorRow.visible, true);
+            controller.close();
+            const closedFrames = frames.length;
+            updates.length = 0;
+            backend.rows = [wired({ connected: true })]; backend.wifiAvailable = false; backend.notify();
+            assert.deepEqual(updates, []);
+            controller.toggle('DP-1');
+            assert.equal(frames.length, closedFrames + 1);
+            assert.deepEqual(frames.at(-1), backend.rows, 'Reopening reconciles additions, removals and profiles from current state');
+            assert.equal(panel.wifiNotice.label, 'No Wi-Fi adapter');
+            assert.equal(panel.listTab, 'nearby');
+        });
+
+        for (const pending of [false, true]) {
+            it(`runs the final close cleanup with a ${pending ? 'pending' : 'displayed'} secret, then ignores hidden replies`, async t => {
+                const { controller, backend, panel, updates, frames, collapses } = viewFixture(t);
+                controller.toggle('DP-1'); controller.info('wifi');
+                const work = controller.revealSecret(), request = backend.calls.readSecret.at(-1);
+                if (!pending) { request.resolve(credentials); await work; assertSecret(panel.secret.label, password); }
+                panel.password.set_text(password); panel.password.visibility = true;
+                controller.close();
+                const collapsed = collapses.at(-1);
+                assert.ok(collapsed, 'The final close pass collapses details');
+                assertSecret(collapsed[0], '*******');
+                assert.equal(collapsed[1], false);
+                assertSecret(collapsed[2], '');
+                assertSecret(collapsed[3], '');
+                assert.equal(panel.password.visibility, false);
+                assert.equal(panel.window.visible, false);
+                assert.equal(panel.window.keymode, 'none');
+                assert.equal(panel.presented, false);
+                if (pending) assert.equal(request.io.cancelled, true);
+                const closedFrames = frames.length;
+                updates.length = 0;
+                backend.notify(); panel.render();
+                if (pending) { request.resolve(credentials); await work; }
+                assert.deepEqual(updates, [], 'Hidden notifications and stale secret completions do not repaint');
+                assert.equal(frames.length, closedFrames);
+                assertSecret(controller.secret, '');
+                assertSecret(panel.secret.label, '*******');
+            });
+        }
+
+        it('does not cancel hidden pending actions or erase their errors on native notifications', async t => {
+            const { controller, backend, updates } = viewFixture(t, [saved()]);
+            const work = controller.connectNetwork('wifi'), request = backend.calls.activate.at(-1);
+            backend.rows = [saved({ changing: true })]; backend.notify();
+            assert.equal(controller.pendingKey, 'wifi');
+            assert.equal(request.options.cancellable.cancelled, false);
+            assert.equal(JSON.parse(controller.status()).class, 'connecting');
+            request.reject(new Error('Activation failed while hidden.')); await work;
+            assert.equal(controller.pendingKey, '');
+            assert.equal(controller.error, 'Activation failed while hidden.');
+            backend.notify();
+            assert.equal(controller.error, 'Activation failed while hidden.');
+            assert.deepEqual(updates, [], 'The render gate never resets controller actions or errors');
         });
     });
 
@@ -4091,6 +4255,11 @@ async function gjsUITests() {
             controller.start();
             view = new NetworkPanel({ app, controller, palette, dismiss: () => {} });
             assertTooltipFree(view, 'Real-controller initial tree');
+            assert(view.rows.size === 0, 'Initial hidden widgets defer all network row construction');
+            controller.error = 'Hidden network operation failed'; backend.notify();
+            assert(controller.error === 'Hidden network operation failed' && view.rows.size === 0,
+                'Hidden native notifications preserve errors without building GTK rows');
+            view.toggle();
             controller.error = 'Network operation failed'; controller.emit();
             assert(view.errorRow.visible && view.dismissError.visible && view.error.visible, 'Errors show a dismiss button beside the message');
             view.dismissError.emit('clicked');
@@ -4098,7 +4267,6 @@ async function gjsUITests() {
             controller.error = 'Later failure'; controller.emit();
             assert(view.errorRow.visible && view.error.label === 'Later failure', 'Later errors remain visible after dismissal');
             view.dismissError.emit('clicked');
-            view.toggle();
             view.window.set_child(null);
             window = new Gtk.Window({ child: view.root, decorated: false, default_width: 1280, default_height: 800,
                 css_classes: ['network-panel'] });
@@ -4253,6 +4421,7 @@ async function gjsUITests() {
         finally { Gtk.DrawingArea.prototype.set_draw_func = setDrawFunc; }
         c.onChange = () => { panel.render(); assertTooltipFree(panel, 'Fake-controller rerender'); };
         assertTooltipFree(panel, 'Initial tree');
+        assert(panel.rows.size === 0, 'Constructing a hidden panel does not build network row widgets');
         app.controller = c;
         app.panel = panel;
         assert(c.calls.length === 0, 'Constructing widgets does not call the controller or native backend');
@@ -5078,10 +5247,32 @@ async function gjsUITests() {
         }
         c.error = ''; c.emit();
         print('PASS real-import frontend IPC status, close, radio toggle/error and strict request parsing');
-        c.rows = []; c.emit();
+        const hiddenRows = new Map(panel.rows), hiddenChoices = [...panel.profileChoices];
+        const renderCounts = { renderRows: 0, renderInfo: 0, position: 0 };
+        const renderMethods = new Map(Object.keys(renderCounts).map(name => [name, panel[name]]));
+        for (const [name, method] of renderMethods) panel[name] = function (...args) {
+            renderCounts[name]++;
+            return method.apply(this, args);
+        };
+        c.rows = [];
+        for (let index = 0; index < 10; index++) c.emit();
+        equal(renderCounts, { renderRows: 0, renderInfo: 0, position: 0 },
+            'Hidden notifications do not update real GTK rows, details or layout');
+        assert(panel.rows.size === hiddenRows.size && [...hiddenRows].every(([key, row]) => panel.rows.get(key) === row),
+            'Hidden rows retain widget identity until reopening');
+        equal([...panel.profileChoices], hiddenChoices, 'Hidden notifications do not churn saved profile choices');
+        panel.toggle();
+        assert(renderCounts.renderRows > 0 && renderCounts.renderInfo > 0 && renderCounts.position > 0,
+            'Opening fully reconciles the GTK tree with the latest controller state');
         assert(panel.empty.visible && panel.savedEmpty.visible && panel.rows.size === 0 && panel.profileChoices.size === 0,
-            'Removed rows and profile choices are cleaned up across both empty tabs');
+            'Removed rows and profile choices are cleaned up across both empty tabs on opening');
         assertListPartition([], [], 'Empty network tabs have no visible rows or divider');
+        panel.close();
+        const closedCounts = { ...renderCounts };
+        c.emit(); panel.render();
+        equal(renderCounts, closedCounts, 'Repeated hidden renders do not replay the final close pass');
+        for (const [name, method] of renderMethods) panel[name] = method;
+        print('PASS hidden GTK render suppression, deferred profile cleanup and full opening refresh');
         await inlineControllerTests(app, palette);
         assert(services.every(name => !owner(name)), 'No real service was started or mutated');
         print(`PASS network GTK UI: ${checks} assertions; fake credentials/backends only, no native network mutations`);

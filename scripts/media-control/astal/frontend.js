@@ -230,6 +230,7 @@ class MediaPanel {
         this.backend = backend;
 
         this.opened = false;
+        this.presented = false;
         this.groups = [];
         this.activePlayer = '';
         this.failure = '';
@@ -420,6 +421,7 @@ class MediaPanel {
 
     setFailure(text) {
         this.failure = text;
+        if (!this.opened) return;
         this.errorLabel.set_label(text);
         this.errorLabel.visible = Boolean(text);
     }
@@ -452,6 +454,9 @@ class MediaPanel {
     }
 
     render() {
+        // Render once on close to cancel artwork/credit work, then leave hidden widgets alone.
+        if (!this.opened && !this.presented) return;
+        this.presented = this.opened;
         this.group = this.groups.find(group => group.primary?.bus === this.activePlayer) || null;
         const player = this.group?.primary;
         const current = this.modelCurrent();
@@ -569,7 +574,8 @@ class MediaPanel {
             this.position();
             return GLib.SOURCE_CONTINUE;
         });
-        this.render();
+        this.setModel(this.backend.resolveGroups(), this.backend.activePlayer);
+        this.setFailure(this.backend.failure);
     }
 
     close() {
@@ -602,7 +608,7 @@ class MediaPanel {
 let backend, panel;
 
 function render() {
-    if (!panel) return;
+    if (!panel?.opened) return;
     panel.setModel(backend.resolveGroups(), backend.activePlayer);
     panel.setFailure(backend.failure);
 }

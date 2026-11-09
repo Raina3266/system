@@ -557,6 +557,7 @@ class NativeMedia {
         this.streams = new Map();
         this.serial = 0;
         this.idle = 0;
+        this.modelChanged = false;
         this.signals = [
             [this.mpris, this.mpris.connect('notify::players', () => this.sync())],
             [this.audio, this.audio.connect('notify::streams', () => this.sync())],
@@ -564,11 +565,14 @@ class NativeMedia {
         this.sync();
     }
 
-    changed() {
+    changed(modelChanged = true) {
+        this.modelChanged ||= modelChanged;
         if (this.idle) return;
         this.idle = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this.idle = 0;
-            this.onChange();
+            const changed = this.modelChanged;
+            this.modelChanged = false;
+            this.onChange(changed);
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -576,7 +580,10 @@ class NativeMedia {
     sync() {
         this.syncObjects(this.players, this.mpris.players, player => player.bus_name, player => {
             const record = { object: player, instance: ++this.serial, seekRevision: 0 };
-            record.signal = player.connect('notify', () => this.changed());
+            record.signal = player.connect('notify', (_, property) => {
+                // These properties affect the view, not grouping or stream ownership.
+                this.changed(!['volume', 'cover-art'].includes(property?.name));
+            });
             return record;
         });
         this.syncObjects(this.streams, this.audio.streams, stream => stream.id, stream => ({
@@ -996,8 +1003,12 @@ export class MediaBackend {
         this.groups = [];
         this.activePlayer = '';
         this.modelStamp = '';
+        this.reconcileAt = -Infinity;
         this.failure = '';
-        this.native = new NativeMedia({ onChange: () => { this.planner?.refresh(); onChange(); } });
+        this.native = new NativeMedia({ onChange: modelChanged => {
+            if (modelChanged) this.planner?.refresh();
+            onChange();
+        } });
         this.planner = new Planner({
             capture: () => this.native.capture(), send: request => this.worker.send(request),
             apply: operation => this.native.apply(operation), now: clock,
@@ -1116,8 +1127,18 @@ export class MediaBackend {
 
     cycle() { return this.planner.cycle(); }
 
+    reconcile() {
+        if (this.disposed || !this.planner.ready) return false;
+        const now = clock();
+        if (now >= this.reconcileAt && now - this.reconcileAt < 5) return false;
+        this.reconcileAt = now;
+        // Raw PipeWire properties do not all emit notify signals. Check them at
+        // a bounded rate, without recalculating an unchanged model on every badge read.
+        return !this.current() && this.planner.refresh();
+    }
+
     status() {
-        this.planner.refresh();
+        this.reconcile();
         const group = this.resolveGroups().find(candidate => candidate.primary.bus === this.activePlayer);
         return JSON.stringify(badge(group));
     }

@@ -127,7 +127,7 @@ rec {
     let
       panel = args: mkPanel ({
         inherit pkgs repoRoot panelLauncher agsPackage;
-        astalPackage = astalPackages.default;
+        astalPackage = astalPackages.io;
       } // args);
     in
     {
@@ -216,8 +216,12 @@ rec {
       lib,
       pkgs,
       repoPackages,
+      repoRoot,
       ...
     }:
+    let
+      repoRelativePath = lib.removePrefix "${config.home.homeDirectory}/" repoRoot;
+    in
     {
       # --- Installed packages -------------------------------------------------
       home.packages = [
@@ -232,12 +236,12 @@ rec {
         repoPackages.clipboardCustom
       ];
 
-      # Inferred TypeScript projects discover ancestor @types packages without
-      # a checkout tsconfig or node_modules. Keep generated dependencies in Nix.
+      # Inferred TypeScript projects discover ancestor @types packages. Scope
+      # these Nix-managed links to this checkout, not every project under home.
       home.file = {
-        "node_modules/@types/dashboard-gi".source =
+        "${repoRelativePath}/node_modules/@types/dashboard-gi".source =
           "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/dashboard-gi";
-        "node_modules/@types/node".source =
+        "${repoRelativePath}/node_modules/@types/node".source =
           "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/node";
       };
 

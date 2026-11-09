@@ -57,6 +57,7 @@
     kdePackages.kdenlive
     kdePackages.elisa
     kdePackages.dolphin
+    kdePackages.gwenview
     kdePackages.ark
     kdePackages.baloo
     kdePackages.baloo-widgets

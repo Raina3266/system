@@ -485,7 +485,7 @@ describe('Media view transport feedback', () => {
         const backend = { failure: '', current: () => current, refresh() { refreshes++; },
             reportFailure(text) { this.failure = text; }, resolveGroups: () => [], activePlayer: '' };
         const panel = Object.assign(Object.create(MediaPanel.prototype), {
-            group: { primary: { bus: 'browser' } }, backend,
+            group: { primary: { bus: 'browser' } }, backend, opened: true,
             errorLabel: { set_label(text) { this.text = text; } }, setModel() {},
         });
         assert.equal(panel.action('next'), false);
@@ -513,7 +513,7 @@ describe('Media view transport feedback', () => {
         const row = { name: label(), title: label(), play: button(), art: { set() {} },
             widget: accessibleWidget({ add_css_class() {}, remove_css_class() {} }) };
         const panel = Object.assign(Object.create(MediaPanel.prototype), {
-            groups: [group], activePlayer: 'browser', rows: new Map([['browser', row]]),
+            groups: [group], activePlayer: 'browser', rows: new Map([['browser', row]]), opened: true,
             backend: {
                 current: () => true,
                 transport: () => ({ enabled, reason: enabled ? 'Pause' : 'Browser bridge does not expose pause control.' }),
@@ -578,6 +578,62 @@ describe('Media view transport feedback', () => {
         panel.render();
         assertNoControlTooltips();
         assert.equal(panel.title.a11y.label, 'Unknown title');
+
+        const visibility = [];
+        panel.credit.set = (_, active) => visibility.push(['credit', active]);
+        panel.art.set = (_, __, active) => visibility.push(['art', active]);
+        row.art.set = (_, __, active) => visibility.push(['row-art', active]);
+        panel.opened = false;
+        panel.render();
+        assert.deepEqual(visibility, [['credit', false], ['art', false], ['row-art', false]],
+            'closing performs one cleanup render for outstanding lookups');
+        panel.setModel([group], 'browser');
+        panel.setModel([group], 'browser');
+        assert.equal(visibility.length, 3, 'later hidden model updates do not touch widgets');
+        group.primary.title = 'Changed while hidden';
+        panel.opened = true;
+        panel.render();
+        assert.equal(panel.title.a11y.label, 'Changed while hidden');
+        assert.equal(visibility.length, 6, 'opening renders the current metadata again');
+    });
+
+    test('hidden model callbacks skip native snapshot resolution and GTK updates', () => {
+        const panel = { opened: false, setModel() { assert.fail('Hidden GTK model update'); },
+            setFailure() { assert.fail('Hidden GTK error update'); } };
+        const backend = { resolveGroups() { assert.fail('Hidden metadata snapshot resolution'); } };
+        const start = viewSource.indexOf('\nfunction render()');
+        const render = new Function('panel', 'backend',
+            viewSource.slice(start, viewSource.indexOf('\nfunction monitorFor(', start)) + '\nreturn render;')(panel, backend);
+        for (let index = 0; index < 100; index++) render();
+    });
+
+    test('hidden failure state is retained without writing GTK labels', () => {
+        const panel = Object.assign(Object.create(MediaPanel.prototype), {
+            opened: false, errorLabel: { set_label() { assert.fail('Hidden label mutation'); } },
+        });
+        panel.setFailure('Retry when this panel opens.');
+        assert.equal(panel.failure, 'Retry when this panel opens.');
+    });
+
+    test('opening resolves the latest model and failure before displaying controls', () => {
+        const prototype = new Function('Astal', 'GLib', 'closeNetwork',
+            viewSource.slice(viewSource.indexOf('class MediaPanel {'), viewSource.indexOf('\nlet backend, panel;'))
+            + '\nreturn MediaPanel.prototype;')({ Keymode: { EXCLUSIVE: 1 } }, {}, () => {});
+        const latest = [{ primary: { bus: 'new-source' } }];
+        let refreshes = 0;
+        const panel = Object.assign(Object.create(prototype), {
+            opened: false, positionTimer: 1, card: {}, window: {}, revealer: {},
+            backend: { activePlayer: 'new-source', failure: 'Current error',
+                refresh() { refreshes++; }, resolveGroups: () => latest },
+            setModel(groups, active) { this.groups = groups; this.activePlayer = active; },
+            setFailure(text) { this.failure = text; },
+        });
+        panel.toggle(null);
+        assert.equal(panel.groups, latest);
+        assert.equal(panel.activePlayer, 'new-source');
+        assert.equal(panel.failure, 'Current error');
+        assert.equal(panel.opened, true);
+        assert.equal(refreshes, 1);
     });
 
     test('stale and rejected source selection is not silently discarded', () => {
@@ -713,10 +769,11 @@ function nativeHarness({ player = new Player(), stream = null, isObjectPath = va
     const audio = Object.assign(new Signals(), { streams: stream ? [stream] : [] });
     const sources = new Map();
     let nextSource = 0;
-    const h = { time: 0, changes: 0, player, stream, manager, audio, sources };
+    const h = { time: 0, changes: 0, modelChanges: [], player, stream, manager, audio, sources };
     const GLib = {
         PRIORITY_DEFAULT_IDLE: 0, PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
         get_monotonic_time: () => h.time * 1e6,
+        getenv: () => null,
         idle_add: (_, callback) => { const id = ++nextSource; sources.set(id, callback); return id; },
         source_remove: id => sources.delete(id),
         Variant: { is_object_path: isObjectPath },
@@ -727,7 +784,10 @@ function nativeHarness({ player = new Player(), stream = null, isObjectPath = va
         Mpris: { get_default: () => manager, PlaybackStatus: { PLAYING: 1, PAUSED: 2, STOPPED: 3 } },
         Wp: { get_default: () => ({ audio }) },
     });
-    const native = new api.NativeMedia({ onChange: () => h.changes++ });
+    const native = new api.NativeMedia({ onChange: modelChanged => {
+        h.changes++;
+        h.modelChanges.push(modelChanged);
+    } });
     return Object.assign(h, api, {
         native,
         stamp: () => api.ownershipStamp(native.capture()),
@@ -744,6 +804,113 @@ function nativeHarness({ player = new Player(), stream = null, isObjectPath = va
 describe('Native service integration', () => {
     const seek = (h, value = 80) => h.native.apply({ player: h.player.bus_name, operation: 'seek', value });
     const volume = h => h.native.volume(h.group(), h.stamp());
+
+    test('volume and cover notifications update the view without invalidating grouping', () => {
+        const h = nativeHarness();
+        h.flush();
+        assert.deepEqual(h.modelChanges, [true]);
+        for (const [property, value] of [['volume', 0.8], ['cover-art', '/cache/cover.png']]) {
+            h.player.publish(property, value);
+            h.flush();
+        }
+        assert.deepEqual(h.modelChanges, [true, false, false]);
+        h.player.publish('position', 11);
+        h.flush();
+        assert.equal(h.modelChanges.at(-1), true, 'Rust grouping can depend on relative playback positions');
+        assert.equal(h.native.player(h.player.bus_name).position, 11);
+        assert.equal(h.native.player(h.player.bus_name).cover, '/cache/cover.png');
+        h.player.publish('title', 'New title');
+        h.flush();
+        assert.equal(h.modelChanges.at(-1), true);
+    });
+
+    test('coalescing a view notification never drops a model-changing notification', () => {
+        for (const first of ['volume', 'title']) {
+            const h = nativeHarness();
+            h.flush();
+            h.player.publish(first, first === 'volume' ? 0.8 : 'Changed');
+            h.player.publish(first === 'volume' ? 'title' : 'volume', first === 'volume' ? 'Changed' : 0.8);
+            assert.equal(h.sources.size, 1);
+            h.flush();
+            assert.deepEqual(h.modelChanges, [true, true]);
+        }
+    });
+
+    test('stream readiness and object-list notifications still invalidate the model', () => {
+        const h = nativeHarness({ stream: new Stream({ _volume: -1 }) });
+        h.flush();
+        h.stream.publish('volume', 0.5);
+        h.flush();
+        h.manager.emit('notify::players');
+        h.audio.emit('notify::streams');
+        h.flush();
+        assert.deepEqual(h.modelChanges, [true, true, true]);
+        assert.equal(h.native.capture().streams[0].ready, true);
+    });
+
+    test('the public backend refreshes grouping only for model-changing native notifications', () => {
+        const h = nativeHarness();
+        let refreshes = 0, changes = 0;
+        const backend = new h.MediaBackend({ onChange: () => changes++ });
+        backend.planner.refresh = () => { refreshes++; return true; };
+        h.flush();
+        refreshes = changes = 0;
+        h.player.publish('position', 11);
+        h.flush();
+        h.player.publish('volume', 0.7);
+        h.flush();
+        assert.equal(refreshes, 1, 'position changes still reconcile position-dependent grouping');
+        assert.equal(changes, 2, 'visible views still receive native progress/volume changes');
+        h.player.publish('title', 'New track');
+        h.flush();
+        assert.equal(refreshes, 2);
+        backend.dispose();
+    });
+
+    test('repeated status requests read current metadata without refreshing the Rust model', () => {
+        const h = nativeHarness();
+        const group = h.group();
+        let captures = 0;
+        const capture = h.native.capture.bind(h.native);
+        h.native.capture = () => { captures++; return capture(); };
+        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
+            activePlayer: h.player.bus_name, resolveGroups: () => [group], native: h.native, modelStamp: h.stamp(),
+            planner: { ready: true, refresh() { assert.fail('Unchanged status must not schedule model work'); } },
+        });
+        captures = 0;
+        for (let index = 0; index < 100; index++)
+            assert.deepEqual(JSON.parse(backend.status()), badge(group));
+        assert.equal(captures, 1, 'three monitor badges share one bounded ownership check');
+        h.time = 5;
+        backend.status();
+        assert.equal(captures, 2);
+        group.primary.title = 'Current title';
+        assert.equal(JSON.parse(backend.status()).tooltip, 'Current title — Artist');
+    });
+
+    test('status reconciliation recovers silent PipeWire changes without a polling timer', () => {
+        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
+        let refreshes = 0;
+        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
+            activePlayer: h.player.bus_name, resolveGroups: () => [h.group()], native: h.native, modelStamp: h.stamp(),
+            planner: { ready: true, refresh() { refreshes++; return true; } },
+        });
+        const descriptor = h.native.volume(h.group(), h.stamp());
+        backend.status();
+        assert.equal(refreshes, 0);
+        h.stream.properties['application.id'] = 'a-replaced-owner';
+        assert.equal(descriptor.set(0.1), false, 'old ownership is rejected immediately, before reconciliation');
+        h.time = 1;
+        backend.status();
+        assert.equal(refreshes, 0);
+        h.time = 5;
+        backend.status();
+        assert.equal(refreshes, 1, 'silent property changes eventually trigger a fresh model');
+        backend.modelStamp = h.stamp();
+        h.time = 10;
+        backend.status();
+        assert.equal(refreshes, 1, 'reconciled state does not repeatedly refresh');
+    });
 
     test('position comes only from Astal: no elapsed-time, rate, or length projection', () => {
         const h = nativeHarness();

@@ -35,6 +35,40 @@ in
     nixpkgs.config.allowUnfree = true;
     nixpkgs.overlays = [
       inputs.nixGL.overlay
+      (final: prev:
+        let
+          # The Rust setup hook requires system AWS-LC, but these recipes omit it.
+          withAwsLc = package: package.overrideAttrs (old: {
+            buildInputs = (old.buildInputs or [ ]) ++ [ final.aws-lc ];
+          });
+        in
+        {
+          mprisence = withAwsLc prev.mprisence;
+          clash-verge-rev = prev.clash-verge-rev.override {
+            callPackage = path: args:
+              let package = final.callPackage path args;
+              in if (package.pname or "") == "clash-verge-rev-unwrapped"
+                then withAwsLc package
+                else package;
+          };
+        })
+      (final: prev: {
+        anki = prev.anki.overrideAttrs (old: {
+          # The Rust setup hook requires system zstd and SQLite instead of vendored copies.
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.pkg-config ];
+          buildInputs = (old.buildInputs or [ ]) ++ [ final.zstd final.sqlite ];
+          env = old.env // {
+            # Hatchling needs tomlkit in uv's offline build-isolation wheel pool.
+            UV_FIND_LINKS = final.symlinkJoin {
+              name = "anki-uv-wheels";
+              paths = [
+                old.env.UV_FIND_LINKS
+                prev.anki.python.pkgs.tomlkit.dist
+              ];
+            };
+          };
+        });
+      })
     ];
 
     # Nix

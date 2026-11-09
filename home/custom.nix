@@ -34,13 +34,7 @@ let
       buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtimageformats ];
 
       postPatch = (old.postPatch or "") + ''
-        # Upstream passes argv lists through a shell, losing FFmpeg's arguments.
-        for previewWindow in fastflix/widgets/windows/{crop_window,large_preview}.py; do
-          substituteInPlace "$previewWindow" \
-            --replace-fail 'run(thumb_command, shell=True, stderr=PIPE, stdout=PIPE)' \
-              'run(thumb_command, stderr=PIPE, stdout=PIPE)'
-        done
-
+        # Let the portal's palette style the default-theme status bar.
         substituteInPlace fastflix/widgets/status_bar.py \
           --replace-fail '"#StatusBarWidget {  background-color: #f0f0f0;  border-top: 1px solid #cccccc;}"' '""' \
           --replace-fail '"color: #333333; background: transparent;"' '""'
