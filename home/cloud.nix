@@ -4,6 +4,7 @@
   config,
   lib,
   pkgs,
+  repoPackages,
   ...
 }:
 let
@@ -157,11 +158,60 @@ let
   syncs = map mkBisync syncSpecs;
   videoDir = "${config.home.homeDirectory}/Videos";
   fusermount = "/run/wrappers/bin/fusermount3";
+
+  driveActionSpecs = syncSpecs ++ [
+    {
+      name = "Video";
+      localDir = videoDir;
+      remote = "GoogleDrive:Video";
+    }
+  ];
+  driveActionsConfig = (pkgs.formats.toml { }).generate "dolphin-gdrive-actions.toml" {
+    mounts = map (spec: {
+      local_root = spec.localDir;
+      remote = "Dga${spec.name}";
+    }) driveActionSpecs;
+  };
+  # Upstream accepts remote names, not remote subpaths. Private aliases retain
+  # the existing connection without editing the credential-bearing rclone config.
+  dolphinGdriveActions = pkgs.symlinkJoin {
+    name = "dolphin-gdrive-actions";
+    meta.mainProgram = "dga";
+    paths = [ repoPackages.dolphinGdriveActions ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram "$out/bin/dga" \
+        ${lib.concatMapStringsSep " \\\n        " (spec: "--set RCLONE_CONFIG_DGA${lib.toUpper spec.name}_TYPE alias --set RCLONE_CONFIG_DGA${lib.toUpper spec.name}_REMOTE ${lib.escapeShellArg spec.remote}") driveActionSpecs}
+    '';
+  };
 in
 {
   # fuse3 is not listed: the units below call /run/wrappers/bin/fusermount3,
   # the setuid wrapper NixOS provides, never an unwrapped copy from PATH.
-  home.packages = [ pkgs.rclone ];
+  home.packages = [
+    pkgs.rclone
+    dolphinGdriveActions
+  ];
+
+  xdg.configFile."dolphin-gdrive-actions/config.toml".source = driveActionsConfig;
+
+  xdg.dataFile."kio/servicemenus/copy-google-drive-link.desktop" = {
+    executable = true;
+    text = ''
+      [Desktop Entry]
+      Type=Service
+      MimeType=application/octet-stream;inode/directory;
+      Actions=copyGoogleDriveLink;
+      X-KDE-Protocol=file
+      X-KDE-Priority=TopLevel
+      X-KDE-RequiredNumberOfUrls=1
+
+      [Desktop Action copyGoogleDriveLink]
+      Name=Copy Google Drive Link
+      Icon=edit-copy
+      Exec=${lib.getExe dolphinGdriveActions} copy-link --config ${driveActionsConfig} --clipboard %f
+    '';
+  };
 
   systemd.user = {
     services = lib.mkMerge (

@@ -2112,12 +2112,12 @@ macro_rules! media_unit_tests {
             fn a_published_identity_wins_unless_it_is_the_bus_name() {
                 assert!(!echoes_bus_name("YouTube Music"));
                 assert!(!echoes_bus_name("Elisa"));
-                assert!(!echoes_bus_name("VLC media player"));
+                assert!(!echoes_bus_name("Haruna"));
                 assert!(echoes_bus_name("mprisence_web.spotify.p2911"));
 
                 let mut player = elisa();
-                player.identity = String::from("VLC media player");
-                assert_eq!(source_name(&player), "VLC media player");
+                player.identity = String::from("Haruna");
+                assert_eq!(source_name(&player), "Haruna");
                 for identity in ["", " \t ", "org.mpris.MediaPlayer2.elisa"] {
                     player.identity = String::from(identity);
                     assert_eq!(source_name(&player), "Elisa");

@@ -70,7 +70,6 @@
     kdePackages.skanpage
 
     # media
-    vlc
     haruna
     spotube
     puddletag

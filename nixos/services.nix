@@ -152,6 +152,9 @@ in
   services.fprintd.enable = true;
   services.fwupd.enable = true;
 
+  # Niri workspaces do not use KDE Activities; also block D-Bus activation.
+  systemd.user.services.plasma-kactivitymanagerd.enable = false;
+
   # KDE System Monitor needs its sensor backend in non-Plasma sessions too.
   # Register D-Bus activation so the monitor can start ksystemstats on demand.
   services.dbus.packages = [ pkgs.kdePackages.ksystemstats ];
@@ -292,13 +295,7 @@ in
   # The real camera has no zoom, so expose a centre-cropped v4l2loopback device
   # instead. The supervisor keeps a placeholder attached while idle and powers
   # the real camera only while something consumes the virtual one.
-  boot.extraModulePackages = [
-    (config.boot.kernelPackages.v4l2loopback.overrideAttrs (old: {
-      # NixOS runs depmod on the combined tree; package-local indexes collide
-      # with the kernel's modules.alias before that merge can finish.
-      installFlags = (old.installFlags or [ ]) ++ [ "DEPMOD=true" ];
-    }))
-  ];
+  boot.extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
   boot.kernelModules = [ "v4l2loopback" ];
   boot.extraModprobeConfig = ''
     options v4l2loopback devices=1 video_nr=${toString webcamVideoNr} card_label="${webcamCardLabel}" exclusive_caps=1 max_buffers=2

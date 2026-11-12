@@ -17,6 +17,8 @@ let
     agsPackage = inputs.ags.packages.${system}.ags;
     astalPackages = inputs.astal.packages.${system};
     niriWindowButtonsSrc = inputs.niri-window-buttons;
+    waybarYcalSrc = inputs.waybar-ycal;
+    dolphinGdriveActionsSrc = inputs.dolphin-gdrive-actions;
   };
 in
 {
@@ -53,23 +55,6 @@ in
                 else package;
           };
         })
-      (final: prev: {
-        anki = prev.anki.overrideAttrs (old: {
-          # The Rust setup hook requires system zstd and SQLite instead of vendored copies.
-          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.pkg-config ];
-          buildInputs = (old.buildInputs or [ ]) ++ [ final.zstd final.sqlite ];
-          env = old.env // {
-            # Hatchling needs tomlkit in uv's offline build-isolation wheel pool.
-            UV_FIND_LINKS = final.symlinkJoin {
-              name = "anki-uv-wheels";
-              paths = [
-                old.env.UV_FIND_LINKS
-                prev.anki.python.pkgs.tomlkit.dist
-              ];
-            };
-          };
-        });
-      })
     ];
 
     # Nix

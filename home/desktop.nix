@@ -242,25 +242,17 @@ in
       --group General --key TerminalService com.mitchellh.ghostty.desktop
   '';
 
-  systemd.user.services = {
-    # No standalone pairing agent here: the AGS audio panel uses the Rust helper
-    # for BlueZ PIN/passkey requests, and GNOME Shell handles GNOME sessions.
-    # A bt-agent service
-    # used to steal the default-agent role and then hang on stdin prompts it
-    # could never answer, which is what broke all pairing here.
-    kde-baloo = {
-      Unit = {
-        Description = "Baloo File Indexer";
-        PartOf = [ "graphical-session.target" ];
-        After = [ "graphical-session.target" ];
-      };
-      Service = {
-        ExecStart = "${pkgs.kdePackages.baloo}/libexec/kf6/baloo_file";
-        Restart = "on-failure";
-      };
-      Install.WantedBy = [ "graphical-session.target" ];
-    };
-  };
+  # Disable background indexing without replacing unrelated Baloo preferences.
+  home.activation.disableBalooIndexing = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/baloofilerc" \
+      --group "Basic Settings" --key Indexing-Enabled --type bool false
+  '';
+
+  # kio-extras provides this menu independently of the disabled Activities daemon.
+  home.activation.disableKdeActivitiesMenu = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kservicemenurc" \
+      --group Show --key kactivitymanagerd_fileitem_linking_plugin --type bool false
+  '';
 
   # ──────────────────────────────────────────────────────────────────────
   # Desktop entries

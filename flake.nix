@@ -14,9 +14,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Track upstream source through flake.lock instead of a fixed release tag.
+    # Track upstream sources through flake.lock instead of fixed release tags.
     niri-window-buttons = {
       url = "github:adelmonte/niri_window_buttons";
+      flake = false;
+    };
+    waybar-ycal = {
+      url = "github:yagybaba/waybar-ycal";
+      flake = false;
+    };
+    dolphin-gdrive-actions = {
+      url = "github:sktk4/dolphin-gdrive-actions/main";
       flake = false;
     };
 

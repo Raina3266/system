@@ -1,6 +1,9 @@
 #! /usr/bin/env bash
 set -euxo pipefail
 
+# Refresh this upstream integration on every switch, not only on full updates.
+nix flake update dolphin-gdrive-actions
+
 git add -A
 
 # `switch` builds before it activates, and refuses to activate a failed build,

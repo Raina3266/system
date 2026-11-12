@@ -254,7 +254,8 @@ in
         # first or the tool skips an already-selected scheme.
         $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
           --group General --key ColorScheme --delete
-        $DRY_RUN_CMD ${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme Daemon2
+        # Boot-time activation runs before a graphical display is available.
+        QT_QPA_PLATFORM=offscreen $DRY_RUN_CMD ${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme Daemon2
 
         $DRY_RUN_CMD ${kwriteconfig} --file "${kdeConfigHome}/kdeglobals" \
           --group KDE --key widgetStyle kvantum

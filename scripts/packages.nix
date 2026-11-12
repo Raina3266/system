@@ -5,6 +5,8 @@
   agsPackage,
   astalPackages,
   niriWindowButtonsSrc,
+  waybarYcalSrc,
+  dolphinGdriveActionsSrc,
   kernelPackages ? pkgs.linuxPackages_latest,
   repoRoot ? "/home/raina/System",
 }:
@@ -213,6 +215,47 @@ in
 rec {
   inherit withParentDeath;
 
+  dolphinGdriveActions = pkgs.python3Packages.buildPythonApplication {
+    pname = "dolphin-gdrive-actions";
+    version = "0-unstable-${dolphinGdriveActionsSrc.shortRev}";
+    pyproject = true;
+    src = dolphinGdriveActionsSrc;
+
+    build-system = [ pkgs.python3Packages.setuptools ];
+
+    doCheck = true;
+    nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook ];
+    enabledTestPaths = [ "tests" ];
+    preCheck = ''
+      # Keep configuration and integration tests away from real user data.
+      export HOME="$(mktemp -d)"
+      export XDG_CONFIG_HOME="$HOME/.config"
+      export XDG_DATA_HOME="$HOME/.local/share"
+      export XDG_CACHE_HOME="$HOME/.cache"
+      export RCLONE_CONFIG="$XDG_CONFIG_HOME/rclone/rclone.conf"
+    '';
+    pythonImportsCheck = [ "dolphin_gdrive_actions" ];
+
+    # Only the installed CLI needs these tools; tests mock external services.
+    makeWrapperArgs = [
+      "--prefix"
+      "PATH"
+      ":"
+      (lib.makeBinPath [
+        pkgs.rclone
+        pkgs.wl-clipboard
+        pkgs.libnotify
+      ])
+    ];
+
+    meta = {
+      description = "Google Drive actions for rclone mounts";
+      homepage = "https://github.com/sktk4/dolphin-gdrive-actions";
+      license = lib.licenses.mit;
+      mainProgram = "dga";
+    };
+  };
+
   ocrScreenshot = mkWorkspacePackage "ocr-screenshot" {
     postInstall = ''
       wrapProgram "$out/bin/ocr-screenshot" \
@@ -270,14 +313,19 @@ rec {
         "AstalNotifd-0.1"
         "Gtk4LayerShell-1.0" "Pango-1.0" "cairo-1.0"
       ];
-      nodeTypes = pkgs.fetchurl {
-        url = "https://registry.npmjs.org/@types/node/-/node-24.0.0.tgz";
-        hash = "sha256-Jf0KcgqaKYySA9NasX0HFOP5Zc3lq7Cp6OBheofolZY=";
-      };
-      undiciTypes = pkgs.fetchurl {
-        url = "https://registry.npmjs.org/undici-types/-/undici-types-7.8.0.tgz";
-        hash = "sha256-lkv9/F7dwcBQcdlc7Tsd6VJtCgaHlFEhTorC1x8ubYo=";
-      };
+      # These are static declarations; native-addon hooks would pull in an
+      # unnecessary Node compiler/header toolchain.
+      nodeTypeModules = pkgs.runCommand "panel-node-types" {
+        nativeBuildInputs = [ pkgs.nodejs ];
+        npmDeps = pkgs.importNpmLock { npmRoot = ./node-types; };
+      } ''
+        export HOME="$TMPDIR"
+        cp --no-preserve=mode "$npmDeps/package.json" .
+        cp --no-preserve=mode "$npmDeps/package-lock.json" .
+        npm install --offline --ignore-scripts --no-audit --no-fund
+        mkdir -p "$out"
+        cp -RL node_modules "$out/node_modules"
+      '';
     in
     pkgs.runCommand "dashboard-type-environment" {
       nativeBuildInputs = [ tsForGir ];
@@ -287,11 +335,12 @@ rec {
         inherit girDirs modules;
       };
     } ''
-      mkdir -p "$out/node_modules/@types/node" "$out/node_modules/undici-types"
-      # Copy, rather than symlink, so realpath-based dependency resolution finds
-      # undici-types beside @types/node inside the same store environment.
-      tar -xf ${nodeTypes} --strip-components=1 -C "$out/node_modules/@types/node"
-      tar -xf ${undiciTypes} --strip-components=1 -C "$out/node_modules/undici-types"
+      mkdir -p "$out"
+      # Dereference package links so realpath-based resolution finds all locked
+      # dependencies beside @types/node in the same store environment.
+      cp -RL ${nodeTypeModules}/node_modules "$out/node_modules"
+      # Copied store directories must allow the generator to add sibling typings.
+      chmod -R u+w "$out/node_modules"
       ts-for-gir generate ${lib.escapeShellArgs modules} \
         -g ${girDirs}/share/gir-1.0 \
         --outdir "$out/node_modules/@types/dashboard-gi"
@@ -376,10 +425,7 @@ rec {
 
   ycal =
     let
-      src = pkgs.fetchzip {
-        url = "https://github.com/yagybaba/waybar-ycal/archive/refs/tags/v1.1.0.tar.gz";
-        sha256 = "0483nv1dspa7a90s8hxkb3kmva9r6c8qb61hilaks483n92lwf7a";
-      };
+      src = waybarYcalSrc;
       python = pkgs.python3;
       pythonWithDeps = python.withPackages (ps: [
         ps.google-api-python-client
@@ -416,7 +462,7 @@ rec {
       '';
       package = pkgs.stdenvNoCC.mkDerivation {
         pname = "waybar-ycal";
-        version = "1.1.0";
+        version = "unstable-${waybarYcalSrc.shortRev}";
         dontUnpack = true;
         nativeBuildInputs = [ python ];
 

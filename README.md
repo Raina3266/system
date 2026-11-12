@@ -185,6 +185,30 @@ Sources: [`scripts/webcam-crop/`](scripts/webcam-crop/).
 - Previews or apps retaining a camera handle can keep it active. This is not a
   hardware privacy switch; use the configured service rather than a second instance.
 
+## Dolphin: Google Drive links
+
+Uses upstream [dolphin-gdrive-actions](https://github.com/sktk4/dolphin-gdrive-actions),
+packaged in [`scripts/packages.nix`](scripts/packages.nix) and configured in
+[`home/cloud.nix`](home/cloud.nix). There is no locally maintained link helper.
+
+- Right-click **one** local file or folder and choose **Copy Google Drive Link**.
+  Supports items inside `~/GoogleDrive`, `~/Music`, and the `~/Videos` Drive mount.
+  The configured root directories themselves are not supported by upstream.
+- Looks up existing remote IDs only when clicked; no background service, uploads,
+  sync runs, or sharing-permission changes. Recipients still need existing access.
+- Requires an internet connection and the existing rclone login. New or renamed
+  items must finish syncing first. Upstream does not apply the bisync exclusion
+  list to link lookups; the bisync exclusions themselves remain unchanged.
+- Private rclone aliases map the configured folders to the existing remote without
+  changing its credentials. Nix manages the TOML configuration and Dolphin menu;
+  do not run upstream's imperative `dga setup` installer.
+- `dga copy-link /path/to/item` prints a URL; add `--clipboard` to copy it.
+- Tracks upstream `main`, not a release tag. `switch.sh` refreshes this input before
+  every switch; `update.sh` refreshes all inputs. To refresh only this project:
+  `nix flake update dolphin-gdrive-actions`, then rebuild/switch. Nix still records
+  the resolved commit in `flake.lock` so each build remains reproducible.
+- The package runs upstream's pytest suite and an import check during its build.
+
 ## Helpers & commands
 
 `audio-control` handles audio compatibility policy, pairing prompts, and HID++
