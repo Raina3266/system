@@ -163,43 +163,7 @@ function scale(upper, classes = []) {
         draw_value: false, css_classes: classes, valign: Gtk.Align.CENTER,
         adjustment: new Gtk.Adjustment({ lower: 0, upper, step_increment: upper / 100, page_increment: upper / 20 }) });
 }
-function volumeBar(scale, beforeStep) {
-    // Enabling the value label changes Gtk.Range rounding; retain 1% precision.
-    const roundDigits = scale.round_digits;
-    scale.draw_value = true;
-    scale.round_digits = roundDigits;
-    scale.value_pos = Gtk.PositionType.TOP;
-    scale.add_css_class('volume-track');
-    let available = true;
-    const formatValue = (_, value) => available ? `${Math.round(value * 100)}%` : '—';
-    scale.set_format_value_func(formatValue);
-    const step = (glyph, label, direction) => {
-        const widget = new Gtk.Button({ label: glyph,
-            css_classes: ['volume-step'], valign: Gtk.Align.CENTER });
-        widget.update_property([Gtk.AccessibleProperty.LABEL], [label]);
-        widget.connect('clicked', () => {
-            if (!scale.is_sensitive()) return;
-            beforeStep();
-            scale.emit('move-slider', direction);
-        });
-        return widget;
-    };
-    const widget = new Gtk.Box({ css_classes: ['volume-bar'], hexpand: true, valign: Gtk.Align.CENTER });
-    widget.append(step('◁', 'Decrease volume', Gtk.ScrollType.STEP_BACKWARD));
-    widget.append(scale);
-    widget.append(step('▷', 'Increase volume', Gtk.ScrollType.STEP_FORWARD));
-    return {
-        widget,
-        setAvailable(value) {
-            widget.sensitive = scale.sensitive;
-            const next = Boolean(value);
-            if (next === available) return;
-            available = next;
-            // GTK caches formatted text even when the numeric value is unchanged.
-            scale.set_format_value_func(formatValue);
-        },
-    };
-}
+
 function trackKey(player) {
     return player ? JSON.stringify([player.bus, player.instance, player.trackKey]) : '';
 }
@@ -238,8 +202,6 @@ class MediaPanel {
         this.seekDragging = false;
         this.seekPending = false;
         this.seekTarget = null;
-        this.volumeDragging = false;
-        this.volumeTarget = null;
 
         this.monitor = null;
         this.window = new Astal.Window({
@@ -287,10 +249,6 @@ class MediaPanel {
                 this.finishSeek(true);
             else if (type === Gdk.EventType.TOUCH_CANCEL)
                 this.finishSeek(false);
-            if ([Gdk.EventType.BUTTON_RELEASE, Gdk.EventType.TOUCH_END, Gdk.EventType.TOUCH_CANCEL].includes(type)) {
-                this.volumeDragging = false;
-                this.volumeTarget = null;
-            }
             return false;
         });
         this.root.add_controller(release);
@@ -341,31 +299,11 @@ class MediaPanel {
         this.previous = button('󰒮', 'Previous', () => this.action('previous'));
         this.play = button('󰐊', 'Play / pause', () => this.action('toggle'), ['play-button']);
         this.next = button('󰒭', 'Next', () => this.action('next'));
-        const transport = box(false, 14, [this.previous, this.play, this.next]);
-        this.volumeGlyph = label('󰕾', ['volume-glyph']);
-        this.volumeButton = new Gtk.Button({ css_classes: ['volume-button'], valign: Gtk.Align.CENTER,
-            child: this.volumeGlyph });
-        this.volumeButton.update_property([Gtk.AccessibleProperty.LABEL], ['Mute / unmute']);
-        this.volumeButton.connect('clicked', () => {
-            if (!this.volumeControl?.toggleMute()) this.setFailure('Native mute is unavailable or the media source changed.');
-        });
-        this.volume = scale(1);
-        this.volume.update_property([Gtk.AccessibleProperty.LABEL], ['Volume']);
-        this.volume.width_request = 80;
-        this.volume.connect('change-value', (_, scroll, value) => {
-            const control = this.backend.volume(this.group);
-            // Revalidate ownership on each motion without retaining a descriptor
-            // whose metadata stamp can expire during a drag.
-            if ((this.volumeTarget && this.volumeTarget !== control.key)
-                || !control.enabled || !control.set(value)) {
-                this.setFailure('The media source changed. Try the volume again.');
-                return true;
-            }
-            return false;
-        });
-        this.drag(this.volume, () => { this.volumeDragging = true; this.volumeTarget = this.volumeControl?.key; });
-        this.volumeBar = volumeBar(this.volume, () => { this.volumeDragging = false; this.volumeTarget = null; });
-        this.details.append(box(false, 14, [transport, this.volumeButton, this.volumeBar.widget]));
+        this.rewind = button('−15', 'Rewind 15 seconds', () => this.seekBy(-15), ['seek-button']);
+        this.forward = button('+15', 'Forward 15 seconds', () => this.seekBy(15), ['seek-button']);
+        this.transport = box(false, 14, [this.rewind, this.previous, this.play, this.next, this.forward]);
+        this.transport.halign = Gtk.Align.CENTER;
+        this.details.append(this.transport);
         this.details.append(new Gtk.Separator({ css_classes: ['divider'] }));
         this.sourceName = ellipsis('', ['source-name']);
         this.chevron = label('󰅃', ['chevron']);
@@ -409,6 +347,23 @@ class MediaPanel {
         this.seekPending = false;
         this.seekTarget = null;
         if (!commit) this.position();
+    }
+
+    canSeekBy(player) {
+        return Boolean(player && this.group && trackKey(player) === trackKey(this.group.primary)
+            && player.canSeek && player.positionSupported && Number.isFinite(player.position)
+            && Number.isFinite(player.length) && player.length > 0);
+    }
+
+    seekBy(seconds) {
+        if (!this.group || !this.modelCurrent()) return false;
+        const player = this.backend.player(this.group.primary.bus);
+        if (!this.canSeekBy(player)) return false;
+        const position = Math.min(player.length, Math.max(0, player.position + seconds));
+        this.finishSeek(false);
+        const queued = this.backend.action('seek', player.bus, position);
+        if (!queued) this.reportFailure(this.backend.failure || 'The media seek was not queued. Try again.');
+        return queued;
     }
 
     modelCurrent() { return this.backend.current(); }
@@ -476,16 +431,8 @@ class MediaPanel {
         this.seek.adjustment.upper = player?.length || 1;
         this.seek.adjustment.step_increment = 1;
         this.seek.adjustment.page_increment = Math.max(1, (player?.length || 20) / 20);
-        this.volumeControl = this.backend.volume(this.group);
-        this.volume.sensitive = this.volumeControl.enabled;
-        this.volumeBar.setAvailable(this.volumeControl.enabled);
-        this.volumeButton.sensitive = this.volumeControl.muteEnabled;
-        this.volume.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.reason]);
-        this.volumeBar.widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.reason]);
-        this.volumeButton.update_property([Gtk.AccessibleProperty.DESCRIPTION], [this.volumeControl.muteReason]);
-        if (!this.volumeDragging) this.volume.set_value(this.volumeControl.value);
-        const volume = this.volumeControl.value;
-        this.volumeGlyph.set_label(this.volumeControl.muted || volume < 0.01 ? '󰝟' : volume < 0.5 ? '󰖀' : '󰕾');
+        this.rewind.sensitive = this.forward.sensitive = current
+            && this.canSeekBy(player && this.backend.player(player.bus));
         this.sourceName.set_label(this.group?.displayName || '');
         this.section.sensitive = this.groups.length > 1;
         if (this.groups.length < 2) { this.sources.reveal_child = false; this.chevron.set_label('󰅃'); }
@@ -584,9 +531,9 @@ class MediaPanel {
         if (this.positionTimer) GLib.source_remove(this.positionTimer);
         this.positionTimer = 0;
         this.window.keymode = Astal.Keymode.NONE;
-        this.seekDragging = this.volumeDragging = false;
+        this.seekDragging = false;
         this.seekPending = false;
-        this.seekTarget = this.volumeTarget = null;
+        this.seekTarget = null;
         this.sources.reveal_child = false;
         this.chevron.set_label('󰅃');
         this.revealer.reveal_child = false;

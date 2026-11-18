@@ -105,15 +105,15 @@ test('the entire built media tree stays tooltip-free through source, title and c
         set_label(text) { this.label = text; }
         set_value(value) { this.value = value; }
         get_value() { return this.value; }
-        set_format_value_func(callback) { this.format = callback; }
         is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); }
         add_css_class(name) { this.css_classes = [...new Set([...(this.css_classes || []), name])]; }
         remove_css_class(name) { this.css_classes = this.css_classes?.filter(value => value !== name); }
     }
-    const Gtk = { Box: Widget, Label: Widget, Button: Widget, Scale: Widget, Adjustment: Widget,
+    class Scale extends Widget {}
+    const Gtk = { Box: Widget, Label: Widget, Button: Widget, Scale, Adjustment: Widget,
         Separator: Widget, Revealer: Widget, ScrolledWindow: Widget, AccessibleProperty: accessibleProperty,
-        Orientation: { HORIZONTAL: 0, VERTICAL: 1 }, Align: { CENTER: 0 }, PositionType: { TOP: 0 },
-        ScrollType: { STEP_BACKWARD: 0, STEP_FORWARD: 1 }, PolicyType: { NEVER: 0, AUTOMATIC: 1 },
+        Orientation: { HORIZONTAL: 0, VERTICAL: 1 }, Align: { CENTER: 0 },
+        PolicyType: { NEVER: 0, AUTOMATIC: 1 },
         RevealerTransitionType: { SLIDE_DOWN: 0 } };
     class Artwork {
         constructor() { this.widget = new Widget(); }
@@ -128,7 +128,6 @@ test('the entire built media tree stays tooltip-free through source, title and c
     const actions = [];
     let enabled = true;
     const backend = { current: () => enabled, transport: () => ({ enabled, reason: enabled ? '' : 'Unavailable' }),
-        volume: () => ({ enabled, muteEnabled: enabled, value: 0.4, reason: '', muteReason: '', toggleMute() { actions.push('mute'); return true; } }),
         player: bus => panel.groups.find(group => group.primary.bus === bus)?.primary,
         action: (...args) => { actions.push(args); return true; } };
     const panel = Object.assign(Object.create(MediaPanel.prototype), {
@@ -137,13 +136,36 @@ test('the entire built media tree stays tooltip-free through source, title and c
     const checkTree = widget => {
         assert.ok(!widget.tooltip_text && !widget.tooltip_markup && !widget.has_tooltip);
         assert.equal(widget.signals.has('query-tooltip'), false);
+        assert.doesNotMatch(widget.a11y.label || '', /volume|mute/i);
+        assert.ok((widget.css_classes || []).every(name => !name.startsWith('volume')));
         widget.children.forEach(checkTree);
         if (widget.child) checkTree(widget.child);
     };
     panel.build();
     checkTree(panel.content);
+    assert.deepEqual(panel.transport.children, [panel.rewind, panel.previous, panel.play, panel.next, panel.forward]);
+    assert.equal(panel.transport.orientation, Gtk.Orientation.HORIZONTAL);
+    assert.equal(panel.transport.spacing, 14);
+    assert.equal(panel.transport.halign, Gtk.Align.CENTER);
+    assert.equal(panel.transport.parent, panel.details);
+    assert.equal(panel.rewind.child.label, '−15');
+    assert.equal(panel.forward.child.label, '+15');
+    assert.equal(panel.rewind.a11y.label, 'Rewind 15 seconds');
+    assert.equal(panel.forward.a11y.label, 'Forward 15 seconds');
+    for (const widget of [panel.rewind, panel.forward]) assert.ok(widget.css_classes.includes('seek-button'));
+    const scales = [];
+    const findScales = widget => {
+        if (widget instanceof Scale) scales.push(widget);
+        widget.children.forEach(findScales);
+        if (widget.child) findScales(widget.child);
+    };
+    findScales(panel.content);
+    assert.deepEqual(scales, [panel.seek], 'the track progress slider is the only remaining scale');
+    assert.equal(panel.rewind.sensitive, false);
+    assert.equal(panel.forward.sensitive, false);
     const group = (bus, title) => ({ displayName: `Source ${bus}`, title,
-        primary: { bus, title, canPrevious: true, canNext: true, canSeek: true, length: 90 } });
+        primary: { bus, title, instance: `player-${bus}`, trackKey: title, canPrevious: true, canNext: true,
+            canSeek: true, positionSupported: true, position: 30, length: 90 } });
     for (const title of ['Long <literal> title & 🎵'.repeat(10), 'Renamed track', '']) {
         panel.setModel([group('one', title), group('two', 'Other track')], 'one');
         checkTree(panel.content);
@@ -154,14 +176,17 @@ test('the entire built media tree stays tooltip-free through source, title and c
     panel.previous.emit('clicked');
     panel.next.emit('clicked');
     panel.rows.get('two').play.emit('clicked');
-    panel.volumeButton.emit('clicked');
-    assert.deepEqual(actions, [['toggle', 'one'], ['previous', 'one'], ['next', 'one'], ['toggle', 'two'], 'mute']);
+    panel.rewind.emit('clicked');
+    panel.forward.emit('clicked');
+    assert.deepEqual(actions, [['toggle', 'one'], ['previous', 'one'], ['next', 'one'], ['toggle', 'two'],
+        ['seek', 'one', 15], ['seek', 'one', 45]]);
     for (enabled of [false, true]) {
         panel.render();
         checkTree(panel.content);
         assert.equal(panel.play.sensitive, enabled);
         assert.equal(panel.play.a11y.label, 'Play / pause');
-        assert.equal(panel.volumeButton.a11y.label, 'Mute / unmute');
+        assert.equal(panel.rewind.sensitive, enabled);
+        assert.equal(panel.forward.sensitive, enabled);
     }
     panel.setModel([group('two', 'Replacement')], 'two');
     checkTree(panel.content);
@@ -171,6 +196,8 @@ test('the entire built media tree stays tooltip-free through source, title and c
     checkTree(panel.content);
     assert.equal(panel.title.a11y.label, 'Unknown title');
     assert.equal(panel.rows.size, 0);
+    assert.equal(panel.rewind.sensitive, false);
+    assert.equal(panel.forward.sensitive, false);
 });
 
 test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
@@ -185,180 +212,8 @@ test('elapsed time, seek bar, and total time share one compact horizontal row', 
     assert.doesNotMatch(viewSource, /this\.details\.append\(box\(true, 4, \[this\.seek,/);
 });
 
-test('volume drag refreshes ownership but never switches its captured native target', () => {
-    const start = viewSource.indexOf("this.volume.connect('change-value', ");
-    const body = viewSource.slice(start, viewSource.indexOf('\n        this.drag(this.volume', start));
-    let callback;
-    let writes = 0;
-    let failures = 0;
-    const context = {
-        volume: { connect(name, fn) { callback = fn; } },
-        volumeTarget: 'stream:1', group: {},
-        volumeControl: { enabled: true, set() { throw new Error('Stale descriptor used'); } },
-        backend: { volume() { return { key: 'stream:1', enabled: true, set() { writes++; return true; } }; } },
-        setFailure() { failures++; },
-    };
-    new Function(body).call(context);
-    assert.equal(callback(null, null, 0.4), false);
-    assert.equal(writes, 1);
-    context.volumeTarget = 'stream:2';
-    assert.equal(callback(null, null, 0.5), true);
-    assert.equal(writes, 1);
-    assert.equal(failures, 1);
-});
-
-describe('Media volume bar', () => {
-    function harness() {
-        class Widget {
-            constructor(properties = {}) { this.sensitive = true; this.children = []; this.signals = new Map(); Object.assign(this, accessibleWidget(properties)); }
-            append(child) { this.children.push(child); child.parent = this; }
-            connect(name, callback) { this.signals.set(name, callback); }
-            emit(name, ...args) { return this.signals.get(name)?.(this, ...args); }
-            is_sensitive() { return this.sensitive && (!this.parent || this.parent.is_sensitive()); }
-            add_css_class(name) { (this.css_classes ||= []).push(name); }
-        }
-        class Scale extends Widget {
-            constructor(properties) { super(properties); this.value = 0; this.formats = 0; this.moves = []; }
-            set draw_value(value) { this.drawValue = value; this.round_digits = value ? 1 : -1; }
-            get draw_value() { return this.drawValue; }
-            set_format_value_func(callback) { this.format = callback; this.formats++; }
-            set_value(value) { this.value = value; }
-            emit(name, direction) {
-                this.moves.push([name, direction]);
-                assert.equal(name, 'move-slider');
-                const delta = direction === Gtk.ScrollType.STEP_FORWARD ? this.adjustment.step_increment : -this.adjustment.step_increment;
-                const value = Math.max(this.adjustment.lower, Math.min(this.adjustment.upper, this.value + delta));
-                if (!this.signals.get('change-value')(this, direction, value)) this.set_value(value);
-            }
-        }
-        const Gtk = { Scale, Box: Widget, Button: Widget, Label: Widget, Adjustment: Widget,
-            Orientation: { HORIZONTAL: 0, VERTICAL: 1 }, Align: { CENTER: 0 }, PositionType: { TOP: 0 },
-            ScrollType: { STEP_BACKWARD: 0, STEP_FORWARD: 1 }, AccessibleProperty: accessibleProperty };
-        const { scale, volumeBar } = new Function('Gtk',
-            viewSource.slice(viewSource.indexOf('function scale('), viewSource.indexOf('function trackKey('))
-            + '\nreturn { scale, volumeBar };')(Gtk);
-        const writes = [], failures = [];
-        let reads = 0;
-        const control = { key: 'stream:2', enabled: true, set(value) { writes.push(value); return true; } };
-        const panel = {
-            details: new Widget(), volumeControl: { key: 'stream:1', set() { throw new Error('Cached volume setter used'); } },
-            backend: { volume(group) { assert.equal(group, panel.group); reads++; return control; } }, group: {},
-            drag(widget, begin) { this.beginVolumeDrag = begin; }, setFailure(text) { failures.push(text); },
-        };
-        const start = viewSource.indexOf('        this.volumeGlyph =');
-        const end = viewSource.indexOf("\n        this.details.append(new Gtk.Separator", start);
-        new Function('Gtk', 'label', 'scale', 'volumeBar', 'box', 'transport', viewSource.slice(start, end))
-            .call(panel, Gtk, (text, classes) => new Widget({ label: text, css_classes: classes }), scale, volumeBar,
-                (_, spacing, children) => { const row = new Widget({ spacing }); children.forEach(child => row.append(child)); return row; }, new Widget());
-        const [backward, native, forward] = panel.volumeBar.widget.children;
-        return { panel, native, backward, forward, control, writes, failures, reads: () => reads, Gtk };
-    }
-
-    test('wraps the existing native scale with hollow step buttons and keeps mute glyph-only', () => {
-        const { panel, native, backward, forward } = harness();
-        assert.equal(native, panel.volume);
-        assert.equal(native.draw_value, true);
-        assert.equal(native.round_digits, -1, 'drawing the native value must not round 1% steps to tenths');
-        assert.deepEqual([native.adjustment.lower, native.adjustment.upper,
-            native.adjustment.step_increment, native.adjustment.page_increment], [0, 1, 0.01, 0.05]);
-        assert.deepEqual(native.css_classes, ['volume-track']);
-        assert.equal(native.value_pos, 0);
-        assert.equal(backward.label, '◁');
-        assert.equal(forward.label, '▷');
-        assert.equal(backward.a11y.label, 'Decrease volume');
-        assert.equal(forward.a11y.label, 'Increase volume');
-        assert.equal(native.a11y.label, 'Volume');
-        assert.equal(panel.volumeButton.a11y.label, 'Mute / unmute');
-        for (const widget of [backward, forward, native, panel.volumeButton]) {
-            for (let ancestor = widget; ancestor; ancestor = ancestor.parent) {
-                assert.equal(ancestor.tooltip_text, undefined);
-                assert.equal(ancestor.tooltip_markup, undefined);
-            }
-        }
-        assert.deepEqual(backward.css_classes, ['volume-step']);
-        assert.equal(panel.volumeButton.child, panel.volumeGlyph);
-        assert.equal('volumeValue' in panel, false);
-        assert.equal(panel.details.children[0].children[2], panel.volumeBar.widget);
-        for (const [value, text] of [[0, '0%'], [0.375, '38%'], [1, '100%']])
-            assert.equal(native.format(native, value), text);
-    });
-
-    test('availability invalidates cached native text at the same value and disables the whole bar', () => {
-        const { panel, native, forward } = harness();
-        native.set_value(0.5);
-        const formats = native.formats;
-        native.sensitive = false;
-        panel.volumeBar.setAvailable(false);
-        assert.equal(panel.volumeBar.widget.sensitive, false);
-        assert.equal(forward.is_sensitive(), false);
-        assert.equal(native.format(native, native.value), '—');
-        assert.equal(native.formats, formats + 1);
-        panel.volumeBar.setAvailable(false);
-        assert.equal(native.formats, formats + 1);
-        native.sensitive = true;
-        panel.volumeBar.setAvailable(true);
-        assert.equal(panel.volumeBar.widget.sensitive, true);
-        assert.equal(native.format(native, native.value), '50%');
-        assert.equal(native.formats, formats + 2);
-    });
-
-    test('arrows clear a captured drag and use move-slider plus a freshly validated descriptor', () => {
-        const { panel, native, backward, forward, writes, reads, Gtk } = harness();
-        native.set_value(0.5);
-        panel.beginVolumeDrag();
-        assert.equal(panel.volumeDragging, true);
-        assert.equal(panel.volumeTarget, 'stream:1');
-        forward.emit('clicked');
-        assert.equal(panel.volumeDragging, false);
-        assert.equal(panel.volumeTarget, null);
-        assert.deepEqual(writes, [0.51]);
-        assert.equal(reads(), 1);
-        backward.emit('clicked');
-        assert.deepEqual(writes, [0.51, 0.5]);
-        assert.equal(reads(), 2);
-        assert.deepEqual(native.moves, [['move-slider', Gtk.ScrollType.STEP_FORWARD], ['move-slider', Gtk.ScrollType.STEP_BACKWARD]]);
-    });
-
-    test('disabled arrows do nothing and fresh unavailable or rejected descriptors stop the native change', () => {
-        const { panel, native, backward, forward, control, failures, writes, reads } = harness();
-        native.set_value(0.5);
-        panel.beginVolumeDrag();
-        native.sensitive = false;
-        forward.emit('clicked');
-        assert.equal(panel.volumeDragging, true);
-        assert.equal(panel.volumeTarget, 'stream:1');
-        assert.equal(reads(), 0);
-        native.sensitive = true;
-        panel.volumeBar.widget.sensitive = false;
-        backward.emit('clicked');
-        assert.equal(reads(), 0, 'the native effective-sensitivity guard includes ancestors');
-        panel.volumeBar.widget.sensitive = true;
-        control.enabled = false;
-        forward.emit('clicked');
-        assert.equal(reads(), 1);
-        assert.deepEqual(writes, []);
-        assert.equal(native.value, 0.5);
-        control.enabled = true;
-        control.set = () => false;
-        backward.emit('clicked');
-        assert.equal(reads(), 2);
-        assert.equal(native.value, 0.5);
-        assert.equal(failures.length, 2);
-        assert.ok(failures.every(text => /media source changed/.test(text)));
-    });
-
-    test('mute retains its native toggle and unavailable feedback', () => {
-        const { panel } = harness();
-        let toggles = 0;
-        panel.volumeControl.toggleMute = () => { toggles++; return true; };
-        panel.volumeButton.emit('clicked');
-        assert.equal(toggles, 1);
-        panel.volumeControl.toggleMute = () => false;
-        let failure;
-        panel.setFailure = text => { failure = text; };
-        panel.volumeButton.emit('clicked');
-        assert.match(failure, /Native mute is unavailable or the media source changed/);
-    });
+test('the media frontend has no volume or mute controls, helper, or retained state', () => {
+    assert.doesNotMatch(viewSource, /function volumeBar\(|this\.volume\w*|this\.backend\.volume\(|Mute \/ unmute/);
 });
 
 test('remote page URLs never reach the local artwork extractor after decoding fails', async () => {
@@ -419,6 +274,119 @@ describe('Media view transport feedback', () => {
         panel.group = null;
         assert.equal(panel.action('toggle'), false);
         assert.match(failures.at(-1), /No media source/);
+    });
+
+    const unavailableSeekSamples = [
+        ['no live player', null],
+        ['seek unsupported', { canSeek: false }],
+        ['position unsupported', { positionSupported: false }],
+        ['position support missing', { positionSupported: undefined }],
+        ...[undefined, null, NaN, Infinity, -Infinity, '30'].map(position => [`position ${String(position)}`, { position }]),
+        ...[undefined, null, 0, -1, NaN, Infinity, -Infinity, '90'].map(length => [`length ${String(length)}`, { length }]),
+        ['changed track', { trackKey: '/track/two' }],
+        ['replaced player instance', { instance: 'player-2' }],
+        ['different bus', { bus: 'other-player' }],
+    ];
+
+    function jumpHarness() {
+        const selected = { bus: 'browser', instance: 'player-1', trackKey: '/track/one',
+            canSeek: true, positionSupported: true, position: 10, length: 90 };
+        const h = { selected, live: { ...selected, position: 30 }, current: true, accepted: true,
+            actions: [], failures: [], reports: [], resets: 0 };
+        h.panel = Object.assign(Object.create(MediaPanel.prototype), {
+            group: { primary: selected },
+            seekDragging: false, seekPending: false, seekTarget: null,
+            seek: { get_value: () => 80 },
+            backend: {
+                current: () => h.current, refresh() {}, failure: '',
+                player(bus) { assert.equal(bus, selected.bus); return h.live; },
+                action(...args) { h.actions.push(args); return h.accepted; },
+                reportFailure(text) { this.failure = text; h.reports.push(text); },
+            },
+            setFailure(text) { h.failures.push(text); },
+            position() { h.resets++; },
+        });
+        return h;
+    }
+
+    test('15-second jumps use each fresh native position, not model or slider values', () => {
+        const h = jumpHarness();
+        h.panel.seekBy(-15);
+        h.live.position = 50;
+        h.panel.seekBy(15);
+        assert.deepEqual(h.actions, [['seek', 'browser', 15], ['seek', 'browser', 65]]);
+        assert.equal(h.selected.position, 10);
+        assert.equal(h.live.position, 50, 'jumping must not fabricate a native position update');
+        assert.deepEqual(h.failures, []);
+    });
+
+    test('15-second jumps clamp to zero and the live track length, including genuine zero position', () => {
+        for (const [position, seconds, target] of [[2, -15, 0], [35, 15, 40], [0, 15, 15], [40, -15, 25]]) {
+            const h = jumpHarness();
+            h.live.position = position;
+            h.live.length = 40;
+            h.panel.seekBy(seconds);
+            assert.deepEqual(h.actions, [['seek', 'browser', target]], `position ${position}, jump ${seconds}`);
+        }
+    });
+
+    test('jumps revalidate native support, finite samples, and exact track identity before dispatch', () => {
+        for (const [name, overrides] of unavailableSeekSamples) {
+            for (const seconds of [-15, 15]) {
+                const h = jumpHarness();
+                h.live = overrides && { ...h.live, ...overrides };
+                h.panel.seekBy(seconds);
+                assert.deepEqual(h.actions, [], `${name}, jump ${seconds}`);
+            }
+        }
+    });
+
+    test('jumps never dispatch without a selected group or with a stale model', () => {
+        for (const seconds of [-15, 15]) {
+            const missing = jumpHarness();
+            missing.panel.group = null;
+            missing.panel.seekBy(seconds);
+            assert.deepEqual(missing.actions, [], 'no selected source');
+            const stale = jumpHarness();
+            stale.current = false;
+            stale.panel.seekBy(seconds);
+            assert.deepEqual(stale.actions, [], 'stale ownership model');
+        }
+    });
+
+    test('a jump cancels a pending scrub before queuing and release cannot commit the old thumb value', () => {
+        const h = jumpHarness();
+        const panel = h.panel;
+        panel.seekDragging = true;
+        panel.seekPending = true;
+        panel.seekTarget = trackKey(h.selected);
+        panel.backend.action = (...args) => {
+            assert.equal(panel.seekDragging, false, 'cancel drag before dispatch');
+            assert.equal(panel.seekPending, false, 'discard preview before dispatch');
+            assert.equal(panel.seekTarget, null, 'discard captured scrub identity');
+            h.actions.push(args);
+            return true;
+        };
+        panel.seekBy(15);
+        assert.equal(h.resets, 1, 'cancel restores the sampled native position');
+        panel.finishSeek(true);
+        assert.deepEqual(h.actions, [['seek', 'browser', 45]], 'release must not queue the old 80-second preview');
+    });
+
+    test('rejected jump queues report backend failures and a nonempty fallback through reportFailure', () => {
+        for (const failure of ['Media worker is not ready.', '']) {
+            const h = jumpHarness();
+            h.accepted = false;
+            h.panel.backend.failure = failure;
+            h.panel.seekBy(15);
+            assert.deepEqual(h.actions, [['seek', 'browser', 45]]);
+            assert.equal(h.reports.length, 1);
+            assert.equal(h.failures.length, 1);
+            assert.ok(h.failures[0].length > 0);
+            assert.equal(h.reports[0], h.failures[0]);
+            assert.equal(h.panel.backend.failure, h.failures[0], 'recovery refreshes retain the view error');
+            if (failure) assert.equal(h.failures[0], failure);
+        }
     });
 
     test('seek scrubbing previews locally and dispatches one guarded seek on release', () => {
@@ -502,34 +470,33 @@ describe('Media view transport feedback', () => {
         assert.equal(panel.errorLabel.visible, true);
     });
 
-    test('main and source-row controls share capability feedback without hiding volume reasons', () => {
+    test('main and source-row controls share capability feedback and jumps follow live seek availability', () => {
         const label = () => accessibleWidget({ set_label(text) { this.text = text; } });
         const button = () => { const child = label(); return accessibleWidget({ get_child: () => child }); };
-        let enabled = false;
-        const volume = { enabled: false, value: 0, reason: 'No uniquely owned audio stream.',
-            muteEnabled: false, muteReason: 'No native stream mute is available.' };
-        const volumeValues = [];
-        const group = { title: 'Track', displayName: 'Spotify', primary: { bus: 'browser', title: 'Track', playing: true }, players: ['browser'] };
+        let enabled = false, current = true;
+        const group = { title: 'Track', displayName: 'Spotify', primary: {
+            bus: 'browser', title: 'Track', playing: true, instance: 'player-1', trackKey: '/track/one',
+            canSeek: true, positionSupported: true, position: 10, length: 90,
+        }, players: ['browser'] };
+        let live = { ...group.primary, position: 30 };
         const row = { name: label(), title: label(), play: button(), art: { set() {} },
             widget: accessibleWidget({ add_css_class() {}, remove_css_class() {} }) };
         const panel = Object.assign(Object.create(MediaPanel.prototype), {
             groups: [group], activePlayer: 'browser', rows: new Map([['browser', row]]), opened: true,
             backend: {
-                current: () => true,
+                current: () => current,
                 transport: () => ({ enabled, reason: enabled ? 'Pause' : 'Browser bridge does not expose pause control.' }),
-                volume: () => volume,
+                player: () => live,
             },
             title: label(), credit: { set() {} }, art: { set() {} }, empty: {}, details: {},
-            play: button(), previous: {}, next: {}, seek: { adjustment: {} },
-            volume: accessibleWidget({ set_value(value) { volumeValues.push(value); } }),
-            volumeButton: accessibleWidget(), volumeGlyph: label(), sourceName: label(),
-            volumeBar: { widget: accessibleWidget(), setAvailable(value) { this.available = value; } },
+            play: button(), previous: {}, next: {}, rewind: {}, forward: {}, seek: { adjustment: {} },
+            sourceName: label(),
             section: {}, sources: {}, chevron: label(), sourceRows: { reorder_child_after() {} },
             setFailure() {}, position() {},
         });
         const assertNoControlTooltips = () => {
-            for (const widget of [panel.play, panel.previous, panel.next, panel.volume, panel.volumeBar.widget,
-                panel.volumeButton, panel.section, panel.sources, panel.details, panel.title, row.name, row.title, row.play, row.widget]) {
+            for (const widget of [panel.play, panel.previous, panel.next, panel.rewind, panel.forward, panel.seek,
+                panel.section, panel.sources, panel.details, panel.title, row.name, row.title, row.play, row.widget]) {
                 assert.equal(widget.tooltip_text, undefined);
                 assert.equal(widget.tooltip_markup, undefined);
             }
@@ -542,34 +509,28 @@ describe('Media view transport feedback', () => {
         assert.equal(row.play.sensitive, false);
         assert.match(panel.play.a11y.description, /does not expose pause/);
         assert.equal(row.play.a11y.description, panel.play.a11y.description);
-        assert.equal(panel.volume.sensitive, false);
-        assert.equal(panel.volumeBar.available, false);
-        assert.equal(panel.volume.a11y.description, 'No uniquely owned audio stream.');
-        assert.equal(panel.volumeBar.widget.a11y.description, panel.volume.a11y.description);
-        assert.equal(panel.volumeButton.sensitive, false);
-        assert.equal(panel.volumeButton.a11y.description, 'No native stream mute is available.');
+        assert.equal(panel.rewind.sensitive, true, 'seek availability is independent of play / pause');
+        assert.equal(panel.forward.sensitive, true);
         enabled = true;
-        volume.enabled = true;
-        volume.value = 0.74;
-        volume.reason = 'Native MPRIS volume';
-        panel.volumeDragging = true;
         panel.render();
         assertNoControlTooltips();
         assert.equal(panel.play.sensitive, true);
         assert.equal(row.play.sensitive, true);
         assert.equal(panel.play.a11y.description, 'Pause');
         assert.equal(row.play.a11y.description, panel.play.a11y.description);
-        assert.equal(panel.volume.sensitive, true);
-        assert.equal(panel.volumeBar.available, true);
-        assert.equal(panel.volume.a11y.description, 'Native MPRIS volume');
-        assert.equal(panel.volumeBar.widget.a11y.description, panel.volume.a11y.description);
-        assert.equal(panel.volumeButton.sensitive, false, 'mute availability remains independent');
-        assert.equal(panel.volumeButton.a11y.description, volume.muteReason);
-        assert.deepEqual(volumeValues, [0], 'render must not replace the value during a drag');
-        panel.volumeDragging = false;
-        panel.render();
-        assertNoControlTooltips();
-        assert.deepEqual(volumeValues, [0, 0.74]);
+        for (const [name, overrides] of unavailableSeekSamples) {
+            live = overrides && { ...group.primary, ...overrides };
+            panel.render();
+            assertNoControlTooltips();
+            assert.equal(panel.rewind.sensitive, false, name);
+            assert.equal(panel.forward.sensitive, false, name);
+        }
+        live = { ...group.primary, position: 0 };
+        for (current of [false, true]) {
+            panel.render();
+            assert.equal(panel.rewind.sensitive, current, 'fresh model and genuine zero native position');
+            assert.equal(panel.forward.sensitive, current, 'fresh model and genuine zero native position');
+        }
         group.primary.title = 'Renamed <track> & 🎵';
         panel.render();
         assertNoControlTooltips();

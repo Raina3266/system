@@ -42,11 +42,6 @@
     # the per-crate derivations reuse. It declares no inputs of its own, so
     # there is no nixpkgs to follow; `crane.mkLib pkgs` binds it to ours.
     crane.url = "github:ipetkov/crane";
-
-    sonora = {
-      url = "github:nolight132/sonora";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =

@@ -526,7 +526,7 @@ mod rows {
     use super::fixtures::*;
     use crate::{
         audio::{self, Action, physical_key},
-        model::{AudioKind, Snapshot, single_line},
+        model::{AudioKind, Snapshot, hex_encode, single_line},
     };
     use serde_json::{Value, json};
     use std::collections::HashMap;
@@ -804,6 +804,94 @@ mod rows {
             physical_key("alsa_card.other", SPEAKER)
         );
     }
+    #[test]
+    fn bluetooth_routes_use_device_names_instead_of_generic_port_labels() {
+        let (mut native, mut raw) = mixed_alsa_bluez();
+        for node in native
+            .nodes
+            .iter_mut()
+            .filter(|node| node.card_id == Some(8))
+        {
+            node.description = "Raina's Pixel Buds Pro".into();
+            node.routes[0].description = if node.kind == AudioKind::Output {
+                "Headphones"
+            } else {
+                "Bluetooth"
+            }
+            .into();
+        }
+        // Exercise associated native ports, not just device-only fallback rows.
+        raw[1]["info"]["params"]["EnumRoute"][0]["devices"] = json!([1]);
+        raw[1]["info"]["params"]["EnumRoute"][1]["devices"] = json!([0]);
+        let state = state(native, &raw);
+        for (kind, id, route) in [(AudioKind::Output, 30, 10), (AudioKind::Input, 31, 11)] {
+            let rows = audio::rows(&state, kind).unwrap();
+            let row = rows.iter().find(|row| row.node_id == Some(id)).unwrap();
+            assert_eq!(row.label, "Raina's Pixel Buds Pro");
+            assert!(row.port);
+            assert_eq!(row.route_id, Some(route));
+            assert_eq!(
+                row.key,
+                format!(
+                    "{}:{}:port:{}",
+                    kind.key_prefix(),
+                    hex_encode(&row.name),
+                    hex_encode(&row.port_name)
+                )
+            );
+        }
+        let wired = audio::rows(&state, AudioKind::Output).unwrap();
+        assert_eq!(
+            wired
+                .iter()
+                .find(|row| row.port_name == SPEAKER)
+                .unwrap()
+                .label,
+            "Speaker"
+        );
+        assert_eq!(
+            wired
+                .iter()
+                .find(|row| row.port_name == HEADPHONES)
+                .unwrap()
+                .label,
+            "Headphones"
+        );
+    }
+
+    #[test]
+    fn bluetooth_device_only_rows_preserve_names_and_distinguish_connected_devices() {
+        let (mut native, raw) = mixed_alsa_bluez();
+        native
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == 30)
+            .unwrap()
+            .description = "Raina's Pixel Buds Pro".into();
+        let mut second = native
+            .nodes
+            .iter()
+            .find(|node| node.id == 30)
+            .unwrap()
+            .clone();
+        second.id = 32;
+        second.serial = "320".into();
+        second.name = "bluez_output.second".into();
+        second.description = "Family Room Analog Stereo 🎧".into();
+        second.card_id = None;
+        second.card_serial.clear();
+        native.nodes.push(second);
+        let rows = audio::rows(&state(native, &raw), AudioKind::Output).unwrap();
+        for (id, name) in [
+            (30, "Raina's Pixel Buds Pro"),
+            (32, "Family Room Analog Stereo 🎧"),
+        ] {
+            let row = rows.iter().find(|row| row.node_id == Some(id)).unwrap();
+            assert_eq!(row.label, name);
+            assert!(!row.port);
+        }
+    }
+
     #[test]
     fn duplicate_labels_get_hardware_context_then_short_distinguishing_numbers() {
         let mut rows = audio::rows(&initial(), AudioKind::Output).unwrap();

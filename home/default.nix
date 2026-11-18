@@ -44,6 +44,7 @@
 
     # productivity
     anki
+    pdfmixtool
     digikam
     obsidian
     exercism
@@ -79,6 +80,5 @@
     gimp
     yt-dlp
     waylyrics
-    inputs.sonora.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 }

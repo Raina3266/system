@@ -130,6 +130,9 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
         .collect();
     for node in snapshot.nodes.iter().filter(|node| node.kind == kind) {
         let card = card_for(snapshot, node);
+        let bluetooth = card.is_some_and(|card| card.name.starts_with("bluez_card."))
+            || node.name.starts_with("bluez_output.")
+            || node.name.starts_with("bluez_input.");
         let description = if node.description.is_empty() {
             &node.name
         } else {
@@ -137,7 +140,11 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
         };
         let base = Choice {
             key: node_key(snapshot, node),
-            label: short_device_name(description, None),
+            label: if bluetooth {
+                single_line(description, usize::MAX)
+            } else {
+                short_device_name(description, None)
+            },
             description: description.clone(),
             name: node.name.clone(),
             card: card.map(|card| card.name.clone()).unwrap_or_default(),
@@ -191,7 +198,12 @@ pub fn rows(state: &State, kind: AudioKind) -> AppResult<Vec<Choice>> {
                 };
                 choices.push(Choice {
                     key: format!("{}:port:{}", base.key, hex_encode(&native.name)),
-                    label: single_line(label, usize::MAX),
+                    // BlueZ ports describe the transport, not the connected device.
+                    label: if bluetooth {
+                        base.label.clone()
+                    } else {
+                        single_line(label, usize::MAX)
+                    },
                     description: format!("{} — {label}", base.description),
                     port: true,
                     port_name: native.name.clone(),

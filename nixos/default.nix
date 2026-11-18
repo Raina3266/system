@@ -38,23 +38,6 @@ in
     nixpkgs.config.allowUnfree = true;
     nixpkgs.overlays = [
       inputs.nixGL.overlay
-      (final: prev:
-        let
-          # The Rust setup hook requires system AWS-LC, but these recipes omit it.
-          withAwsLc = package: package.overrideAttrs (old: {
-            buildInputs = (old.buildInputs or [ ]) ++ [ final.aws-lc ];
-          });
-        in
-        {
-          mprisence = withAwsLc prev.mprisence;
-          clash-verge-rev = prev.clash-verge-rev.override {
-            callPackage = path: args:
-              let package = final.callPackage path args;
-              in if (package.pname or "") == "clash-verge-rev-unwrapped"
-                then withAwsLc package
-                else package;
-          };
-        })
     ];
 
     # Nix
