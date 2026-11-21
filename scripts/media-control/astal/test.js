@@ -129,6 +129,10 @@ test('the entire built media tree stays tooltip-free through source, title and c
     let enabled = true;
     const backend = { current: () => enabled, transport: () => ({ enabled, reason: enabled ? '' : 'Unavailable' }),
         player: bus => panel.groups.find(group => group.primary.bus === bus)?.primary,
+        progress: bus => {
+            const player = backend.player(bus);
+            return player && { samplePosition: player.position, ...player };
+        },
         action: (...args) => { actions.push(args); return true; } };
     const panel = Object.assign(Object.create(MediaPanel.prototype), {
         backend, content: new Widget(), groups: [], activePlayer: '', rows: new Map(), opened: true, failure: '', drag() {},
@@ -237,9 +241,9 @@ test('remote page URLs never reach the local artwork extractor after decoding fa
 describe('Media view transport feedback', () => {
     const Gtk = { AccessibleProperty: accessibleProperty };
     const trackKey = player => player ? JSON.stringify([player.bus, player.instance, player.trackKey]) : '';
-    const MediaPanel = new Function('Gtk', 'trackKey',
+    const MediaPanel = new Function('Gtk', 'trackKey', 'formatTime',
         viewSource.slice(viewSource.indexOf('class MediaPanel {'), viewSource.indexOf('\nlet backend, panel;'))
-        + '\nreturn MediaPanel;')(Gtk, trackKey);
+        + '\nreturn MediaPanel;')(Gtk, trackKey, formatTime);
 
     test('stale, unsupported, and rejected actions explain why nothing was dispatched', () => {
         let current = false, enabled = true, accepted = true, refreshes = 0;
@@ -282,6 +286,7 @@ describe('Media view transport feedback', () => {
         ['position unsupported', { positionSupported: false }],
         ['position support missing', { positionSupported: undefined }],
         ...[undefined, null, NaN, Infinity, -Infinity, '30'].map(position => [`position ${String(position)}`, { position }]),
+        ...[undefined, null, NaN, Infinity, -1, '30'].map(samplePosition => [`sample ${String(samplePosition)}`, { samplePosition }]),
         ...[undefined, null, 0, -1, NaN, Infinity, -Infinity, '90'].map(length => [`length ${String(length)}`, { length }]),
         ['changed track', { trackKey: '/track/two' }],
         ['replaced player instance', { instance: 'player-2' }],
@@ -300,6 +305,11 @@ describe('Media view transport feedback', () => {
             backend: {
                 current: () => h.current, refresh() {}, failure: '',
                 player(bus) { assert.equal(bus, selected.bus); return h.live; },
+                progress(bus) {
+                    assert.equal(bus, selected.bus);
+                    const player = h.progress === undefined ? h.live : h.progress;
+                    return player && { samplePosition: player.position, ...player };
+                },
                 action(...args) { h.actions.push(args); return h.accepted; },
                 reportFailure(text) { this.failure = text; h.reports.push(text); },
             },
@@ -308,6 +318,50 @@ describe('Media view transport feedback', () => {
         });
         return h;
     }
+
+    test('progress uses a known duration and never fills an unknown or unsupported range', () => {
+        let player = { position: 86, positionSupported: true, length: 361.9294375 };
+        let value = 0, elapsed = '', total = '';
+        const panel = Object.assign(Object.create(MediaPanel.prototype), {
+            group: { primary: { bus: 'org.mpris.MediaPlayer2.test' } }, seekDragging: false,
+            backend: { progress: () => player },
+            rewind: {}, forward: {}, modelCurrent: () => true,
+            seek: { set_value(next) { value = next; }, get_value: () => value },
+            elapsed: { set_label(text) { elapsed = text; } },
+            total: { set_label(text) { total = text; } },
+        });
+        panel.position();
+        assert.equal(value, 86);
+        assert.equal(elapsed, '1:26');
+        assert.equal(total, '6:01');
+        for (const length of [null, undefined, 0, -1, NaN, Infinity]) {
+            player.length = length;
+            panel.position();
+            assert.equal(value, 0, `unknown duration ${String(length)} must not fill the bar`);
+            assert.equal(elapsed, '1:26', 'elapsed remains available even without duration');
+            assert.equal(total, '--:--');
+        }
+        player.length = 60;
+        panel.position();
+        assert.equal(value, 60, 'only the displayed thumb is clamped to the range');
+        assert.equal(player.position, 86);
+        assert.equal(elapsed, '1:26');
+        player.positionSupported = false;
+        panel.position();
+        assert.equal(value, 0);
+        assert.equal(elapsed, '--:--');
+        panel.seekDragging = true;
+        value = 30;
+        panel.position();
+        assert.equal(value, 30, 'live updates preserve the scrub preview');
+        assert.equal(elapsed, '0:30');
+        player = null;
+        panel.seekDragging = false;
+        panel.position();
+        assert.equal(value, 0);
+        assert.equal(elapsed, '--:--');
+        assert.equal(total, '--:--');
+    });
 
     test('15-second jumps use each fresh native position, not model or slider values', () => {
         const h = jumpHarness();
@@ -318,6 +372,26 @@ describe('Media view transport feedback', () => {
         assert.equal(h.selected.position, 10);
         assert.equal(h.live.position, 50, 'jumping must not fabricate a native position update');
         assert.deepEqual(h.failures, []);
+    });
+
+    test('display estimates are never used as native seek targets and unavailable progress blocks jumps', () => {
+        const h = jumpHarness();
+        h.progress = { ...h.live, position: 34.5, samplePosition: 30 };
+        h.panel.seekBy(15);
+        assert.deepEqual(h.actions, [['seek', 'browser', 45]], 'use the real 30-second sample, not estimated time');
+        for (const progress of [null, { ...h.live, positionSupported: false }]) {
+            h.progress = progress;
+            h.panel.seekBy(15);
+            assert.equal(h.actions.length, 1, 'stale or unavailable display timing must not queue jumps');
+        }
+    });
+
+    test('jumps use a current-track position read rather than an older cached native position', () => {
+        const h = jumpHarness();
+        h.live.position = 100;
+        h.progress = { ...h.live, position: 20, samplePosition: 20 };
+        h.panel.seekBy(15);
+        assert.deepEqual(h.actions, [['seek', 'browser', 35]]);
     });
 
     test('15-second jumps clamp to zero and the live track length, including genuine zero position', () => {
@@ -486,7 +560,7 @@ describe('Media view transport feedback', () => {
             backend: {
                 current: () => current,
                 transport: () => ({ enabled, reason: enabled ? 'Pause' : 'Browser bridge does not expose pause control.' }),
-                player: () => live,
+                player: () => live, progress: () => live && { samplePosition: live.position, ...live },
             },
             title: label(), credit: { set() {} }, art: { set() {} }, empty: {}, details: {},
             play: button(), previous: {}, next: {}, rewind: {}, forward: {}, seek: { adjustment: {} },
@@ -604,6 +678,7 @@ describe('Media view transport feedback', () => {
         const failures = [];
         const context = {
             modelCurrent: () => current, sources: { reveal_child: true }, chevron: { set_label() {} },
+            setSourcesOpen: MediaPanel.prototype.setSourcesOpen,
             backend: { failure: 'Source unavailable.', refresh() { refreshes++; },
                 select() { selections++; if (!accepted) this.failure = 'Source unavailable.'; return accepted; } },
             setFailure(text) { failures.push(text); },
@@ -631,18 +706,21 @@ describe('Media view transport feedback', () => {
 const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
     .replace(/^import .+;\r?$/gm, '')
     .replace(/^export /gm, '');
-const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', `'use strict';
+const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', 'queryPosition', `'use strict';
     ${source}
     if (helper) runHelper = helper;
-    return { Planner, NativeMedia, MediaBackend, ModelWorker, runHelper, ownershipStamp };
+    if (queryPosition) readPosition = queryPosition;
+    return { Planner, NativeMedia, MediaBackend, ModelWorker, runHelper, ownershipStamp, readPosition,
+        DirectPlayer: typeof DirectPlayer === 'undefined' ? undefined : DirectPlayer,
+        LocalPlayerDiscovery: typeof LocalPlayerDiscovery === 'undefined' ? undefined : LocalPlayerDiscovery };
 `);
 
 const variantDouble = {
     is_object_path: value => typeof value === 'string' && /^\/(?:[A-Za-z0-9_]+(?:\/[A-Za-z0-9_]+)*)?$/.test(value),
 };
 
-function loadBackend({ GLib = {}, Gio = {}, Mpris = {}, Wp = {}, runHelper = null } = {}) {
-    return factory({ Variant: variantDouble, ...GLib }, Gio, Mpris, Wp, badge, runHelper);
+function loadBackend({ GLib = {}, Gio = {}, Mpris = {}, Wp = {}, runHelper = null, queryPosition = null } = {}) {
+    return factory({ Variant: variantDouble, ...GLib }, Gio, Mpris, Wp, badge, runHelper, queryPosition);
 }
 
 class Signals {
@@ -725,12 +803,1130 @@ class Stream extends Signals {
     }
 }
 
+// Tuple replies unpack to arrays; a{sv} values stay variants, as they do in GJS.
+class DBusVariant {
+    static is_object_path = variantDouble.is_object_path;
+    constructor(signature, values) { Object.assign(this, { signature, values }); }
+    deep_unpack() { return this.values; }
+}
+
+const dbusVariant = (signature, values) => new DBusVariant(signature, values);
+const mprisPath = '/org/mpris/MediaPlayer2';
+const mprisRoot = 'org.mpris.MediaPlayer2';
+const mprisPlayer = `${mprisRoot}.Player`;
+const propertiesInterface = 'org.freedesktop.DBus.Properties';
+const daemonInterface = 'org.freedesktop.DBus';
+const playbackStatus = { PLAYING: 1, PAUSED: 2, STOPPED: 3 };
+
+function dbusHarness() {
+    const h = { calls: [], pending: new Set(), subscriptions: new Map(), sources: new Map(), time: 0 };
+    let nextSignal = 0, nextSource = 0;
+    h.respond = call => { throw new Error(`Unexpected D-Bus call: ${call.bus} ${call.method}`); };
+    h.connection = {
+        call(bus, path, iface, method, parameters, replyType, flags, timeout, cancellable, callback) {
+            const call = { bus, path, iface, method, parameters, replyType, flags, timeout, cancellable,
+                params: parameters?.deep_unpack() ?? [] };
+            h.calls.push(call);
+            h.pending.add(call);
+            let finished = false, cancelSignal = 0;
+            const finish = result => {
+                if (finished) return;
+                finished = true;
+                h.pending.delete(call);
+                if (cancelSignal) cancellable.disconnect(cancelSignal);
+                queueMicrotask(() => callback(h.connection, result));
+            };
+            call.resolve = value => finish({ value });
+            call.reject = error => finish({ error });
+            if (cancellable?.is_cancelled()) call.reject(new Error('Operation was cancelled'));
+            else if (cancellable) cancelSignal = cancellable.connect(() => call.reject(new Error('Operation was cancelled')));
+            queueMicrotask(() => {
+                if (finished) return;
+                try {
+                    const reply = h.respond(call);
+                    // Undefined deliberately holds a request for race/cancellation tests.
+                    if (reply !== undefined) call.resolve(reply);
+                } catch (error) { call.reject(error); }
+            });
+        },
+        call_finish(result) {
+            if (result.error) throw result.error;
+            return result.value;
+        },
+        signal_subscribe(sender, iface, member, path, arg0, flags, callback) {
+            const id = ++nextSignal;
+            h.subscriptions.set(id, { sender, iface, member, path, arg0, flags, callback });
+            return id;
+        },
+        signal_unsubscribe(id) { h.subscriptions.delete(id); },
+    };
+    h.emit = (sender, iface, member, path, parameters) => {
+        for (const signal of [...h.subscriptions.values()]) {
+            if (signal.sender && signal.sender !== sender || signal.iface && signal.iface !== iface
+                || signal.member && signal.member !== member || signal.path && signal.path !== path
+                || signal.arg0 && signal.arg0 !== parameters.deep_unpack()[0]) continue;
+            signal.callback(h.connection, sender, path, iface, member, parameters);
+        }
+    };
+    const addSource = (kind, interval, callback) => {
+        const id = ++nextSource;
+        h.sources.set(id, { kind, interval, callback, due: h.time + interval });
+        return id;
+    };
+    h.GLib = {
+        Variant: DBusVariant, VariantType: class { constructor(signature) { this.signature = signature; } },
+        PRIORITY_DEFAULT: 0, PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false, SOURCE_CONTINUE: true,
+        get_monotonic_time: () => h.time * 1000, getenv: () => null,
+        idle_add: (_, callback) => addSource('idle', 0, callback),
+        timeout_add: (_, interval, callback) => addSource('timeout', interval, callback),
+        source_remove: id => h.sources.delete(id),
+    };
+    h.Gio = { Cancellable, DBusCallFlags: { NONE: 0 }, DBusSignalFlags: { NONE: 0 }, DBus: { session: h.connection },
+        DBusError: { get_remote_error: error => error.remoteName ?? null } };
+    h.manager = Object.assign(new Signals(), { players: [] });
+    h.audio = Object.assign(new Signals(), { streams: [] });
+    h.api = loadBackend({ GLib: h.GLib, Gio: h.Gio,
+        Mpris: { PlaybackStatus: playbackStatus, get_default: () => h.manager },
+        Wp: { get_default: () => ({ audio: h.audio }) } });
+    h.flush = async () => {
+        for (let turn = 0; turn < 20; turn++) {
+            await new Promise(resolve => setImmediate(resolve));
+            const idle = [...h.sources].filter(([, entry]) => entry.kind === 'idle');
+            if (!idle.length) return;
+            for (const [id, entry] of idle)
+                if (h.sources.has(id) && !entry.callback()) h.sources.delete(id);
+        }
+        assert.fail('Recovery work did not settle after 20 idle turns');
+    };
+    h.advance = async (milliseconds = 1000) => {
+        h.time += milliseconds;
+        for (const [id, entry] of [...h.sources]) {
+            if (entry.kind !== 'timeout' || entry.due > h.time || !h.sources.has(id)) continue;
+            entry.due = h.time + entry.interval;
+            if (!entry.callback()) h.sources.delete(id);
+        }
+        await h.flush();
+    };
+    h.timers = () => [...h.sources.values()].filter(entry => entry.kind === 'timeout');
+    h.positionCalls = () => h.calls.filter(call => call.iface === propertiesInterface
+        && call.method === 'Get' && call.params[1] === 'Position');
+    return h;
+}
+
+function mprisFixture({ identity = 'Haruna', entry = 'org.kde.haruna', status = 'Playing', position = 12_500_000 } = {}) {
+    const metadata = {
+        'mpris:trackid': dbusVariant('o', '/track/lost_name'),
+        'mpris:length': dbusVariant('x', 240_000_000),
+        'xesam:title': dbusVariant('s', 'Recovered track'),
+        'xesam:artist': dbusVariant('as', ['Recovered artist']),
+        'xesam:album': dbusVariant('s', 'Recovered album'),
+        'xesam:url': dbusVariant('s', 'file:///music/recovered.flac'),
+        'mpris:artUrl': dbusVariant('s', 'file:///music/cover.jpg'),
+    };
+    return {
+        root: { Identity: dbusVariant('s', identity), DesktopEntry: dbusVariant('s', entry) },
+        player: {
+            PlaybackStatus: dbusVariant('s', status), Rate: dbusVariant('d', 1.25),
+            Metadata: dbusVariant('a{sv}', metadata), Position: dbusVariant('x', position),
+            CanPlay: dbusVariant('b', true), CanPause: dbusVariant('b', true), CanSeek: dbusVariant('b', true),
+            CanGoNext: dbusVariant('b', false), CanGoPrevious: dbusVariant('b', true),
+        },
+        positionReply: dbusVariant('(v)', [dbusVariant('x', position)]),
+    };
+}
+
+function mprisReply(fixture, call) {
+    assert.equal(call.path, mprisPath);
+    if (call.iface === propertiesInterface && call.method === 'GetAll') {
+        assert.ok([mprisRoot, mprisPlayer].includes(call.params[0]));
+        return dbusVariant('(a{sv})', [call.params[0] === mprisRoot ? fixture.root : fixture.player]);
+    }
+    if (call.iface === propertiesInterface && call.method === 'Get') {
+        assert.deepEqual(call.params, [mprisPlayer, 'Position']);
+        if (fixture.positionReply instanceof Error) throw fixture.positionReply;
+        return fixture.positionReply;
+    }
+    assert.equal(call.iface, mprisPlayer);
+    assert.ok(['Play', 'Pause', 'Next', 'Previous', 'SetPosition'].includes(call.method));
+    return dbusVariant('()', []);
+}
+
+function directPlayerHarness(options) {
+    const h = dbusHarness();
+    assert.equal(typeof h.api.DirectPlayer, 'function', 'backend.js must implement DirectPlayer for lost-name recovery');
+    h.bus = ':1.220';
+    h.fixture = mprisFixture(options);
+    h.respond = call => {
+        assert.equal(call.bus, h.bus, 'MPRIS queries and controls must target the actual private owner');
+        return mprisReply(h.fixture, call);
+    };
+    h.player = new h.api.DirectPlayer(h.bus, { connection: h.connection });
+    h.changed = (values, invalidated = []) => h.emit(h.bus, propertiesInterface, 'PropertiesChanged', mprisPath,
+        dbusVariant('(sa{sv}as)', [mprisPlayer, values, invalidated]));
+    h.seeked = position => h.emit(h.bus, mprisPlayer, 'Seeked', mprisPath, dbusVariant('(x)', [position]));
+    return h;
+}
+
+function assertUnknownPosition(player) {
+    assert.ok(!Number.isFinite(player.position) || player.position < 0,
+        `Missing/invalid Position must not become a fabricated sample: ${player.position}`);
+}
+
+describe('DirectPlayer lost-name recovery', () => {
+    test('decodes Haruna MPRIS exports from a private owner without requiring its lost well-known name', async t => {
+        const h = directPlayerHarness();
+        t.after(() => h.player.dispose());
+        assert.equal(await h.player.start(), h.player);
+        await h.flush();
+        const player = h.player;
+        assert.equal(player.bus_name, ':1.220');
+        assert.equal(player.available, true);
+        assert.equal(player.identity, 'Haruna');
+        assert.equal(player.entry, 'org.kde.haruna');
+        assert.equal(player.playback_status, playbackStatus.PLAYING);
+        assert.equal(player.rate, 1.25);
+        assert.equal(player.length, 240);
+        assert.equal(player.position, 12.5);
+        assert.equal(player.trackid, '/track/lost_name');
+        assert.equal(player.title, 'Recovered track');
+        assert.equal(player.artist, 'Recovered artist');
+        assert.equal(player.album, 'Recovered album');
+        assert.equal(player.art_url, 'file:///music/cover.jpg');
+        assert.equal(typeof player.cover_art, 'string', 'an empty cover is valid; local extraction remains Rust policy');
+        assert.equal(player.get_meta('xesam:url').deep_unpack(), 'file:///music/recovered.flac');
+        assert.deepEqual([player.can_play, player.can_pause, player.can_seek, player.can_go_next, player.can_go_previous],
+            [true, true, true, false, true]);
+        assert.deepEqual(h.calls.filter(call => call.method === 'GetAll').map(call => call.params[0]).sort(),
+            [mprisRoot, mprisPlayer].sort());
+        for (const call of h.calls) {
+            assert.equal(call.timeout, 1500);
+            assert.equal(call.flags, 0);
+            assert.ok(call.cancellable instanceof Cancellable);
+        }
+    });
+
+    test('unknown applications use their own identity and accept double-valued microseconds', async t => {
+        const h = directPlayerHarness({ identity: 'Uncatalogued Audio Lab', entry: 'audio-lab', position: 1_500_000.5 });
+        t.after(() => h.player.dispose());
+        h.fixture.player.Metadata.deep_unpack()['mpris:length'] = dbusVariant('d', 240_000_000.5);
+        h.fixture.player.Position = dbusVariant('d', 1_500_000.5);
+        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('d', 1_500_000.5)]);
+        await h.player.start();
+        await h.flush();
+        assert.equal(h.player.identity, 'Uncatalogued Audio Lab');
+        assert.equal(h.player.entry, 'audio-lab');
+        assert.equal(h.player.length, 240.0000005);
+        assert.equal(h.player.position, 1.5000005);
+    });
+
+    test('PropertiesChanged and Seeked decode the final variant argument and notify live subscribers', async t => {
+        const h = directPlayerHarness();
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const notifications = [];
+        const signal = h.player.connect('notify', (_, property) => notifications.push(property.name));
+        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('x', 21_250_000)]);
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused'), Rate: dbusVariant('d', 0.75),
+            Metadata: dbusVariant('a{sv}', {
+                'mpris:trackid': dbusVariant('o', '/track/two'), 'xesam:title': dbusVariant('s', 'Second track'),
+            }) });
+        h.seeked(21_250_000);
+        await h.flush();
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+        assert.equal(h.player.rate, 0.75);
+        assert.equal(h.player.trackid, '/track/two');
+        assert.equal(h.player.title, 'Second track');
+        assert.equal(h.player.artist, '', 'replacement metadata must not retain the previous artist');
+        assert.equal(h.player.album, '');
+        assert.equal(h.player.art_url, '');
+        assert.equal(h.player.get_meta('xesam:url'), null);
+        assert.equal(h.player.position, 21.25);
+        assert.ok(notifications.includes('position'));
+        assert.ok(notifications.includes('playback-status'));
+        const count = notifications.length;
+        h.player.disconnect(signal);
+        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('x', 22_000_000)]);
+        h.seeked(22_000_000);
+        await h.flush();
+        assert.equal(h.player.position, 22);
+        assert.equal(notifications.length, count);
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Stopped') });
+        await h.flush();
+        assert.equal(h.player.playback_status, playbackStatus.STOPPED);
+    });
+
+    test('controls dispatch to the unique bus and SetPosition never changes the sampled position optimistically', async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        h.fixture.player.CanGoNext = dbusVariant('b', true);
+        await h.player.start();
+        await h.flush();
+        const before = h.player.position;
+        const start = h.calls.length;
+        h.player.play();
+        h.player.pause();
+        h.player.next();
+        h.player.previous();
+        h.player.position = 42.25;
+        assert.equal(h.player.position, before);
+        await h.flush();
+        const controls = h.calls.slice(start).filter(call => call.iface === mprisPlayer);
+        assert.deepEqual(controls.map(call => call.method), ['Play', 'Pause', 'Next', 'Previous', 'SetPosition']);
+        assert.ok(controls.every(call => call.bus === ':1.220' && call.path === mprisPath && call.timeout === 1500));
+        assert.equal(controls.at(-1).parameters.signature, '(ox)');
+        assert.deepEqual(controls.at(-1).params, ['/track/lost_name', 42_250_000]);
+        assert.equal(h.player.position, before, 'successful dispatch is not a position sample');
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+        h.seeked(41_000_000);
+        assert.equal(h.player.position, 41, 'only a real reply or signal can update progress');
+    });
+
+    test('polls Position asynchronously once per second only while playing, without overlapping queries', async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        assert.equal(h.timers().length, 0);
+        const before = h.positionCalls().length;
+        await h.advance(3000);
+        assert.equal(h.positionCalls().length, before);
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Playing') });
+        await h.flush();
+        assert.equal(h.timers().length, 1);
+        assert.equal(h.timers()[0].interval, 1000);
+        const respond = h.respond;
+        h.respond = call => call.method === 'Get' ? undefined : respond(call);
+        await h.advance();
+        const pending = [...h.pending].find(call => call.method === 'Get');
+        assert.ok(pending, 'a playing timer must issue an async Position read');
+        assert.deepEqual(pending.params, [mprisPlayer, 'Position']);
+        assert.equal(pending.timeout, 1500);
+        const count = h.positionCalls().length;
+        await h.advance();
+        assert.equal(h.positionCalls().length, count, 'a slow read must not produce unbounded overlapping requests');
+        assert.equal(h.player.position, 12.5, 'elapsed time alone must not fabricate a native sample');
+        pending.resolve(dbusVariant('(v)', [dbusVariant('d', 16_500_000.5)]));
+        await h.flush();
+        assert.equal(h.player.position, 16.5000005);
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused') });
+        await h.flush();
+        assert.equal(h.timers().length, 0);
+        const paused = h.positionCalls().length;
+        await h.advance(5000);
+        assert.equal(h.positionCalls().length, paused);
+    });
+
+    test('missing metadata and Position remain unknown rather than inheriting fabricated track or progress data', async t => {
+        for (const metadata of [undefined, dbusVariant('a{sv}', {})]) {
+            const h = directPlayerHarness();
+            t.after(() => h.player.dispose());
+            if (metadata) h.fixture.player.Metadata = metadata;
+            else delete h.fixture.player.Metadata;
+            delete h.fixture.player.Position;
+            h.fixture.positionReply = new Error('org.freedesktop.DBus.Error.UnknownProperty: Position');
+            await h.player.start();
+            await h.flush();
+            assert.equal(h.player.available, true);
+            for (const key of ['title', 'artist', 'album', 'art_url']) assert.equal(h.player[key], '');
+            assert.equal(h.player.get_meta('xesam:url'), null);
+            assert.ok(!Number.isFinite(h.player.length) || h.player.length <= 0);
+            assert.notEqual(h.player.trackid, '/track/lost_name');
+            assertUnknownPosition(h.player);
+            await h.advance(60_000);
+            assertUnknownPosition(h.player);
+        }
+    });
+
+    test('negative, non-finite, or non-numeric Position replies never become numeric samples', async t => {
+        const values = [['x', -1], ['d', NaN], ['d', Infinity], ['s', '1000000'], ['b', true]];
+        for (const [signature, value] of values) {
+            const h = directPlayerHarness();
+            t.after(() => h.player.dispose());
+            delete h.fixture.player.Position;
+            h.fixture.positionReply = dbusVariant('(v)', [dbusVariant(signature, value)]);
+            await h.player.start();
+            await h.flush();
+            await h.advance();
+            assertUnknownPosition(h.player);
+            h.player.dispose();
+        }
+    });
+
+    test('dispose cancels queries and timers, unsubscribes signals, and ignores an already queued successful reply', async t => {
+        const h = directPlayerHarness();
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const respond = h.respond;
+        h.respond = call => call.method === 'Get' ? undefined : respond(call);
+        await h.advance();
+        const pending = [...h.pending].find(call => call.method === 'Get');
+        assert.ok(pending);
+        assert.ok(h.subscriptions.size > 0);
+        const notifications = [];
+        h.player.connect('notify', (_, property) => notifications.push(property.name));
+        pending.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
+        h.player.dispose();
+        const count = notifications.length;
+        await h.flush();
+        assert.equal(pending.cancellable.is_cancelled(), true);
+        assert.equal(h.player.available, false);
+        assert.notEqual(h.player.position, 99);
+        assert.equal(h.sources.size, 0);
+        assert.equal(h.subscriptions.size, 0);
+        const calls = h.calls.length;
+        h.seeked(100_000_000);
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Playing') });
+        await h.advance(5000);
+        assert.equal(h.calls.length, calls);
+        assert.equal(notifications.length, count);
+        assert.doesNotThrow(() => h.player.dispose());
+    });
+
+    test('review race: coalesced reads discard the previous track and recover a fresh sample while paused', { timeout: 3000 }, async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const respond = h.respond;
+        h.respond = call => call.method === 'Get' ? undefined : respond(call);
+        const before = h.positionCalls().length;
+        const refreshing = h.player.refreshPosition();
+        let joinedFinished = false;
+        const joined = h.player.refreshPosition().then(() => { joinedFinished = true; });
+        await h.flush();
+        assert.equal(h.positionCalls().length, before + 1, 'concurrent callers must share one physical read');
+        const old = [...h.pending].find(call => call.method === 'Get');
+        assert.ok(old);
+        const samples = [];
+        h.player.connect('notify', (_, property) => {
+            if (property.name === 'position') samples.push(h.player.position);
+        });
+        h.changed({ Metadata: dbusVariant('a{sv}', {
+            'mpris:trackid': dbusVariant('o', '/track/current'), 'xesam:title': dbusVariant('s', 'Current track'),
+        }) });
+        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
+        await h.flush();
+        assert.equal(h.player.trackid, '/track/current');
+        assert.equal(h.player.title, 'Current track');
+        assert.notEqual(h.player.position, 99);
+        assert.ok(!samples.includes(99), 'an old-track value must not even be published transiently');
+        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
+        assert.ok(fresh, 'discarding an old generation must request one current sample even without a playing timer');
+        assert.equal(h.positionCalls().length, before + 2);
+        assert.equal(joinedFinished, false, 'coalesced callers must wait for current-generation recovery');
+        fresh.resolve(dbusVariant('(v)', [dbusVariant('d', 5_250_000.5)]));
+        await Promise.all([refreshing, joined]);
+        await h.flush();
+        assert.equal(h.player.position, 5.2500005);
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+        assert.equal(h.timers().length, 0);
+        await h.advance(60_000);
+        assert.equal(h.player.position, 5.2500005);
+        assert.equal(h.positionCalls().length, before + 2, 'the recovery read is not a paused polling loop');
+    });
+
+    test('review race: a Position read started before SetPosition cannot overwrite the seek and gets one fresh paused read', { timeout: 3000 }, async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const respond = h.respond;
+        h.respond = call => call.method === 'Get' ? undefined : respond(call);
+        const before = h.positionCalls().length;
+        const refreshing = h.player.refreshPosition();
+        await h.flush();
+        const old = [...h.pending].find(call => call.method === 'Get');
+        assert.ok(old);
+        const position = h.player.position;
+        const samples = [];
+        h.player.connect('notify', (_, property) => {
+            if (property.name === 'position') samples.push(h.player.position);
+        });
+        h.player.position = 80;
+        assert.equal(h.player.position, position, 'SetPosition dispatch must not optimistically change the sample');
+        await h.flush();
+        assert.ok(h.calls.some(call => call.method === 'SetPosition' && call.params[1] === 80_000_000));
+        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
+        await h.flush();
+        assert.notEqual(h.player.position, 99);
+        assert.ok(!samples.includes(99));
+        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
+        assert.ok(fresh, 'a pre-seek generation must be replaced even when the player stays paused');
+        assert.equal(h.positionCalls().length, before + 2);
+        fresh.resolve(dbusVariant('(v)', [dbusVariant('x', 79_500_000)]));
+        await refreshing;
+        await h.flush();
+        assert.equal(h.player.position, 79.5, 'use the remote sample, not the requested 80-second target');
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+        assert.equal(h.timers().length, 0);
+    });
+
+    test('review race: initial GetAll baselines cannot overwrite newer root/player changes or Seeked', { timeout: 3000 }, async t => {
+        const h = directPlayerHarness();
+        t.after(() => h.player.dispose());
+        const respond = h.respond;
+        h.respond = call => call.method === 'GetAll' ? undefined : respond(call);
+        const starting = h.player.start();
+        await h.flush();
+        const root = [...h.pending].find(call => call.params[0] === mprisRoot);
+        const player = [...h.pending].find(call => call.params[0] === mprisPlayer);
+        assert.ok(root && player);
+        h.emit(h.bus, propertiesInterface, 'PropertiesChanged', mprisPath, dbusVariant('(sa{sv}as)', [mprisRoot,
+            { Identity: dbusVariant('s', 'Newer identity'), DesktopEntry: dbusVariant('s', 'newer-entry') }, []]));
+        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused'), Rate: dbusVariant('d', 0.5),
+            Metadata: dbusVariant('a{sv}', {
+                'mpris:trackid': dbusVariant('o', '/track/newer'), 'xesam:title': dbusVariant('s', 'Newer track'),
+            }), Position: dbusVariant('x', 31_000_000) });
+        h.seeked(44_500_000);
+        root.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.root }]));
+        player.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
+        await starting;
+        await h.flush();
+        assert.equal(h.player.available, true);
+        assert.equal(h.player.identity, 'Newer identity');
+        assert.equal(h.player.entry, 'newer-entry');
+        assert.equal(h.player.trackid, '/track/newer');
+        assert.equal(h.player.title, 'Newer track');
+        assert.equal(h.player.artist, '', 'the older baseline must not resurrect old metadata');
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+        assert.equal(h.player.rate, 0.5);
+        assert.equal(h.player.position, 44.5, 'replay changes in arrival order, including Seeked after Position');
+        assert.equal(h.timers().length, 0);
+    });
+
+    test('startup metadata without a new position cannot inherit the previous track sample', async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        const respond = h.respond;
+        h.respond = call => call.method === 'GetAll' ? undefined : respond(call);
+        const starting = h.player.start();
+        await h.flush();
+        const root = [...h.pending].find(call => call.params[0] === mprisRoot);
+        const player = [...h.pending].find(call => call.params[0] === mprisPlayer);
+        player.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
+        await h.flush();
+        h.changed({ Metadata: dbusVariant('a{sv}', {
+            'mpris:trackid': dbusVariant('o', '/track/current'), 'xesam:title': dbusVariant('s', 'Current track'),
+        }) });
+        h.fixture.positionReply = new Error('Position is unavailable');
+        root.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.root }]));
+        await starting;
+        await h.flush();
+        assert.equal(h.player.available, true);
+        assert.equal(h.player.trackid, '/track/current');
+        assertUnknownPosition(h.player);
+        assert.ok(h.positionCalls().length > 0, 'startup must attempt to read the new track position');
+        assert.equal(h.timers().length, 0);
+    });
+
+    test('review race: a reload baseline cannot roll back PropertiesChanged or Seeked received while pending', async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const respond = h.respond;
+        h.respond = call => call.method === 'GetAll' && call.params[0] === mprisPlayer ? undefined : respond(call);
+        h.changed({}, ['Metadata', 'Position']);
+        await h.flush();
+        const reload = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
+        assert.ok(reload);
+        h.changed({ Rate: dbusVariant('d', 2), CanPlay: dbusVariant('b', false),
+            Metadata: dbusVariant('a{sv}', {
+                'mpris:trackid': dbusVariant('o', '/track/reloaded'), 'xesam:title': dbusVariant('s', 'Newer than reload'),
+            }), Position: dbusVariant('x', 15_000_000) });
+        h.seeked(27_500_000);
+        reload.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
+        await h.flush();
+        assert.equal(h.player.trackid, '/track/reloaded');
+        assert.equal(h.player.title, 'Newer than reload');
+        assert.equal(h.player.rate, 2);
+        assert.equal(h.player.can_play, false);
+        assert.equal(h.player.position, 27.5);
+        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
+    });
+
+    test('review race: invalidations during a pending reload coalesce into one follow-up reload without losing newer signals', async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const reloads = () => h.calls.filter(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
+        const before = reloads().length;
+        const respond = h.respond;
+        h.respond = call => call.method === 'GetAll' && call.params[0] === mprisPlayer ? undefined : respond(call);
+        h.changed({}, ['Metadata']);
+        await h.flush();
+        const first = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
+        assert.ok(first);
+        h.changed({}, ['Position']);
+        h.changed({}, ['Rate', 'Metadata']);
+        await h.flush();
+        assert.equal(reloads().length, before + 1, 'invalidations must not start overlapping reloads');
+        first.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
+        await h.flush();
+        const followup = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer && call !== first);
+        assert.ok(followup, 'a pending reload must not swallow later invalidations');
+        assert.equal(reloads().length, before + 2);
+        h.changed({ Rate: dbusVariant('d', 0.75), Metadata: dbusVariant('a{sv}', {
+            'mpris:trackid': dbusVariant('o', '/track/latest'), 'xesam:title': dbusVariant('s', 'Latest signal'),
+        }) });
+        h.seeked(77_000_000);
+        followup.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player, Position: dbusVariant('x', 50_000_000) }]));
+        await h.flush();
+        assert.equal(h.player.trackid, '/track/latest');
+        assert.equal(h.player.title, 'Latest signal');
+        assert.equal(h.player.rate, 0.75);
+        assert.equal(h.player.position, 77);
+        assert.equal(reloads().length, before + 2);
+        assert.equal(h.timers().length, 0);
+    });
+
+    test('review race: NativeMedia refreshes DirectPlayer through its coalesced reader, never a second raw D-Bus query', { timeout: 3000 }, async t => {
+        const h = directPlayerHarness({ status: 'Paused' });
+        t.after(() => h.player.dispose());
+        await h.player.start();
+        await h.flush();
+        const respond = h.respond;
+        h.respond = call => call.method === 'Get' ? undefined : respond(call);
+        const before = h.positionCalls().length;
+        const refreshing = h.player.refreshPosition();
+        await h.flush();
+        const old = [...h.pending].find(call => call.method === 'Get');
+        assert.ok(old);
+        let adapterReads = 0;
+        const refreshPosition = h.player.refreshPosition.bind(h.player);
+        h.player.refreshPosition = (...args) => { adapterReads++; return refreshPosition(...args); };
+        const rawReads = [];
+        const native = new h.api.NativeMedia({ queryPosition: (bus, cancel) => {
+            rawReads.push({ bus, cancel });
+            return Promise.resolve(99);
+        } });
+        t.after(() => native.dispose());
+        native.discovery = { players: [h.player], refresh: () => Promise.resolve(), dispose() {} };
+        native.sync();
+        await h.flush();
+        assert.ok(adapterReads > 0, 'NativeMedia must delegate confirmed reads to the DirectPlayer adapter');
+        assert.deepEqual(rawReads, [], 'raw readPosition bypasses the adapter generation guard');
+        assert.equal(h.positionCalls().length, before + 1);
+        h.changed({ Metadata: dbusVariant('a{sv}', {
+            'mpris:trackid': dbusVariant('o', '/track/native-current'), 'xesam:title': dbusVariant('s', 'Native current track'),
+        }) });
+        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
+        await h.flush();
+        assert.notEqual(native.player(h.bus).position, 99);
+        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
+        assert.ok(fresh);
+        fresh.resolve(dbusVariant('(v)', [dbusVariant('x', 6_250_000)]));
+        await refreshing;
+        await h.flush();
+        assert.equal(native.player(h.bus).position, 6.25);
+        assert.equal(native.progress(h.bus).samplePosition, 6.25);
+        assert.equal(native.progress(h.bus).positionSupported, true);
+        assert.deepEqual(rawReads, []);
+        assert.equal(h.positionCalls().length, before + 2);
+        await h.advance(60_000);
+        assert.equal(native.progress(h.bus).position, 6.25);
+        assert.equal(h.positionCalls().length, before + 2);
+    });
+
+    test('dispose during start cancels outstanding GetAll calls and cannot resurrect an available player', { timeout: 3000 }, async t => {
+        const h = directPlayerHarness();
+        t.after(() => h.player.dispose());
+        h.respond = () => undefined;
+        const starting = h.player.start().then(() => null, error => error);
+        await h.flush();
+        const pending = [...h.pending];
+        assert.ok(pending.length > 0);
+        h.player.dispose();
+        assert.ok(pending.every(call => call.cancellable.is_cancelled()));
+        await starting;
+        await h.flush();
+        assert.equal(h.player.available, false);
+        assert.equal(h.sources.size, 0);
+        assert.equal(h.subscriptions.size, 0);
+    });
+});
+
+function discoveryHarness({ owners = {}, streams = [], players = [], standardOwners = {}, realPlayers = false,
+    gated = false, failing = [], startErrors = {} } = {}) {
+    const h = dbusHarness();
+    assert.equal(typeof h.api.LocalPlayerDiscovery, 'function', 'backend.js must implement LocalPlayerDiscovery for lost-name recovery');
+    h.owners = new Map(Object.entries(owners));
+    h.names = [daemonInterface, ...h.owners.keys(), ...Object.keys(standardOwners)];
+    h.standardOwners = standardOwners;
+    h.streams = streams;
+    h.standardPlayers = players;
+    h.applicationReads = [];
+    h.created = [];
+    h.starts = [];
+    h.gates = new Map();
+    h.startErrors = new Map(Object.entries(startErrors).map(([bus, errors]) => [bus, [...errors]]));
+    h.changes = 0;
+    h.fixture = mprisFixture();
+    h.respond = call => {
+        if (call.iface !== daemonInterface) return mprisReply(h.fixture, call);
+        assert.equal(call.bus, daemonInterface);
+        assert.equal(call.path, '/org/freedesktop/DBus');
+        if (call.method === 'ListNames') return dbusVariant('(as)', [h.names]);
+        if (call.method === 'GetNameOwner') {
+            const owner = h.standardOwners[call.params[0]];
+            if (!owner) throw new Error('org.freedesktop.DBus.Error.NameHasNoOwner');
+            return dbusVariant('(s)', [owner]);
+        }
+        assert.equal(call.method, 'GetConnectionUnixProcessID');
+        const owner = h.owners.get(call.params[0]);
+        if (!owner) throw new Error('org.freedesktop.DBus.Error.NameHasNoOwner');
+        return dbusVariant('(u)', [owner.pid]);
+    };
+    h.discovery = new h.api.LocalPlayerDiscovery({
+        connection: h.connection, getStreams: () => h.streams, getPlayers: () => h.standardPlayers,
+        onChange: () => { h.changes++; h.onDiscoveryChange?.(); },
+        applicationForPid: pid => {
+            h.applicationReads.push(pid);
+            return [...h.owners.values()].find(owner => owner.pid === pid)?.application ?? '';
+        },
+        createPlayer: bus => {
+            let player;
+            if (realPlayers) {
+                assert.equal(typeof h.api.DirectPlayer, 'function', 'the real discovery path needs DirectPlayer');
+                player = new h.api.DirectPlayer(bus, { connection: h.connection });
+            } else {
+                player = new Player({ bus_name: bus });
+                player.start = async () => {
+                    h.starts.push(bus);
+                    if (gated) await new Promise(resolve => h.gates.set(bus, resolve));
+                    const errors = h.startErrors.get(bus);
+                    if (errors?.length) throw errors.shift();
+                    if (failing.includes(bus)) throw new Error('No MPRIS exports on this connection');
+                    return player;
+                };
+                player.disposeCalls = 0;
+                player.dispose = () => { player.disposeCalls++; player.available = false; };
+            }
+            h.created.push(player);
+            return player;
+        },
+    });
+    h.ownerChanged = (name, oldOwner, newOwner) => h.emit(daemonInterface, daemonInterface, 'NameOwnerChanged',
+        '/org/freedesktop/DBus', dbusVariant('(sss)', [name, oldOwner, newOwner]));
+    h.credentials = () => h.calls.filter(call => call.method === 'GetConnectionUnixProcessID');
+    h.buses = () => h.discovery.players.map(player => player.bus_name).sort();
+    h.refresh = async () => { await h.discovery.refresh(); await h.flush(); };
+    return h;
+}
+
+function dbusRemoteError(name) {
+    const remoteName = `${daemonInterface}.Error.${name}`;
+    return Object.assign(new Error(`GDBus.Error:${remoteName}: Player exports are not ready`), { remoteName });
+}
+
+describe('LocalPlayerDiscovery lost-name recovery', () => {
+    test('recovers the exact Haruna case: no org.mpris Haruna name, but a matching private owner exports MPRIS', async t => {
+        const h = discoveryHarness({
+            owners: { ':1.220': { pid: 2200, application: 'haruna' }, ':1.221': { pid: 2210, application: 'unrelated-daemon' } },
+            streams: [new Stream({ name: 'Recovered track', properties: { 'application.name': 'Haruna', 'application.process.binary': 'haruna' } })],
+            realPlayers: true,
+        });
+        t.after(() => h.discovery.dispose());
+        assert.ok(!h.names.some(name => name.startsWith('org.mpris.')));
+        await h.discovery.start();
+        await h.flush();
+        assert.deepEqual(h.buses(), [':1.220']);
+        assert.equal(h.discovery.players[0].identity, 'Haruna');
+        assert.equal(h.discovery.players[0].title, 'Recovered track');
+        assert.equal(h.discovery.players[0].position, 12.5);
+        const probes = h.calls.filter(call => call.method === 'GetAll');
+        assert.ok(probes.length > 0);
+        assert.ok(probes.every(call => call.bus === ':1.220'), 'unrelated processes must never receive MPRIS probes');
+        const before = h.calls.length;
+        h.discovery.players[0].pause();
+        await h.flush();
+        assert.ok(h.calls.slice(before).some(call => call.bus === ':1.220' && call.method === 'Pause'));
+    });
+
+    test('unknown application matching is generic across application.name, application.id, and process binary', async t => {
+        for (const key of ['application.name', 'application.id', 'application.process.binary']) {
+            const h = discoveryHarness({
+                owners: { ':1.310': { pid: 3100, application: 'uncatalogued-player' }, ':1.311': { pid: 3110, application: 'other-process' } },
+                streams: [new Stream({ name: 'A track, not the application', properties: { [key]: 'uncatalogued-player' } })],
+                realPlayers: true,
+            });
+            t.after(() => h.discovery.dispose());
+            h.fixture = mprisFixture({ identity: 'Uncatalogued Player', entry: 'uncatalogued-player' });
+            await h.discovery.start();
+            await h.flush();
+            assert.deepEqual(h.buses(), [':1.310'], key);
+            assert.equal(h.discovery.players[0].identity, 'Uncatalogued Player');
+            assert.ok(h.calls.filter(call => call.method === 'GetAll').every(call => call.bus === ':1.310'));
+            h.discovery.dispose();
+        }
+    });
+
+    test('standard Astal players retain the fast path and their unique owners are not probed or duplicated', async t => {
+        const standardBus = 'org.mpris.MediaPlayer2.uncatalogued';
+        const h = discoveryHarness({
+            owners: { ':1.401': { pid: 4010, application: 'uncatalogued-player' }, ':1.402': { pid: 4020, application: 'uncatalogued-player' } },
+            streams: [new Stream({ properties: { 'application.process.binary': 'uncatalogued-player' } })],
+            players: [new Player({ bus_name: standardBus })], standardOwners: { [standardBus]: ':1.401' },
+        });
+        t.after(() => h.discovery.dispose());
+        await h.discovery.start();
+        await h.flush();
+        assert.deepEqual(h.buses(), [':1.402']);
+        assert.deepEqual(h.starts, [':1.402']);
+        assert.ok(h.calls.some(call => call.method === 'GetNameOwner' && call.params[0] === standardBus));
+        await h.refresh();
+        assert.deepEqual(h.starts, [':1.402']);
+        assert.equal(h.standardPlayers[0].available, true, 'discovery must not dispose the standard Astal player');
+    });
+
+    test('volume notifications and unchanged refreshes reuse cached credentials and never repeat probes or discovery timers', async t => {
+        const stream = new Stream({ properties: { 'application.process.binary': 'audio-lab' } });
+        const h = discoveryHarness({
+            owners: { ':1.501': { pid: 5010, application: 'audio-lab' }, ':1.502': { pid: 5020, application: 'unrelated' } },
+            streams: [stream],
+        });
+        t.after(() => h.discovery.dispose());
+        await h.discovery.start();
+        await h.flush();
+        const credentials = h.credentials().length;
+        const applications = [...h.applicationReads];
+        assert.ok(credentials > 0);
+        assert.deepEqual(h.starts, [':1.501']);
+        for (const volume of [0.2, 0.4, 0.6, 0.8]) {
+            stream.publish('volume', volume);
+            await h.refresh();
+        }
+        assert.equal(h.credentials().length, credentials);
+        assert.deepEqual(h.applicationReads, applications);
+        assert.deepEqual(h.starts, [':1.501']);
+        assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
+        assert.equal(h.timers().length, 0, 'discovery is event-driven, not a recurring bus scan');
+        const calls = h.calls.length;
+        await h.advance(60_000);
+        assert.equal(h.calls.length, calls);
+    });
+
+    test('review race: streams admit new owners but pause/removal retain the verified object until its owner disappears', async t => {
+        const h = discoveryHarness({ owners: { ':1.601': { pid: 6010, application: 'audio-lab' } } });
+        t.after(() => h.discovery.dispose());
+        await h.discovery.start();
+        await h.flush();
+        assert.deepEqual(h.starts, []);
+        assert.equal(h.credentials().length, 0, 'no playback applications means no process lookup or MPRIS scan');
+        h.streams = [new Stream({ properties: { 'application.name': 'audio-lab' } })];
+        await h.refresh();
+        assert.deepEqual(h.buses(), [':1.601']);
+        const credentials = h.credentials().length;
+        const applications = [...h.applicationReads];
+        const recovered = h.discovery.players[0];
+        recovered.publish('playback-status', playbackStatus.PAUSED);
+        h.streams = [];
+        await h.refresh();
+        assert.deepEqual(h.discovery.players, [recovered]);
+        assert.equal(recovered.available, true);
+        assert.equal(recovered.disposeCalls, 0, 'a missing playback stream is not evidence of a vanished MPRIS owner');
+        h.streams = [new Stream({ id: 125, properties: { 'application.name': 'audio-lab' } })];
+        await h.refresh();
+        assert.equal(h.discovery.players[0], recovered, 'resuming must preserve the adapter instance and action guards');
+        assert.deepEqual(h.starts, [':1.601']);
+        assert.equal(h.credentials().length, credentials);
+        assert.deepEqual(h.applicationReads, applications);
+        h.streams = [];
+        await h.refresh();
+        h.owners.delete(':1.601');
+        h.ownerChanged(':1.601', ':1.601', '');
+        await h.flush();
+        assert.deepEqual(h.buses(), []);
+        assert.equal(recovered.disposeCalls, 1);
+    });
+
+    test('NameOwnerChanged discovers a new matching private connection and removes a disconnected owner', async t => {
+        const h = discoveryHarness({ streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
+        t.after(() => h.discovery.dispose());
+        await h.discovery.start();
+        await h.flush();
+        h.owners.set(':1.701', { pid: 7010, application: 'audio-lab' });
+        h.ownerChanged(':1.701', '', ':1.701');
+        await h.flush();
+        assert.deepEqual(h.buses(), [':1.701']);
+        const recovered = h.created[0];
+        const changes = h.changes;
+        h.owners.delete(':1.701');
+        h.ownerChanged(':1.701', ':1.701', '');
+        await h.flush();
+        assert.deepEqual(h.buses(), []);
+        assert.equal(recovered.disposeCalls, 1);
+        assert.ok(h.changes > changes);
+        assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1,
+            'the daemon signal already identifies the changed owner');
+        assert.equal(h.timers().length, 0);
+    });
+
+    test('matching processes without MPRIS exports are not repeatedly reprobed on volume-only refreshes', async t => {
+        const h = discoveryHarness({
+            owners: { ':1.801': { pid: 8010, application: 'audio-lab' } }, failing: [':1.801'],
+            streams: [new Stream({ properties: { 'application.process.binary': 'audio-lab' } })],
+        });
+        t.after(() => h.discovery.dispose());
+        await h.discovery.start();
+        await h.flush();
+        assert.deepEqual(h.buses(), []);
+        assert.deepEqual(h.starts, [':1.801']);
+        for (let index = 0; index < 3; index++) await h.refresh();
+        assert.equal(h.timers().length, 0, 'an unclassified failure must not schedule a startup retry');
+        await h.advance(60_000);
+        assert.deepEqual(h.starts, [':1.801']);
+        assert.equal(h.created[0].disposeCalls, 1, 'failed probes must release their player');
+    });
+
+    for (const name of ['UnknownObject', 'UnknownInterface', 'UnknownMethod']) {
+        test(`review race: startup ${name} gets one 250ms retry and can then recover`, { timeout: 3000 }, async t => {
+            const bus = ':1.1201';
+            const h = discoveryHarness({ owners: { [bus]: { pid: 12010, application: 'audio-lab' } },
+                streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
+                startErrors: { [bus]: [dbusRemoteError(name)] } });
+            t.after(() => h.discovery.dispose());
+            const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+            await h.flush();
+            assert.deepEqual(h.starts, [bus]);
+            assert.deepEqual(h.buses(), []);
+            assert.equal(h.created[0].disposeCalls, 1);
+            assert.equal(h.timers().length, 1);
+            assert.equal(h.timers()[0].interval, 250);
+            await h.advance(249);
+            assert.deepEqual(h.starts, [bus], 'do not retry early or spin through microtasks');
+            await h.advance(1);
+            await starting;
+            await h.flush();
+            assert.deepEqual(h.starts, [bus, bus]);
+            assert.deepEqual(h.buses(), [bus]);
+            assert.equal(h.created.length, 2, 'a disposed failed adapter must not be restarted');
+            assert.equal(h.discovery.players[0], h.created[1]);
+            assert.equal(h.created[1].disposeCalls, 0);
+            assert.equal(h.credentials().length, 1, 'the retry must reuse the owner credential lookup');
+            assert.equal(h.timers().length, 0);
+            await h.refresh();
+            await h.advance(60_000);
+            assert.deepEqual(h.starts, [bus, bus]);
+            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
+        });
+
+        test(`review race: a second startup ${name} is negatively cached with no third attempt`, { timeout: 3000 }, async t => {
+            const bus = ':1.1202';
+            const stream = new Stream({ properties: { 'application.process.binary': 'audio-lab' } });
+            const h = discoveryHarness({ owners: { [bus]: { pid: 12020, application: 'audio-lab' } }, streams: [stream],
+                startErrors: { [bus]: [dbusRemoteError(name), dbusRemoteError(name)] } });
+            t.after(() => h.discovery.dispose());
+            const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+            await h.flush();
+            assert.deepEqual(h.starts, [bus]);
+            assert.equal(h.timers().length, 1);
+            assert.equal(h.timers()[0].interval, 250);
+            await h.advance(250);
+            await starting;
+            await h.flush();
+            assert.deepEqual(h.starts, [bus, bus]);
+            assert.deepEqual(h.buses(), []);
+            assert.equal(h.timers().length, 0, 'the retry budget is one, not a discovery loop');
+            for (const volume of [0.3, 0.5, 0.7]) {
+                stream.publish('volume', volume);
+                await h.refresh();
+            }
+            await h.advance(60_000);
+            assert.deepEqual(h.starts, [bus, bus]);
+            assert.ok(h.created.every(player => player.disposeCalls === 1));
+            assert.equal(h.credentials().length, 1);
+            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
+        });
+    }
+
+    for (const name of ['Timeout', 'NoReply', 'UnknownProperty', 'AccessDenied']) {
+        test(`review race: startup ${name} is not retryable and stays negatively cached`, { timeout: 3000 }, async t => {
+            const bus = ':1.1203';
+            const h = discoveryHarness({ owners: { [bus]: { pid: 12030, application: 'audio-lab' } },
+                streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
+                startErrors: { [bus]: [dbusRemoteError(name)] } });
+            t.after(() => h.discovery.dispose());
+            await h.discovery.start();
+            await h.flush();
+            assert.deepEqual(h.buses(), []);
+            assert.deepEqual(h.starts, [bus]);
+            assert.equal(h.timers().length, 0);
+            await h.advance(250);
+            await h.refresh();
+            await h.advance(60_000);
+            assert.deepEqual(h.starts, [bus]);
+            assert.equal(h.created[0].disposeCalls, 1);
+            assert.equal(h.credentials().length, 1);
+            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
+        });
+    }
+
+    test('review race: disposal cancels a pending startup retry instead of creating another adapter', { timeout: 3000 }, async t => {
+        const bus = ':1.1204';
+        const h = discoveryHarness({ owners: { [bus]: { pid: 12040, application: 'audio-lab' } },
+            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
+            startErrors: { [bus]: [dbusRemoteError('UnknownObject')] } });
+        t.after(() => h.discovery.dispose());
+        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+        await h.flush();
+        assert.equal(h.timers().length, 1);
+        h.discovery.dispose();
+        const changes = h.changes;
+        assert.equal(h.sources.size, 0);
+        assert.equal(h.subscriptions.size, 0);
+        await h.advance(60_000);
+        await starting;
+        assert.deepEqual(h.starts, [bus]);
+        assert.deepEqual(h.buses(), []);
+        assert.equal(h.changes, changes);
+    });
+
+    test('review race: a standard Astal arrival replaces the verified adapter and cleans up native records and subscriptions', async t => {
+        const bus = ':1.1301';
+        const standardBus = 'org.mpris.MediaPlayer2.audio_lab';
+        const h = discoveryHarness({ owners: { [bus]: { pid: 13010, application: 'audio-lab' } }, realPlayers: true,
+            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
+        t.after(() => h.discovery.dispose());
+        h.fixture = mprisFixture({ identity: 'Audio Lab', entry: 'audio-lab', status: 'Paused' });
+        h.audio.streams = h.streams;
+        const native = new h.api.NativeMedia({ queryPosition: () => Promise.resolve(12.5) });
+        t.after(() => native.dispose());
+        native.discovery = h.discovery;
+        h.onDiscoveryChange = () => native.sync();
+        native.sync();
+        await h.discovery.start();
+        await h.flush();
+        const recovered = h.discovery.players[0];
+        assert.ok(recovered);
+        assert.deepEqual(native.capture().players.map(player => player.bus), [bus]);
+        assert.ok(recovered.handlers.size > 0);
+        h.standardOwners[standardBus] = bus;
+        h.ownerChanged(standardBus, '', bus);
+        await h.flush();
+        assert.equal(h.discovery.players[0], recovered, 'a well-known alias alone is not an Astal replacement');
+        const standard = new Player({ bus_name: standardBus, playback_status: playbackStatus.PAUSED });
+        h.standardPlayers = h.manager.players = [standard];
+        h.manager.emit('notify::players');
+        await h.flush();
+        assert.deepEqual(h.discovery.players, []);
+        assert.deepEqual(native.capture().players.map(player => player.bus), [standardBus]);
+        assert.equal(native.player(bus), null);
+        assert.equal(native.players.get(standardBus).object, standard);
+        assert.equal(recovered.available, false);
+        assert.equal(recovered.handlers.size, 0);
+        assert.ok([...h.subscriptions.values()].every(signal => signal.iface === daemonInterface),
+            'all direct MPRIS subscriptions must be removed at takeover');
+        assert.equal(h.created.length, 1);
+        assert.equal(h.timers().length, 0);
+        assert.equal(standard.available, true);
+        assert.deepEqual(standard.calls, [], 'deduplication must not dispatch playback controls');
+    });
+
+    test('review race: standard Astal takeover during a probe prevents the late adapter from being published', { timeout: 3000 }, async t => {
+        const bus = ':1.1302';
+        const standardBus = 'org.mpris.MediaPlayer2.audio_lab';
+        const h = discoveryHarness({ owners: { [bus]: { pid: 13020, application: 'audio-lab' } }, gated: true,
+            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
+        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
+        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+        await h.flush();
+        assert.equal(h.gates.size, 1);
+        const standard = new Player({ bus_name: standardBus });
+        h.standardOwners[standardBus] = bus;
+        h.standardPlayers = [standard];
+        h.ownerChanged(standardBus, '', bus);
+        for (const resolve of h.gates.values()) resolve();
+        h.gates.clear();
+        await starting;
+        await h.flush();
+        assert.deepEqual(h.buses(), []);
+        assert.equal(h.created.length, 1);
+        assert.equal(h.created[0].disposeCalls, 1);
+        assert.equal(standard.available, true);
+        assert.deepEqual(standard.calls, []);
+    });
+
+    test('candidate MPRIS probes are bounded to four concurrent starts', { timeout: 3000 }, async t => {
+        const owners = Object.fromEntries(Array.from({ length: 9 }, (_, index) =>
+            [`:1.${900 + index}`, { pid: 9000 + index, application: 'audio-lab' }]));
+        const h = discoveryHarness({ owners, gated: true,
+            streams: [new Stream({ properties: { 'application.process.binary': 'audio-lab' } })] });
+        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
+        const starting = h.discovery.start();
+        await h.flush();
+        assert.equal(h.gates.size, 4);
+        const [bus, release] = h.gates.entries().next().value;
+        h.gates.delete(bus);
+        release();
+        await h.flush();
+        assert.equal(h.starts.length, 5);
+        assert.equal(h.gates.size, 4, 'finishing one probe permits exactly one replacement');
+        for (let batch = 0; batch < 3; batch++) {
+            assert.ok(h.gates.size <= 4);
+            const gates = [...h.gates.values()];
+            h.gates.clear();
+            gates.forEach(resolve => resolve());
+            await h.flush();
+        }
+        await starting;
+        assert.equal(h.starts.length, 9);
+        assert.deepEqual(h.buses(), Object.keys(owners).sort());
+    });
+
+    test('dispose cancels a credential query and ignores its already queued success', { timeout: 3000 }, async t => {
+        const h = discoveryHarness({ owners: { ':1.1001': { pid: 10010, application: 'audio-lab' } },
+            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
+        t.after(() => h.discovery.dispose());
+        const respond = h.respond;
+        h.respond = call => call.method === 'GetConnectionUnixProcessID' ? undefined : respond(call);
+        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+        await h.flush();
+        const pending = [...h.pending].find(call => call.method === 'GetConnectionUnixProcessID');
+        assert.ok(pending);
+        pending.resolve(dbusVariant('(u)', [10010]));
+        h.discovery.dispose();
+        const changes = h.changes;
+        await starting;
+        await h.flush();
+        assert.equal(pending.cancellable.is_cancelled(), true);
+        assert.deepEqual(h.created, []);
+        assert.deepEqual(h.buses(), []);
+        assert.equal(h.subscriptions.size, 0);
+        assert.equal(h.sources.size, 0);
+        assert.equal(h.changes, changes);
+    });
+
+    test('a probe completing after disposal cannot publish or retain a recovered player', { timeout: 3000 }, async t => {
+        const h = discoveryHarness({ owners: { ':1.1101': { pid: 11010, application: 'audio-lab' } }, gated: true,
+            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
+        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
+        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
+        await h.flush();
+        assert.equal(h.gates.size, 1);
+        h.discovery.dispose();
+        const changes = h.changes;
+        for (const resolve of h.gates.values()) resolve();
+        h.gates.clear();
+        await starting;
+        await h.flush();
+        assert.deepEqual(h.buses(), []);
+        assert.ok(h.created[0].disposeCalls >= 1);
+        assert.equal(h.changes, changes);
+        assert.equal(h.subscriptions.size, 0);
+        assert.equal(h.sources.size, 0);
+    });
+});
+
 function nativeHarness({ player = new Player(), stream = null, isObjectPath = variantDouble.is_object_path } = {}) {
     const manager = Object.assign(new Signals(), { players: [player] });
     const audio = Object.assign(new Signals(), { streams: stream ? [stream] : [] });
     const sources = new Map();
     let nextSource = 0;
-    const h = { time: 0, changes: 0, modelChanges: [], player, stream, manager, audio, sources };
+    const h = { time: 0, changes: 0, modelChanges: [], player, stream, manager, audio, sources, positionQueries: [] };
     const GLib = {
         PRIORITY_DEFAULT_IDLE: 0, PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
         get_monotonic_time: () => h.time * 1e6,
@@ -742,6 +1938,7 @@ function nativeHarness({ player = new Player(), stream = null, isObjectPath = va
     const Gio = { Cancellable };
     const api = loadBackend({
         GLib, Gio,
+        queryPosition: (bus, cancel) => new Promise((resolve, reject) => h.positionQueries.push({ bus, cancel, resolve, reject })),
         Mpris: { get_default: () => manager, PlaybackStatus: { PLAYING: 1, PAUSED: 2, STOPPED: 3 } },
         Wp: { get_default: () => ({ audio }) },
     });
@@ -873,6 +2070,320 @@ describe('Native service integration', () => {
         assert.equal(refreshes, 1, 'reconciled state does not repeatedly refresh');
     });
 
+    test('position refresh uses a bounded cancellable D-Bus read and accepts only numeric microseconds', async () => {
+        let value;
+        const cancel = new Cancellable();
+        const api = loadBackend({
+            GLib: {
+                Variant: class { constructor(signature, values) { Object.assign(this, { signature, values }); } },
+                VariantType: class { constructor(signature) { this.signature = signature; } },
+            },
+            Gio: { DBusCallFlags: { NONE: 0 }, DBus: { session: {
+                call(bus, path, iface, method, params, replyType, flags, timeout, cancellable, callback) {
+                    assert.equal(bus, 'org.mpris.MediaPlayer2.test');
+                    assert.equal(path, '/org/mpris/MediaPlayer2');
+                    assert.equal(iface, 'org.freedesktop.DBus.Properties');
+                    assert.equal(method, 'Get');
+                    assert.equal(params.signature, '(ss)');
+                    assert.deepEqual(params.values, ['org.mpris.MediaPlayer2.Player', 'Position']);
+                    assert.equal(replyType.signature, '(v)');
+                    assert.equal(flags, 0);
+                    assert.equal(timeout, 1500);
+                    assert.equal(cancellable, cancel);
+                    queueMicrotask(() => callback({ call_finish() {
+                        if (value instanceof Error) throw value;
+                        return { deep_unpack: () => [{ deep_unpack: () => value }] };
+                    } }, {}));
+                },
+            } } },
+        });
+        for (value of [0, 1000000, 1500000.5])
+            assert.equal(await api.readPosition('org.mpris.MediaPlayer2.test', cancel), value / 1e6);
+        for (value of [-1, NaN, Infinity, null, undefined, '1000000', true, {}, []])
+            await assert.rejects(api.readPosition('org.mpris.MediaPlayer2.test', cancel), /Unsupported/);
+        value = new Error('The player disappeared');
+        await assert.rejects(api.readPosition('org.mpris.MediaPlayer2.test', cancel), /disappeared/);
+    });
+
+    test('worker UTF-8 decoding stays strict and independent across failed and successful replies', () => {
+        const { ModelWorker } = loadBackend({ GLib: {
+            PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
+            timeout_add: () => 1, source_remove() {},
+        } });
+        const responses = [], failures = [];
+        const reply = bytes => {
+            let callback;
+            const worker = new ModelWorker('unused', {
+                onReady() {}, onResponse: value => responses.push(value), onFailure: error => failures.push(error),
+            });
+            worker.pending = 1;
+            worker.buffer = new Uint8Array();
+            worker.output = {
+                read_bytes_async(_size, _priority, _cancel, next) { callback = next; },
+                read_bytes_finish: bytes => ({ toArray: () => bytes }),
+            };
+            worker.read(worker.generation);
+            callback(worker.output, bytes);
+            worker.dispose();
+        };
+        reply(new Uint8Array([0xff, 10]));
+        assert.equal(responses.length, 0);
+        assert.match(failures[0], /protocol failed/);
+        const response = { requestId: 1, title: '作者 🎵' };
+        const bytes = new TextEncoder().encode(JSON.stringify(response) + '\n');
+        reply(bytes);
+        reply(bytes);
+        assert.deepEqual(responses, [response, response]);
+        assert.equal(failures.length, 1, 'a failed decode must not poison later workers');
+    });
+
+    test('capture reuses its native player snapshot while deriving model progress', () => {
+        const h = nativeHarness();
+        const player = h.native.player.bind(h.native);
+        let reads = 0;
+        h.native.player = bus => { reads++; return player(bus); };
+        const snapshot = h.native.capture().players[0];
+        assert.equal(reads, 1, 'one native snapshot per captured player');
+        assert.equal(snapshot.position, 10);
+        assert.equal(snapshot.modelPosition, 10);
+        assert.equal(snapshot.title, h.player.title);
+        h.native.progress(h.player.bus_name);
+        assert.equal(reads, 2, 'standalone progress still obtains its own fresh native snapshot');
+    });
+
+    test('display progress interpolates from real samples without changing native snapshots or ownership', () => {
+        const h = nativeHarness();
+        const stamp = h.stamp();
+        h.time = 1.5;
+        assert.equal(h.native.progress(h.player.bus_name).position, 11.5);
+        assert.equal(h.native.progress(h.player.bus_name).samplePosition, 10);
+        assert.equal(h.native.player(h.player.bus_name).position, 10);
+        assert.equal(h.native.capture().players[0].position, 10);
+        assert.equal(h.stamp(), stamp);
+        h.player.publish('position', 20);
+        h.time = 2;
+        assert.equal(h.native.progress(h.player.bus_name).position, 20.5);
+        h.player.publish('position', 5);
+        h.time = 3;
+        assert.equal(h.native.progress(h.player.bus_name).position, 6, 'backward seeks reanchor immediately');
+        h.player.length = 5.5;
+        assert.equal(h.native.progress(h.player.bus_name).position, 5.5);
+        assert.equal(h.native.player(h.player.bus_name).position, 5);
+    });
+
+    test('display progress freezes on pause, resumes without counting paused time, and follows rate changes', () => {
+        const h = nativeHarness();
+        const progress = () => h.native.progress(h.player.bus_name);
+        h.time = 1;
+        h.player.publish('rate', 2);
+        h.time = 2;
+        assert.equal(progress().position, 13);
+        h.player.publish('playback-status', 2);
+        h.time = 40;
+        assert.equal(progress().position, 13);
+        h.player.publish('playback-status', 1);
+        h.time = 41;
+        assert.equal(progress().position, 15);
+        h.player.publish('playback-status', 3);
+        assert.equal(progress().positionSupported, false);
+    });
+
+    test('playing placeholder zeros never start a synthetic clock, regardless of application or seek support', () => {
+        for (const bus_name of ['org.mpris.MediaPlayer2.test', 'org.mpris.MediaPlayer2.future.tab']) {
+            for (const can_seek of [false, true]) {
+                const h = nativeHarness({ player: new Player({ bus_name, can_seek, _position: 0 }) });
+                const progress = () => h.native.progress(bus_name);
+                h.time = 2;
+                h.player.publish('position', 0);
+                assert.equal(progress().positionSupported, false);
+                assert.equal(progress().position, 0);
+                assert.equal(progress().canSeek, can_seek, 'do not rewrite advertised capabilities');
+                h.time = 10;
+                assert.equal(progress().positionSupported, false);
+                h.player.publish('position', 25);
+                assert.equal(progress().position, 25);
+                assert.equal(progress().positionSupported, true);
+                h.time = 11;
+                h.player.publish('position', 0);
+                assert.equal(progress().positionSupported, false, 'loss of timing must not restart at zero');
+            }
+        }
+    });
+
+    test('expired nonzero samples become unknown only for matching, and quality changes refresh grouping once', () => {
+        const h = nativeHarness({ player: new Player({ _position: 0.208 }) });
+        const initial = h.native.capture().players[0];
+        assert.equal(initial.position, 0.208);
+        assert.equal(initial.modelPosition, 0.208);
+        const stamp = h.stamp();
+        h.flush();
+        const changes = h.modelChanges.length;
+        h.time = 6;
+        const stale = h.native.capture().players[0];
+        assert.equal(stale.position, 0.208, 'never overwrite native state with a model sentinel');
+        assert.equal(stale.positionSupported, true, 'native syntactic support is unchanged');
+        assert.equal(stale.modelPosition, 0, 'a frozen sample must not veto a matching live publisher');
+        assert.equal(h.native.player(h.player.bus_name).position, 0.208);
+        assert.equal(h.stamp(), stamp, 'sample quality is not an ownership change');
+        h.flush();
+        assert.equal(h.modelChanges.length, changes + 1);
+        assert.equal(h.modelChanges.at(-1), true, 'expiry requests a new grouping decision');
+        h.native.capture();
+        h.flush();
+        assert.equal(h.modelChanges.length, changes + 1, 'do not repeatedly refresh an already stale source');
+        h.player.publish('position', 12);
+        assert.equal(h.native.capture().players[0].modelPosition, 12, 'fresh real disagreement remains available to the matcher');
+    });
+
+    test('confirmed paused reads refresh grouping even when position quality stays supported', async () => {
+        const h = nativeHarness({ player: new Player({ playback_status: 2, _position: 100 }) });
+        assert.equal(h.native.capture().players[0].modelPosition, 100);
+        h.flush();
+        const changes = h.modelChanges.length;
+        h.positionQueries[0].resolve(20);
+        await new Promise(resolve => setImmediate(resolve));
+        h.flush();
+        assert.equal(h.modelChanges.length, changes + 1);
+        assert.equal(h.modelChanges.at(-1), true, 'a corrected sample affects matching even without a quality transition');
+        const player = h.native.capture().players[0];
+        assert.equal(player.position, 100);
+        assert.equal(player.modelPosition, 20);
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
+    });
+
+    test('model positions use confirmed reads rather than old native or interpolated display positions', async () => {
+        const h = nativeHarness({ player: new Player({ playback_status: 2, _position: 100 }) });
+        h.player.publish('trackid', '/track/two');
+        h.positionQueries.at(-1).resolve(20);
+        await new Promise(resolve => setImmediate(resolve));
+        h.player.publish('playback-status', 1);
+        h.time = 2;
+        const snapshot = h.native.capture().players[0];
+        assert.equal(snapshot.position, 100);
+        assert.equal(snapshot.modelPosition, 20);
+        assert.equal(h.native.progress(h.player.bus_name).position, 22);
+    });
+
+    test('display estimates expire without fresh samples and unrelated notifications cannot renew them', () => {
+        const h = nativeHarness();
+        const progress = () => h.native.progress(h.player.bus_name);
+        h.time = 5;
+        assert.equal(progress().positionSupported, true);
+        h.time = 5.01;
+        h.player.publish('cover-art', '/cover.png');
+        h.player.publish('volume', 0.5);
+        h.player.emit('notify', { name: 'metadata' });
+        assert.equal(progress().positionSupported, false);
+        h.player.publish('playback-status', 2);
+        assert.equal(progress().positionSupported, false, 'pausing must not revive an expired sample');
+        h.player.publish('position', 15);
+        assert.equal(progress().positionSupported, true);
+        h.time = 100;
+        assert.equal(progress().position, 15, 'a confirmed paused position does not expire');
+    });
+
+    test('seek dispatch invalidates display estimates until a real position update arrives', () => {
+        const h = nativeHarness();
+        h.time = 1;
+        assert.equal(h.native.progress(h.player.bus_name).position, 11);
+        seek(h, 80);
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
+        assert.equal(h.native.player(h.player.bus_name).position, 10, 'dispatch is not an acknowledgement');
+        h.player.publish('position', 79.5);
+        assert.equal(h.native.progress(h.player.bus_name).position, 79.5);
+    });
+
+    test('track changes do not inherit cached progress and paused tracks recover through an explicit read', async () => {
+        const h = nativeHarness({ player: new Player({ playback_status: 2 }) });
+        h.player.publish('position', 30);
+        h.player.title = 'Another track';
+        h.player.metadata['xesam:url'] = 'file:///music/another.flac';
+        h.player.emit('notify', { name: 'metadata' });
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
+        assert.equal(h.positionQueries[0].cancel.is_cancelled(), true);
+        h.positionQueries.at(-1).resolve(30);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(h.native.progress(h.player.bus_name).position, 30);
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
+        h.time = 100;
+        assert.equal(h.native.progress(h.player.bus_name).position, 30);
+        h.player.publish('playback-status', 1);
+        h.time = 101;
+        assert.equal(h.native.progress(h.player.bus_name).position, 31);
+    });
+
+    test('pause and rate transitions renew pending recovery reads instead of stranding paused progress', async () => {
+        const h = nativeHarness();
+        h.player.publish('trackid', '/track/two');
+        const playingRead = h.positionQueries.at(-1);
+        h.player.publish('playback-status', 2);
+        const pausedRead = h.positionQueries.at(-1);
+        assert.notEqual(pausedRead, playingRead);
+        assert.equal(playingRead.cancel.is_cancelled(), true);
+        h.player.publish('rate', 2);
+        const rateRead = h.positionQueries.at(-1);
+        assert.notEqual(rateRead, pausedRead);
+        assert.equal(pausedRead.cancel.is_cancelled(), true);
+        playingRead.resolve(99);
+        pausedRead.resolve(99);
+        rateRead.resolve(20);
+        await new Promise(resolve => setImmediate(resolve));
+        h.time = 60;
+        const progress = h.native.progress(h.player.bus_name);
+        assert.equal(progress.positionSupported, true);
+        assert.equal(progress.position, 20);
+        assert.equal(progress.samplePosition, 20);
+        assert.equal(h.native.player(h.player.bus_name).position, 10, 'raw native state remains untouched');
+    });
+
+    test('late position reads cannot overwrite newer samples, tracks, or replacement players', async () => {
+        const h = nativeHarness();
+        const initial = h.positionQueries[0];
+        h.player.publish('position', 20);
+        initial.resolve(99);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(h.native.progress(h.player.bus_name).position, 20);
+        h.player.publish('trackid', '/track/two');
+        const changed = h.positionQueries.at(-1);
+        h.manager.players = [new Player({ _position: 40 })];
+        h.manager.emit('notify::players');
+        changed.resolve(99);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(changed.cancel.is_cancelled(), true);
+        assert.equal(h.native.progress(h.player.bus_name).position, 40);
+        const replacement = h.positionQueries.at(-1);
+        h.native.dispose();
+        replacement.resolve(99);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(replacement.cancel.is_cancelled(), true);
+        assert.equal(h.native.progress(h.player.bus_name), null);
+    });
+
+    test('explicit position reads can supply display timing without fabricating native position support', async () => {
+        const h = nativeHarness({ player: new Player({ _position: -1 }) });
+        h.positionQueries[0].resolve(25.5);
+        await new Promise(resolve => setImmediate(resolve));
+        h.time = 1;
+        assert.equal(h.native.progress(h.player.bus_name).position, 26.5);
+        assert.equal(h.native.progress(h.player.bus_name).samplePosition, 25.5);
+        assert.equal(h.native.player(h.player.bus_name).positionSupported, false);
+        h.player.publish('playback-status', 2);
+        h.time = 100;
+        assert.equal(h.native.progress(h.player.bus_name).position, 26.5);
+    });
+
+    test('zero and invalid native positions stay unavailable while playing, but paused zero is valid', () => {
+        for (const position of [-1, NaN, Infinity, null, undefined, 0]) {
+            const h = nativeHarness({ player: new Player({ _position: position }) });
+            assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
+        }
+        const h = nativeHarness({ player: new Player({ _position: 0, playback_status: 2 }) });
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
+        assert.equal(h.native.progress(h.player.bus_name).position, 0);
+        h.player.publish('playback-status', 1);
+        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
+    });
+
     test('position comes only from Astal: no elapsed-time, rate, or length projection', () => {
         const h = nativeHarness();
         h.time = 100;
@@ -882,6 +2393,52 @@ describe('Native service integration', () => {
         assert.equal(h.native.player(h.player.bus_name).position, 250, 'do not clamp a native sample to length');
         h.time = 200;
         assert.equal(h.native.capture().players[0].position, 250);
+    });
+
+    test('numeric microseconds supply duration when the typed native length is unavailable', () => {
+        const h = nativeHarness({ player: new Player({
+            length: -1, metadata: { 'mpris:length': 361929437.5 },
+        }) });
+        const sample = () => h.native.player(h.player.bus_name);
+        assert.equal(sample().length, 361.9294375);
+        assert.equal(sample().canSeek, true);
+        assert.equal(sample().position, 10);
+        h.player.length = 200;
+        assert.equal(sample().length, 200, 'valid native seconds take precedence over raw metadata');
+        for (const length of [-1, 0, NaN, Infinity, null, undefined]) {
+            h.player.length = length;
+            assert.equal(sample().length, 361.9294375);
+        }
+        h.player.metadata['mpris:length'] = 200000000;
+        assert.equal(sample().length, 200, 'integer microseconds work too');
+        for (const raw of [undefined, null, 0, -1, NaN, Infinity, -Infinity, '200000000', true, [], {}]) {
+            h.player.metadata['mpris:length'] = raw;
+            assert.equal(sample().length, null, `invalid raw duration ${String(raw)}`);
+        }
+        delete h.player.metadata['mpris:length'];
+        assert.equal(sample().length, null);
+    });
+
+    test('duration recovery is independent of player identity and preserves advertised capabilities', () => {
+        for (const [bus_name, identity, entry] of [
+            ['org.mpris.MediaPlayer2.test', 'Test Player', 'test-player'],
+            ['org.mpris.MediaPlayer2.future_player.instance42', 'An Unknown Future Player', 'future-player'],
+            ['org.mpris.MediaPlayer2.browser.tab17', '', ''],
+        ]) {
+            for (const can_seek of [false, true]) {
+                const h = nativeHarness({ player: new Player({
+                    bus_name, identity, entry, can_seek, length: -1,
+                    metadata: { 'mpris:length': 361929437.5 },
+                }) });
+                const recovered = h.native.player(bus_name);
+                assert.equal(recovered.length, 361.9294375, bus_name);
+                assert.equal(recovered.canSeek, can_seek, 'duration recovery must not invent seek support');
+                h.player.metadata = {};
+                assert.equal(h.native.player(bus_name).length, null, 'missing data stays unknown for every player');
+                h.player.length = 120;
+                assert.equal(h.native.player(bus_name).length, 120, 'standard native duration remains unchanged');
+            }
+        }
     });
 
     test('unsupported native positions normalize to zero without disabling native can_seek', () => {
@@ -942,7 +2499,7 @@ describe('Native service integration', () => {
         const player = h.native.capture().players[0];
         assert.notEqual(player.trackKey, h.player.trackid, 'use metadata when native syntax validation rejects the ID');
         assert.throws(() => seek(h), /unavailable/);
-        assert.deepEqual(checked, ['/track/one', '/track/one']);
+        assert.deepEqual(checked, ['/track/one', '/track/one', '/track/one', '/track/one']);
         assert.deepEqual(h.player.calls, []);
     });
 
@@ -1319,7 +2876,7 @@ describe('Native service integration', () => {
         assert.equal(planner.receive(response([{ player: h.player.bus_name, operation: 'seek', value: 80 }])), true);
         await Promise.resolve();
         assert.equal(sent.at(-1).action.position, 90);
-        assert.equal(sent.at(-1).players[0].position, 10);
+        assert.equal(sent.at(-1).players[0].position, 0, 'position is unknown until a seek is confirmed');
         assert.equal('trackKey' in sent.at(-1).players[0], false, 'native freshness keys do not change the Rust protocol');
         assert.equal(planner.receive(response([{ player: h.player.bus_name, operation: 'seek', value: 90 }])), true);
         assert.deepEqual(h.player.calls, [['position', 80], ['position', 90]]);
@@ -1532,6 +3089,31 @@ describe('Planner', () => {
         assert.equal(h.planner.error, '');
         assert.equal(h.errors.at(-1), '');
         assert.deepEqual(h.applied, [op('a', 'next')]);
+    });
+
+    test('matching receives normalized positions without leaking extra fields or changing raw capture', async () => {
+        const h = harness([player('a', { position: 0.208, modelPosition: 0 })]);
+        h.planner.refresh();
+        await tick();
+        assert.equal(h.sent[0].players[0].position, 0);
+        assert.equal('modelPosition' in h.sent[0].players[0], false);
+        assert.equal(h.state.players[0].position, 0.208);
+        h.state.players[0].modelPosition = 12;
+        assert.equal(h.planner.receive(response(h)), true, 'matching samples, like native positions, are not ownership guards');
+        h.planner.refresh();
+        await tick();
+        assert.equal(h.sent.at(-1).players[0].position, 12);
+        assert.equal(h.state.players[0].position, 0.208);
+    });
+
+    test('invalid matching positions are rejected instead of serialized as invented samples', async () => {
+        for (const modelPosition of [-1, NaN, Infinity, null, '12']) {
+            const h = harness([player('a', { modelPosition })]);
+            h.planner.refresh();
+            await tick();
+            assert.equal(h.sent.length, 0);
+            assert.match(h.planner.error, /Model positions must be finite and nonnegative/);
+        }
     });
 
     test('refresh coalesces and sends detached JSON OBJECT protocol fields only', async () => {

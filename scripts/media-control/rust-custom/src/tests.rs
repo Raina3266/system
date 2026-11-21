@@ -155,6 +155,7 @@ macro_rules! media_unit_tests {
                     "https://youtube.com./watch?v=dQw4w9WgXcQ",
                     "https://youtube.com:/watch?v=dQw4w9WgXcQ",
                     "https://youtube.com:65536/watch?v=dQw4w9WgXcQ",
+                    "https://youtube.com:000443/watch?v=dQw4w9WgXcQ",
                     "https://youtube.com:abc/watch?v=dQw4w9WgXcQ",
                     "https://youtube.com:443:80/watch?v=dQw4w9WgXcQ",
                     "https:///youtube.com/watch?v=dQw4w9WgXcQ",
@@ -542,6 +543,27 @@ macro_rules! media_unit_tests {
                 [real, duplicate]
             }
 
+            fn browser_companions(url: &str) -> [Player; 2] {
+                let mut native = player("native", "Native Publisher", "Track");
+                native.browser_hint = json!(true);
+                native.artist = "Artist".to_owned();
+                native.album = "Album".to_owned();
+                native.length = Some(222.353378);
+                native.position = 121.125;
+                native.can_play = true;
+                native.can_pause = true;
+                let mut companion = native.clone();
+                companion.bus = "companion".to_owned();
+                companion.identity = "Companion Publisher".to_owned();
+                companion.url = url.to_owned();
+                companion.length = Some(222.353);
+                companion.position = 0.0;
+                companion.can_play = false;
+                companion.can_pause = false;
+                companion.can_seek = false;
+                [native, companion]
+            }
+
             fn node(id: u32, app: &str, title: &str) -> Stream {
                 Stream {
                     id,
@@ -577,7 +599,6 @@ macro_rules! media_unit_tests {
                 let groups: Vec<_> = players
                     .iter()
                     .map(|player| Members {
-                        title: &player.title,
                         players: vec![player],
                         primary: player,
                     })
@@ -924,6 +945,8 @@ macro_rules! media_unit_tests {
                     "https://spotify.com/search/query",
                     "HTTPS://WWW.YOUTUBE.COM/WATCH?v=id",
                     "http://youtube.com:8080/watch?v=id",
+                    "https://youtube.com:000443/watch?v=id",
+                    "https://-x.youtube.com/watch?v=id",
                 ] {
                     assert!(browser_media_allowed(url), "should allow {url}");
                 }
@@ -1000,6 +1023,7 @@ macro_rules! media_unit_tests {
                 for (url, name) in [
                     ("https://music.youtube.com/watch", "YouTube Music"),
                     ("https://www.youtube.com/watch", "YouTube"),
+                    ("https://-x.youtube.com:000443/watch", "YouTube"),
                     ("https://youtu.be/id", "YouTube"),
                     ("https://live.bilibili.com/123", "Bilibili Live"),
                     ("https://www.bilibili.com/video/id", "Bilibili"),
@@ -1099,6 +1123,140 @@ macro_rules! media_unit_tests {
                 ));
                 assert_eq!(response.groups.len(), 1);
                 assert_eq!(response.groups[0].players, ["native"]);
+            }
+
+            #[test]
+            fn url_less_browser_uses_allowed_companion_without_losing_native_primary() {
+                for (url, label) in [
+                    ("https://open.spotify.com/album/id", "Spotify"),
+                    ("https://music.youtube.com/watch?v=id", "YouTube Music"),
+                    ("https://www.youtube.com/watch?v=id", "YouTube"),
+                    ("https://youtu.be/id", "YouTube"),
+                    ("https://www.bilibili.com/video/id", "Bilibili"),
+                    ("https://live.bilibili.com/123", "Bilibili Live"),
+                    ("https://b23.tv/id", "Bilibili"),
+                ] {
+                    for hint in [json!(true), json!(false), json!(""), json!("Arbitrary Browser")] {
+                        for playing in [false, true] {
+                            for reversed in [false, true] {
+                                let mut players = browser_companions(url);
+                                players[0].browser_hint = hint.clone();
+                                for player in &mut players {
+                                    player.playing = playing;
+                                }
+                                if reversed {
+                                    players.reverse();
+                                }
+                                let members = players.each_ref().map(|p| p.bus.clone());
+                                let [first, second] = players;
+                                let mut snapshot = request(
+                                    vec![first, player("other", "Other", "Other"), second],
+                                    vec![],
+                                );
+                                for selected in ["native", "companion"] {
+                                    snapshot.selected_player = selected.to_owned();
+                                    let before = snapshot.clone();
+                                    let response = analyze(&snapshot);
+                                    assert!(response.error.is_none());
+                                    assert_eq!(response.groups.len(), 2);
+                                    assert_eq!(response.groups[0].players, members);
+                                    assert_eq!(response.groups[0].primary, "native");
+                                    assert_eq!(response.groups[0].display_name, label);
+                                    assert_eq!(response.groups[1].players, ["other"]);
+                                    assert_eq!(response.active_player, "native");
+                                    assert_eq!(snapshot, before);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn url_less_browser_needs_direct_live_allowed_browser_corroboration() {
+                let [native, companion] =
+                    browser_companions("https://www.youtube.com/watch?v=id");
+                assert!(analyze(&request(vec![native.clone()], vec![])).groups.is_empty());
+                for case in ["stopped", "playerctld", "kdeconnect", "nonbrowser", "empty", "blocked"] {
+                    let mut peer = companion.clone();
+                    match case {
+                        "stopped" => peer.stopped = true,
+                        "playerctld" => peer.bus = "org.mpris.MediaPlayer2.PLAYERCTLD".to_owned(),
+                        "kdeconnect" => peer.bus = "org.mpris.MediaPlayer2.kdeconnect.instance".to_owned(),
+                        "nonbrowser" => peer.browser_hint = Value::Null,
+                        "empty" => peer.url.clear(),
+                        "blocked" => peer.url = "https://youtube.com/channel/id".to_owned(),
+                        _ => unreachable!(),
+                    }
+                    for reversed in [false, true] {
+                        let mut players = vec![native.clone(), peer.clone()];
+                        if reversed {
+                            players.reverse();
+                        }
+                        let response = analyze(&request(players, vec![]));
+                        assert!(response.error.is_none());
+                        assert!(
+                            response.groups.iter().all(|group| !group.players.contains(&native.bus)),
+                            "{case}"
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn browser_corroboration_does_not_rescue_explicit_disallowed_urls() {
+                for url in [
+                    " ",
+                    "https://example.test/watch",
+                    "https://open.spotify.com/login",
+                    "https://youtube.com/channel/id",
+                    "https://youtube.com.evil.test/watch?v=id",
+                ] {
+                    let [mut native, companion] =
+                        browser_companions("https://www.youtube.com/watch?v=id");
+                    native.url = url.to_owned();
+                    assert!(same_playback(&native, &companion));
+                    for reversed in [false, true] {
+                        let mut players = vec![native.clone(), companion.clone()];
+                        if reversed {
+                            players.reverse();
+                        }
+                        let response = analyze(&request(players, vec![]));
+                        assert_eq!(response.groups.len(), 1);
+                        assert_eq!(response.groups[0].players, ["companion"], "{url:?}");
+                    }
+                }
+            }
+
+            #[test]
+            fn browser_corroboration_retains_metadata_and_known_position_checks() {
+                for case in ["title", "metadata", "sparse", "position"] {
+                    let [native, mut companion] =
+                        browser_companions("https://www.youtube.com/watch?v=id");
+                    match case {
+                        "title" => companion.title = "Different Track".to_owned(),
+                        "metadata" => {
+                            companion.artist = "Different Artist".to_owned();
+                            companion.album = "Different Album".to_owned();
+                        }
+                        "sparse" => {
+                            companion.album.clear();
+                            companion.length = None;
+                        }
+                        "position" => companion.position = native.position - 6.0,
+                        _ => unreachable!(),
+                    }
+                    assert!(!same_playback(&native, &companion), "{case}");
+                    for reversed in [false, true] {
+                        let mut players = vec![native.clone(), companion.clone()];
+                        if reversed {
+                            players.reverse();
+                        }
+                        let response = analyze(&request(players, vec![]));
+                        assert_eq!(response.groups.len(), 1);
+                        assert_eq!(response.groups[0].players, ["companion"], "{case}");
+                    }
+                }
             }
 
             #[test]
@@ -1660,13 +1818,26 @@ macro_rules! media_unit_tests {
                     snapshot.action = Some(action(kind, "gone"));
                     let response = analyze(&snapshot);
                     assert!(response.actions.is_empty());
-                    assert!(response.error.is_some());
+                    assert_eq!(
+                        response.error.as_deref(),
+                        Some("The requested media source is no longer available.")
+                    );
                 }
                 snapshot.action = Some(action("unknown", ""));
                 assert_eq!(
                     analyze(&snapshot).error.as_deref(),
                     Some("Unknown media action.")
                 );
+                for (kind, position, expected) in [
+                    ("seek", -1.0, "Seek position must be finite and nonnegative."),
+                    ("unknown", -1.0, "Unknown media action."),
+                    ("unknown", f64::NAN, "Action position must be finite."),
+                ] {
+                    snapshot.action = Some(Action { position, ..action(kind, "gone") });
+                    let response = analyze(&snapshot);
+                    assert!(response.actions.is_empty());
+                    assert_eq!(response.error.as_deref(), Some(expected));
+                }
             }
 
             #[test]
@@ -2065,9 +2236,9 @@ macro_rules! media_unit_tests {
 
             #[test]
             fn unknown_text_or_length_never_counts_as_agreement() {
-                assert!(!same_optional(None, None));
-                assert!(!same_optional(Some("cover"), None));
-                assert!(!same_optional(Some(" \t"), Some("\n")));
+                assert!(!same_text("", ""));
+                assert!(!same_text("cover", ""));
+                assert!(!same_text(" \t", "\n"));
                 for length in [
                     None,
                     Some(0.0),
@@ -2495,6 +2666,55 @@ mod media_bridge {
             stream_ids(&helper.request(&request)),
             [Value::Null, Value::Null]
         );
+        helper.finish_success();
+    }
+
+    #[test]
+    fn url_less_native_browser_and_generic_companion_keep_live_snapshot_shape() {
+        let native_bus = "org.mpris.MediaPlayer2.chromium.instance171244";
+        let companion_bus = "org.mpris.MediaPlayer2.mprisence_web.generic.pa808";
+        let mut native = player(native_bus, "Chrome", "Nothing Compares - Bonus Track");
+        native["artist"] = json!("The Weeknd");
+        native["album"] = json!("After Hours (Deluxe)");
+        native["position"] = json!(121.125);
+        native["length"] = json!(222.353378);
+        native["canPlay"] = json!(true);
+        native["canPause"] = json!(true);
+        let mut companion = native.clone();
+        companion["bus"] = json!(companion_bus);
+        companion["identity"] = json!("Generic Companion");
+        companion["desktopEntry"] = json!("");
+        companion["browserHint"] = json!(true);
+        companion["url"] = json!("https://open.spotify.com/album/4ZyeHIgdujClXSjC2cSqSb");
+        companion["position"] = json!(0.0);
+        companion["length"] = json!(222.353);
+        companion["canPlay"] = json!(false);
+        companion["canPause"] = json!(false);
+        companion["canSeek"] = json!(false);
+        let mut helper = Helper::start("model");
+        for reversed in [false, true] {
+            let mut players = vec![native.clone(), companion.clone()];
+            if reversed {
+                players.reverse();
+            }
+            let members: Vec<_> = players.iter().map(|p| p["bus"].clone()).collect();
+            let mut request = snapshot(players, vec![]);
+            for selected in [native_bus, companion_bus] {
+                request["selectedPlayer"] = json!(selected);
+                let reply = helper.request(&request);
+                assert!(reply.get("error").is_none());
+                assert_eq!(reply["activePlayer"], native_bus);
+                assert_eq!(
+                    reply["groups"],
+                    json!([{
+                        "title": "Nothing Compares - Bonus Track",
+                        "primary": native_bus, "players": members,
+                        "displayName": "Spotify", "streamId": null,
+                        "streamReason": "No matching audio stream. Start playback in this source."
+                    }])
+                );
+            }
+        }
         helper.finish_success();
     }
 

@@ -93,9 +93,6 @@ in
 
     ];
     programs.google-chrome = {
-      commandLineArgs = [
-        "--disable-features=HardwareMediaKeyHandling,MediaSessionService"
-      ];
       nativeMessagingHosts = [ mprisenceNativeHost ];
     };
     systemd.user.services.waybar-ycal = {

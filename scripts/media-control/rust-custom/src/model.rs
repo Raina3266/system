@@ -14,7 +14,8 @@ use std::io::{self, BufRead, BufWriter, Write};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::playback::{same_playback, source_name};
+use crate::credit::http_authority;
+use crate::playback::{known_length, same_playback, source_name};
 
 /// Maximum request-line size in bytes, excluding the terminating LF.
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -174,10 +175,10 @@ pub fn analyze(request: &Request) -> Response {
             .iter()
             .zip(matches)
             .map(|(group, matched)| Group {
-                title: group.title.to_owned(),
+                title: group.primary.title.clone(),
                 primary: group.primary.bus.clone(),
                 players: group.players.iter().map(|p| p.bus.clone()).collect(),
-                display_name: display_name(group.primary),
+                display_name: group.display_name(),
                 stream_id: matched.node.map(|node| node.id),
                 stream_reason: matched.reason.to_owned(),
             })
@@ -185,7 +186,10 @@ pub fn analyze(request: &Request) -> Response {
         ..Response::default()
     };
     if let Some(action) = &request.action {
-        plan_action(request, action, &groups, active, &mut response);
+        match plan_action(request, action, &groups, active) {
+            Ok(actions) => response.actions = actions,
+            Err(error) => response.error = Some(error.to_owned()),
+        }
     }
     response
 }
@@ -270,7 +274,6 @@ fn read_line(input: &mut impl BufRead, bytes: &mut Vec<u8>) -> io::Result<Line> 
 }
 
 struct Members<'a> {
-    title: &'a str,
     players: Vec<&'a Player>,
     primary: &'a Player,
 }
@@ -278,6 +281,27 @@ struct Members<'a> {
 impl Members<'_> {
     fn contains(&self, bus: &str) -> bool {
         self.players.iter().any(|player| player.bus == bus)
+    }
+
+    fn playback_actions(&self, operation: &str) -> Vec<NativeAction> {
+        self.players
+            .iter()
+            .map(|player| native_action(player, operation, None))
+            .collect()
+    }
+
+    fn display_name(&self) -> String {
+        let primary = self.primary;
+        let source = if browser_player(primary) && primary.url.is_empty() {
+            self.players
+                .iter()
+                .copied()
+                .find(|peer| browser_peer_corroborates(primary, peer))
+                .unwrap_or(primary)
+        } else {
+            primary
+        };
+        display_name(source)
     }
 }
 
@@ -294,6 +318,16 @@ fn browser_player(player: &Player) -> bool {
             .any(|name| identity.contains(name))
 }
 
+// Missing URLs need independent allowlist evidence, never another URL-less
+// source or a match that would rescue an explicitly disallowed URL.
+fn browser_peer_corroborates(player: &Player, peer: &Player) -> bool {
+    !peer.stopped
+        && !proxy(peer)
+        && browser_player(peer)
+        && browser_media_allowed(&peer.url)
+        && same_playback(player, peer)
+}
+
 fn group_players(players: &[Player]) -> Vec<Members<'_>> {
     let mut buses = HashSet::new();
     let mut candidates: Vec<_> = players
@@ -302,7 +336,12 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
         .filter(|(_, player)| {
             !player.stopped
                 && !proxy(player)
-                && (!browser_player(player) || browser_media_allowed(&player.url))
+                && (!browser_player(player)
+                    || browser_media_allowed(&player.url)
+                    || player.url.is_empty()
+                        && players
+                            .iter()
+                            .any(|peer| browser_peer_corroborates(player, peer)))
                 && buses.insert(player.bus.as_str())
         })
         .collect();
@@ -321,7 +360,6 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
             group.players.push(player);
         } else {
             groups.push(Members {
-                title: &player.title,
                 players: vec![player],
                 primary: player,
             });
@@ -341,14 +379,11 @@ fn group_players(players: &[Player]) -> Vec<Members<'_>> {
                 (
                     !player.playing,
                     !(player.can_play || player.can_pause),
-                    !player
-                        .length
-                        .is_some_and(|length| length.is_finite() && length > 0.0),
+                    known_length(player.length).is_none(),
                     !player.can_seek,
                 )
             })
             .expect("groups contain at least one player");
-        group.title = &group.primary.title;
     }
     groups.sort_by_key(|group| order[group.players[0].bus.as_str()]);
     groups
@@ -363,18 +398,7 @@ struct WebUrl<'a> {
 /// Reject credentials, escapes and backslashes rather than guessing how a
 /// browser might interpret a malformed authority. No URL is fetched here.
 fn web_url(url: &str) -> Option<WebUrl<'_>> {
-    if url
-        .bytes()
-        .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control() || byte == b'\\')
-    {
-        return None;
-    }
-    let (scheme, rest) = url.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
-        return None;
-    }
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let authority = &rest[..end];
+    let (authority, path_query) = http_authority(url)?;
     let host = if let Some((host, port)) = authority.split_once(':') {
         if port.is_empty()
             || !port.bytes().all(|byte| byte.is_ascii_digit())
@@ -396,7 +420,7 @@ fn web_url(url: &str) -> Option<WebUrl<'_>> {
     }
     Some(WebUrl {
         host,
-        path: rest[end..].split(['?', '#']).next().unwrap_or(""),
+        path: path_query.split(['?', '#']).next().unwrap_or(""),
     })
 }
 
@@ -568,8 +592,8 @@ fn source<'a>(group: &Members<'a>) -> Source<'a> {
             urls.push(player.url.trim());
         }
     }
-    if !group.title.trim().is_empty() {
-        titles.push(group.title.trim());
+    if !group.primary.title.trim().is_empty() {
+        titles.push(group.primary.title.trim());
     }
     let browser = keys.iter().any(|key| browser_key(key));
     Source {
@@ -682,13 +706,8 @@ fn match_groups<'a>(groups: &[Members<'_>], streams: &'a [Stream]) -> Vec<Stream
         .map(|(index, options)| {
             let (node, reason) = match options.as_slice() {
                 [] => (None, reasons[index]),
-                [node] => {
-                    if claims[*node] > 1 {
-                        (None, SHARED)
-                    } else {
-                        (Some(nodes[*node]), UNIQUE)
-                    }
-                }
+                [node] if claims[*node] > 1 => (None, SHARED),
+                [node] => (Some(nodes[*node]), UNIQUE),
                 _ => (None, MULTIPLE),
             };
             StreamMatch { node, reason }
@@ -718,35 +737,23 @@ fn plan_action(
     action: &Action,
     groups: &[Members<'_>],
     active: Option<usize>,
-    response: &mut Response,
-) {
+) -> Result<Vec<NativeAction>, &'static str> {
     match action.kind.as_str() {
-        "pauseAll" => {
-            response.actions = pause_actions(&request.players);
-            return;
-        }
-        "togglePauseAll" => {
-            response.actions = pause_actions(&request.players);
-            if response.actions.is_empty()
+        "pauseAll" | "togglePauseAll" => {
+            let mut actions = pause_actions(&request.players);
+            if action.kind == "togglePauseAll"
+                && actions.is_empty()
                 && let Some(index) = active
             {
-                response.actions = groups[index]
-                    .players
-                    .iter()
-                    .map(|p| native_action(p, "play", None))
-                    .collect();
+                actions = groups[index].playback_actions("play");
             }
-            return;
+            return Ok(actions);
         }
         "toggle" | "next" | "previous" | "seek" => {}
-        _ => {
-            response.error = Some("Unknown media action.".to_owned());
-            return;
-        }
+        _ => return Err("Unknown media action."),
     }
     if action.kind == "seek" && action.position < 0.0 {
-        response.error = Some("Seek position must be finite and nonnegative.".to_owned());
-        return;
+        return Err("Seek position must be finite and nonnegative.");
     }
     let target = if action.player.is_empty() {
         active
@@ -755,41 +762,29 @@ fn plan_action(
             .iter()
             .position(|group| group.contains(&action.player))
     };
-    let Some(index) = target else {
-        response.error = Some("The requested media source is no longer available.".to_owned());
-        return;
-    };
+    let index = target.ok_or("The requested media source is no longer available.")?;
     let group = &groups[index];
-    match action.kind.as_str() {
+    Ok(match action.kind.as_str() {
         "toggle" => {
             let operation = if group.players.iter().any(|p| p.playing) {
                 "pause"
             } else {
                 "play"
             };
-            response.actions = group
-                .players
-                .iter()
-                .map(|p| native_action(p, operation, None))
-                .collect();
+            group.playback_actions(operation)
         }
-        "next" if group.primary.can_next => {
-            response.actions = vec![native_action(group.primary, "next", None)];
-        }
+        "next" if group.primary.can_next => vec![native_action(group.primary, "next", None)],
         "previous" if group.primary.can_previous => {
-            response.actions = vec![native_action(group.primary, "previous", None)];
+            vec![native_action(group.primary, "previous", None)]
         }
-        "seek" => {
-            response.actions = group
-                .players
-                .iter()
-                .filter(|p| p.can_seek)
-                .map(|p| native_action(p, "seek", Some(action.position)))
-                .collect();
-        }
-
-        _ => {}
-    }
+        "seek" => group
+            .players
+            .iter()
+            .filter(|p| p.can_seek)
+            .map(|p| native_action(p, "seek", Some(action.position)))
+            .collect(),
+        _ => Vec::new(),
+    })
 }
 
 #[cfg(test)]

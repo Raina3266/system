@@ -199,9 +199,7 @@ class MediaPanel {
         this.activePlayer = '';
         this.failure = '';
         this.rows = new Map();
-        this.seekDragging = false;
-        this.seekPending = false;
-        this.seekTarget = null;
+        this.resetSeek();
 
         this.monitor = null;
         this.window = new Astal.Window({
@@ -310,10 +308,7 @@ class MediaPanel {
         this.section = new Gtk.Button({ css_classes: ['section-button'], child: box(false, 10, [
             label('󰐊', ['section-glyph']), label('MEDIA', ['section-label']), this.sourceName, this.chevron,
         ]) });
-        this.section.connect('clicked', () => {
-            this.sources.reveal_child = !this.sources.reveal_child;
-            this.chevron.set_label(this.sources.reveal_child ? '󰅀' : '󰅃');
-        });
+        this.section.connect('clicked', () => this.setSourcesOpen(!this.sources.reveal_child));
         this.sourceRows = box(true, 2);
         const scroll = new Gtk.ScrolledWindow({ child: this.sourceRows, hscrollbar_policy: Gtk.PolicyType.NEVER,
             vscrollbar_policy: Gtk.PolicyType.AUTOMATIC, propagate_natural_height: true, max_content_height: 320 });
@@ -343,23 +338,29 @@ class MediaPanel {
             && this.seekTarget === trackKey(this.backend.player(player.bus)) && this.modelCurrent()) {
             this.backend.action('seek', player.bus, this.seek.get_value());
         }
+        this.resetSeek();
+        if (!commit) this.position();
+    }
+
+    resetSeek() {
         this.seekDragging = false;
         this.seekPending = false;
         this.seekTarget = null;
-        if (!commit) this.position();
     }
 
     canSeekBy(player) {
         return Boolean(player && this.group && trackKey(player) === trackKey(this.group.primary)
             && player.canSeek && player.positionSupported && Number.isFinite(player.position)
+            && Number.isFinite(player.samplePosition) && player.samplePosition >= 0
             && Number.isFinite(player.length) && player.length > 0);
     }
 
     seekBy(seconds) {
         if (!this.group || !this.modelCurrent()) return false;
-        const player = this.backend.player(this.group.primary.bus);
+        const player = this.backend.progress(this.group.primary.bus);
         if (!this.canSeekBy(player)) return false;
-        const position = Math.min(player.length, Math.max(0, player.position + seconds));
+        // Use the last confirmed position, never the interpolated display value.
+        const position = Math.min(player.length, Math.max(0, player.samplePosition + seconds));
         this.finishSeek(false);
         const queued = this.backend.action('seek', player.bus, position);
         if (!queued) this.reportFailure(this.backend.failure || 'The media seek was not queued. Try again.');
@@ -417,14 +418,12 @@ class MediaPanel {
         const current = this.modelCurrent();
         this.empty.visible = !player;
         this.details.visible = Boolean(player);
-        this.title.set_label(player?.title || 'Unknown title');
-        this.title.update_property([Gtk.AccessibleProperty.LABEL], [player?.title || 'Unknown title']);
+        const title = player?.title || 'Unknown title';
+        this.title.set_label(title);
+        this.title.update_property([Gtk.AccessibleProperty.LABEL], [title]);
         this.credit.set(player, this.opened);
         this.art.set(player?.cover || '', player?.url || '', this.opened && Boolean(player));
-        this.play.get_child().set_label(player?.playing ? '󰏤' : '󰐊');
-        const transport = this.backend.transport(this.group);
-        this.play.sensitive = current && transport.enabled;
-        this.play.update_property([Gtk.AccessibleProperty.DESCRIPTION], [transport.reason]);
+        this.renderPlay(this.play, this.group, current);
         this.previous.sensitive = current && Boolean(player?.canPrevious);
         this.next.sensitive = current && Boolean(player?.canNext);
         this.seek.sensitive = current && Boolean(player?.canSeek && player?.length);
@@ -432,33 +431,42 @@ class MediaPanel {
         this.seek.adjustment.step_increment = 1;
         this.seek.adjustment.page_increment = Math.max(1, (player?.length || 20) / 20);
         this.rewind.sensitive = this.forward.sensitive = current
-            && this.canSeekBy(player && this.backend.player(player.bus));
+            && this.canSeekBy(player && this.backend.progress(player.bus));
         this.sourceName.set_label(this.group?.displayName || '');
         this.section.sensitive = this.groups.length > 1;
-        if (this.groups.length < 2) { this.sources.reveal_child = false; this.chevron.set_label('󰅃'); }
+        if (this.groups.length < 2) this.setSourcesOpen(false);
         this.renderRows(current);
         this.setFailure(this.failure);
         this.position();
     }
 
+    renderPlay(widget, group, current) {
+        widget.get_child().set_label(group?.primary?.playing ? '󰏤' : '󰐊');
+        const transport = this.backend.transport(group);
+        widget.sensitive = current && transport.enabled;
+        widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [transport.reason]);
+    }
+
+    setSourcesOpen(open) {
+        this.sources.reveal_child = open;
+        this.chevron.set_label(open ? '󰅀' : '󰅃');
+    }
+
     renderRows(current) {
         const wanted = new Set(this.groups.map(group => group.primary.bus));
         for (const [bus, row] of this.rows) {
-            if (!wanted.has(bus)) {
-                row.art.dispose();
-                this.sourceRows.remove(row.widget);
-                this.rows.delete(bus);
-            }
+            if (wanted.has(bus)) continue;
+            row.art.dispose();
+            this.sourceRows.remove(row.widget);
+            this.rows.delete(bus);
         }
         let previous = null;
         for (const group of this.groups) {
             const bus = group.primary.bus;
             let row = this.rows.get(bus);
             if (!row) {
-                row = { group };
-                row.art = new Artwork(this.backend, 34);
-                row.name = ellipsis('', ['source-name']);
-                row.title = ellipsis('', ['source-title']);
+                row = { group, art: new Artwork(this.backend, 34),
+                    name: ellipsis('', ['source-name']), title: ellipsis('', ['source-title']) };
                 row.play = button('󰐊', 'Play / pause this source', () => this.action('toggle', row.group), ['source-play']);
                 const select = new Gtk.Button({ css_classes: ['source-select'], hexpand: true,
                     child: box(false, 8, [row.art.widget, box(true, 1, [row.name, row.title])]) });
@@ -473,8 +481,7 @@ class MediaPanel {
                         return;
                     }
                     this.reportFailure('');
-                    this.sources.reveal_child = false;
-                    this.chevron.set_label('󰅃');
+                    this.setSourcesOpen(false);
                 });
                 row.widget = box(false, 8, [row.play, select]);
                 row.widget.add_css_class('source-row');
@@ -485,10 +492,7 @@ class MediaPanel {
             row.name.set_label(group.displayName);
             row.title.set_label(group.title);
             row.widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [`${group.displayName}\n${group.title}`]);
-            row.play.get_child().set_label(group.primary.playing ? '󰏤' : '󰐊');
-            const transport = this.backend.transport(group);
-            row.play.sensitive = current && transport.enabled;
-            row.play.update_property([Gtk.AccessibleProperty.DESCRIPTION], [transport.reason]);
+            this.renderPlay(row.play, group, current);
             if (bus === this.activePlayer) row.widget.add_css_class('current');
             else row.widget.remove_css_class('current');
             row.art.set(group.primary.cover, group.primary.url, this.opened && this.sources.reveal_child);
@@ -498,11 +502,16 @@ class MediaPanel {
     }
 
     position() {
-        const player = this.group && this.backend.player(this.group.primary.bus);
-        if (!this.seekDragging) this.seek.set_value(player?.position || 0);
+        const player = this.group && this.backend.progress(this.group.primary.bus);
+        this.rewind.sensitive = this.forward.sensitive = this.modelCurrent() && this.canSeekBy(player);
+        const hasRange = Number.isFinite(player?.length) && player.length > 0;
+        if (!this.seekDragging) {
+            this.seek.set_value(hasRange && player.positionSupported
+                ? Math.min(player.length, Math.max(0, player.position)) : 0);
+        }
         this.elapsed.set_label(formatTime(this.seekDragging ? this.seek.get_value()
             : player?.positionSupported ? player.position : null));
-        this.total.set_label(formatTime(player?.length));
+        this.total.set_label(formatTime(hasRange ? player.length : null));
     }
 
     toggle(monitor) {
@@ -531,15 +540,11 @@ class MediaPanel {
         if (this.positionTimer) GLib.source_remove(this.positionTimer);
         this.positionTimer = 0;
         this.window.keymode = Astal.Keymode.NONE;
-        this.seekDragging = false;
-        this.seekPending = false;
-        this.seekTarget = null;
-        this.sources.reveal_child = false;
-        this.chevron.set_label('󰅃');
+        this.resetSeek();
+        this.setSourcesOpen(false);
         this.revealer.reveal_child = false;
         this.render();
     }
-
 
     dispose() {
         if (this.positionTimer) GLib.source_remove(this.positionTimer);

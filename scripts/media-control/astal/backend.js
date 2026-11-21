@@ -67,6 +67,9 @@ function snapshot(raw) {
         copy.position = player.positionSupported ? player.position : 0;
         if (!Number.isFinite(copy.position) || copy.position < 0)
             fail('Supported player positions must be finite and nonnegative.');
+        copy.modelPosition = player.modelPosition === undefined ? copy.position : player.modelPosition;
+        if (!Number.isFinite(copy.modelPosition) || copy.modelPosition < 0)
+            fail('Model positions must be finite and nonnegative.');
         return copy;
     });
     const ids = new Set();
@@ -90,14 +93,16 @@ function snapshot(raw) {
 
 function stamp(state) {
     return JSON.stringify({
-        players: state.players.map(({ position, ...player }) => player),
+        players: state.players.map(({ position, modelPosition, ...player }) => player),
         streams: state.streams,
     });
 }
 
 function protocol(state) {
     return {
-        players: state.players.map(({ instance, trackId, seekRevision, positionSupported, rate, ...player }) => player),
+        players: state.players.map(({ instance, trackId, seekRevision, positionSupported, rate, modelPosition, ...player }) => ({
+            ...player, position: modelPosition,
+        })),
         streams: state.streams.map(({ instance, ...stream }) => stream),
     };
 }
@@ -114,10 +119,12 @@ function freeze(value) {
  * Transport/safety bridge to the Rust model; never groups players or routes audio.
  *
  * capture() returns protocol players/streams plus player {trackId, instance,
- * seekRevision, positionSupported, rate} and stream {instance}. Instance serials
- * must change on native object replacement, including reuse of a bus/stream ID.
+ * seekRevision, positionSupported, rate, modelPosition?} and stream {instance}.
+ * Instance serials must change on native object replacement, including bus/stream ID reuse.
  * Extra fields (including volume) are ignored. Unknown positions are sent as 0;
- * invalid/unknown lengths as null. The extra bridge fields never go to Rust.
+ * invalid/unknown lengths as null. Optional modelPosition supplies a fresh confirmed
+ * sample (0 when stale) for matching, without replacing raw native position or
+ * entering action guards. The extra bridge fields never go to Rust.
  *
  * send(requestObject) synchronously dispatches ONE JSON request; the backend
  * serializes it and calls receive(parsedResponse). A throw/false means send failure.
@@ -520,6 +527,8 @@ export class Planner {
 
 export const clock = () => GLib.get_monotonic_time() / 1e6;
 const bounded = value => Math.min(1, Math.max(0, value));
+// Astal polls playing positions every second. Do not coast through a stalled source.
+const MAX_POSITION_AGE = 5;
 const PROPERTIES = [
     'application.name', 'application.id', 'application.process.binary',
     'media.title', 'media.filename', 'media.url', 'node.nick',
@@ -543,16 +552,411 @@ function identity(player) {
 // Volume must use a fresh ownership decision, not a recycled native node ID.
 function ownershipStamp(data) {
     return JSON.stringify({
-        players: data.players.map(({ position, seekRevision, rate, positionSupported, cover, ...player }) => player),
+        players: data.players.map(({ position, modelPosition, seekRevision, rate, positionSupported, cover, ...player }) => player),
         streams: data.streams,
     });
 }
 
+function projectedPosition(sample, now) {
+    return sample.anchor + (sample.playing ? Math.max(0, now - sample.at) * sample.rate : 0);
+}
+
+function positionFresh(sample, now) {
+    return !sample.playing || now - sample.sampledAt <= MAX_POSITION_AGE;
+}
+
+function readPosition(bus, cancellable) {
+    return new Promise((resolve, reject) => Gio.DBus.session.call(
+        bus, '/org/mpris/MediaPlayer2', 'org.freedesktop.DBus.Properties', 'Get',
+        new GLib.Variant('(ss)', ['org.mpris.MediaPlayer2.Player', 'Position']),
+        new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, 1500, cancellable,
+        (connection, result) => {
+            try {
+                const value = connection.call_finish(result).deep_unpack()[0].deep_unpack();
+                if (!Number.isFinite(value) || value < 0) throw new Error('Unsupported media position.');
+                resolve(value / 1e6);
+            } catch (error) { reject(error); }
+        },
+    ));
+}
+
+const MPRIS_ROOT = 'org.mpris.MediaPlayer2';
+const MPRIS_PLAYER = `${MPRIS_ROOT}.Player`;
+const MPRIS_PATH = '/org/mpris/MediaPlayer2';
+const DBUS = 'org.freedesktop.DBus';
+const DBUS_PATH = '/org/freedesktop/DBus';
+const DBUS_PROPERTIES = `${DBUS}.Properties`;
+const unpack = value => value?.deep_unpack ? value.deep_unpack() : value;
+
+function dbusCall(connection, bus, path, iface, method, signature, args, cancellable) {
+    return new Promise((resolve, reject) => connection.call(bus, path, iface, method,
+        signature ? new GLib.Variant(signature, args) : null, null, Gio.DBusCallFlags.NONE, 1500, cancellable,
+        (source, result) => {
+            try { resolve(source.call_finish(result).deep_unpack()); }
+            catch (error) { reject(error); }
+        }));
+}
+
+// Recover real MPRIS exports without an available public bus name.
+// Normal players continue to use Astal; this adapter targets the actual unique owner.
+class DirectPlayer {
+    constructor(bus, { connection = Gio.DBus.session } = {}) {
+        this.bus_name = bus;
+        this.connection = connection;
+        this.cancel = new Gio.Cancellable();
+        this.handlers = new Map();
+        this.serial = 0;
+        this.subscriptions = [];
+        this.metadata = {};
+        this.available = this.disposed = false;
+        this.identity = this.entry = this.trackid = this.title = this.artist = this.album = this.art_url = this.cover_art = '';
+        this.can_play = this.can_pause = this.can_seek = this.can_go_next = this.can_go_previous = false;
+        this.playback_status = Mpris.PlaybackStatus.STOPPED;
+        this.rate = 1;
+        this.length = this._position = this.volume = -1;
+        this.timer = 0;
+        this.positionRevision = this.positionSampleRevision = 0;
+        this.updates = [];
+        this.buffering = false;
+    }
+
+    connect(name, callback) { const id = ++this.serial; this.handlers.set(id, { name, callback }); return id; }
+    disconnect(id) { this.handlers.delete(id); }
+    notify(name) {
+        for (const handler of [...this.handlers.values()])
+            if (handler.name === 'notify') handler.callback(this, { name });
+    }
+    get_meta(key) { return this.metadata[key] ?? null; }
+    get position() { return this._position; }
+    set position(seconds) {
+        this.positionRevision++;
+        this.command('SetPosition', '(ox)', [this.trackid, Math.trunc(seconds * 1e6)]);
+    }
+    play() { this.command('Play'); }
+    pause() { this.command('Pause'); }
+    next() { this.command('Next'); }
+    previous() { this.command('Previous'); }
+
+    call(iface, method, signature, args) {
+        return dbusCall(this.connection, this.bus_name, MPRIS_PATH, iface, method, signature, args, this.cancel);
+    }
+    command(method, signature = null, args = []) {
+        if (!this.available) throw new Error('The media player disappeared.');
+        this.call(MPRIS_PLAYER, method, signature, args).then(() => {
+            if (method === 'SetPosition' && !this.disposed) return this.refreshPosition();
+        }).catch(error => {
+            if (!this.disposed) console.warn(`Media ${method}: ${message(error)}`);
+        });
+    }
+
+    async start() {
+        if (this.disposed) throw new Error('Media lookup cancelled.');
+        if (this.available) return this;
+        // A slow initial snapshot must not roll back newer properties or Seeked signals.
+        this.buffering = true;
+        try {
+            for (const [iface, signal, receive] of [
+                [DBUS_PROPERTIES, 'PropertiesChanged', params => {
+                    const [changedInterface, properties, invalidated] = params.deep_unpack();
+                    if (![MPRIS_ROOT, MPRIS_PLAYER].includes(changedInterface)) return;
+                    this.applyProperties(properties);
+                    if (invalidated.length) this.reload();
+                }],
+                [MPRIS_PLAYER, 'Seeked', params => this.setPosition(params.deep_unpack()[0], true)],
+            ]) this.subscriptions.push(this.connection.signal_subscribe(this.bus_name, iface, signal,
+                MPRIS_PATH, null, Gio.DBusSignalFlags.NONE, (...args) => {
+                    if (this.disposed) return;
+                    const update = () => receive(args.at(-1));
+                    if (this.buffering) this.updates.push(update); else update();
+                }));
+            const [[root], [player]] = await Promise.all([
+                this.call(DBUS_PROPERTIES, 'GetAll', '(s)', [MPRIS_ROOT]),
+                this.call(DBUS_PROPERTIES, 'GetAll', '(s)', [MPRIS_PLAYER]),
+            ]);
+            if (this.disposed) throw new Error('Media lookup cancelled.');
+            this.applyProperties(root);
+            this.applyProperties(player, true);
+            this.flushUpdates();
+            if (!Number.isFinite(this._position) || this._position < 0) await this.refreshPosition().catch(() => {});
+            if (this.disposed) throw new Error('Media lookup cancelled.');
+            this.available = true;
+            this.poll();
+            if (this.reloadAgain && !this.reloading) { this.reloadAgain = false; this.reload(); }
+            return this;
+        } catch (error) { this.dispose(); throw error; }
+    }
+
+    applyProperties(properties, fullPlayer = false) {
+        if (this.disposed) return;
+        const changed = new Set();
+        for (const [source, target, fallback] of [
+            ['Identity', 'identity', ''], ['DesktopEntry', 'entry', ''], ['Rate', 'rate', 1],
+            ['CanPlay', 'can_play', false], ['CanPause', 'can_pause', false], ['CanSeek', 'can_seek', false],
+            ['CanGoNext', 'can_go_next', false], ['CanGoPrevious', 'can_go_previous', false],
+        ]) {
+            if (!has(properties, source)) continue;
+            const raw = unpack(properties[source]);
+            const value = typeof raw === typeof fallback && (typeof raw !== 'number' || Number.isFinite(raw)) ? raw : fallback;
+            if (this[target] !== value) { this[target] = value; changed.add(target.replaceAll('_', '-')); }
+        }
+        if (has(properties, 'PlaybackStatus')) {
+            const status = unpack(properties.PlaybackStatus);
+            const value = status === 'Playing' ? Mpris.PlaybackStatus.PLAYING
+                : status === 'Paused' ? Mpris.PlaybackStatus.PAUSED : Mpris.PlaybackStatus.STOPPED;
+            if (value !== this.playback_status) {
+                this.positionRevision++;
+                this.playback_status = value;
+                changed.add('playback-status');
+            }
+        }
+        let trackChanged = false;
+        if (has(properties, 'Metadata') || fullPlayer) {
+            const previous = JSON.stringify([this.trackid, this.title, unpack(this.get_meta('xesam:url'))]);
+            this.metadata = unpack(properties.Metadata) || {};
+            const string = key => typeof unpack(this.get_meta(key)) === 'string' ? unpack(this.get_meta(key)) : '';
+            this.trackid = string('mpris:trackid');
+            this.title = string('xesam:title');
+            this.album = string('xesam:album');
+            this.art_url = string('mpris:artUrl');
+            const artists = unpack(this.get_meta('xesam:artist'));
+            this.artist = Array.isArray(artists) ? artists.join(', ') : '';
+            const length = unpack(this.get_meta('mpris:length'));
+            this.length = Number.isFinite(length) && length > 0 ? length / 1e6 : -1;
+            trackChanged = previous !== JSON.stringify([this.trackid, this.title, unpack(this.get_meta('xesam:url'))]);
+            if (trackChanged) this.positionRevision++;
+            changed.add('metadata');
+        }
+        if (has(properties, 'Position')) this.setPosition(unpack(properties.Position));
+        else if (trackChanged) this.setPosition(-1);
+        for (const name of changed) this.notify(name);
+        this.poll();
+        if (trackChanged && this.available && !has(properties, 'Position')) this.refreshPosition().catch(() => {});
+    }
+
+    setPosition(microseconds, force = false) {
+        if (this.disposed) return;
+        const position = Number.isFinite(microseconds) && microseconds >= 0 ? microseconds / 1e6 : -1;
+        this.positionRevision++;
+        if (position >= 0) this.positionSampleRevision = this.positionRevision;
+        if (position !== this._position || force) { this._position = position; this.notify('position'); }
+    }
+    refreshPosition() {
+        // Share poll/view reads, and discard samples crossing a track or seek boundary.
+        if (this.disposed) return Promise.reject(new Error('Media lookup cancelled.'));
+        const retryStale = value => value === null && !this.disposed ? this.refreshPosition() : value;
+        if (this.positionRead) return this.positionRead.then(retryStale);
+        const revision = this.positionRevision;
+        this.positionRead = this.call(DBUS_PROPERTIES, 'Get', '(ss)', [MPRIS_PLAYER, 'Position']).then(([value]) => {
+            if (this.disposed) throw new Error('Media lookup cancelled.');
+            if (revision !== this.positionRevision)
+                return this._position >= 0 && this.positionSampleRevision > revision ? this._position : null;
+            const microseconds = unpack(value);
+            if (!Number.isFinite(microseconds) || microseconds < 0) throw new Error('Unsupported media position.');
+            this.setPosition(microseconds);
+            return this._position;
+        }).finally(() => { this.positionRead = null; });
+        return this.positionRead.then(retryStale);
+    }
+    flushUpdates() {
+        this.buffering = false;
+        const updates = this.updates;
+        this.updates = [];
+        if (!this.disposed) for (const update of updates) update();
+    }
+    reload() {
+        if (this.disposed) return;
+        if (this.reloading || this.buffering) { this.reloadAgain = true; return; }
+        this.reloading = this.buffering = true;
+        this.call(DBUS_PROPERTIES, 'GetAll', '(s)', [MPRIS_PLAYER])
+            .then(([properties]) => this.applyProperties(properties, true)).catch(() => {})
+            .finally(() => {
+                this.flushUpdates();
+                this.reloading = false;
+                if (this.reloadAgain && !this.disposed) { this.reloadAgain = false; this.reload(); }
+            });
+    }
+    poll() {
+        const playing = this.available && this.playback_status === Mpris.PlaybackStatus.PLAYING;
+        if (!playing && this.timer) { GLib.source_remove(this.timer); this.timer = 0; }
+        if (!playing || this.timer || this.disposed) return;
+        this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            this.refreshPosition().catch(() => {});
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+    dispose() {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.available = false;
+        this.cancel.cancel();
+        if (this.timer) GLib.source_remove(this.timer);
+        this.timer = 0;
+        for (const id of this.subscriptions) this.connection.signal_unsubscribe(id);
+        this.subscriptions = [];
+        this.updates = [];
+        this.handlers.clear();
+    }
+}
+
+function applicationKey(value) {
+    return String(value || '').split(/[\\/]/).at(-1).replace(/^\./, '').replace(/-wrapped$/, '')
+        .replace(/\.desktop$/, '').split('.').at(-1).toLowerCase();
+}
+
+class LocalPlayerDiscovery {
+    constructor({ getStreams, getPlayers, onChange = () => {}, connection = Gio.DBus.session,
+        applicationForPid = pid => GLib.file_read_link(`/proc/${pid}/exe`),
+        createPlayer = bus => new DirectPlayer(bus, { connection }) }) {
+        Object.assign(this, { getStreams, getPlayers, onChange, connection, applicationForPid, createPlayer });
+        this.cancel = new Gio.Cancellable();
+        this.owners = new Set();
+        this.credentials = new Map();
+        this.applications = new Map();
+        this.aliases = new Map();
+        this.found = new Map();
+        this.probing = new Set();
+        this.checked = new Set();
+        this.keys = new Set();
+        this.retried = new Set();
+        this.retries = new Map();
+        this.initialClosed = new Set();
+        this.aliasRevision = 0;
+        this.disposed = this.listed = false;
+        this.signal = 0;
+    }
+    get players() { return [...this.found.values()]; }
+    daemon(method, signature = null, args = []) {
+        return dbusCall(this.connection, DBUS, DBUS_PATH, DBUS, method, signature, args, this.cancel);
+    }
+    async start() {
+        if (this.disposed || this.signal) return;
+        this.signal = this.connection.signal_subscribe(DBUS, DBUS, 'NameOwnerChanged', DBUS_PATH,
+            null, Gio.DBusSignalFlags.NONE, (...args) => {
+                if (this.disposed) return;
+                const [name, , owner] = args.at(-1).deep_unpack();
+                if (name.startsWith(':')) {
+                    if (owner) this.owners.add(name);
+                    else {
+                        this.owners.delete(name);
+                        this.credentials.delete(name);
+                        this.applications.delete(name);
+                        this.checked.delete(name);
+                        this.retried.delete(name);
+                        if (!this.listed) this.initialClosed.add(name);
+                        if (this.retries.has(name)) { GLib.source_remove(this.retries.get(name)); this.retries.delete(name); }
+                        this.remove(name);
+                    }
+                } else if (name.startsWith(`${MPRIS_ROOT}.`)) {
+                    this.aliasRevision++;
+                    if (owner) this.aliases.set(name, owner); else this.aliases.delete(name);
+                } else return;
+                this.refresh();
+            });
+        try {
+            const [names] = await this.daemon('ListNames');
+            if (this.disposed) return;
+            for (const name of names) if (name.startsWith(':') && !this.initialClosed.has(name)) this.owners.add(name);
+            this.initialClosed.clear();
+            this.listed = true;
+            await this.refresh();
+        } catch (error) {
+            if (!this.disposed) console.warn(`Local media discovery: ${message(error)}`);
+        }
+    }
+    refresh() {
+        if (this.disposed || !this.listed) return Promise.resolve();
+        const streams = this.getStreams() || [];
+        this.keys = new Set(streams.flatMap(stream => ['application.name', 'application.id', 'application.process.binary']
+            .map(key => applicationKey(stream.get_pw_property(key))).filter(Boolean)));
+        const names = (this.getPlayers() || []).map(player => player.bus_name);
+        const signature = JSON.stringify([[...this.keys].sort(), streams.map(stream => stream.id).sort(), names.slice().sort()]);
+        if (signature !== this.signature) { this.signature = signature; this.checked.clear(); }
+        if (this.running) { this.again = true; return this.running; }
+        this.running = this.scan(names).finally(() => {
+            this.running = null;
+            if (this.again && !this.disposed) { this.again = false; this.refresh(); }
+        });
+        return this.running;
+    }
+    async scan(names) {
+        await Promise.all(names.map(async name => {
+            if (this.aliases.has(name) || name.startsWith(':')) return;
+            try {
+                const revision = this.aliasRevision;
+                const [owner] = await this.daemon('GetNameOwner', '(s)', [name]);
+                if (!this.disposed && revision === this.aliasRevision) this.aliases.set(name, owner);
+            } catch (_) { /* The standard player may have closed during discovery. */ }
+        }));
+        const normal = new Set(names.map(name => this.aliases.get(name) || name));
+        // Streams admit new candidates; verified players survive a pause that closes audio.
+        for (const owner of this.found.keys())
+            if (!this.owners.has(owner) || normal.has(owner)) this.remove(owner);
+        if (!this.keys.size || this.disposed) return;
+        const queue = [...this.owners].filter(owner => !normal.has(owner) && !this.found.has(owner) && !this.checked.has(owner));
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+            while (queue.length && !this.disposed) {
+                const owner = queue.shift();
+                this.checked.add(owner);
+                // Only the daemon is queried globally; application probes require a stream match.
+                if (!this.credentials.has(owner)) this.credentials.set(owner,
+                    this.daemon('GetConnectionUnixProcessID', '(s)', [owner]).then(([pid]) => {
+                        if (this.disposed || !this.owners.has(owner)) return '';
+                        return applicationKey(this.applicationForPid(pid));
+                    }).catch(() => ''));
+                const application = await this.credentials.get(owner);
+                this.applications.set(owner, application);
+                if (this.disposed || !this.owners.has(owner) || !this.keys.has(application) || normal.has(owner)) continue;
+                const player = this.createPlayer(owner);
+                this.probing.add(player);
+                try {
+                    await player.start();
+                    const standard = (this.getPlayers() || []).some(p => (this.aliases.get(p.bus_name) || p.bus_name) === owner);
+                    if (this.disposed || !this.owners.has(owner) || standard) player.dispose();
+                    else { this.found.set(owner, player); this.onChange(); }
+                } catch (error) {
+                    player.dispose();
+                    // A fresh connection can precede object export. Retry once, never poll discovery.
+                    if (!this.disposed && this.owners.has(owner) && !this.retried.has(owner)
+                        && /UnknownObject|UnknownInterface|UnknownMethod/.test(message(error))) {
+                        this.retried.add(owner);
+                        this.retries.set(owner, GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                            this.retries.delete(owner);
+                            this.checked.delete(owner);
+                            this.refresh();
+                            return GLib.SOURCE_REMOVE;
+                        }));
+                    }
+                }
+                finally { this.probing.delete(player); }
+            }
+        }));
+    }
+    remove(owner) {
+        const player = this.found.get(owner);
+        if (!player) return;
+        this.found.delete(owner);
+        player.dispose();
+        if (!this.disposed) this.onChange();
+    }
+    dispose() {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.cancel.cancel();
+        if (this.signal) this.connection.signal_unsubscribe(this.signal);
+        for (const timer of this.retries.values()) GLib.source_remove(timer);
+        this.retries.clear();
+        for (const player of [...this.found.values(), ...this.probing]) player.dispose();
+        this.found.clear();
+        this.probing.clear();
+    }
+}
+
 class NativeMedia {
-    constructor({ onChange = () => {} } = {}) {
+    constructor({ onChange = () => {}, queryPosition = readPosition } = {}) {
         this.mpris = Mpris.get_default();
         this.audio = Wp.get_default().audio;
         this.onChange = onChange;
+        this.queryPosition = queryPosition;
         this.players = new Map();
         this.streams = new Map();
         this.serial = 0;
@@ -577,10 +981,22 @@ class NativeMedia {
         });
     }
 
+    start() {
+        if (this.discovery) return;
+        this.discovery = new LocalPlayerDiscovery({
+            getStreams: () => this.audio.streams, getPlayers: () => this.mpris.players,
+            onChange: () => this.sync(),
+        });
+        this.discovery.start();
+    }
+
     sync() {
-        this.syncObjects(this.players, this.mpris.players, player => player.bus_name, player => {
-            const record = { object: player, instance: ++this.serial, seekRevision: 0 };
+        const players = [...(this.mpris.players || []), ...(this.discovery?.players || [])];
+        this.syncObjects(this.players, players, player => player.bus_name, player => {
+            const record = { object: player, instance: ++this.serial, seekRevision: 0, progress: null };
+            this.sampleProgress(record);
             record.signal = player.connect('notify', (_, property) => {
+                this.sampleProgress(record, property?.name === 'position');
                 // These properties affect the view, not grouping or stream ownership.
                 this.changed(!['volume', 'cover-art'].includes(property?.name));
             });
@@ -588,8 +1004,12 @@ class NativeMedia {
         });
         this.syncObjects(this.streams, this.audio.streams, stream => stream.id, stream => ({
             object: stream, instance: ++this.serial,
-            signal: stream.connect('notify', () => this.changed()),
+            signal: stream.connect('notify', () => {
+                this.discovery?.refresh();
+                this.changed();
+            }),
         }));
+        this.discovery?.refresh();
         this.changed();
     }
 
@@ -597,12 +1017,17 @@ class NativeMedia {
         const current = new Map((objects || []).map(object => [key(object), object]));
         for (const [id, record] of records) {
             if (current.get(id) !== record.object) {
-                record.object.disconnect(record.signal);
+                this.disconnectRecord(record);
                 records.delete(id);
             }
         }
         for (const [id, object] of current)
             if (!records.has(id)) records.set(id, create(object));
+    }
+
+    disconnectRecord(record) {
+        record.object.disconnect(record.signal);
+        record.positionQuery?.cancel();
     }
 
     player(bus) {
@@ -611,6 +1036,10 @@ class NativeMedia {
         const player = record.object;
         const positionSupported = Number.isFinite(player.position) && player.position >= 0;
         const rate = Number.isFinite(player.rate) ? player.rate : 1;
+        // Accept numeric MPRIS microseconds when Astal rejects the variant's type.
+        const rawLength = meta(player, 'mpris:length');
+        const length = Number.isFinite(player.length) && player.length > 0 ? player.length
+            : Number.isFinite(rawLength) && rawLength > 0 ? rawLength / 1e6 : null;
         return {
             bus, instance: record.instance, trackId: player.trackid || '', trackKey: identity(player),
             identity: player.identity || '', desktopEntry: player.entry || '',
@@ -621,7 +1050,7 @@ class NativeMedia {
             stopped: player.playback_status === Mpris.PlaybackStatus.STOPPED,
             position: positionSupported ? player.position : 0, positionSupported,
             seekRevision: record.seekRevision, rate,
-            length: player.length > 0 && Number.isFinite(player.length) ? player.length : null,
+            length,
             canPlay: Boolean(player.can_play), canPause: Boolean(player.can_pause),
             canSeek: Boolean(player.can_seek),
             canNext: Boolean(player.can_go_next), canPrevious: Boolean(player.can_go_previous),
@@ -629,10 +1058,84 @@ class NativeMedia {
         };
     }
 
+    sampleProgress(record, freshPosition = false, confirmedPosition = undefined) {
+        const player = record.object;
+        const key = JSON.stringify([identity(player), meta(player, 'xesam:url'), player.title]);
+        const raw = player.position;
+        const playing = player.playback_status === Mpris.PlaybackStatus.PLAYING;
+        const stopped = player.playback_status === Mpris.PlaybackStatus.STOPPED;
+        const rate = Number.isFinite(player.rate) ? player.rate : 1;
+        const previous = record.progress;
+        const sameTrack = previous?.key === key;
+        const now = clock();
+        if (sameTrack && !freshPosition && raw === previous.raw
+            && playing === previous.playing && stopped === previous.stopped && rate === previous.rate) return;
+
+        const hasNewSample = !previous || freshPosition || raw !== previous.raw;
+        const continuing = sameTrack && !hasNewSample;
+        const position = confirmedPosition ?? (continuing ? previous.anchor : raw);
+        // A playing source's zero may be a placeholder, not a real start-of-track sample.
+        const canAnchor = Number.isFinite(position) && position >= 0 && !stopped && (position > 0 || !playing);
+        let anchor = position, sampledAt = now, trusted = canAnchor && hasNewSample;
+        const samplePosition = hasNewSample ? position : previous.samplePosition;
+        if (continuing) {
+            anchor = projectedPosition(previous, now);
+            trusted = canAnchor && previous.trusted && positionFresh(previous, now);
+            sampledAt = previous.playing ? previous.sampledAt : now;
+        }
+        const queryPending = record.positionQuery && !record.positionQuery.is_cancelled();
+        record.positionQuery?.cancel();
+        record.progress = { key, raw, playing, stopped, rate, anchor, at: now, sampledAt, samplePosition, trusted };
+        // Astal does not poll paused tracks. Refresh after discovery/track changes
+        // and preserve recovery across pause/rate transitions that cancel a read.
+        if (!freshPosition && !stopped && (!previous || !sameTrack
+            || (!playing && (previous.playing || !trusted || queryPending)))) this.refreshProgress(record);
+    }
+
+    refreshProgress(record) {
+        const pending = record.progress;
+        const cancel = record.positionQuery = new Gio.Cancellable();
+        const query = record.object instanceof DirectPlayer
+            ? record.object.refreshPosition() : this.queryPosition(record.object.bus_name, cancel);
+        query.then(position => {
+            if (cancel.is_cancelled()) return;
+            this.sampleProgress(record);
+            if (cancel.is_cancelled() || record.progress !== pending) return;
+            this.sampleProgress(record, true, position);
+            this.changed();
+        }).catch(error => {
+            if (!cancel.is_cancelled()) console.warn(`Media position refresh: ${message(error)}`);
+        }).finally(() => {
+            if (record.positionQuery === cancel) record.positionQuery = null;
+        });
+    }
+
+    // Display estimates stay separate from native samples used by grouping and action guards.
+    progress(bus, player = null) {
+        const record = this.players.get(bus);
+        if (!record?.object.available) return null;
+        this.sampleProgress(record);
+        player ??= this.player(bus);
+        const sample = record.progress;
+        const now = clock();
+        const position = projectedPosition(sample, now);
+        const supported = sample.trusted && Number.isFinite(position) && positionFresh(sample, now);
+        const qualityChanged = record.modelPositionSupported !== undefined && record.modelPositionSupported !== supported;
+        record.modelPositionSupported = supported;
+        if (qualityChanged) this.changed();
+        return { ...player, positionSupported: supported,
+            samplePosition: supported ? sample.samplePosition : null,
+            position: supported ? Math.max(0, player.length ? Math.min(player.length, position) : position) : 0 };
+    }
 
     capture() {
         return {
-            players: [...this.players.keys()].map(bus => this.player(bus)),
+            players: [...this.players.keys()].map(bus => {
+                const player = this.player(bus);
+                const progress = this.progress(bus, player);
+                // A frozen nonzero sample is unknown, not evidence of different playback.
+                return { ...player, modelPosition: progress?.positionSupported ? progress.samplePosition : 0 };
+            }),
             streams: [...this.streams.values()].map(({ object: stream, instance }) => {
                 const properties = Object.fromEntries(PROPERTIES.map(key => [key, stream.get_pw_property(key) || '']));
                 properties['media.name'] = stream.name || '';
@@ -665,6 +1168,8 @@ class NativeMedia {
             // Astal dispatches asynchronously. This guards our dispatch only;
             // position/support continue to come exclusively from native state.
             record.seekRevision++;
+            record.positionQuery?.cancel();
+            record.progress.trusted = false;
             break;
         }
         default: throw new Error('Unsupported native media operation.');
@@ -737,19 +1242,24 @@ class NativeMedia {
     }
 
     dispose() {
+        this.discovery?.dispose();
         if (this.idle) GLib.source_remove(this.idle);
         this.idle = 0;
         this.signals.forEach(([object, signal]) => object.disconnect(signal));
         for (const records of [this.players, this.streams]) {
-            for (const record of records.values()) record.object.disconnect(record.signal);
+            for (const record of records.values()) this.disconnectRecord(record);
             records.clear();
         }
     }
 }
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
 const MAX_HELPER_BYTES = 1024 * 1024;
+const PIPE_CHUNK_BYTES = 8192;
 const HELPER_TIMEOUT_MS = 12000;
+const MODEL_TIMEOUT_MS = 4000;
+const MODEL_RETRY_MS = 1500;
 
 export function runHelper(argv, input = null, cancellable = new Gio.Cancellable()) {
     return new Promise((resolve, reject) => {
@@ -797,10 +1307,10 @@ export function runHelper(argv, input = null, cancellable = new Gio.Cancellable(
                     bytes.set(data, offset);
                     offset += data.length;
                 }
-                settle(null, new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+                settle(null, decoder.decode(bytes));
             } catch (error) { settle(error); }
         };
-        const read = () => output.read_bytes_async(8192, GLib.PRIORITY_DEFAULT, io, (stream, result) => {
+        const read = () => output.read_bytes_async(PIPE_CHUNK_BYTES, GLib.PRIORITY_DEFAULT, io, (stream, result) => {
             try {
                 const bytes = stream.read_bytes_finish(result);
                 if (settled) return;
@@ -923,10 +1433,10 @@ class ModelWorker {
     send(request) {
         if (!this.child || this.pending !== null) throw new Error('Media worker is not ready.');
         const data = encoder.encode(JSON.stringify(request) + '\n');
-        if (data.length > 1024 * 1024) throw new Error('Media snapshot is too large.');
+        if (data.length > MAX_HELPER_BYTES) throw new Error('Media snapshot is too large.');
         this.pending = request.requestId;
         const generation = this.generation;
-        this.watchdog = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 4000, () => {
+        this.watchdog = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MODEL_TIMEOUT_MS, () => {
             this.watchdog = 0;
             this.failed('Media helper timed out; pending actions were discarded.');
             return GLib.SOURCE_REMOVE;
@@ -938,7 +1448,7 @@ class ModelWorker {
     }
 
     read(generation) {
-        this.output.read_bytes_async(8192, GLib.PRIORITY_DEFAULT, this.cancel, (stream, result) => {
+        this.output.read_bytes_async(PIPE_CHUNK_BYTES, GLib.PRIORITY_DEFAULT, this.cancel, (stream, result) => {
             if (generation !== this.generation) return;
             try {
                 const bytes = stream.read_bytes_finish(result).toArray();
@@ -946,11 +1456,11 @@ class ModelWorker {
                 const joined = new Uint8Array(this.buffer.length + bytes.length);
                 joined.set(this.buffer);
                 joined.set(bytes, this.buffer.length);
-                if (joined.length > 1024 * 1024) throw new Error('Media model response is too large.');
+                if (joined.length > MAX_HELPER_BYTES) throw new Error('Media model response is too large.');
                 let start = 0;
                 for (let index = 0; index < joined.length; index++) {
                     if (joined[index] !== 10) continue;
-                    const response = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(joined.subarray(start, index)));
+                    const response = JSON.parse(decoder.decode(joined.subarray(start, index)));
                     if (this.pending === null || response.requestId !== this.pending)
                         throw new Error('Unexpected media model response.');
                     this.pending = null;
@@ -972,7 +1482,7 @@ class ModelWorker {
         if (this.disposed) return;
         this.stop();
         this.onFailure(reason);
-        this.retry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
+        this.retry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MODEL_RETRY_MS, () => {
             this.retry = 0;
             this.start();
             return GLib.SOURCE_REMOVE;
@@ -1038,6 +1548,7 @@ export class MediaBackend {
 
     start() {
         this.worker.start();
+        this.native.start();
     }
 
     resolveGroups() {
@@ -1046,6 +1557,7 @@ export class MediaBackend {
     }
 
     player(bus) { return this.native.player(bus); }
+    progress(bus) { return this.native.progress(bus); }
 
     transport(group) {
         const primary = group?.primary;

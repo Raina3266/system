@@ -4,13 +4,17 @@
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
+use lofty::config::ParseOptions;
+use lofty::file::TaggedFileExt;
+use lofty::prelude::Accessor;
+use lofty::probe::Probe;
 use serde::{Deserialize, Serialize};
 
 const MAX_INPUT_BYTES: usize = 64 * 1024;
@@ -18,6 +22,7 @@ const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MAX_AUTHOR_BYTES: usize = 1024;
 const MAX_CACHE_BYTES: usize = 4096;
 const MAX_CACHE_ENTRIES: usize = 128;
+const MAX_TAG_READ_BYTES: usize = 8 * 1024 * 1024;
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_DIR: &str = "media-control/authors";
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -42,6 +47,8 @@ struct CreditReply<'a> {
 /// The original fields are echoed unchanged so callers can reject stale replies.
 /// Only invalid input or local stdin/stdout errors fail this operation; metadata
 /// lookup and cache failures produce the ordinary credit fallback instead.
+/// For local tracks, embedded tags fill empty artist/album fields in the credit
+/// only; the echoed request fields remain unchanged.
 ///
 /// `MEDIA_CONTROL_CURL` may name a curl-compatible executable (not a shell command).
 /// The successful-author cache lives under XDG_CACHE_HOME, or HOME/.cache.
@@ -167,10 +174,9 @@ impl Video {
     }
 }
 
-// Deliberately a narrow HTTP URL parser, not a general URL normalizer. Reject
-// credentials, escaped hosts and browser-style backslashes rather than guessing
-// which authority a different parser would see. IDs are never percent-decoded.
-fn http_url_parts(url: &str) -> Option<(&str, &str, &str)> {
+// Share only the HTTP(S) envelope; credit and browser filtering deliberately
+// retain different authority validation rules.
+pub(crate) fn http_authority(url: &str) -> Option<(&str, &str)> {
     if url
         .bytes()
         .any(|b| b.is_ascii_control() || b.is_ascii_whitespace() || b == b'\\')
@@ -182,7 +188,14 @@ fn http_url_parts(url: &str) -> Option<(&str, &str, &str)> {
         return None;
     }
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
+    Some(rest.split_at(authority_end))
+}
+
+// Deliberately a narrow HTTP URL parser, not a general URL normalizer. Reject
+// credentials, escaped hosts and browser-style backslashes rather than guessing
+// which authority a different parser would see. IDs are never percent-decoded.
+fn http_url_parts(url: &str) -> Option<(&str, &str, &str)> {
+    let (authority, path_query) = http_authority(url)?;
     if authority.contains('@') {
         return None;
     }
@@ -213,7 +226,7 @@ fn http_url_parts(url: &str) -> Option<(&str, &str, &str)> {
     {
         return None;
     }
-    let path_query = rest[authority_end..].split('#').next()?;
+    let path_query = path_query.split('#').next()?;
     let (path, query) = path_query.split_once('?').unwrap_or((path_query, ""));
     Some((host, path, query))
 }
@@ -238,11 +251,23 @@ fn resolve_credit(
     mut fetch: impl FnMut(&Video) -> Option<String>,
 ) -> String {
     let Some(video) = Video::parse(&request.url) else {
-        return [request.artist.as_str(), request.album.as_str()]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let (tag_artist, tag_album) = if request.artist.is_empty() || request.album.is_empty() {
+            local_tags(&request.url).unwrap_or_default()
+        } else {
+            (None, None)
+        };
+        return [
+            (request.artist.as_str(), tag_artist.as_deref()),
+            (request.album.as_str(), tag_album.as_deref()),
+        ]
+        .into_iter()
+        .map(|(supplied, tagged)| match supplied {
+            "" => tagged.unwrap_or_default(),
+            _ => supplied,
+        })
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
     };
     let cache = cache.filter(|directory| prepare_cache_dir(directory).is_ok());
     if let Some(author) = cache.and_then(|directory| read_cached_author(directory, &video)) {
@@ -261,6 +286,96 @@ fn resolve_credit(
     } else {
         request.artist.clone()
     }
+}
+
+// Accept only empty-authority file URLs or literal absolute filesystem paths.
+// Validate before decoding: file://%2Fmusic/song.mp3 is not an absolute file URL.
+fn local_credit_path(url: &str) -> Option<PathBuf> {
+    if let Some(encoded) = url.strip_prefix("file://") {
+        if !encoded.starts_with('/')
+            || encoded.starts_with("//")
+            || encoded.bytes().any(|byte| {
+                byte.is_ascii_control()
+                    || byte.is_ascii_whitespace()
+                    || matches!(byte, b'?' | b'#' | b'\\')
+            })
+        {
+            return None;
+        }
+    } else if !url.starts_with('/') {
+        return None;
+    }
+    let path = crate::artwork::local_path(url)?;
+    let text = path.to_str()?;
+    (!text.starts_with("//") && !text.chars().any(char::is_control)).then_some(path)
+}
+
+// Budget actual reads rather than file length, allowing large audio files and
+// seeks to trailing tags without scanning audio or loading it all into memory.
+struct TagReader<R> {
+    inner: R,
+    remaining: usize,
+}
+
+impl<R: Read> Read for TagReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            return Err(io::Error::other("media tag read limit exceeded"));
+        }
+        let limit = buffer.len().min(self.remaining);
+        let count = self.inner.read(&mut buffer[..limit])?;
+        self.remaining -= count;
+        Ok(count)
+    }
+}
+
+impl<R: Seek> Seek for TagReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
+
+fn local_tags(url: &str) -> Option<(Option<String>, Option<String>)> {
+    let path = local_credit_path(url)?;
+    if !fs::metadata(&path).ok()?.is_file() {
+        return None;
+    }
+    // Linux O_NONBLOCK also protects against a regular file being replaced by
+    // a FIFO between metadata and open. Check the opened file again before I/O.
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(0o4000)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut reader = TagReader {
+        inner: BufReader::new(file),
+        remaining: MAX_TAG_READ_BYTES,
+    };
+    let tagged = Probe::new(&mut reader)
+        .options(
+            ParseOptions::new()
+                .read_properties(false)
+                .read_cover_art(false),
+        )
+        .guess_file_type()
+        .ok()?
+        .read()
+        .ok()?;
+    // Some formats tolerate read errors; never use a partially budgeted parse.
+    if reader.remaining == 0 {
+        return None;
+    }
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    Some((
+        tag.artist().and_then(|value| validated_author(&value)),
+        tag.album().and_then(|value| validated_author(&value)),
+    ))
 }
 
 fn is_site_name(artist: &str) -> bool {
@@ -459,3 +574,215 @@ fn trim_cache(directory: &Path) {
 
 #[cfg(test)]
 media_unit_tests!(credit);
+
+#[cfg(test)]
+mod local_file_tests {
+    use super::*;
+    use lofty::config::WriteOptions;
+    use lofty::prelude::TagExt;
+    use lofty::tag::{Tag, TagType};
+    use std::io::Cursor;
+    use std::os::unix::fs::symlink;
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            loop {
+                let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+                let path = std::env::temp_dir().join(format!(
+                    "media-control-local-credit-test-{}-{sequence}",
+                    std::process::id()
+                ));
+                match fs::DirBuilder::new().mode(0o700).create(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("create test directory: {error}"),
+                }
+            }
+        }
+
+        fn mp3(&self, artist: Option<&str>, album: Option<&str>) -> String {
+            let path = self.0.join("Not the artist || Not the album % #? 曲.mp3");
+            let mut tag = Tag::new(TagType::Id3v2);
+            if let Some(artist) = artist {
+                tag.set_artist(artist.to_owned());
+            }
+            if let Some(album) = album {
+                tag.set_album(album.to_owned());
+            }
+            let mut bytes = Vec::new();
+            tag.dump_to(&mut bytes, WriteOptions::default()).unwrap();
+            // Three MPEG-1 Layer III frames, 128 kbps at 44.1 kHz.
+            for _ in 0..3 {
+                bytes.extend_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+                bytes.resize(bytes.len() + 413, 0);
+            }
+            fs::write(&path, bytes).unwrap();
+            path.to_str().unwrap().to_owned()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn credit(url: &str, artist: &str, album: &str) -> String {
+        resolve_credit(
+            &CreditRequest {
+                url: url.to_owned(),
+                artist: artist.to_owned(),
+                album: album.to_owned(),
+            },
+            None,
+            |_| panic!("local or unsupported URL must never fetch"),
+        )
+    }
+
+    fn file_url(path: &str) -> String {
+        let encoded: String = path
+            .bytes()
+            .map(|byte| match byte {
+                b'/' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                    char::from(byte).to_string()
+                }
+                _ => format!("%{byte:02X}"),
+            })
+            .collect();
+        format!("file://{encoded}")
+    }
+
+    #[test]
+    fn embedded_mp3_tags_fill_only_missing_mpris_fields() {
+        let fixture = Fixture::new();
+        let path = fixture.mp3(Some("Tagged 作者"), Some("Tagged Album"));
+        let before = fs::read(&path).unwrap();
+        for url in [&path, &file_url(&path)] {
+            for (artist, album, expected) in [
+                ("", "", "Tagged 作者 · Tagged Album"),
+                (" MPRIS Artist ", "", " MPRIS Artist  · Tagged Album"),
+                ("", "MPRIS Album", "Tagged 作者 · MPRIS Album"),
+                ("MPRIS Artist", "MPRIS Album", "MPRIS Artist · MPRIS Album"),
+                (" ", "MPRIS Album", "  · MPRIS Album"),
+            ] {
+                assert_eq!(credit(url, artist, album), expected);
+            }
+        }
+        assert_eq!(fs::read(&path).unwrap(), before, "tag lookup is read-only");
+        let request = CreditRequest {
+            url: file_url(&path),
+            artist: String::new(),
+            album: String::new(),
+        };
+        let resolved = resolve_credit(&request, None, |_| panic!("unexpected fetch"));
+        let mut output = Vec::new();
+        write_reply(&mut output, &request, &resolved).unwrap();
+        let reply: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(reply["artist"], "");
+        assert_eq!(reply["album"], "");
+        assert_eq!(reply["url"], request.url);
+        assert_eq!(reply["credit"], "Tagged 作者 · Tagged Album");
+    }
+
+    #[test]
+    fn absent_or_invalid_tags_never_guess_from_the_filename() {
+        let fixture = Fixture::new();
+        for (artist, album, expected) in [
+            (None, None, ""),
+            (Some("Only Artist"), None, "Only Artist"),
+            (None, Some("Only Album"), "Only Album"),
+            (Some(" \t "), Some("Bad\nAlbum"), ""),
+        ] {
+            let path = fixture.mp3(artist, album);
+            assert_eq!(credit(&path, "", ""), expected);
+        }
+    }
+
+    #[test]
+    fn missing_corrupt_and_nonregular_files_preserve_supplied_metadata() {
+        let fixture = Fixture::new();
+        let missing = fixture.0.join("missing.mp3");
+        let bad = fixture.0.join("bad.mp3");
+        fs::write(&bad, b"not an audio file").unwrap();
+        let fifo = fixture.0.join("fifo.mp3");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let link = fixture.0.join("fifo-link.mp3");
+        symlink(&fifo, &link).unwrap();
+        for path in [&missing, &bad, &fixture.0, &fifo, &link] {
+            for (artist, album, expected) in [
+                ("", "", ""),
+                ("Artist", "", "Artist"),
+                ("", "Album", "Album"),
+                ("Artist", "Album", "Artist · Album"),
+            ] {
+                assert_eq!(credit(path.to_str().unwrap(), artist, album), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn only_strict_absolute_local_paths_and_file_urls_are_accepted() {
+        let fixture = Fixture::new();
+        let path = fixture.mp3(Some("Artist"), Some("Album"));
+        let url = file_url(&path);
+        assert_eq!(local_credit_path(&url), Some(PathBuf::from(&path)));
+        assert_eq!(local_credit_path(&path), Some(PathBuf::from(&path)));
+        for invalid in [
+            String::new(),
+            "relative/song.mp3".into(),
+            "file:relative.mp3".into(),
+            "file:/music/song.mp3".into(),
+            "file://relative/song.mp3".into(),
+            "file://%2Fmusic/song.mp3".into(),
+            "file:///music/bad%2.mp3".into(),
+            "file:///music/bad%GG.mp3".into(),
+            "file:///music/bad%00.mp3".into(),
+            "file:///music/bad%FF.mp3".into(),
+            format!("file://remote.test{path}"),
+            format!("file://localhost{path}"),
+            format!("file://user@remote.test{path}"),
+            format!("file:///{path}"),
+            format!("file://%2F{path}"),
+            format!("/{path}"),
+            format!("{url}?query"),
+            format!("{url}#fragment"),
+            format!("https://example.test{path}"),
+            format!("smb://example.test{path}"),
+        ] {
+            assert_eq!(local_credit_path(&invalid), None, "{invalid:?}");
+            assert_eq!(credit(&invalid, "", ""), "", "{invalid:?}");
+            assert_eq!(credit(&invalid, "Provided", ""), "Provided");
+        }
+    }
+
+    #[test]
+    fn tag_read_budget_is_not_reset_by_seeking() {
+        let mut reader = TagReader {
+            inner: Cursor::new(b"12345678"),
+            remaining: 4,
+        };
+        let mut buffer = [0; 3];
+        assert_eq!(reader.read(&mut buffer).unwrap(), 3);
+        reader.seek(SeekFrom::Start(0)).unwrap();
+        assert_eq!(reader.read(&mut buffer).unwrap(), 1);
+        assert!(reader.read(&mut buffer).is_err());
+        assert_eq!(reader.read(&mut []).unwrap(), 0);
+    }
+
+    #[test]
+    fn excessive_tag_input_fails_closed() {
+        let fixture = Fixture::new();
+        let oversized_artist = "x".repeat(MAX_TAG_READ_BYTES + 1);
+        let path = fixture.mp3(Some(&oversized_artist), Some("Album"));
+        assert_eq!(credit(&path, "", ""), "");
+        assert_eq!(credit(&path, "Provided", ""), "Provided");
+    }
+}

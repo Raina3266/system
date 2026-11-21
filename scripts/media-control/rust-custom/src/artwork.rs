@@ -120,20 +120,16 @@ fn embedded(track: &Path) -> Option<PathBuf> {
 }
 
 fn write_cache(name: &str, bytes: &[u8]) -> Option<PathBuf> {
-    let directory = cache_dir()?;
+    let directory = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?
+        .join(CACHE_DIR);
     std::fs::create_dir_all(&directory).ok()?;
     let path = directory.join(name);
     if !path.is_file() {
         std::fs::write(&path, bytes).ok()?;
     }
     Some(path)
-}
-
-fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join(CACHE_DIR))
 }
 
 #[cfg(test)]

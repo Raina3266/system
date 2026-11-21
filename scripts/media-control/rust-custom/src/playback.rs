@@ -23,8 +23,8 @@ fn agreeing_fields(left: &Player, right: &Player) -> usize {
     [
         same_text(&left.artist, &right.artist),
         same_text(&left.album, &right.album),
-        same_optional(Some(&left.art_url), Some(&right.art_url)),
-        same_optional(Some(&left.url), Some(&right.url)),
+        same_text(&left.art_url, &right.art_url),
+        same_text(&left.url, &right.url),
         near_length(left.length, right.length),
     ]
     .into_iter()
@@ -51,17 +51,16 @@ fn same_text(left: &str, right: &str) -> bool {
     !left.is_empty() && left == normalised(right)
 }
 
-fn same_optional(left: Option<&str>, right: Option<&str>) -> bool {
-    left.zip(right)
-        .is_some_and(|(left, right)| same_text(left, right))
+fn near_length(left: Option<f64>, right: Option<f64>) -> bool {
+    known_length(left)
+        .zip(known_length(right))
+        .is_some_and(|(left, right)| (left - right).abs() <= 2.0)
 }
 
-fn near_length(left: Option<f64>, right: Option<f64>) -> bool {
-    // The old MPRIS reader discarded zero/invalid lengths before matching.
-    let known = |length: &f64| length.is_finite() && *length > 0.0;
-    left.filter(known)
-        .zip(right.filter(known))
-        .is_some_and(|(left, right)| (left - right).abs() <= 2.0)
+// The old MPRIS reader discarded zero/invalid lengths before matching.
+// Representative ranking uses the same definition of a usable length.
+pub(crate) fn known_length(length: Option<f64>) -> Option<f64> {
+    length.filter(|length| length.is_finite() && *length > 0.0)
 }
 
 fn normalised(value: &str) -> String {
