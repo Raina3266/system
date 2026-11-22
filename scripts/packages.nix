@@ -111,79 +111,6 @@ let
         };
       }
     );
-
-  # Use AGS 2.3's generator revision and upstream lock, not npx's mutable
-  # dependency resolution. Only generator workspaces are needed from this repo.
-  tsForGir = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
-    pname = "ts-for-gir";
-    version = "4.0.0-beta.19";
-    src = pkgs.fetchFromGitHub {
-      owner = "gjsify";
-      repo = "ts-for-gir";
-      rev = "f1b7e7f5d158ad4a36815d6620aaec28486a0304";
-      hash = "sha256-0yDAO1EC32TN+9rFiTHlw1jNV08m0Uiaq8DHD8Wh7v8=";
-    };
-
-    # Yarn omits checksums for optional platform dependencies. Keep the
-    # supplemental metadata content-addressed without adding a checkout file.
-    missingHashes = pkgs.runCommand "ts-for-gir-missing-hashes.json" {
-      nativeBuildInputs = [ pkgs.yarn-berry.yarn-berry-fetcher ];
-      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-      outputHashMode = "flat";
-      outputHashAlgo = "sha256";
-      outputHash = "sha256-6kswIcTpVh9l4W+u7jxPtSSjuJVnNwgIrtl4CpbRAck=";
-    } ''
-      yarn-berry-fetcher missing-hashes ${finalAttrs.src}/yarn.lock > "$out"
-    '';
-    offlineCache = pkgs.yarn-berry.fetchYarnBerryDeps {
-      inherit (finalAttrs) src missingHashes;
-      hash = "sha256-GY09M2yc9ONAc+cri0QnALosh8nBTOJ3tmHRuoS1HuY=";
-    };
-
-    nativeBuildInputs = [ pkgs.nodejs pkgs.makeWrapper ];
-    YARN_NODE_LINKER = "node-modules";
-    YARN_ENABLE_SCRIPTS = "false";
-    YARN_ENABLE_NETWORK = "false";
-    YARN_ENABLE_TELEMETRY = "false";
-    YARN_ENABLE_GLOBAL_CACHE = "false";
-    # Prune the example/type workspaces while retaining all locked versions.
-    YARN_ENABLE_IMMUTABLE_INSTALLS = "false";
-    postPatch = ''
-      node --input-type=commonjs -e '
-        const fs = require("node:fs");
-        const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-        pkg.workspaces = ["packages/*"];
-        fs.writeFileSync("package.json", JSON.stringify(pkg));
-      '
-    '';
-    # The source vendors Yarn 4.5.1; newer Nixpkgs Yarn hooks reject its v8 lock.
-    configurePhase = ''
-      runHook preConfigure
-      export HOME="$TMPDIR"
-      cp -R ${finalAttrs.offlineCache}/cache .yarn/cache
-      chmod -R u+w .yarn/cache
-      node .yarn/releases/yarn-4.5.1.cjs install --mode=skip-build
-      patchShebangs node_modules
-      runHook postConfigure
-    '';
-    buildPhase = ''
-      runHook preBuild
-      for package in parser lib generator-base generator-typescript generator-html-doc cli; do
-        node node_modules/typescript/bin/tsc -p "packages/$package"
-      done
-      runHook postBuild
-    '';
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out/lib/ts-for-gir" "$out/bin"
-      cp -R node_modules packages package.json "$out/lib/ts-for-gir/"
-      makeWrapper ${lib.getExe pkgs.nodejs} "$out/bin/ts-for-gir" \
-        --add-flags "$out/lib/ts-for-gir/packages/cli/lib/start.js"
-      runHook postInstall
-    '';
-    meta.mainProgram = "ts-for-gir";
-  });
-
 in
 rec {
   withParentDeath = pkgs.writeShellScriptBin "with-parent-death" ''
@@ -257,6 +184,7 @@ rec {
   };
 
   panelLauncher = mkWorkspacePackage "panel-launcher" {
+    nativeCheckInputs = [ (lib.getBin pkgs.dbus) ];
     cargoArtifacts = mkCargoArtifacts "panel-launcher-deps" {
       cargoExtraArgs = "--locked --package panel-launcher";
     };
@@ -274,69 +202,6 @@ rec {
       astalPackages
       ;
   }) clipboardPanel audioPanel mediaPanel networkPanel dashboardPanel appLauncher;
-
-  dashboardTypeEnvironment =
-    let
-      # Match AGS's GIR search path, including propagated dev outputs. Avoid
-      # GTK3 roots even though the runtime wrapper supports both GTK versions.
-      depsOf = pkg: [ (pkg.dev or pkg) ] ++ map depsOf (pkg.propagatedBuildInputs or [ ]);
-      girDirs = pkgs.symlinkJoin {
-        name = "gir-dirs";
-        paths = lib.flatten (map depsOf dashboardPanel.ags.buildInputs);
-      };
-      modules = [
-        "GLib-2.0" "Gio-2.0" "GObject-2.0" "Gtk-4.0" "Gdk-4.0"
-        "Astal-4.0" "AstalIO-0.1" "AstalBattery-0.1" "AstalPowerProfiles-0.1"
-        "AstalNotifd-0.1"
-        "Gtk4LayerShell-1.0" "Pango-1.0" "cairo-1.0"
-      ];
-      # These are static declarations; native-addon hooks would pull in an
-      # unnecessary Node compiler/header toolchain.
-      nodeTypeModules = pkgs.runCommand "panel-node-types" {
-        nativeBuildInputs = [ pkgs.nodejs ];
-        npmDeps = pkgs.importNpmLock { npmRoot = ./node-types; };
-      } ''
-        export HOME="$TMPDIR"
-        cp --no-preserve=mode "$npmDeps/package.json" .
-        cp --no-preserve=mode "$npmDeps/package-lock.json" .
-        npm install --offline --ignore-scripts --no-audit --no-fund
-        mkdir -p "$out"
-        cp -RL node_modules "$out/node_modules"
-      '';
-    in
-    pkgs.runCommand "dashboard-type-environment" {
-      nativeBuildInputs = [ tsForGir ];
-      passthru = {
-        generator = tsForGir;
-        typescript = pkgs.typescript_5;
-        inherit girDirs modules;
-      };
-    } ''
-      mkdir -p "$out"
-      # Dereference package links so realpath-based resolution finds all locked
-      # dependencies beside @types/node in the same store environment.
-      cp -RL ${nodeTypeModules}/node_modules "$out/node_modules"
-      # Copied store directories must allow the generator to add sibling typings.
-      chmod -R u+w "$out/node_modules"
-      ts-for-gir generate ${lib.escapeShellArgs modules} \
-        -g ${girDirs}/share/gir-1.0 \
-        --outdir "$out/node_modules/@types/dashboard-gi"
-      # This inferred project also loads Node types. Keep GJS's optional DOM
-      # globals and bare console module available, but do not auto-load their
-      # incompatible duplicates of Node/browser globals in the shared entry.
-      substituteInPlace "$out/node_modules/@types/dashboard-gi/index.d.ts" \
-        --replace-fail "import './dom.d.ts';" "" \
-        --replace-fail "import './console.d.ts';" ""
-      # GJS supplies its Cairo wrapper to GTK draw callbacks, not the opaque
-      # GIR cairo.Context emitted by this generator revision.
-      substituteInPlace "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts" \
-        --replace-fail "import type cairo from 'gi://cairo?version=1.0';" \
-          "import type cairo from 'gi://cairo?version=1.0'; import type GjsCairo from 'cairo';" \
-        --replace-fail "(drawing_area: DrawingArea, cr: cairo.Context, width: number, height: number): void;" \
-          "(drawing_area: DrawingArea, cr: GjsCairo.Context, width: number, height: number): void;"
-      test -s "$out/node_modules/@types/dashboard-gi/index.d.ts"
-      test -s "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts"
-    '';
 
   # Resident audio/Bluetooth policy, native transaction orchestration, pairing,
   # compatibility discovery, and HID++ battery publication.

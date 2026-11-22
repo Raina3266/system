@@ -1,6 +1,6 @@
 window.network-panel {
     background: transparent;
-    color: @np_cyan;
+    color: var(--np_cyan);
     font-family: "Noto Sans", sans-serif;
     font-size: 14px;
 }
@@ -18,7 +18,7 @@ window.network-panel {
 .network-panel .network-card { background: transparent; padding: 0; margin: 0; border: none; }
 .network-panel .network-content { padding: 12px 12px 7px 7px; }
 .network-panel .network-prompt-content { padding: 10px 12px 14px; }
-.network-panel label { background: transparent; color: @np_cyan; padding: 0; margin: 0; }
+.network-panel label { background: transparent; color: var(--np_cyan); padding: 0; margin: 0; }
 
 .network-panel .network-row {
     border: 1px solid transparent;
@@ -31,24 +31,24 @@ window.network-panel {
 .network-panel .network-row:hover,
 .network-panel .network-row:focus-within,
 .network-panel .network-row.expanded {
-    background: alpha(@np_red, 0.1);
-    border-color: alpha(@np_yellow, 0.45);
+    background: color-mix(in srgb, var(--np_red) 10%, transparent);
+    border-color: color-mix(in srgb, var(--np_yellow) 45%, transparent);
 }
 .network-panel .network-row.expanded {
-    border-color: alpha(@np_red, 0.55);
+    border-color: color-mix(in srgb, var(--np_red) 55%, transparent);
 }
-.network-panel .network-name { color: alpha(@np_cyan, 0.78); font-weight: 500; }
-.network-panel .network-row.connected .network-name { color: @np_cyan; }
-.network-panel .network-marker { color: alpha(@np_cyan, 0.45); }
+.network-panel .network-name { color: color-mix(in srgb, var(--np_cyan) 78%, transparent); font-weight: 500; }
+.network-panel .network-row.connected .network-name { color: var(--np_cyan); }
+.network-panel .network-marker { color: color-mix(in srgb, var(--np_cyan) 45%, transparent); }
 .network-panel .network-row.expanded .network-marker,
-.network-panel .network-row.connected .network-marker { color: @np_cyan; }
+.network-panel .network-row.connected .network-marker { color: var(--np_cyan); }
 .network-panel .network-row .network-marker.network-wifi-marker { color: #ffffff; }
 .network-panel .network-status { color: #ffffff; }
-.network-panel .metadata { color: @np_foreground; }
-.network-panel .warning { color: @np_yellow; }
+.network-panel .metadata { color: var(--np_foreground); }
+.network-panel .warning { color: var(--np_yellow); }
 .network-panel .network-divider {
     min-height: 1px;
-    background: @np_separator;
+    background: var(--np_separator);
     border: none;
     padding: 0;
     margin: 0;
@@ -57,8 +57,8 @@ window.network-panel {
 .network-panel button.control-button {
     background: transparent;
     background-image: none;
-    color: @np_cyan;
-    border: 0.35px solid alpha(@np_foreground, 0.5);
+    color: var(--np_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--np_foreground) 50%, transparent);
     border-radius: 3px;
     min-height: 27.3px;
     min-width: 0;
@@ -76,12 +76,12 @@ window.network-panel {
 }
 .network-panel button.info-toggle.expanded {
     background: transparent;
-    border-color: @np_cyan;
+    border-color: var(--np_cyan);
 }
 .network-panel .network-details {
     border-left: none;
     box-shadow: none;
-    border-top: 1px solid alpha(@np_pink, 0.18);
+    border-top: 1px solid color-mix(in srgb, var(--np_pink) 18%, transparent);
     background: transparent;
     padding: 6px 6px 6px 12px;
     margin-top: 6px;
@@ -94,44 +94,44 @@ window.network-panel {
 /* Use a single inset stroke without stacking a colored border on top. */
 .network-panel button.control-button:hover {
     border-color: transparent;
-    box-shadow: inset 0 0 0 0.5px @np_yellow;
+    box-shadow: inset 0 0 0 0.5px var(--np_yellow);
 }
 .network-panel button.control-button:focus-visible {
-    background: alpha(@np_pink, 0.333);
+    background: color-mix(in srgb, var(--np_pink) 33.3%, transparent);
     border-color: transparent;
-    box-shadow: inset 0 0 0 0.5px @np_yellow;
+    box-shadow: inset 0 0 0 0.5px var(--np_yellow);
 }
-.network-panel button.control-button:active { background: alpha(@np_pink, 0.45); }
+.network-panel button.control-button:active { background: color-mix(in srgb, var(--np_pink) 45%, transparent); }
 .network-panel button.control-button:disabled {
-    color: @np_separator;
+    color: var(--np_separator);
     background: transparent;
-    border-color: alpha(@np_foreground, 0.25);
+    border-color: color-mix(in srgb, var(--np_foreground) 25%, transparent);
     box-shadow: none;
 }
 
 .network-panel button.network-tab {
     border: none;
-    border-bottom: 2px solid @np_cyan;
+    border-bottom: 2px solid var(--np_cyan);
     border-radius: 0;
     min-height: 30px;
     padding: 0;
     background: transparent;
-    color: @np_cyan;
+    color: var(--np_cyan);
     box-shadow: none;
 }
 .network-panel button.network-tab label { font-size: 14px; letter-spacing: 0.5px; }
 .network-panel button.network-tab:hover,
 .network-panel button.network-tab:focus-visible {
-    border-color: @np_cyan;
+    border-color: var(--np_cyan);
     background: transparent;
     box-shadow: none;
 }
 .network-panel button.network-tab.active,
 .network-panel button.network-tab.active:hover,
 .network-panel button.network-tab.active:focus-visible {
-    border-color: @np_red;
+    border-color: var(--np_red);
     background: transparent;
-    color: @np_red;
+    color: var(--np_red);
     box-shadow: none;
 }
 .network-panel button.network-tab:active,
@@ -144,11 +144,11 @@ window.network-panel {
 .network-panel button.network-remove label { font-size: 16px; }
 
 .network-panel entry.network-password {
-    background: alpha(@np_chromeBackground, 0.8);
+    background: color-mix(in srgb, var(--np_chromeBackground) 80%, transparent);
     background-image: none;
-    color: @np_cyan;
-    caret-color: @np_cyan;
-    border: 0.35px solid alpha(@np_foreground, 0.5);
+    color: var(--np_cyan);
+    caret-color: var(--np_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--np_foreground) 50%, transparent);
     border-radius: 3px;
     min-height: 27.3px;
     min-width: 0;
@@ -157,18 +157,18 @@ window.network-panel {
     outline: none;
 }
 .network-panel entry.network-password:focus-within {
-    border-color: @np_yellow;
-    box-shadow: inset 0 0 0 1.15px @np_yellow;
+    border-color: var(--np_yellow);
+    box-shadow: inset 0 0 0 1.15px var(--np_yellow);
 }
-.network-panel entry.network-password placeholder { color: @np_separator; }
-.network-panel entry.network-password selection { background: @np_pink; color: @np_background; }
+.network-panel entry.network-password placeholder { color: var(--np_separator); }
+.network-panel entry.network-password selection { background: var(--np_pink); color: var(--np_background); }
 
 .network-panel dropdown.profile-choice { padding: 0; margin: 0; }
 .network-panel dropdown.profile-choice > button {
-    background: alpha(@np_chromeBackground, 0.8);
+    background: color-mix(in srgb, var(--np_chromeBackground) 80%, transparent);
     background-image: none;
-    color: @np_cyan;
-    border: 0.35px solid alpha(@np_foreground, 0.5);
+    color: var(--np_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--np_foreground) 50%, transparent);
     border-radius: 3px;
     min-height: 27.3px;
     padding: 0 8px;
@@ -176,15 +176,15 @@ window.network-panel {
     outline: none;
 }
 .network-panel dropdown.profile-choice > button:hover,
-.network-panel dropdown.profile-choice > button:focus-visible { border-color: @np_yellow; }
+.network-panel dropdown.profile-choice > button:focus-visible { border-color: var(--np_yellow); }
 .network-panel dropdown.profile-choice popover > contents {
     background: #25252f;
-    border: 1px solid @np_yellow;
+    border: 1px solid var(--np_yellow);
     border-radius: 3px;
-    color: @np_cyan;
+    color: var(--np_cyan);
     padding: 4px;
 }
-.network-panel dropdown.profile-choice listview { background: transparent; color: @np_cyan; }
+.network-panel dropdown.profile-choice listview { background: transparent; color: var(--np_cyan); }
 .network-panel dropdown.profile-choice listview row {
     padding: 3px 5px;
     border: 1px solid transparent;
@@ -197,11 +197,11 @@ window.network-panel {
 .network-panel dropdown.profile-choice listview row:hover,
 .network-panel dropdown.profile-choice listview row:focus-visible,
 .network-panel dropdown.profile-choice listview row:active {
-    background: alpha(@np_red, 0.1);
-    border-color: alpha(@np_yellow, 0.45);
+    background: color-mix(in srgb, var(--np_red) 10%, transparent);
+    border-color: color-mix(in srgb, var(--np_yellow) 45%, transparent);
 }
 .network-panel dropdown.profile-choice listview row:selected {
-    border-color: alpha(@np_red, 0.55);
+    border-color: color-mix(in srgb, var(--np_red) 55%, transparent);
 }
 
 .network-panel scrolledwindow,
@@ -210,7 +210,7 @@ window.network-panel {
 .network-panel scrolledwindow > undershoot { background: transparent; background-image: none; border: none; }
 .network-panel scrollbar { background: transparent; border: none; padding: 0; margin: 0; }
 .network-panel scrollbar slider {
-    background: alpha(@np_pink, 0.5);
+    background: color-mix(in srgb, var(--np_pink) 50%, transparent);
     min-width: 3px;
     min-height: 12px;
     padding: 0;

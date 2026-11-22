@@ -11,9 +11,9 @@ window.app-launcher {
     min-width: 0;
     min-height: 0;
     padding: 0 8px;
-    border: 1px solid alpha(#FCEE0A, 0.35);
+    border: 1px solid color-mix(in srgb, #FCEE0A 35%, transparent);
     border-radius: 0;
-    background: alpha(#0F0C17, 0.55);
+    background: color-mix(in srgb, #0F0C17 55%, transparent);
     box-shadow: none;
     color: #F8F8F2;
     caret-color: #FCEE0A;
@@ -41,17 +41,17 @@ window.app-launcher {
 .app-launcher button.app-tile:hover,
 .app-launcher button.app-tile:focus-visible,
 .app-launcher button.app-tile:active {
-    background: alpha(#ff6b75, 0.1);
+    background: color-mix(in srgb, #ff6b75 10%, transparent);
     background-image: none;
     box-shadow: none;
-    border-color: alpha(#FCEE0A, 0.45);
+    border-color: color-mix(in srgb, #FCEE0A 45%, transparent);
 }
-.app-launcher button.app-tile.selected { border-color: alpha(#ff6b75, 0.55); }
+.app-launcher button.app-tile.selected { border-color: color-mix(in srgb, #ff6b75 55%, transparent); }
 .app-launcher .app-name {
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.2px;
-    text-shadow: 0 0 5px alpha(#26c6da, 0.28);
+    text-shadow: 0 0 5px color-mix(in srgb, #26c6da 28%, transparent);
 }
 .app-launcher .launcher-empty { color: #6eb6bd; font-size: 10px; }
 .app-launcher button.app-tile.launch-error { color: #ff6b75; border-color: #ff6b75; }

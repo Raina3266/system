@@ -16,6 +16,65 @@ function accessibleWidget(properties = {}) {
     }, ...properties };
 }
 
+describe('Media theme color syntax', () => {
+    const required = ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'secondaryBackground'];
+    const palette = Object.fromEntries(required.map((key, index) => [key, `#${(index + 1).toString(16).padStart(6, '0')}`]));
+
+    function themeFixture(contents) {
+        const calls = [], reads = [];
+        const theme = viewSource.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
+        assert.ok(theme);
+        const loadTheme = new Function('read', 'loadPanelStyle', `${theme}\nreturn loadTheme;`)(
+            path => { reads.push(path); return contents; }, options => calls.push(options));
+        return { loadTheme, calls, reads };
+    }
+
+    test('scoped declarations cover every CSS reference without changing the raw palette', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        const colors = { ...palette, extraColor: '#AbCdEf' };
+        const input = { ...colors, 'bad-key': '#123456', 'bad; } .other {': '#123456',
+            notColor: 'transparent', shortHex: '#123', alphaHex: '#12345678', metadata: { keep: true } };
+        const h = themeFixture(JSON.stringify(input));
+        assert.deepEqual(h.loadTheme('fixture/frontend.js', 'fixture/palette.json'), { palette: input });
+        assert.deepEqual(h.reads, ['fixture/palette.json']);
+        assert.equal(h.calls.length, 1);
+        assert.equal(h.calls[0].entry, 'fixture/frontend.js');
+        assert.equal(h.calls[0].label, 'Media');
+        const { definitions } = h.calls[0];
+        assert.equal(definitions, '.media-panel {\n' + Object.entries(colors)
+            .map(([key, value]) => `    --mp_${key}: ${value};`).join('\n') + '\n}');
+        assert.doesNotMatch(viewSource, /@define-color|@mp_/);
+        assert.doesNotMatch(css, /@define-color|@mp_|\balpha\s*\(|#[a-f\d]{3,8}\b/i);
+        const declarations = new Set([...definitions.matchAll(/(--[^\s:]+):/g)].map(([, name]) => name));
+        const references = new Set([...css.matchAll(/\bvar\(\s*(--[^,\s)]+)/g)].map(([, name]) => name));
+        assert.deepEqual([...references].sort(), required.map(key => `--mp_${key}`).sort());
+        for (const name of references) assert.ok(declarations.has(name), `Missing declaration for ${name}`);
+        const mixes = [...css.matchAll(/color-mix\(in srgb, var\(--mp_([a-zA-Z]+)\) ([\d.]+)%, transparent\)/g)]
+            .map(([, key, percent]) => [key, percent]);
+        assert.deepEqual(mixes, [
+            ['yellow', '15'], ['separator', '40'], ['foreground', '50'], ['pink', '33.3'],
+            ['pink', '45'], ['foreground', '25'], ['dimPink', '35'], ['yellow', '45'],
+            ['red', '10'], ['red', '55'], ['pink', '50'],
+        ]);
+    });
+
+    test('invalid required colors and malformed JSON never reach the stylesheet loader', () => {
+        for (const key of required) {
+            for (const value of [undefined, null, 'transparent', '#123', '#12345678', '#gggggg']) {
+                const h = themeFixture(JSON.stringify({ ...palette, [key]: value }));
+                assert.throws(() => h.loadTheme('fixture/frontend.js', 'fixture/palette.json'),
+                    { message: `Invalid media palette colour: ${key}` });
+                assert.equal(h.calls.length, 0, `Invalid ${key} must not load CSS`);
+            }
+        }
+        for (const contents of ['', '{']) {
+            const h = themeFixture(contents);
+            assert.throws(() => h.loadTheme('fixture/frontend.js', 'fixture/palette.json'), SyntaxError);
+            assert.equal(h.calls.length, 0, 'Malformed JSON must not load CSS');
+        }
+    });
+});
+
 test('source rows use dim yellow interactions with a later dim red current override and unchanged tint', () => {
     const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
@@ -34,20 +93,20 @@ test('source rows use dim yellow interactions with a later dim red current overr
     assert.match(row, /padding: 0 7px 0 5px;/);
     for (const state of ['.current', ':hover', ':focus-within', ':active']) {
         const selected = rule(`.media-panel .source-row${state}`);
-        assert.match(selected, /border-color: alpha\(@mp_yellow, 0\.45\);/);
-        assert.match(selected, /background: alpha\(@mp_red, 0\.1\);/);
+        assert.match(selected, /border-color: color-mix\(in srgb, var\(--mp_yellow\) 45%, transparent\);/);
+        assert.match(selected, /background: color-mix\(in srgb, var\(--mp_red\) 10%, transparent\);/);
         assert.doesNotMatch(selected, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
     }
     const current = '.media-panel .source-row.current';
     const currentRules = matchingRules(current);
     assert.equal(currentRules.length, 2);
     assert.equal(currentRules[1][1].trim(), current);
-    assert.equal(currentRules[1][2].trim(), 'border-color: alpha(@mp_red, 0.55);');
+    assert.equal(currentRules[1][2].trim(), 'border-color: color-mix(in srgb, var(--mp_red) 55%, transparent);');
     for (const state of ['', ':hover', ':focus-within', ':active']) {
         // Both selectors have equal specificity, so the last border color wins.
         const colors = matchingRules(current, `.media-panel .source-row${state}`)
             .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
-        assert.deepEqual(colors, ['alpha(@mp_yellow, 0.45)', 'alpha(@mp_red, 0.55)'], `Current must win over ${state || 'idle'}`);
+        assert.deepEqual(colors, ['color-mix(in srgb, var(--mp_yellow) 45%, transparent)', 'color-mix(in srgb, var(--mp_red) 55%, transparent)'], `Current must win over ${state || 'idle'}`);
     }
     for (const state of ['', ':hover', ':focus-visible', ':active']) {
         const select = rule(`.media-panel button.source-select${state}`);

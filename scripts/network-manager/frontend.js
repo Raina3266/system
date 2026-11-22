@@ -21,9 +21,9 @@ export function loadTheme(entry, palettePath) {
     const palette = JSON.parse(read(palettePath));
     for (const key of ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'chromeBackground'])
         if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid network palette colour: ${key}`);
-    const definitions = Object.entries(palette)
+    const definitions = '.network-panel {\n' + Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `@define-color np_${key} ${value};`).join('\n');
+        .map(([key, value]) => `    --np_${key}: ${value};`).join('\n') + '\n}';
     loadPanelStyle({ entry, definitions, label: 'Network' });
     return palette;
 }

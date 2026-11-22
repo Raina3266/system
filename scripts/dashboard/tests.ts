@@ -1,8 +1,9 @@
 // Deterministic pure/lifecycle coverage without GI, a display, D-Bus, or host telemetry.
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
-import { registerHooks } from 'node:module';
+import { registerHooks, stripTypeScriptTypes } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 
 import type { NotificationRow, Palette } from './notification.ts';
 import type { DashboardPanel } from './power.ts';
@@ -17,24 +18,24 @@ test('notification history uses dim yellow interactions, a later dim red focus o
         return match[2];
     };
     const base = rule('.dashboard-ui .notification-entry');
-    assert.match(base, /border: 1px solid alpha\(@dp_cyan, 0\.42\);/);
+    assert.match(base, /border: 1px solid color-mix\(in srgb, var\(--dp_cyan\) 42%, transparent\);/);
     assert.match(base, /background: transparent;/);
     for (const state of ['hover', 'focus-visible', 'active']) {
         const entry = rule(`.dashboard-ui .notification-entry:${state}`);
-        assert.match(entry, /border-color: alpha\(@dp_yellow, 0\.45\);/);
-        assert.match(entry, /background: alpha\(@dp_red, 0\.1\);/);
+        assert.match(entry, /border-color: color-mix\(in srgb, var\(--dp_yellow\) 45%, transparent\);/);
+        assert.match(entry, /background: color-mix\(in srgb, var\(--dp_red\) 10%, transparent\);/);
         assert.doesNotMatch(entry, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
     }
     const focus = '.dashboard-ui .notification-entry:focus-visible';
     const focusRules = matchingRules(focus);
     assert.equal(focusRules.length, 2);
     assert.equal(focusRules[1][1].trim(), focus);
-    assert.equal(focusRules[1][2].trim(), 'border-color: alpha(@dp_red, 0.55);');
+    assert.equal(focusRules[1][2].trim(), 'border-color: color-mix(in srgb, var(--dp_red) 55%, transparent);');
     for (const state of ['', ':hover', ':active']) {
         // Equal specificity makes the later focus rule win, even while hovered/pressed.
         const colors = matchingRules(focus, `.dashboard-ui .notification-entry${state}`)
             .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
-        assert.deepEqual(colors, ['alpha(@dp_yellow, 0.45)', 'alpha(@dp_red, 0.55)'], `Focus must win over ${state || 'idle'}`);
+        assert.deepEqual(colors, ['color-mix(in srgb, var(--dp_yellow) 45%, transparent)', 'color-mix(in srgb, var(--dp_red) 55%, transparent)'], `Focus must win over ${state || 'idle'}`);
     }
     for (const state of ['', '.hovered', ':focus-visible']) {
         const popupRules = matchingRules(`.dashboard-ui .popup-entry${state}`);
@@ -303,6 +304,48 @@ const palette: Palette = {
     background: '#101010', secondaryBackground: '#202020', elevated: '#303030', foreground: '#eeeeee',
     separator: '#404040', cyan: '#00ffff', pink: '#ff00ff', dimPink: '#804080', yellow: '#ffff00', red: '#ff0000',
 };
+
+test('dashboard palette defines scoped CSS variables and preserves palette validation', () => {
+    const source = readFileSync(new URL('./notification.ts', import.meta.url), 'utf8');
+    const definition = source.match(/export function loadTheme\([^]*?\n\}/)?.[0];
+    assert.ok(definition);
+    let contents = JSON.stringify({ ...palette, accent: '#123ABC', bad_key: '#112233', invalid: 'red' });
+    const reads: string[] = [];
+    const styles: { entry: string; definitions: string; label: string }[] = [];
+    const provider = {};
+    const loadTheme = runInNewContext(stripTypeScriptTypes(definition.replace('export ', '')) + '\nloadTheme;', {
+        read(path: string) { reads.push(path); return contents; },
+        loadPanelStyle(style: typeof styles[number]) { styles.push(style); return provider; },
+    });
+    const result = loadTheme('/dashboard/power.ts', '/dashboard/palette.json');
+    assert.deepEqual(reads, ['/dashboard/palette.json']);
+    assert.equal(JSON.stringify(result.palette), contents);
+    assert.equal(result.provider, provider);
+    assert.equal(styles.length, 1);
+    assert.equal(styles[0].entry, '/dashboard/power.ts');
+    assert.equal(styles[0].label, 'Dashboard');
+    const definitions = styles[0].definitions;
+    assert.match(definitions, /^\.dashboard-ui \{\n[^]*\n\}$/);
+    for (const [key, value] of Object.entries({ ...palette, accent: '#123ABC' }))
+        assert.ok(definitions.includes(`    --dp_${key}: ${value};`), key);
+    assert.doesNotMatch(definitions, /bad_key|invalid|@define-color|@dp_|:root/);
+    const declared = new Set([...definitions.matchAll(/(--[^\s:]+):/g)].map(match => match[1]));
+    assert.equal(declared.size, Object.keys(palette).length + 1);
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    const referenced = [...css.matchAll(/\bvar\(\s*(--[^,\s)]+)/g)];
+    assert.ok(referenced.length);
+    for (const [, name] of referenced) assert.ok(declared.has(name), `Undefined CSS variable: ${name}`);
+    assert.doesNotMatch(css, /@dp_|@define-color|\balpha\(/);
+    assert.match(css, /color-mix\(in srgb, var\(--dp_pink\) 33\.3%, transparent\)/);
+    for (const key of Object.keys(palette)) {
+        contents = JSON.stringify({ ...palette, [key]: 'invalid' });
+        assert.throws(() => loadTheme('/dashboard/power.ts', '/dashboard/palette.json'),
+            { message: `Invalid dashboard palette colour: ${key}` });
+    }
+    contents = '{';
+    assert.throws(() => loadTheme('/dashboard/power.ts', '/dashboard/palette.json'), { name: 'SyntaxError' });
+    assert.equal(styles.length, 1, 'Invalid palettes must not reach the stylesheet loader');
+});
 const profileChoices = [
     { id: 'power-saver', label: 'Power Saver' },
     { id: 'balanced', label: 'Balanced' },

@@ -278,9 +278,9 @@ export function loadTheme(entry: string | null, palettePath: string | null) {
         'separator', 'cyan', 'pink', 'dimPink', 'yellow', 'red'] as const) {
         if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid dashboard palette colour: ${key}`);
     }
-    const definitions = Object.entries(palette)
+    const definitions = '.dashboard-ui {\n' + Object.entries(palette)
         .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `@define-color dp_${key} ${value};`).join('\n');
+        .map(([key, value]) => `    --dp_${key}: ${value};`).join('\n') + '\n}';
     const provider = loadPanelStyle({ entry, definitions, label: 'Dashboard' });
     return { palette, provider };
 }

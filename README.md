@@ -310,7 +310,6 @@ and bounded/cancellable Rust IPC remain frontend responsibilities.
 | Cropped webcam | Compliant | Backend is in [`scripts/webcam-crop/`](scripts/webcam-crop/). |
 | Panel launcher | Compliant | Launch/request handling and shared backend/runtime entrypoints are in [`scripts/panel-launcher/`](scripts/panel-launcher/). |
 | Shared stylesheet loader | Frontend-only | [`scripts/live-style.js`](scripts/live-style.js) loads and reloads UI styles. |
-| Node type metadata | Not runtime code | [`scripts/node-types/`](scripts/node-types/) contains development type dependencies. |
 | Build/update entrypoints | Configuration/build glue | `switch.sh`, `update.sh`, ordinary Nix build/launch wiring, and [`themes/patch-daemon.py`](themes/patch-daemon.py) are build-time/configuration tools, not custom runtime backends. |
 
 Locally maintained runtime helpers outside `scripts/` have been migrated too:

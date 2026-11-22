@@ -882,13 +882,59 @@ async function nodeControllerTests() {
         }
     });
 
+    it('generates panel-scoped network CSS variables from a validated raw JSON palette', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        const keys = ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'chromeBackground'];
+        const palette = Object.fromEntries([...keys, 'extraColor'].map((key, index) =>
+            [key, `#${(index + 1).toString(16).padStart(6, '0').toUpperCase()}`]));
+        const input = { ...palette, 'bad-key': palette.yellow, bad_key: palette.cyan,
+            color2: palette.pink, notColor: 'transparent', badHex: '#12345g' };
+        let raw = JSON.stringify(input);
+        const calls = [], paths = [];
+        const theme = frontend.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
+        assert.ok(theme);
+        const loadTheme = vm.runInNewContext(`${theme}\nloadTheme;`, {
+            read(path) { paths.push(path); return raw; },
+            loadPanelStyle: options => calls.push(options),
+        });
+        const loaded = loadTheme('fixture/frontend.js', 'fixture/network palette.json');
+        assert.equal(JSON.stringify(loaded), JSON.stringify(input));
+        assert.deepEqual(paths, ['fixture/network palette.json']);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].entry, 'fixture/frontend.js');
+        assert.equal(calls[0].label, 'Network');
+        assert.equal(calls[0].definitions, '.network-panel {\n' + Object.entries(palette)
+            .map(([key, value]) => `    --np_${key}: ${value};`).join('\n') + '\n}');
+        const declarations = new Set([...calls[0].definitions.matchAll(/(--[^\s:]+):/g)]
+            .map(([, name]) => name));
+        const references = [...css.matchAll(/\bvar\(\s*(--[^,\s)]+)/g)];
+        assert.ok(references.length > 0);
+        for (const [, name] of references) assert.ok(declarations.has(name), `Missing variable: ${name}`);
+        assert.doesNotMatch(frontend, /@define-color/);
+        assert.doesNotMatch(css, /@np_|\balpha\s*\(|@define-color/);
+        assert.match(css, /button\.control-button:focus-visible \{\s*background: color-mix\(in srgb, var\(--np_pink\) 33\.3%, transparent\);/);
+        for (const key of keys) {
+            for (const value of [undefined, null, 42, 'transparent', '123456', '#12345', '#1234567', '#12345678', '#gg0000']) {
+                raw = JSON.stringify({ ...palette, [key]: value });
+                assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/network palette.json'),
+                    { message: `Invalid network palette colour: ${key}` });
+            }
+        }
+        raw = JSON.stringify({ colors: palette });
+        assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/network palette.json'),
+            /Invalid network palette colour: yellow/);
+        raw = '{invalid JSON';
+        assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/network palette.json'), { name: 'SyntaxError' });
+        assert.equal(calls.length, 1, 'invalid palettes never reach the stylesheet loader');
+    });
+
     it('uses a single half-pixel button stroke for hover and keyboard focus without changing border width', () => {
         const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
         for (const state of ['hover', 'focus-visible']) {
             const rule = css.match(new RegExp(`button\\.control-button:${state} \\{([^}]+)\\}`))?.[1];
             assert.ok(rule);
             assert.match(rule, /border-color: transparent;/);
-            assert.match(rule, /box-shadow: inset 0 0 0 0\.5px @np_yellow;/);
+            assert.match(rule, /box-shadow: inset 0 0 0 0\.5px var\(--np_yellow\);/);
             assert.doesNotMatch(rule, /border-width:/);
         }
     });
@@ -901,16 +947,16 @@ async function nodeControllerTests() {
             'connected state alone must not look selected');
         for (const state of [':hover', ':focus-within', '.expanded'])
             assert.ok(rows.includes(`.network-row${state}`));
-        assert.match(rows, /border-color: alpha\(@np_yellow, 0\.45\);/);
-        assert.match(rows, /\.network-row\.expanded \{\s*border-color: alpha\(@np_red, 0\.55\);/);
+        assert.match(rows, /border-color: color-mix\(in srgb, var\(--np_yellow\) 45%, transparent\);/);
+        assert.match(rows, /\.network-row\.expanded \{\s*border-color: color-mix\(in srgb, var\(--np_red\) 55%, transparent\);/);
         assert.ok(rows.lastIndexOf('.network-row.expanded {') > rows.indexOf('.network-row:hover,'));
-        assert.match(rows, /background: alpha\(@np_red, 0\.1\);/);
+        assert.match(rows, /background: color-mix\(in srgb, var\(--np_red\) 10%, transparent\);/);
         const profiles = css.slice(css.indexOf('.network-panel dropdown.profile-choice listview row {'), css.indexOf('.network-panel scrolledwindow,'));
         assert.match(profiles, /border: 1px solid transparent;/);
-        assert.match(profiles, /border-color: alpha\(@np_yellow, 0\.45\);/);
-        assert.match(profiles, /row:selected \{\s*border-color: alpha\(@np_red, 0\.55\);/);
+        assert.match(profiles, /border-color: color-mix\(in srgb, var\(--np_yellow\) 45%, transparent\);/);
+        assert.match(profiles, /row:selected \{\s*border-color: color-mix\(in srgb, var\(--np_red\) 55%, transparent\);/);
         assert.ok(profiles.indexOf('row:selected {') > profiles.indexOf('row:hover,'));
-        assert.match(profiles, /background: alpha\(@np_red, 0\.1\);/);
+        assert.match(profiles, /background: color-mix\(in srgb, var\(--np_red\) 10%, transparent\);/);
         const details = css.match(/\.network-panel \.network-details \{([^}]+)\}/)?.[1];
         assert.match(details, /background: transparent;/);
     });

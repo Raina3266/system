@@ -3953,6 +3953,7 @@ mod network_backend {
         use std::io::{BufRead, BufReader, Read, Write};
         use std::os::fd::AsRawFd;
         use std::os::unix::net::UnixStream;
+        use std::path::PathBuf;
         use std::process::{Child, Command, Stdio};
         use std::sync::mpsc;
         use std::thread;
@@ -5259,13 +5260,38 @@ mod network_backend {
         struct PrivateBus {
             child: Child,
             address: String,
+            config: PathBuf,
         }
         impl PrivateBus {
             fn new() -> Self {
+                static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                let config = std::env::temp_dir().join(format!(
+                    "network-dbus-test-{}-{}.conf",
+                    std::process::id(),
+                    SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+                // A private fixture must not depend on /etc session policy or
+                // activate services from the host desktop.
+                std::fs::write(
+                    &config,
+                    r#"<busconfig>
+                        <type>session</type>
+                        <listen>unix:tmpdir=/tmp</listen>
+                        <auth>EXTERNAL</auth>
+                        <policy context="default">
+                            <allow send_destination="*"/>
+                            <allow receive_sender="*"/>
+                            <allow own="*"/>
+                        </policy>
+                    </busconfig>"#,
+                )
+                .unwrap();
                 let mut child = Command::new("dbus-daemon")
-                    .args(["--session", "--nofork", "--nopidfile", "--print-address=1"])
+                    .arg("--config-file")
+                    .arg(&config)
+                    .args(["--nofork", "--nopidfile", "--print-address=1"])
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
+                    .stderr(Stdio::inherit())
                     .spawn()
                     .expect("private-bus fixture needs dbus-daemon");
                 let stdout = child.stdout.take().unwrap();
@@ -5278,13 +5304,18 @@ mod network_backend {
                 let mut bus = Self {
                     child,
                     address: String::new(),
+                    config,
                 };
                 bus.address = receiver
                     .recv_timeout(Duration::from_secs(2))
                     .expect("private daemon startup deadline")
                     .trim()
                     .to_owned();
-                assert!(bus.address.starts_with("unix:"));
+                assert!(
+                    bus.address.starts_with("unix:"),
+                    "private dbus-daemon did not publish a Unix address; status: {:?}",
+                    bus.child.try_wait()
+                );
                 bus
             }
             fn connect(&self) -> Channel {
@@ -5297,6 +5328,7 @@ mod network_backend {
             fn drop(&mut self) {
                 let _ = self.child.kill();
                 let _ = self.child.wait();
+                let _ = std::fs::remove_file(&self.config);
             }
         }
         fn read_frame(reader: &mut BufReader<UnixStream>) -> Value {

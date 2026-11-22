@@ -1601,8 +1601,43 @@ mod cli {
 
     fn run(mut command: Command, args: &[&str], bytes: &[u8]) -> Output {
         let mut child = command.args(args).spawn().unwrap();
-        child.stdin.take().unwrap().write_all(bytes).unwrap();
-        child.wait_with_output().unwrap()
+        let input = child.stdin.take().unwrap().write_all(bytes);
+        // Invalid arguments may close stdin before the write. Reap the child and
+        // preserve its diagnostics instead of racing argument validation.
+        let output = child.wait_with_output().unwrap();
+        if let Err(error) = input {
+            assert!(
+                error.kind() == std::io::ErrorKind::BrokenPipe && !output.status.success(),
+                "Cannot write CLI input for {args:?}: {error}; child output: {output:?}"
+            );
+        }
+        output
+    }
+
+    #[test]
+    fn rejected_cli_commands_can_close_stdin_before_test_input_is_written() {
+        use std::os::unix::process::CommandExt;
+
+        let fixture = Fixture::new();
+        let mut command = fixture.command();
+        // Closing the read end before exec makes the broken pipe deterministic.
+        // SAFETY: close is async-signal-safe and only touches the child's stdin.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::close(libc::STDIN_FILENO) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        let output = run(command, &["unknown"], b"private clipboard contents");
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Usage: clipboard-custom"));
+        assert!(!stderr.contains("private clipboard contents"));
+        assert!(!fixture.0.join("data").exists());
     }
 
     #[test]

@@ -220,12 +220,8 @@ rec {
       lib,
       pkgs,
       repoPackages,
-      repoRoot,
       ...
     }:
-    let
-      repoRelativePath = lib.removePrefix "${config.home.homeDirectory}/" repoRoot;
-    in
     {
       # --- Installed packages -------------------------------------------------
       home.packages = [
@@ -240,15 +236,6 @@ rec {
         repoPackages.clipboardCustom
         repoPackages.panelLauncher
       ];
-
-      # Inferred TypeScript projects discover ancestor @types packages. Scope
-      # these Nix-managed links to this checkout, not every project under home.
-      home.file = {
-        "${repoRelativePath}/node_modules/@types/dashboard-gi".source =
-          "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/dashboard-gi";
-        "${repoRelativePath}/node_modules/@types/node".source =
-          "${repoPackages.dashboardTypeEnvironment}/node_modules/@types/node";
-      };
 
       # --- Palette configuration files ----------------------------------------
       # CSS is read directly through PANEL_CSS_FILE. Installing child links under

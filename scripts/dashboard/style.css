@@ -1,7 +1,7 @@
 /* Higher than USER priority, but deliberately confined to these two windows. */
 window.dashboard-ui {
     background: transparent;
-    color: @dp_foreground;
+    color: var(--dp_foreground);
     font-family: "Noto Sans", sans-serif;
     font-size: 12px;
     opacity: 1;
@@ -9,7 +9,7 @@ window.dashboard-ui {
 
 window.dashboard-ui,
 .dashboard-ui * {
-    color: @dp_foreground;
+    color: var(--dp_foreground);
     opacity: 1;
     background-color: transparent;
     background-image: none;
@@ -35,99 +35,99 @@ window.dashboard-ui,
 
 .dashboard-ui .section {
     background: transparent;
-    border: 1px solid alpha(@dp_cyan, 0.28);
+    border: 1px solid color-mix(in srgb, var(--dp_cyan) 28%, transparent);
     border-radius: 3px;
     /* Including the border, the section inset is exactly 12px. */
     padding: 11px;
 }
-.dashboard-ui .section-glyph { color: @dp_pink; font-size: 14px; }
+.dashboard-ui .section-glyph { color: var(--dp_pink); font-size: 14px; }
 .dashboard-ui .section-title {
-    color: @dp_cyan;
+    color: var(--dp_cyan);
     font-size: 10px;
     font-weight: bold;
     letter-spacing: 2px;
 }
-.dashboard-ui .section-divider { min-height: 1px; background: alpha(@dp_cyan, 0.16); }
+.dashboard-ui .section-divider { min-height: 1px; background: color-mix(in srgb, var(--dp_cyan) 16%, transparent); }
 
 
 .dashboard-ui button { opacity: 1; }
 .dashboard-ui .button-switcher { min-height: 42px; background: transparent; }
-.dashboard-ui .switcher-value { color: @dp_cyan; font-size: 12px; font-weight: bold; }
+.dashboard-ui .switcher-value { color: var(--dp_cyan); font-size: 12px; font-weight: bold; }
 .dashboard-ui button.switcher-step {
-    color: @dp_cyan;
+    color: var(--dp_cyan);
     background: transparent;
     border-bottom: 1px solid transparent;
     margin: 0 2px;
 }
 .dashboard-ui .switcher-arrow { color: inherit; font-size: 23px; }
 .dashboard-ui button.switcher-step:hover,
-.dashboard-ui button.switcher-step:focus-visible { color: @dp_red; border-bottom-color: @dp_cyan; }
-.dashboard-ui button.switcher-step:active { color: @dp_pink; }
-.dashboard-ui button.switcher-step:disabled { color: @dp_separator; border-bottom-color: transparent; }
-.dashboard-ui .switcher-tick { min-width: 16px; min-height: 2px; background: alpha(@dp_red, 0.25); }
-.dashboard-ui .switcher-tick.active { background: @dp_red; }
+.dashboard-ui button.switcher-step:focus-visible { color: var(--dp_red); border-bottom-color: var(--dp_cyan); }
+.dashboard-ui button.switcher-step:active { color: var(--dp_pink); }
+.dashboard-ui button.switcher-step:disabled { color: var(--dp_separator); border-bottom-color: transparent; }
+.dashboard-ui .switcher-tick { min-width: 16px; min-height: 2px; background: color-mix(in srgb, var(--dp_red) 25%, transparent); }
+.dashboard-ui .switcher-tick.active { background: var(--dp_red); }
 
-.dashboard-ui .metric-label { color: @dp_separator; font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }
-.dashboard-ui .metric-value { color: @dp_foreground; font-size: 11px; font-family: "JetBrains Mono", monospace; }
+.dashboard-ui .metric-label { color: var(--dp_separator); font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }
+.dashboard-ui .metric-value { color: var(--dp_foreground); font-size: 11px; font-family: "JetBrains Mono", monospace; }
 .dashboard-ui .metric-bar { min-height: 5px; }
-.dashboard-ui .metric-bar trough { min-height: 5px; border-radius: 2px; background: alpha(@dp_separator, 0.2); }
-.dashboard-ui .metric-bar progress { min-height: 5px; border-radius: 2px; background: @dp_pink; }
-.dashboard-ui .metric-bar.critical progress { background: @dp_red; }
+.dashboard-ui .metric-bar trough { min-height: 5px; border-radius: 2px; background: color-mix(in srgb, var(--dp_separator) 20%, transparent); }
+.dashboard-ui .metric-bar progress { min-height: 5px; border-radius: 2px; background: var(--dp_pink); }
+.dashboard-ui .metric-bar.critical progress { background: var(--dp_red); }
 
-.dashboard-ui .history-count { color: @dp_foreground; font-size: 9px; font-weight: bold; letter-spacing: 0.8px; margin-right: 8px; }
-.dashboard-ui .notifications-empty { color: @dp_separator; font-size: 10px; letter-spacing: 1.5px; margin: 8px 0; }
+.dashboard-ui .history-count { color: var(--dp_foreground); font-size: 9px; font-weight: bold; letter-spacing: 0.8px; margin-right: 8px; }
+.dashboard-ui .notifications-empty { color: var(--dp_separator); font-size: 10px; letter-spacing: 1.5px; margin: 8px 0; }
 
 .dashboard-ui .icon-button, .dashboard-ui .notification-action {
     background: transparent;
-    border: 0.35px solid alpha(@dp_foreground, 0.5);
+    border: 0.35px solid color-mix(in srgb, var(--dp_foreground) 50%, transparent);
     border-radius: 3px;
     transition: background-color 120ms ease-out, border-color 120ms ease-out;
 }
 .dashboard-ui .icon-button { border-radius: 999px; }
-.dashboard-ui .icon-glyph { color: @dp_red; font-size: 14px; }
+.dashboard-ui .icon-glyph { color: var(--dp_red); font-size: 14px; }
 .dashboard-ui .notification-close .icon-glyph { font-size: 10px; }
 .dashboard-ui .icon-button:hover,
 .dashboard-ui .notification-action:hover {
-    border-color: @dp_yellow;
+    border-color: var(--dp_yellow);
     border-width: 1.5px;
 }
 .dashboard-ui .icon-button:focus-visible,
 .dashboard-ui .notification-action:focus-visible {
-    background: alpha(@dp_pink, 0.333);
-    border-color: @dp_yellow;
+    background: color-mix(in srgb, var(--dp_pink) 33.3%, transparent);
+    border-color: var(--dp_yellow);
     border-width: 1.5px;
 }
-.dashboard-ui .icon-button:active, .dashboard-ui .notification-action:active { background: alpha(@dp_pink, 0.45); }
+.dashboard-ui .icon-button:active, .dashboard-ui .notification-action:active { background: color-mix(in srgb, var(--dp_pink) 45%, transparent); }
 .dashboard-ui .icon-button:disabled, .dashboard-ui .notification-action:disabled {
     background: transparent;
-    border: 0.35px solid alpha(@dp_foreground, 0.25);
+    border: 0.35px solid color-mix(in srgb, var(--dp_foreground) 25%, transparent);
 }
-.dashboard-ui .icon-button:disabled .icon-glyph { color: @dp_separator; }
+.dashboard-ui .icon-button:disabled .icon-glyph { color: var(--dp_separator); }
 
 .dashboard-ui .notification-entry {
     background: transparent;
-    border: 1px solid alpha(@dp_cyan, 0.42);
+    border: 1px solid color-mix(in srgb, var(--dp_cyan) 42%, transparent);
     border-radius: 2px;
     transition: background-color 120ms ease-out;
 }
 .dashboard-ui .notification-entry:hover,
 .dashboard-ui .notification-entry:focus-visible,
 .dashboard-ui .notification-entry:active {
-    background: alpha(@dp_red, 0.1);
-    border-color: alpha(@dp_yellow, 0.45);
+    background: color-mix(in srgb, var(--dp_red) 10%, transparent);
+    border-color: color-mix(in srgb, var(--dp_yellow) 45%, transparent);
 }
-.dashboard-ui .notification-entry:focus-visible { border-color: alpha(@dp_red, 0.55); }
+.dashboard-ui .notification-entry:focus-visible { border-color: color-mix(in srgb, var(--dp_red) 55%, transparent); }
 .dashboard-ui .notification-layout { margin: 8px 23px 8px 11px; }
-.dashboard-ui .notification-stripe { min-width: 2px; background: @dp_cyan; }
-.dashboard-ui .notification-entry.critical .notification-stripe { background: @dp_red; }
+.dashboard-ui .notification-stripe { min-width: 2px; background: var(--dp_cyan); }
+.dashboard-ui .notification-entry.critical .notification-stripe { background: var(--dp_red); }
 .dashboard-ui .popup-entry, .dashboard-ui .popup-entry.hovered, .dashboard-ui .popup-entry:focus-visible { background: transparent; border: none; }
 .dashboard-ui .popup-entry .notification-layout { margin: 9px 24px 9px 12px; }
-.dashboard-ui .notification-app { color: @dp_pink; font-size: 9px; font-weight: bold; letter-spacing: 1.2px; }
-.dashboard-ui .notification-summary { color: @dp_cyan; font-size: 12px; font-weight: bold; }
-.dashboard-ui .notification-body { color: @dp_foreground; font-size: 12px; }
+.dashboard-ui .notification-app { color: var(--dp_pink); font-size: 9px; font-weight: bold; letter-spacing: 1.2px; }
+.dashboard-ui .notification-summary { color: var(--dp_cyan); font-size: 12px; font-weight: bold; }
+.dashboard-ui .notification-body { color: var(--dp_foreground); font-size: 12px; }
 .dashboard-ui .notification-action { padding: 0 8px; }
-.dashboard-ui .notification-action-label { color: @dp_cyan; font-size: 12px; font-weight: bold; }
-.dashboard-ui .notification-action:disabled .notification-action-label { color: @dp_separator; }
+.dashboard-ui .notification-action-label { color: var(--dp_cyan); font-size: 12px; font-weight: bold; }
+.dashboard-ui .notification-action:disabled .notification-action-label { color: var(--dp_separator); }
 .dashboard-ui flowbox, .dashboard-ui flowboxchild { background: transparent; border: none; padding: 0; margin: 0; }
 
 .dashboard-ui scrolledwindow, .dashboard-ui viewport { background: transparent; border: none; }
@@ -136,7 +136,7 @@ window.dashboard-ui,
     min-width: 3px;
     min-height: 24px;
     border-radius: 2px;
-    background: alpha(@dp_pink, 0.5);
+    background: color-mix(in srgb, var(--dp_pink) 50%, transparent);
 }
-.dashboard-ui scrollbar slider:hover { background: @dp_pink; }
+.dashboard-ui scrollbar slider:hover { background: var(--dp_pink); }
 .dashboard-ui scrollbar.horizontal slider { min-width: 24px; min-height: 3px; }

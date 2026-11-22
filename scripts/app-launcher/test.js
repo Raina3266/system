@@ -153,6 +153,17 @@ async function unitTests() {
         assert.ok(panelLayout(320, 600).columns < GRID_COLUMNS);
     });
 
+    test('launcher uses standard color mixes with unchanged literals and no palette variables', () => {
+        const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+        assert.doesNotMatch(css, /@define-color|@mp_|\balpha\s*\(|\bvar\s*\(/);
+        const mixes = [...css.matchAll(/color-mix\(in srgb, (#[a-f\d]{6}) ([\d.]+)%, transparent\)/gi)]
+            .map(([, color, percent]) => [color, percent]);
+        assert.deepEqual(mixes, [
+            ['#FCEE0A', '35'], ['#0F0C17', '55'], ['#ff6b75', '10'],
+            ['#FCEE0A', '45'], ['#ff6b75', '55'], ['#26c6da', '28'],
+        ]);
+    });
+
     test('app tiles use dim yellow interactions with a later dim red selected override and unchanged tint', () => {
         const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
         const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
@@ -171,8 +182,8 @@ async function unitTests() {
         assert.match(base, /transition: border-color 140ms ease;/);
         for (const state of ['.selected', ':hover', ':focus-visible', ':active']) {
             const tile = rule(`.app-launcher button.app-tile${state}`);
-            assert.match(tile, /border-color: alpha\(#FCEE0A, 0\.45\);/);
-            assert.match(tile, /background: alpha\(#ff6b75, 0\.1\);/);
+            assert.match(tile, /border-color: color-mix\(in srgb, #FCEE0A 45%, transparent\);/);
+            assert.match(tile, /background: color-mix\(in srgb, #ff6b75 10%, transparent\);/);
             assert.match(tile, /background-image: none;/);
             assert.match(tile, /box-shadow: none;/);
             assert.doesNotMatch(tile, /(?:border(?:-width)?|padding|margin|min-height|min-width):/);
@@ -181,12 +192,12 @@ async function unitTests() {
         const selectedRules = matchingRules(selected);
         assert.equal(selectedRules.length, 2);
         assert.equal(selectedRules[1][1].trim(), selected);
-        assert.equal(selectedRules[1][2].trim(), 'border-color: alpha(#ff6b75, 0.55);');
+        assert.equal(selectedRules[1][2].trim(), 'border-color: color-mix(in srgb, #ff6b75 55%, transparent);');
         for (const state of ['', ':hover', ':focus-visible', ':active']) {
             // Both selectors have equal specificity, so the last border color wins.
             const colors = matchingRules(selected, `.app-launcher button.app-tile${state}`)
                 .flatMap(([, , body]) => [...body.matchAll(/border-color:\s*([^;]+);/g)].map(match => match[1]));
-            assert.deepEqual(colors, ['alpha(#FCEE0A, 0.45)', 'alpha(#ff6b75, 0.55)'], `Selected must win over ${state || 'idle'}`);
+            assert.deepEqual(colors, ['color-mix(in srgb, #FCEE0A 45%, transparent)', 'color-mix(in srgb, #ff6b75 55%, transparent)'], `Selected must win over ${state || 'idle'}`);
         }
     });
 

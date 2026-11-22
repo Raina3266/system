@@ -1,6 +1,6 @@
 window.media-panel {
     background: transparent;
-    color: @mp_cyan;
+    color: var(--mp_cyan);
     font-family: "Noto Sans", sans-serif;
     font-size: 12px;
 }
@@ -13,28 +13,28 @@ window.media-panel {
 
 .media-panel .media-content { padding: 16px; }
 .media-panel label { background: transparent; }
-.media-panel .title { color: @mp_cyan; font-size: 15px; font-weight: bold; }
-.media-panel .metadata { color: @mp_foreground; font-size: 13px; }
+.media-panel .title { color: var(--mp_cyan); font-size: 15px; font-weight: bold; }
+.media-panel .metadata { color: var(--mp_foreground); font-size: 13px; }
 .media-panel .total-time,
-.media-panel .elapsed-time { color: @mp_foreground; }
-.media-panel .empty { color: @mp_separator; letter-spacing: 3px; margin: 12px 0; }
-.media-panel .failure { color: @mp_red; font-size: 11px; }
-.media-panel .divider { min-height: 1px; background: alpha(@mp_yellow, 0.15); }
+.media-panel .elapsed-time { color: var(--mp_foreground); }
+.media-panel .empty { color: var(--mp_separator); letter-spacing: 3px; margin: 12px 0; }
+.media-panel .failure { color: var(--mp_red); font-size: 11px; }
+.media-panel .divider { min-height: 1px; background: color-mix(in srgb, var(--mp_yellow) 15%, transparent); }
 
 .media-panel .artwork {
-    background: @mp_secondaryBackground;
-    border: 1px solid alpha(@mp_separator, 0.4);
+    background: var(--mp_secondaryBackground);
+    border: 1px solid color-mix(in srgb, var(--mp_separator) 40%, transparent);
     border-radius: 3px;
     padding: 0;
 }
-.media-panel .art-glyph { color: @mp_separator; font-size: 26px; }
-.media-panel .art-glyph-small { color: @mp_separator; font-size: 14px; }
+.media-panel .art-glyph { color: var(--mp_separator); font-size: 26px; }
+.media-panel .art-glyph-small { color: var(--mp_separator); font-size: 14px; }
 
 .media-panel button {
     background: transparent;
     background-image: none;
-    color: @mp_cyan;
-    border: 0.35px solid alpha(@mp_foreground, 0.5);
+    color: var(--mp_cyan);
+    border: 0.35px solid color-mix(in srgb, var(--mp_foreground) 50%, transparent);
     border-radius: 3px;
     min-width: 0;
     min-height: 0;
@@ -44,20 +44,20 @@ window.media-panel {
     transition: background 120ms ease-out, border-color 100ms ease-out;
 }
 .media-panel button:hover {
-    border-color: @mp_yellow;
+    border-color: var(--mp_yellow);
     border-width: 1.5px;
 }
 .media-panel button:focus-visible {
-    background: alpha(@mp_pink, 0.333);
-    border-color: @mp_yellow;
+    background: color-mix(in srgb, var(--mp_pink) 33.3%, transparent);
+    border-color: var(--mp_yellow);
     border-width: 1.5px;
 }
-.media-panel button:active { background: alpha(@mp_pink, 0.45); }
-.media-panel button:disabled { border-color: alpha(@mp_foreground, 0.25); color: @mp_separator; }
+.media-panel button:active { background: color-mix(in srgb, var(--mp_pink) 45%, transparent); }
+.media-panel button:disabled { border-color: color-mix(in srgb, var(--mp_foreground) 25%, transparent); color: var(--mp_separator); }
 .media-panel .icon-button { border-radius: 999px; min-width: 32px; min-height: 32px; }
-.media-panel .icon-button label { color: @mp_red; font-size: 16px; }
-.media-panel .icon-button:disabled label { color: @mp_separator; }
-.media-panel .play-button { min-width: 40px; min-height: 40px; background: alpha(@mp_dimPink, 0.35); }
+.media-panel .icon-button label { color: var(--mp_red); font-size: 16px; }
+.media-panel .icon-button:disabled label { color: var(--mp_separator); }
+.media-panel .play-button { min-width: 40px; min-height: 40px; background: color-mix(in srgb, var(--mp_dimPink) 35%, transparent); }
 .media-panel .play-button label { font-size: 20px; }
 .media-panel .source-play { min-width: 26px; min-height: 26px; }
 .media-panel .source-play label { font-size: 13px; }
@@ -65,12 +65,12 @@ window.media-panel {
 .media-panel .seek-button label { font-size: 12px; font-weight: bold; }
 
 .media-panel scale { padding: 0; min-height: 16px; margin: 0; }
-.media-panel scale trough { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: @mp_secondaryBackground; border: none; }
-.media-panel scale highlight { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: @mp_dimPink; border: none; }
-.media-panel scale.seek highlight { background: @mp_pink; }
+.media-panel scale trough { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: var(--mp_secondaryBackground); border: none; }
+.media-panel scale highlight { min-width: 0; min-height: 4px; margin: 0; padding: 0; border-radius: 2px; background: var(--mp_dimPink); border: none; }
+.media-panel scale.seek highlight { background: var(--mp_pink); }
 .media-panel scale slider {
     min-width: 10px; min-height: 10px; margin: -3px 0;
-    background: @mp_pink; border: none; border-radius: 100%;
+    background: var(--mp_pink); border: none; border-radius: 100%;
     transition: min-width 120ms ease-out, min-height 120ms ease-out;
 }
 .media-panel scale:hover slider { min-width: 12px; min-height: 12px; margin: -4px 0; }
@@ -79,10 +79,10 @@ window.media-panel {
 
 
 .media-panel .section-button { border: none; padding: 4px 4px 4px 8px; }
-.media-panel .section-glyph, .media-panel .section-label, .media-panel .chevron { color: @mp_pink; }
+.media-panel .section-glyph, .media-panel .section-label, .media-panel .chevron { color: var(--mp_pink); }
 .media-panel .section-label { font-size: 10px; letter-spacing: 2px; font-weight: bold; }
-.media-panel .source-name { color: @mp_cyan; font-size: 12px; font-weight: bold; }
-.media-panel .section-button:disabled .chevron { color: @mp_separator; }
+.media-panel .source-name { color: var(--mp_cyan); font-size: 12px; font-weight: bold; }
+.media-panel .section-button:disabled .chevron { color: var(--mp_separator); }
 .media-panel .sources { margin-top: 4px; }
 .media-panel .source-row {
     border: 1px solid transparent;
@@ -96,10 +96,10 @@ window.media-panel {
 .media-panel .source-row:hover,
 .media-panel .source-row:focus-within,
 .media-panel .source-row:active {
-    border-color: alpha(@mp_yellow, 0.45);
-    background: alpha(@mp_red, 0.1);
+    border-color: color-mix(in srgb, var(--mp_yellow) 45%, transparent);
+    background: color-mix(in srgb, var(--mp_red) 10%, transparent);
 }
-.media-panel .source-row.current { border-color: alpha(@mp_red, 0.55); }
+.media-panel .source-row.current { border-color: color-mix(in srgb, var(--mp_red) 55%, transparent); }
 .media-panel button.source-select,
 .media-panel button.source-select:hover,
 .media-panel button.source-select:focus-visible,
@@ -110,8 +110,8 @@ window.media-panel {
     box-shadow: none;
     outline: none;
 }
-.media-panel .source-title { color: @mp_foreground; font-size: 13px; }
+.media-panel .source-title { color: var(--mp_foreground); font-size: 13px; }
 .media-panel .source-row .source-name { font-size: 13px; }
 .media-panel scrolledwindow { background: transparent; border: none; }
 .media-panel scrollbar { background: transparent; }
-.media-panel scrollbar slider { background: alpha(@mp_pink, 0.5); min-width: 3px; border: none; border-radius: 2px; }
+.media-panel scrollbar slider { background: color-mix(in srgb, var(--mp_pink) 50%, transparent); min-width: 3px; border: none; border-radius: 2px; }
