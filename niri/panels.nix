@@ -39,13 +39,15 @@ rec {
       inherit (pkgs) lib;
       # --- Packaged application sources ----------------------------------------
       # Only runtime code/metadata enter the snapshot. CSS stays in the checkout;
-      # docs and unrelated panels must not invalidate this launcher.
+      # tests, docs and unrelated panels must not invalidate this launcher.
       source = lib.fileset.toSource {
         root = ../scripts;
         fileset = lib.fileset.unions [
           ../scripts/live-style.js
           (lib.fileset.fileFilter
-            (file: file.hasExt "js" || file.hasExt "ts" || file.hasExt "json")
+            (file:
+              (file.hasExt "js" || file.hasExt "ts" || file.hasExt "json")
+              && !(lib.elem file.name [ "test.js" "tests.ts" ]))
             (../scripts + "/${sourceDir}"))
         ];
       };
@@ -159,9 +161,8 @@ rec {
         name = "network-panel";
         prefix = "NETWORK_PANEL";
         sourceDir = "network-manager";
-        # AstalNetwork's GIR references NM.Client; include libnm's typelib.
-        extraPackages = [ astalPackages.network pkgs.networkmanager ];
         environment = {
+          PANEL_BACKEND = pkgs.lib.getExe panelLauncher;
           DASHBOARD_PANEL = "dashboard-panel";
           MEDIA_PANEL = "media-panel";
         };
@@ -179,7 +180,7 @@ rec {
         imageLoaders = true;
         environment = {
           NETWORK_PANEL = "network-panel";
-          COREUTILS_DF = "${pkgs.coreutils}/bin/df";
+          PANEL_BACKEND = pkgs.lib.getExe panelLauncher;
           SWAYIDLE = pkgs.lib.getExe pkgs.swayidle;
           SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
         };
@@ -192,7 +193,10 @@ rec {
         sourceDir = "app-launcher";
         extraPackages = [ astalPackages.apps ];
         withPalette = false;
-        environment.NIRI = pkgs.lib.getExe pkgs.niri;
+        environment = {
+          NIRI = pkgs.lib.getExe pkgs.niri;
+          PANEL_BACKEND = pkgs.lib.getExe panelLauncher;
+        };
         commands = [ "run" "toggle" "close" "status" ];
       };
       # --- Clipboard ----------------------------------------------------------
@@ -234,6 +238,7 @@ rec {
         repoPackages.appLauncher
         repoPackages.clipboardPanel
         repoPackages.clipboardCustom
+        repoPackages.panelLauncher
       ];
 
       # Inferred TypeScript projects discover ancestor @types packages. Scope
@@ -302,6 +307,7 @@ rec {
 
             "DASHBOARD_PANEL=${lib.getExe repoPackages.dashboardPanel}"
             "MEDIA_PANEL=${lib.getExe repoPackages.mediaPanel}"
+            "PANEL_BACKEND=${lib.getExe repoPackages.panelLauncher}"
           ];
           Restart = "on-failure";
           RestartSec = 3;
@@ -357,6 +363,7 @@ rec {
 
             "DASHBOARD_PANEL_PALETTE=${config.xdg.configHome}/ags/dashboard-palette.json"
             "NETWORK_PANEL=${lib.getExe repoPackages.networkPanel}"
+            "PANEL_BACKEND=${lib.getExe repoPackages.panelLauncher}"
             "NOTIFICATION_HISTORY=%S/dashboard/notifications.json"
             "LEGACY_NOTIFICATION_HISTORY=%S/quickshell/notifications.json"
           ];
@@ -386,6 +393,7 @@ rec {
             "GDK_BACKEND=wayland"
 
             "NIRI=${lib.getExe pkgs.niri}"
+            "PANEL_BACKEND=${lib.getExe repoPackages.panelLauncher}"
           ];
           Restart = "on-failure";
           RestartSec = 3;

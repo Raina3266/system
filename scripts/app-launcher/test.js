@@ -60,6 +60,54 @@ async function unitTests() {
             setQuery(value) { query = value; }, setResults(value) { results = value; } };
     }
 
+    function monitorFixture(reply = { name: 'DP-2' }, successful = true, connectors = ['DP-1', 'DP-2']) {
+        const calls = [], warnings = [];
+        const available = connectors.map(name => ({ get_connector: () => name }));
+        const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
+            .replace(/^import .*\n/gm, '').replace(/export /g, '');
+        const focusedMonitor = runInNewContext(`${source}\nfocusedMonitor;`, {
+            GLib: { getenv: key => key === 'PANEL_BACKEND' ? '/packaged/panel-launcher' : null },
+            Gio: { SubprocessFlags: { STDOUT_PIPE: 1, STDERR_PIPE: 2 },
+                Subprocess: { new(argv) { calls.push(Array.from(argv)); return {
+                    communicate_utf8_async(_input, _cancel, callback) { callback(this, {}); },
+                    communicate_utf8_finish() { return [true, JSON.stringify(reply), '']; },
+                    get_successful: () => successful,
+                }; } } },
+            Gdk: { Display: { get_default: () => ({ get_monitors: () => ({
+                get_n_items: () => available.length, get_item: index => available[index],
+            }) }) } },
+            console: { warn: value => warnings.push(value) },
+        });
+        return { focusedMonitor, calls, warnings, available };
+    }
+
+    test('focused monitor lookup delegates Niri integration to the bounded Rust helper', async () => {
+        const h = monitorFixture();
+        assert.equal(await h.focusedMonitor(), h.available[1]);
+        assert.deepEqual(h.calls, [['/packaged/panel-launcher', 'runtime', 'focused-output']]);
+        assert.deepEqual(h.warnings, []);
+        const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8');
+        assert.doesNotMatch(source, /getenv\('NIRI'\)|'msg'\s*,\s*'-j'/);
+    });
+
+    test('an explicit monitor stays a native UI lookup and never launches the helper', async () => {
+        const h = monitorFixture();
+        assert.equal(await h.focusedMonitor('DP-2'), h.available[1]);
+        await assert.rejects(h.focusedMonitor('removed-output'), /No connected monitor/);
+        assert.deepEqual(h.calls, []);
+    });
+
+    test('focused-monitor helper failure or malformed replies preserve the native first-monitor fallback', async () => {
+        for (const [reply, successful] of [[{ name: null }, true], [{ name: 3 }, true], [null, true], [{ name: 'DP-2' }, false]]) {
+            const h = monitorFixture(reply, successful);
+            assert.equal(await h.focusedMonitor(), h.available[0]);
+            if (reply === null || typeof reply.name !== 'string' && reply.name !== null || !successful)
+                assert.equal(h.warnings.length, 1);
+        }
+        const empty = monitorFixture({ name: null }, true, []);
+        await assert.rejects(empty.focusedMonitor(), /No connected monitor is available/);
+    });
+
     test('IPC accepts only supported commands and valid monitor names', () => {
         assert.deepEqual(parseRequest('{"command":"toggle","monitor":"DP-8"}'), { command: 'toggle', monitor: 'DP-8' });
         for (const command of ['status', 'close', 'toggle']) assert.equal(parseRequest(JSON.stringify({ command })).command, command);

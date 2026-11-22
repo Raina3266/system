@@ -46,7 +46,7 @@ export async function focusedMonitor(name) {
     let connector = name;
     if (!connector) {
         try {
-            const process = Gio.Subprocess.new([GLib.getenv('NIRI') || 'niri', 'msg', '-j', 'focused-output'],
+            const process = Gio.Subprocess.new([GLib.getenv('PANEL_BACKEND') || 'panel-launcher', 'runtime', 'focused-output'],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
             const [, stdout] = await new Promise((resolve, reject) => {
                 process.communicate_utf8_async(null, null, (source, result) => {
@@ -54,8 +54,11 @@ export async function focusedMonitor(name) {
                     catch (error) { reject(error); }
                 });
             });
-            if (!process.get_successful()) throw new Error('niri focused-output failed');
-            connector = JSON.parse(stdout)?.name;
+            if (!process.get_successful()) throw new Error('Focused-monitor helper failed.');
+            const reply = JSON.parse(stdout);
+            if (!reply || (reply.name !== null && typeof reply.name !== 'string'))
+                throw new Error('Invalid focused-monitor helper response.');
+            connector = reply.name;
         } catch (error) { console.warn(`Launcher monitor lookup: ${error.message}`); }
     }
     const available = monitors();

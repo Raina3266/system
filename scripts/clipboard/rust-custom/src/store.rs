@@ -7,7 +7,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,9 +34,43 @@ struct Item {
     digest: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct DeleteToken {
+    kind: Kind,
+    name: Option<String>,
+    image_file: Option<String>,
+    identity: Option<(u64, u64)>,
+}
+
+const STALE_DELETE: &str =
+    "This file changed in clipboard history. Close and reopen the panel before deleting it.";
+
 impl Item {
     fn draft(&self) -> bool {
         matches!(self.kind, Kind::Memo) && self.text.as_deref().unwrap_or_default().is_empty()
+    }
+
+    fn source(&self) -> Option<&Path> {
+        self.name
+            .as_deref()
+            .filter(|name| self.kind == Kind::File && name.starts_with('/') && !name.contains('\0'))
+            .map(Path::new)
+    }
+
+    fn delete_token(&self) -> Result<String> {
+        // An exact association, not a hash or an authorization credential. Text
+        // edits and pin changes must not invalidate a displayed file association.
+        let identity = self
+            .source()
+            .filter(|p| validate_trash_path(p).is_ok())
+            .and_then(|p| fs::symlink_metadata(p).ok())
+            .map(|m| (m.dev(), m.ino()));
+        Ok(serde_json::to_string(&DeleteToken {
+            kind: self.kind.clone(),
+            name: self.name.clone(),
+            image_file: self.image_file.clone(),
+            identity,
+        })?)
     }
 }
 
@@ -105,6 +139,10 @@ impl Store {
             PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?).join(".local/share")
         };
         Self::at_data_home(&base)
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.root
     }
 
     fn image_path(&self, item: &Item) -> Result<Option<PathBuf>> {
@@ -241,6 +279,8 @@ impl Store {
             .map(|item| {
                 let mut value = serde_json::to_value(item)?;
                 value["image_path"] = json!(self.image_path(item)?);
+                value["can_trash"] = json!(item.source().is_some());
+                value["delete_token"] = json!(item.delete_token()?);
                 Ok(value)
             })
             .collect();
@@ -279,14 +319,63 @@ impl Store {
         })
     }
 
-    pub fn delete(&self, id: u64) -> Result<Value> {
-        self.transaction(true, |history| {
-            let item = history.items.remove(position(history, id)?);
+    pub fn delete(&self, id: u64, expected: &str) -> Result<Value> {
+        self.delete_with(id, expected, trash_source)
+    }
+
+    fn delete_with(
+        &self,
+        id: u64,
+        expected: &str,
+        trash: impl FnOnce(&Path) -> Result<()>,
+    ) -> Result<Value> {
+        let mut trashed = false;
+        let result = self.transaction(true, |history| {
+            let index = position(history, id)?;
+            let item = &history.items[index];
+            let token: DeleteToken = serde_json::from_str(expected).context(STALE_DELETE)?;
+            ensure!(token.kind == item.kind && token.name == item.name && token.image_file == item.image_file, STALE_DELETE);
+            if let Some(name) = item.name.as_deref().filter(|name| item.kind == Kind::File && name.starts_with('/')) {
+                // Invalid local associations are errors, never history-only deletes.
+                let path = Path::new(name);
+                validate_trash_path(path)?;
+                match fs::symlink_metadata(path) {
+                    Ok(metadata) => {
+                        ensure!(metadata.is_file() || metadata.file_type().is_symlink(),
+                            "Only files and symbolic links can be moved to Trash here. Use your file manager for folders.");
+                        ensure!(token.identity == Some((metadata.dev(), metadata.ino())), STALE_DELETE);
+                                                trash(path)?;
+                        trashed = true;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => anyhow::bail!("Cannot inspect the linked file; nothing was deleted."),
+                }
+            }
+            let item = history.items.remove(index);
             if matches!(item.kind, Kind::Memo) {
                 ensure_draft(history);
             }
             Ok(json!({ "id": id }))
-        })
+        });
+        if trashed && result.is_err() {
+            anyhow::bail!(
+                "The file was moved to Trash, but its clipboard entry could not be removed. Close and reopen the panel, then try again."
+            );
+        }
+        result
+    }
+
+    pub(super) fn linked_sources(&self) -> Result<Vec<PathBuf>> {
+        let mut sources = Vec::new();
+        self.transaction(false, |history| {
+            sources = history
+                .items
+                .iter()
+                .filter_map(|item| item.source().map(Path::to_path_buf))
+                .collect();
+            Ok(Value::Null)
+        })?;
+        Ok(sources)
     }
 
     pub fn save(&self, id: u64, base: &str, text: String) -> Result<Value> {
@@ -323,11 +412,7 @@ impl Store {
                 return Ok(json!({ "mime": item.mime, "file": path }));
             }
             if matches!(item.kind, Kind::File)
-                && let Some(path) = item
-                    .name
-                    .as_deref()
-                    .map(Path::new)
-                    .filter(|p| p.is_absolute())
+                && let Some(path) = item.source()
             {
                 ensure!(path.exists(), "The linked file no longer exists");
                 return Ok(json!({ "mime": "text/uri-list", "text": file_uri(path) }));
@@ -339,9 +424,8 @@ impl Store {
     pub fn prepare(&self) -> Result<Value> {
         self.transaction(true, |history| {
             history.items.retain(|item| {
-                let missing = matches!(item.kind, Kind::File)
-                    && item.name.as_deref().map(Path::new).filter(|p| p.is_absolute())
-                        .is_some_and(|p| matches!(fs::metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound));
+                let missing = item.source()
+                    .is_some_and(|p| matches!(fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound));
                 !missing
             });
             let id = ensure_draft(history);
@@ -432,6 +516,61 @@ impl Store {
         })?;
         Ok(())
     }
+}
+
+fn validate_trash_path(path: &Path) -> Result<()> {
+    use std::path::Component;
+    let bytes = path.as_os_str().as_bytes();
+    ensure!(
+        path.is_absolute()
+            && !bytes.contains(&0)
+            && path.file_name().is_some()
+            && !bytes.ends_with(b"/")
+            && !bytes.ends_with(b"/.")
+            && !path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir)),
+        "Cannot delete an invalid local file path."
+    );
+    Ok(())
+}
+
+fn trash_source(path: &Path) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let executable = std::env::var_os("CLIPBOARD_GIO")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "gio".into());
+    let mut command = Command::new(executable);
+    command
+        .env("GIO_USE_VFS", "local")
+        .args(["trash", "--"])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let parent = std::process::id() as libc::pid_t;
+    // SAFETY: only async-signal-safe syscalls run between fork and exec. Killing
+    // a timed-out/cancelled helper must also stop its destructive subprocess.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+            }
+            Ok(())
+        });
+    }
+    let status = command
+        .status()
+        .context("Cannot start the Trash backend; the file and history were kept")?;
+    ensure!(
+        status.success(),
+        "Could not move the file to Trash. The history entry was kept; no permanent deletion was attempted."
+    );
+    Ok(())
 }
 
 fn position(history: &History, id: u64) -> Result<usize> {

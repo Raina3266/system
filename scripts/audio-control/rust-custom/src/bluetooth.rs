@@ -1,7 +1,9 @@
-use std::io;
+use std::{io, sync::Arc};
 
 use bluer::agent::{Agent, ReqError, ReqResult};
 use bluer::{Address, ErrorKind, Session};
+use serde::Serialize;
+use serde_json::{Value, json};
 
 use crate::AppResult;
 use crate::model::CodeKind;
@@ -74,9 +76,9 @@ pub fn error_message(name: &str, error: &(dyn std::error::Error + 'static)) -> S
 // ---------------------------------------------------------------------------
 // Pairing agent
 //
-// BlueZ calls back into an agent while a device pairs, so the agent must
-// outlive the call. Prompts go to stderr and answers come from stdin, including
-// when AGS/Astal connects the process pipes to its pairing UI.
+// BlueZ calls back while Pair is pending, so the request-local agent must
+// outlive that call. The retained CLI uses terminal I/O; the resident panel
+// transports typed prompts/answers without parsing terminal prose.
 // ---------------------------------------------------------------------------
 
 /// A prompt requiring an answer while pairing.
@@ -85,42 +87,204 @@ pub(crate) struct PairRequest {
     pub(crate) message: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingNotice {
+    pub state: String,
+    pub text: String,
+    pub prompt: String,
+    pub needs_answer: bool,
+    #[serde(skip)]
+    pub dismissed: bool,
+}
+
+pub fn pair_label(device: &Value) -> String {
+    let name = device["name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .or_else(|| device["alias"].as_str())
+        .unwrap_or_default();
+    let address = device["address"].as_str().unwrap_or_default();
+    if name.is_empty() || name == address {
+        address.into()
+    } else {
+        format!("{name} ({address})")
+    }
+}
+
+impl PairingNotice {
+    pub fn new(device: &Value) -> Self {
+        Self {
+            state: "pairing".into(),
+            text: format!("Pairing with {}…", pair_label(device)),
+            prompt: String::new(),
+            needs_answer: false,
+            dismissed: false,
+        }
+    }
+    pub fn set_prompt(&mut self, message: String, needs_answer: bool) {
+        self.prompt = message;
+        self.needs_answer = needs_answer;
+        self.dismissed = false;
+    }
+    pub fn clear_prompt(&mut self) {
+        self.prompt.clear();
+        self.needs_answer = false;
+    }
+    pub fn paired(&mut self, device: &Value) {
+        self.state = "paired".into();
+        self.text = format!("Paired with {}.", pair_label(device));
+        self.clear_prompt();
+    }
+    pub fn fail(&mut self, device: &Value, error: &str, paired: bool) {
+        let label = pair_label(device);
+        let detail = error
+            .trim()
+            .lines()
+            .next_back()
+            .unwrap_or_default()
+            .trim()
+            .trim_start_matches("audio-control:")
+            .trim()
+            .replace(device["address"].as_str().unwrap_or_default(), &label);
+        let text = if paired {
+            format!("Paired with {label}, but setup failed: {detail}")
+        } else if detail.contains(&label) {
+            format!("Pairing failed: {detail}")
+        } else {
+            format!("Failed to pair with {label}: {detail}")
+        };
+        self.state = "failed".into();
+        self.text = crate::model::truncate(&text, 2048);
+        self.clear_prompt();
+    }
+    pub fn dismiss(&mut self, agent_active: bool) {
+        if !agent_active || self.prompt.is_empty() {
+            self.dismissed = true;
+        }
+    }
+}
+
+pub struct AgentPrompt {
+    pub message: String,
+    pub answer: Option<tokio::sync::oneshot::Sender<String>>,
+}
+
+#[derive(Clone)]
+enum AgentIo {
+    Terminal,
+    Panel(Arc<dyn Fn(AgentPrompt) + Send + Sync>),
+}
+
+impl AgentIo {
+    fn display(&self, message: String) {
+        match self {
+            Self::Terminal => eprintln!("{message}"),
+            Self::Panel(send) => send(AgentPrompt {
+                message,
+                answer: None,
+            }),
+        }
+    }
+
+    async fn ask(&self, request: PairRequest) -> ReqResult<String> {
+        let answer = match self {
+            Self::Terminal => ask_on_terminal(request.message).await?,
+            Self::Panel(send) => {
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                send(AgentPrompt {
+                    message: request.message,
+                    answer: Some(sender),
+                });
+                tokio::time::timeout(std::time::Duration::from_secs(180), receiver)
+                    .await
+                    .map_err(|_| ReqError::Canceled)?
+                    .map_err(|_| ReqError::Canceled)?
+            }
+        };
+        validate_answer(request.kind, &answer)
+    }
+}
+
+pub async fn pair_interactive(
+    adapter: &str,
+    address: &str,
+    send: Arc<dyn Fn(AgentPrompt) + Send + Sync>,
+) -> AppResult<()> {
+    let address = pairing_target(adapter, address)?;
+    let session = Session::new().await?;
+    let device = session.adapter(adapter)?.device(address)?;
+    let _agent = session.register_agent(agent(AgentIo::Panel(send))).await?;
+    match device.pair().await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind == ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(io::Error::other(error_message(&address.to_string(), &error)).into()),
+    }
+}
+
 fn pairing_agent() -> Agent {
+    agent(AgentIo::Terminal)
+}
+
+fn agent(io: AgentIo) -> Agent {
+    let pin = io.clone();
+    let passkey = io.clone();
+    let display_pin = io.clone();
+    let display_passkey = io.clone();
     Agent {
         // Not the default agent: this one only handles pairings that this
         // process starts, leaving incoming pairings to the session agent.
         request_default: false,
-        request_pin_code: Some(Box::new(|request| {
-            Box::pin(async move { ask(CodeKind::Pin, request.device.to_string()).await })
-        })),
-        request_passkey: Some(Box::new(|request| {
+        request_pin_code: Some(Box::new(move |request| {
+            let io = pin.clone();
             Box::pin(async move {
-                let code = ask(CodeKind::Passkey, request.device.to_string()).await?;
+                io.ask(PairRequest {
+                    kind: CodeKind::Pin,
+                    message: CodeKind::Pin.prompt(&request.device.to_string()),
+                })
+                .await
+            })
+        })),
+        request_passkey: Some(Box::new(move |request| {
+            let io = passkey.clone();
+            Box::pin(async move {
+                let code = io
+                    .ask(PairRequest {
+                        kind: CodeKind::Passkey,
+                        message: CodeKind::Passkey.prompt(&request.device.to_string()),
+                    })
+                    .await?;
                 code.trim().parse::<u32>().map_err(|_| ReqError::Rejected)
             })
         })),
-        display_pin_code: Some(Box::new(|request| {
+        display_pin_code: Some(Box::new(move |request| {
+            let io = display_pin.clone();
             Box::pin(async move {
-                eprintln!("Type {} on the device to finish pairing.", request.pincode);
+                io.display(format!(
+                    "Type {} on the device to finish pairing.",
+                    request.pincode
+                ));
                 Ok(())
             })
         })),
         // Zero-padded: BlueZ passes the passkey as a number, and a keyboard
         // waiting on six digits rejects the five that 042311 would print as.
-        display_passkey: Some(Box::new(|request| {
+        display_passkey: Some(Box::new(move |request| {
+            let io = display_passkey.clone();
             Box::pin(async move {
-                eprintln!(
+                io.display(format!(
                     "Type {:06} on the device and press Enter to finish pairing.",
                     request.passkey
-                );
+                ));
                 Ok(())
             })
         })),
         // Starting pairing is not consent to a numeric comparison: the user
         // must verify that both devices display the same passkey.
-        request_confirmation: Some(Box::new(|request| {
+        request_confirmation: Some(Box::new(move |request| {
+            let io = io.clone();
             Box::pin(async move {
-                ask_request(confirmation_request(
+                io.ask(confirmation_request(
                     request.device.to_string(),
                     request.passkey,
                 ))
@@ -132,16 +296,6 @@ fn pairing_agent() -> Agent {
         authorize_service: Some(Box::new(|_| Box::pin(async { Ok(()) }))),
         ..Default::default()
     }
-}
-
-/// Raises a prompt the pairing cannot continue without, and waits for it to be
-/// answered.
-async fn ask(kind: CodeKind, address: String) -> ReqResult<String> {
-    ask_request(PairRequest {
-        kind,
-        message: kind.prompt(&address),
-    })
-    .await
 }
 
 pub(crate) fn confirmation_request(address: String, passkey: u32) -> PairRequest {
@@ -162,11 +316,6 @@ pub(crate) fn validate_answer(kind: CodeKind, answer: &str) -> ReqResult<String>
     Ok(answer.to_owned())
 }
 
-async fn ask_request(request: PairRequest) -> ReqResult<String> {
-    let answer = ask_on_terminal(request.message).await?;
-    validate_answer(request.kind, &answer)
-}
-
 /// Reads the answer from stdin. BlueZ times the pairing out on its own, so the
 /// read is left to block for as long as the daemon is still waiting.
 async fn ask_on_terminal(prompt: String) -> ReqResult<String> {
@@ -184,6 +333,69 @@ async fn ask_on_terminal(prompt: String) -> ReqResult<String> {
     })
     .await
     .map_err(|_| ReqError::Canceled)?
+}
+
+pub fn display_name(device: &Value) -> String {
+    let address = device["address"].as_str().unwrap_or_default();
+    for field in ["name", "alias"] {
+        let name = device[field].as_str().unwrap_or_default().trim();
+        let address_only = name.len() == 17
+            && name.bytes().enumerate().all(|(index, byte)| {
+                if index % 3 == 2 {
+                    matches!(byte, b':' | b'-')
+                } else {
+                    byte.is_ascii_hexdigit()
+                }
+            });
+        if !name.is_empty() && !name.eq_ignore_ascii_case(address.trim()) && !address_only {
+            return name.to_owned();
+        }
+    }
+    address.to_owned()
+}
+
+pub fn device_rows(
+    native: &crate::model::NativeSnapshot,
+    busy: &std::collections::HashSet<String>,
+) -> Vec<Value> {
+    let path = native
+        .object(&native.adapter)
+        .ok()
+        .and_then(|adapter| adapter["path"].as_str())
+        .unwrap_or_default();
+    let mut devices: Vec<_> = native.objects("device").filter(|device| !path.is_empty() && device["adapter"] == path)
+        .map(|device| {
+            let battery = device["battery"].as_f64().filter(|value| value.is_finite() && *value >= 0.0).map(|value| value.min(1.0));
+            json!({"key":device["key"],"address":device["address"],"name":display_name(device),
+                "connected":device["connected"],"paired":device["paired"],"busy":busy.contains(crate::model::object_key(device)),"battery":battery})
+        }).collect();
+    devices.sort_by(|left, right| {
+        let rank = |device: &Value| {
+            if device["connected"] == true {
+                0
+            } else if device["paired"] == true {
+                1
+            } else {
+                2
+            }
+        };
+        rank(left).cmp(&rank(right)).then_with(|| {
+            display_name(left)
+                .to_lowercase()
+                .cmp(&display_name(right).to_lowercase())
+        })
+    });
+    devices
+}
+
+pub fn pairing_answer(answer: &str) -> AppResult<String> {
+    if answer.trim().is_empty()
+        || answer.encode_utf16().count() > 512
+        || answer.contains(['\r', '\n', '\0'])
+    {
+        return Err("Enter one PIN/passkey or yes/no answer.".into());
+    }
+    Ok(answer.to_owned())
 }
 
 pub mod battery_provider {
@@ -225,8 +437,9 @@ pub mod battery_provider {
 
     use zbus::fdo::{DBusProxy, ObjectManager, ObjectManagerProxy};
     use zbus::names::{BusName, OwnedInterfaceName};
-    use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
-    use zbus::{Connection, Proxy, interface};
+    use zbus::{
+        Connection, ObjectPath, OwnedObjectPath, OwnedVariant as OwnedValue, Proxy, interface,
+    };
 
     use crate::AppResult;
 

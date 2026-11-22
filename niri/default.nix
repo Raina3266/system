@@ -3,26 +3,13 @@
   config,
   lib,
   repoRoot,
+  repoPackages,
   ...
 }:
 let
-  # Smart playerctl wrapper: targets the currently playing MPRIS player,
-  # or falls back to the most recently active. Used by media key binds.
+  # Rust preserves playing-first selection and the native player's list order.
   mediactl = pkgs.writeShellScriptBin "mediactl" ''
-    cmd="$1"
-    players=$(${pkgs.playerctl}/bin/playerctl -l 2>/dev/null)
-    [ -z "$players" ] && exit 0
-    target=""
-    for p in $players; do
-      st=$(${pkgs.playerctl}/bin/playerctl -p "$p" status 2>/dev/null)
-      if [ "$st" = "Playing" ]; then
-        target="$p"
-        break
-      fi
-    done
-    # Fall back to first listed player (most recently active)
-    [ -z "$target" ] && target=$(echo "$players" | head -n1)
-    exec ${pkgs.playerctl}/bin/playerctl -p "$target" "$cmd"
+    exec ${lib.getExe repoPackages.mediaControl} playerctl "$@"
   '';
 
   # Shared by niri's environment block and environment.d below, so Qt apps

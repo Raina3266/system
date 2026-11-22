@@ -11,6 +11,7 @@ import type { DashboardBackend } from './power.ts';
 import { loadPanelStyle } from '../live-style.js';
 
 export type NotificationRow = {
+    token?: string;
     id: string;
     app: string;
     summary: string;
@@ -23,77 +24,125 @@ export type NotificationRow = {
     closed: boolean;
 };
 
-export const HISTORY_LIMIT = 200;
-export const POPUP_LIMIT = 5;
-export const DEFAULT_TIMEOUT = 8000;
-
-export function newestFirst(rows: NotificationRow[], row: NotificationRow, limit: number): NotificationRow[] {
-    return [row, ...rows.filter(existing => existing.id !== row.id)].slice(0, limit);
+// Bound native strings before encoding the pipe frame. Never truncate an action ID
+// into another valid ID. Lengths allow for JSON's worst-case six-byte escaping.
+function field(value: string, max: number): string {
+    return (value || '').slice(0, max).replace(/[\uD800-\uDBFF]$/, '');
 }
-
-export function archived(row: NotificationRow): NotificationRow {
-    return { ...row, actions: [], closed: true, icon: row.icon.startsWith('image://') ? '' : row.icon };
-}
-
-export function notificationTimeout(row: Pick<NotificationRow, 'timeout' | 'urgency'>): number {
-    if (row.timeout === 0 || row.urgency === 2) return 0;
-    return row.timeout > 0 ? row.timeout : DEFAULT_TIMEOUT;
-}
-
-export function restoreArchive(text: string, limit = HISTORY_LIMIT): { history: NotificationRow[]; dnd: boolean } {
-    if (!text.trim()) return { history: [], dnd: false };
-    const state = JSON.parse(text);
-    if (!state || state.version !== 1 || !Array.isArray(state.history))
-        throw new Error('Unsupported notification history format.');
-    const history: NotificationRow[] = [];
-    const ids = new Set<string>();
-    for (const value of state.history) {
-        if (!value || typeof value !== 'object' || Array.isArray(value)
-            || !['id', 'app', 'summary', 'body'].every(key => typeof value[key] === 'string')
-            || !value.id || ids.has(value.id) || value.transient === true) continue;
-        ids.add(value.id);
-        history.push(archived({
-            id: value.id, app: value.app, summary: value.summary, body: value.body,
-            icon: typeof value.icon === 'string' ? value.icon : '',
-            urgency: [0, 1, 2].includes(value.urgency) ? value.urgency : 1,
-            transient: false,
-            timeout: Number.isInteger(value.timeout) && value.timeout >= -1 && value.timeout <= 0x7fffffff ? value.timeout : -1,
-            actions: [], closed: true,
-        }));
-        if (history.length >= limit) break;
-    }
-    return { history, dnd: state.dnd === true };
-}
-
-export function serializeArchive(history: NotificationRow[], dnd: boolean): string {
-    return JSON.stringify({ version: 1, dnd, history: history.filter(row => !row.transient).slice(0, HISTORY_LIMIT).map(archived) });
-}
-
-type LiveNotification = { native: Notifd.Notification; key: string; timer: number; hovered: boolean };
-
-function snapshot(native: Notifd.Notification, id: string): NotificationRow {
+function snapshot(native: Notifd.Notification): NotificationRow {
     return {
-        id, app: native.app_name || '', summary: native.summary || '', body: native.body || '',
-        icon: native.image || native.app_icon || '', urgency: native.urgency,
+        id: '', app: field(native.app_name, 512), summary: field(native.summary, 2048), body: field(native.body, 12288),
+        icon: field(native.image || native.app_icon, 1024), urgency: native.urgency,
         transient: native.transient, timeout: native.expire_timeout,
-        actions: (native.actions || []).map((action: Notifd.Action) => ({ identifier: action.id, text: action.label })),
+        actions: (native.actions || []).slice(0, 16).filter((a: Notifd.Action) => a.id.length <= 128)
+            .map((a: Notifd.Action) => ({ identifier: a.id, text: field(a.label, 192) })),
         closed: false,
     };
 }
 
-function readArchive(path: string): string | null {
-    const file = Gio.File.new_for_path(path);
-    try {
-        // A malformed/unbounded file must not turn startup into an unbounded read.
-        if (file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null).get_size() > 8 * 1024 * 1024)
-            throw new Error('Notification archive exceeds 8 MiB.');
-        const [ok, bytes] = file.load_contents(null);
-        if (!ok) throw new Error('Could not load notification archive.');
-        return new TextDecoder().decode(bytes);
-    } catch (error: any) {
-        if (error.matches?.(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_FOUND)) return null;
-        console.warn(`notifications: could not read ${path}: ${error.message}`);
-        return '';
+export type Notice = { kind: 'init'; dnd: boolean; user: boolean }
+    | { kind: 'received'; native: number; token: string; time: number; restore: boolean; row: NotificationRow }
+    | { kind: 'resolved'; token: string; reason: number } | { kind: 'dnd' | 'seedAck'; value: boolean }
+    | { kind: 'hover'; id: string; token: string; value: boolean } | { kind: 'action'; id: string; token: string; identifier: string }
+    | { kind: 'dismiss'; id: string; token: string } | { kind: 'toggle' }
+    | { kind: 'clear'; instances: { native: number; token: string }[] };
+export type RequestFrame = { op: 'active'; active: boolean; generation: number } | { op: 'timeout'; minutes: number }
+    | { op: 'notify'; command: Notice };
+export type EventFrame = { event: 'offline' } | { event: 'toggle' } | { event: 'seed'; value: boolean }
+    | { event: 'error'; code: string } | { event: 'timeout'; minutes: number }
+    | { event: 'metrics'; generation: number; data: import('./parameters.ts').Metrics }
+    | { event: 'notifications'; history: NotificationRow[]; popups: NotificationRow[] }
+    | { event: 'native'; operation: 'expire' | 'invoke' | 'dismiss'; native: number; token: string; argument: string };
+export interface Transport {
+    send(frame: RequestFrame): void;
+    whenDrained(callback: () => void): void;
+    dispose(): void;
+}
+// One process per dashboard owner. Never reconnect and replay queued operations.
+export class DashboardPipe {
+    private child: Gio.Subprocess;
+    private io = new Gio.Cancellable();
+    private queue: Uint8Array[] = [];
+    private writing = false;
+    private ended = false;
+    private queuedBytes = 0;
+    private drained?: () => void;
+    whenDrained(callback: () => void) {
+        if (this.ended) return;
+        this.drained = callback;
+        if (!this.writing && !this.queue.length) void Promise.resolve().then(() => this.resume());
+    }
+    private resume() {
+        if (this.ended || this.writing || this.queue.length) return;
+        const callback = this.drained;
+        this.drained = undefined;
+        callback?.();
+    }
+    constructor(private receive: (event: EventFrame) => void) {
+        this.child = Gio.Subprocess.new([GLib.getenv('PANEL_BACKEND') || 'panel-launcher', 'backend', 'dashboard'],
+            Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE);
+        this.child.wait_async(null, (_, result) => {
+            try { this.child.wait_finish(result); } catch { /* Never log raw child data. */ } finally { this.dispose(); }
+        });
+        const input = this.child.get_stdout_pipe()!;
+        let parts: Uint8Array[] = [], size = 0;
+        const read = () => input.read_bytes_async(65536, GLib.PRIORITY_DEFAULT, this.io, (_, result) => {
+            try {
+                const bytes = input.read_bytes_finish(result).get_data();
+                if (this.ended) { input.close(null); return; }
+                if (!bytes?.length) { this.dispose(); return; }
+                let pos = 0;
+                while (pos < bytes.length) {
+                    const newline = bytes.indexOf(10, pos);
+                    const end = newline < 0 ? bytes.length : newline;
+                    const part = bytes.subarray(pos, end); size += part.length;
+                    if (size > 32 * 1024 * 1024) { this.dispose(); return; }
+                    parts.push(part); pos = end + 1;
+                    if (newline < 0) break;
+                    const line = new Uint8Array(size); let offset = 0;
+                    for (const p of parts) { line.set(p, offset); offset += p.length; }
+                    parts = []; size = 0;
+                    this.receive(JSON.parse(new TextDecoder().decode(line)));
+                    if (this.ended) return;
+                }
+                read();
+            } catch { this.dispose(); try { input.close(null); } catch {} }
+        });
+        try { read(); } catch { this.dispose(); }
+    }
+    send(message: RequestFrame) {
+        if (this.ended) return;
+        const bytes = new TextEncoder().encode(JSON.stringify(message) + '\n');
+        if (bytes.length > 131072) { console.warn('Dashboard request exceeds frame limit'); return; }
+        if (this.queue.length >= 512 || this.queuedBytes + bytes.length > 8 * 1024 * 1024) { this.dispose(); return; }
+        this.queuedBytes += bytes.length; this.queue.push(bytes); this.flush();
+    }
+    private flush() {
+        if (this.ended || this.writing || !this.queue.length) return;
+        this.writing = true;
+        const pipe = this.child.get_stdin_pipe()!;
+        const frame = this.queue.shift()!;
+        try {
+            pipe.write_all_async(frame, GLib.PRIORITY_DEFAULT, this.io, (_, result) => {
+                this.writing = false;
+                try {
+                    const [ok, n] = pipe.write_all_finish(result);
+                    if (!ok || n !== frame.length) this.dispose();
+                } catch { this.dispose(); }
+                this.queuedBytes -= frame.length;
+                if (this.ended) { try { pipe.close(null); } catch {} } else { this.flush(); this.resume(); }
+            });
+        } catch {
+            this.writing = false;
+            this.dispose();
+        }
+    }
+    dispose() {
+        if (this.ended) return;
+        this.ended = true; this.drained = undefined; this.queue = []; this.io.cancel();
+        if (!this.writing) { try { this.child.get_stdin_pipe()?.close(null); } catch {} }
+        try { this.child.get_stdout_pipe()?.close(null); } catch {}
+        this.receive({ event: 'offline' });
     }
 }
 
@@ -102,231 +151,108 @@ export class NotificationCenter {
     popups: NotificationRow[] = [];
     private native = Notifd.get_default();
     private settings = new Gio.Settings({ schema_id: 'io.astal.notifd' });
-    private live = new Map<number, LiveNotification>();
+    private live = new Map<number, { native: Notifd.Notification; token: string }>();
     private listeners = new Set<() => void>();
     private signals: number[] = [];
     private disposed = false;
-    private depth = 0;
-    private dirty = false;
-    private path: string;
-    private lastSaved = '';
-
-    constructor() {
-        const stateHome = GLib.getenv('XDG_STATE_HOME') || GLib.build_filenamev([GLib.get_home_dir(), '.local', 'state']);
-        this.path = GLib.getenv('NOTIFICATION_HISTORY') || GLib.build_filenamev([stateHome, 'dashboard', 'notifications.json']);
-        const legacy = GLib.getenv('LEGACY_NOTIFICATION_HISTORY') || GLib.build_filenamev([stateHome, 'quickshell', 'notifications.json']);
-        let text = readArchive(this.path);
-        // The new file, including an empty/corrupt one, is the migration marker.
-        if (text === null && legacy !== this.path) text = readArchive(legacy);
-        let restoredDnd = false;
-        try {
-            const restored = restoreArchive(text || '');
-            this.history = restored.history;
-            restoredDnd = restored.dnd;
-        } catch (error) { console.warn(`notifications: could not restore history: ${String(error)}`); }
-
-        // Native settings always win. The archive only seeds DND on first migration.
-        if (this.settings.get_user_value('dont-disturb') === null) this.native.dont_disturb = restoredDnd;
+    private offline = false;
+    private pending = new Map<number, Notifd.Notification>();
+    private pipe?: Transport;
+    start(pipe: Transport) {
+        if (this.pipe || this.disposed || this.offline) return;
+        this.pipe = pipe;
         this.native.ignore_timeout = true;
-        // Preserve protocol -1 in rows; this frontend owns the 8000 ms default.
         this.native.default_timeout = -1;
-        // The pinned schema spells this key "capabilites". Static image hints
-        // use icon-static; plaintext bodies do not support body-images/markup.
         this.settings.set_strv('server-capabilites', ['actions', 'body', 'icon-static', 'persistence']);
-        this.signals = [
-            this.native.connect('notified', (_service: Notifd.Notifd, id: number) => this.transaction(() => this.received(id))),
-            this.native.connect('resolved', (_service: Notifd.Notifd, id: number, reason: number) => this.transaction(() => this.resolved(id, reason))),
-            this.native.connect('notify::dont-disturb', () => this.transaction(() => {
-                if (this.dnd) {
-                    const visible = new Set(this.popups.map(row => row.id));
-                    this.popups = [];
-                    for (const live of this.live.values()) {
-                        if (visible.has(live.key)) { live.hovered = false; this.startTimer(live); }
-                    }
-                    this.prune();
-                }
-                this.changed();
-            })),
-        ];
-
-        this.transaction(() => {
-            // Astal persists unresolved objects in GSettings. Reattach only rows
-            // already admitted by our archive, in archive order, without popups.
-            // Absent rows may be a stale native flush after clear/eviction.
-            for (const native of [...this.native.notifications]) {
-                const row = this.history.find(row => {
-                    const match = /^astal:(\d+):(\d+):/.exec(row.id);
-                    if (!match || Number(match[1]) !== native.id || Number(match[2]) > native.time) return false;
-                    return JSON.stringify(archived(snapshot(native, row.id))) === JSON.stringify(archived(row));
-                });
-                if (!row) { native.expire(); continue; }
-                const live = { native, key: row.id, timer: 0, hovered: false };
-                this.live.set(native.id, live);
-                this.history = this.history.map(existing => existing.id === row.id ? snapshot(native, row.id) : existing);
-                this.startTimer(live);
-            }
-            this.changed();
-        });
+        this.command({ kind: 'init', dnd: this.dnd, user: this.settings.get_user_value('dont-disturb') !== null });
+        if (this.offline) return;
+        for (const object of this.native.notifications) this.pending.set(object.id, object);
+        this.signals = [this.native.connect('notified', (_, id: number) => {
+            this.restoreOne(id);
+            const object = this.native.get_notification(id);
+            if (object) this.attach(object, false);
+        }), this.native.connect('resolved', (_, id: number, reason: number) => {
+            this.restoreOne(id);
+            const live = this.live.get(id);
+            if (live) { this.live.delete(id); this.command({ kind: 'resolved', token: live.token, reason }); }
+        }), this.native.connect('notify::dont-disturb', () => this.command({ kind: 'dnd', value: this.dnd }))];
+        this.scheduleRestore();
         Gio.Settings.sync();
     }
-
-    get dnd(): boolean { return this.native.dont_disturb; }
-
-    subscribe(callback: () => void): () => void {
-        if (this.disposed) return () => {};
-        this.listeners.add(callback);
-        return () => this.listeners.delete(callback);
+    private restoreOne(id: number) {
+        // A signal may overtake the bulk restore. Preserve per-ID ordering without
+        // reattaching the old instance a second time after its replacement.
+        const object = this.pending.get(id);
+        if (!object) return;
+        this.pending.delete(id);
+        this.attach(object, true);
     }
-
-    private transaction(action: () => void) {
+    private scheduleRestore() {
+        if (!this.pending.size || this.offline || this.disposed) return;
+        this.pipe!.whenDrained(() => {
+            const item = this.pending.keys().next();
+            if (item.done) return;
+            this.restoreOne(item.value);
+            this.scheduleRestore();
+        });
+    }
+    private attach(native: Notifd.Notification, restore: boolean) {
+        if (this.offline || this.disposed) return;
+        const token = GLib.uuid_string_random();
+        this.live.set(native.id, { native, token });
+        this.command({ kind: 'received', native: native.id, time: native.time, token, row: snapshot(native), restore });
+    }
+    private command(command: Notice) { if (!this.disposed && !this.offline) this.pipe?.send({ op: 'notify', command }); }
+    receive(e: EventFrame) {
         if (this.disposed) return;
-        this.depth++;
-        try { action(); }
-        finally {
-            this.depth--;
-            if (!this.depth && this.dirty) {
-                this.dirty = false;
-                this.persist();
-                for (const callback of this.listeners) callback();
+        if (e.event === 'notifications' || e.event === 'offline') {
+            this.history = e.event === 'notifications' ? e.history : []; this.popups = e.event === 'notifications' ? e.popups : [];
+            if (e.event === 'offline') { this.offline = true; this.live.clear(); this.disconnect(); }
+            for (const cb of this.listeners) cb();
+        } else if (e.event === 'native') {
+            const live = this.live.get(e.native);
+            if (!live || live.token !== e.token || this.native.get_notification(e.native) !== live.native) return;
+            try {
+                if (e.operation === 'expire') live.native.expire();
+                if (e.operation === 'dismiss') live.native.dismiss();
+                if (e.operation === 'invoke') live.native.invoke(e.argument);
+            } catch { console.warn('Dashboard notification operation failed'); }
+        } else if (e.event === 'toggle' || e.event === 'seed') {
+            if (e.event === 'toggle' || this.settings.get_user_value('dont-disturb') === null) {
+                this.native.dont_disturb = e.event === 'toggle' ? !this.dnd : e.value;
+                Gio.Settings.sync();
             }
+            // A failed settings write is not an acknowledgment. Leave the seed
+            // pending unless readback matches or an explicit native value wins.
+            if (e.event !== 'seed' || this.dnd === e.value || this.settings.get_user_value('dont-disturb') !== null)
+                this.command({ kind: e.event === 'seed' ? 'seedAck' : 'dnd', value: this.dnd });
         }
     }
-
-    private changed() { this.dirty = true; }
-
-    private persist() {
-        const text = serializeArchive(this.history, this.dnd);
-        if (text === this.lastSaved) return;
-        try {
-            const parent = GLib.path_get_dirname(this.path);
-            if (GLib.mkdir_with_parents(parent, 0o700) !== 0) throw new Error(`Could not create ${parent}`);
-            // PRIVATE + REPLACE_DESTINATION gives an atomic 0600 replacement,
-            // including when migrating a file that previously had broader modes.
-            Gio.File.new_for_path(this.path).replace_contents(new TextEncoder().encode(text), null, false,
-                Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-            this.lastSaved = text;
-        } catch (error) { console.warn(`notifications: could not save history: ${String(error)}`); }
-    }
-
-    private received(id: number) {
-        const native = this.native.get_notification(id);
-        if (!native) return;
-        const previous = this.live.get(id);
-        if (previous) this.stopTimer(previous);
-        const live: LiveNotification = { native,
-            key: previous?.key || `astal:${id}:${native.time}:${GLib.uuid_string_random()}`,
-            timer: 0, hovered: previous?.hovered || false };
-        this.live.set(id, live);
-        const row = snapshot(native, live.key);
-        this.history = row.transient ? this.history.filter(existing => existing.id !== row.id)
-            : newestFirst(this.history, row, HISTORY_LIMIT);
-        this.popups = this.dnd ? this.popups.filter(existing => existing.id !== row.id)
-            : newestFirst(this.popups, row, POPUP_LIMIT);
-        // A hovered popup that was evicted no longer receives a leave event.
-        const visible = new Set(this.popups.map(row => row.id));
-        for (const tracked of this.live.values()) {
-            if (tracked.hovered && !visible.has(tracked.key)) { tracked.hovered = false; this.startTimer(tracked); }
-        }
-        this.startTimer(live);
-        this.prune();
-        this.changed();
-    }
-
-    private resolved(id: number, reason: number) {
-        const live = this.live.get(id);
-        if (!live) return;
-        this.stopTimer(live);
-        this.live.delete(id);
-        this.popups = this.popups.filter(row => row.id !== live.key);
-        // Pinned Astal: EXPIRED=1 archives; DISMISSED_BY_USER=2,
-        // CLOSED=3 (also non-resident actions), UNDEFINED=4 remove history.
-        this.history = reason === Notifd.ClosedReason.EXPIRED
-            ? this.history.map(row => row.id === live.key ? archived(row) : row)
-            : this.history.filter(row => row.id !== live.key);
-        this.changed();
-    }
-
-    private stopTimer(live: LiveNotification) {
-        if (live.timer) GLib.source_remove(live.timer);
-        live.timer = 0;
-    }
-
-    private startTimer(live: LiveNotification) {
-        this.stopTimer(live);
-        const timeout = notificationTimeout({ timeout: live.native.expire_timeout, urgency: live.native.urgency });
-        if (!timeout || live.hovered) return;
-        live.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeout, () => {
-            live.timer = 0;
-            // Replacements are new native objects; never expire an old instance.
-            if (!this.disposed && this.live.get(live.native.id) === live) live.native.expire();
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    private prune() {
-        const retained = new Set([...this.history, ...this.popups].map(row => row.id));
-        for (const live of [...this.live.values()]) {
-            if (!retained.has(live.key)) live.native.expire();
-        }
-    }
-
-    private findLive(id: string): LiveNotification | undefined {
-        for (const live of this.live.values()) {
-            if (live.key === id) return live;
-        }
-        return undefined;
-    }
-
-    setHovered(id: string, hovered: boolean) {
-        if (this.disposed) return;
-        const live = this.findLive(id);
-        if (!live || live.hovered === hovered || (hovered && !this.popups.some(row => row.id === id))) return;
-        live.hovered = hovered;
-        // Leaving starts a full interval, not the remainder of the old timeout.
-        this.startTimer(live);
-    }
-
-    dismissNotification(id: string) {
-        this.transaction(() => {
-            const live = this.findLive(id);
-            live?.native.dismiss();
-            this.history = this.history.filter(row => row.id !== id);
-            this.popups = this.popups.filter(row => row.id !== id);
-            this.changed();
-        });
-    }
-
-    invokeNotificationAction(id: string, identifier: string) {
-        if (this.disposed) return;
-        const live = this.findLive(id);
-        if (live?.native.actions.some((action: Notifd.Action) => action.id === identifier)) live.native.invoke(identifier);
-    }
-
+    get dnd() { return this.native.dont_disturb; }
+    subscribe(cb: () => void) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
+    setHovered(id: string, value: boolean, token = '') { this.command({ kind: 'hover', id, token, value }); }
+    dismissNotification(id: string, token = '') { this.command({ kind: 'dismiss', id, token }); }
+    invokeNotificationAction(id: string, identifier: string, token = '') { this.command({ kind: 'action', id, token, identifier }); }
     clearNotifications() {
-        this.transaction(() => {
-            // Include native rows that have not yet reached our notified callback.
-            for (const native of [...this.native.notifications]) native.dismiss();
-            this.history = [];
-            this.popups = [];
-            this.changed();
-        });
+        if (this.disposed || this.offline) return;
+        this.pending.clear(); // Clear includes the full current native collection below.
+        let instances: { native: number; token: string }[] = [];
+        for (const native of this.native.notifications) {
+            let ref = this.live.get(native.id);
+            if (ref?.native !== native) {
+                ref = { native, token: GLib.uuid_string_random() }; this.live.set(native.id, ref);
+            }
+            instances.push({ native: native.id, token: ref.token });
+            if (instances.length === 256) { this.command({ kind: 'clear', instances }); instances = []; }
+        }
+        this.command({ kind: 'clear', instances });
     }
-
-    toggleDnd() {
-        if (this.disposed) return;
-        this.native.dont_disturb = !this.native.dont_disturb;
-        Gio.Settings.sync();
-    }
-
+    toggleDnd() { this.command({ kind: 'toggle' }); }
+    private disconnect() { this.pending.clear(); this.signals.splice(0).forEach(id => this.native.disconnect(id)); }
     dispose() {
         if (this.disposed) return;
-        this.persist();
         this.disposed = true;
-        this.signals.forEach(signal => this.native.disconnect(signal));
-        this.signals = [];
-        for (const live of this.live.values()) this.stopTimer(live);
-        this.live.clear();
-        this.listeners.clear();
+        this.disconnect(); this.live.clear(); this.listeners.clear();
     }
 }
 
@@ -334,9 +260,9 @@ export type Palette = Record<'background' | 'secondaryBackground' | 'elevated' |
     | 'separator' | 'cyan' | 'pink' | 'dimPink' | 'yellow' | 'red', string>;
 
 export interface NotificationController {
-    setHovered(id: string, hovered: boolean): void;
-    dismissNotification(id: string): void;
-    invokeNotificationAction(id: string, identifier: string): void;
+    setHovered(id: string, hovered: boolean, token?: string): void;
+    dismissNotification(id: string, token?: string): void;
+    invokeNotificationAction(id: string, identifier: string, token?: string): void;
 }
 
 function read(path: string | null): string {
@@ -519,7 +445,7 @@ export class NotificationEntry {
         this.widget.set_child(content);
         if (!popup) this.widget.add_overlay(new Gtk.Box({ css_classes: ['notification-stripe'], width_request: 2,
             halign: Gtk.Align.START, can_target: false }));
-        this.close = iconButton('󰅖', null, () => this.center.dismissNotification(this.row.id), 16);
+        this.close = iconButton('󰅖', null, () => this.center.dismissNotification(this.row.id, this.row.token), 16);
         this.close.update_property([Gtk.AccessibleProperty.LABEL], ['Dismiss notification']);
         this.close.add_css_class('notification-close');
         this.close.halign = Gtk.Align.END;
@@ -553,14 +479,14 @@ export class NotificationEntry {
 
     private activateDefault(): void {
         if (this.row.actions.some(action => action.identifier === 'default'))
-            invoke(() => this.center.invokeNotificationAction(this.row.id, 'default'));
+            invoke(() => this.center.invokeNotificationAction(this.row.id, 'default', this.row.token));
     }
 
     private setHovered(hovered: boolean): void {
         if (this.hovered === hovered) return;
         this.hovered = hovered;
         style(this.widget, 'hovered', hovered);
-        if (this.popup) invoke(() => this.center.setHovered(this.row.id, hovered));
+        if (this.popup) invoke(() => this.center.setHovered(this.row.id, hovered, this.row.token));
     }
 
     update(row: NotificationRow): void {
@@ -579,14 +505,14 @@ export class NotificationEntry {
                 try { this.artwork.set_from_gicon(Gio.Icon.new_for_string(row.icon)); }
                 catch (error) {
                     this.artwork.visible = false;
-                    console.warn(`Dashboard notification icon: ${String(error)}`);
+                    console.warn('Invalid dashboard notification icon');
                 }
             }
         }
         // Keep controls (and their focus/pressed state) alive across metrics,
         // timeout and hover updates that do not change notification actions.
         const actions = row.actions.filter(action => action.identifier !== 'default');
-        const actionKey = JSON.stringify(actions);
+        const actionKey = JSON.stringify([row.token, actions]);
         if (actionKey !== this.actionKey) {
             this.actionKey = actionKey;
             for (let child = this.actions.get_first_child(); child;) {
@@ -600,7 +526,7 @@ export class NotificationEntry {
                 const button = new Gtk.Button({ child: text, css_classes: ['notification-action'],
                     height_request: 28, valign: Gtk.Align.START });
                 button.update_property([Gtk.AccessibleProperty.LABEL], [action.text]);
-                button.connect('clicked', () => invoke(() => this.center.invokeNotificationAction(this.row.id, action.identifier)));
+                button.connect('clicked', () => invoke(() => this.center.invokeNotificationAction(row.id, action.identifier, row.token)));
                 this.actions.insert(button, -1);
                 button.get_parent()?.set_focusable(false);
             }
@@ -625,7 +551,7 @@ export class NotificationStack {
 
     sync(notifications: readonly NotificationRow[]): void {
         // The center supplies newest-first ordering for both native views.
-        const selected = this.popup ? notifications.slice(0, 5) : notifications;
+        const selected = notifications;
         const wanted = new Set(selected.map(row => row.id));
         for (const [id, row] of this.rows) {
             if (wanted.has(id)) continue;

@@ -184,36 +184,11 @@ let
     meta.mainProgram = "ts-for-gir";
   });
 
-  withParentDeath =
-    pkgs.runCommandCC "with-parent-death"
-      {
-        src = pkgs.writeText "with-parent-death.c" ''
-          #include <sys/prctl.h>
-          #include <unistd.h>
-          #include <signal.h>
-          #include <stdlib.h>
-          #include <stdio.h>
-
-          int main(int argc, char *argv[]) {
-            if (argc < 2) {
-              fprintf(stderr, "usage: with-parent-death PROGRAM [ARGS...]\n");
-              return 2;
-            }
-            prctl(PR_SET_PDEATHSIG, SIGKILL);
-            if (getppid() == 1) _exit(0);
-            execvp(argv[1], &argv[1]);
-            perror("with-parent-death: execvp");
-            return 127;
-          }
-        '';
-      }
-      ''
-        install -d $out/bin
-        cc -O2 -s -o $out/bin/with-parent-death $src
-      '';
 in
 rec {
-  inherit withParentDeath;
+  withParentDeath = pkgs.writeShellScriptBin "with-parent-death" ''
+    exec ${lib.getExe panelLauncher} runtime with-parent-death "$@"
+  '';
 
   dolphinGdriveActions = pkgs.python3Packages.buildPythonApplication {
     pname = "dolphin-gdrive-actions";
@@ -270,8 +245,10 @@ rec {
 
   clipboardCustom = mkWorkspacePackage "clipboard-custom" {
     workspaceMember = "clipboard/rust-custom";
+    nativeCheckInputs = [ pkgs.glib.bin ];
     postInstall = ''
       wrapProgram "$out/bin/clipboard-custom" \
+        --set CLIPBOARD_GIO "${pkgs.glib.bin}/bin/gio" \
         --set CLIPBOARD_WL_PASTE "${lib.getExe' pkgs.wl-clipboard "wl-paste"}"
     '';
     cargoArtifacts = mkCargoArtifacts "clipboard-custom-deps" {
@@ -361,7 +338,8 @@ rec {
       test -s "$out/node_modules/@types/dashboard-gi/gtk-4.0.d.ts"
     '';
 
-  # Headless audio compatibility, pairing, and HID++ battery publication only.
+  # Resident audio/Bluetooth policy, native transaction orchestration, pairing,
+  # compatibility discovery, and HID++ battery publication.
   audioControl = mkWorkspacePackage "audio-control" {
     workspaceMember = "audio-control/rust-custom";
     postInstall = ''
@@ -370,11 +348,13 @@ rec {
     '';
   };
 
-  # Custom media policy/metadata only; AGS/Astal supplies the native services.
+  # Resident media policy/metadata and private MPRIS recovery. AGS/Astal supplies
+  # normal native snapshots and setters.
   mediaControl = mkWorkspacePackage "media-control" {
     workspaceMember = "media-control/rust-custom";
     postInstall = ''
       wrapProgram "$out/bin/media-control" \
+        --set MEDIA_CONTROL_PLAYERCTL "${pkgs.playerctl}/bin/playerctl" \
         --set MEDIA_CONTROL_CURL "${lib.getExe pkgs.curl}"
     '';
   };
@@ -517,29 +497,8 @@ rec {
         exec ${pythonWithDeps}/bin/python ${package}/share/waybar-ycal/bar.py "$@"
       '';
       toggle = pkgs.writeShellScriptBin "waybar-ycal-toggle" ''
-        set -euo pipefail
-        PID_FILE="$HOME/.cache/waybar-ycal/popup.pid"
-
-        if [ -f "$PID_FILE" ]; then
-          PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-          if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-            kill -SIGUSR1 "$PID"
-            exit 0
-          fi
-        fi
-
-        systemctl --user start waybar-ycal.service >/dev/null 2>&1 || true
-        for _ in 1 2 3 4 5; do
-          if [ -f "$PID_FILE" ]; then
-            PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-            if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-              kill -SIGUSR1 "$PID"
-              exit 0
-            fi
-          fi
-          sleep 0.2
-        done
-        ${package}/bin/waybar-ycal-popup &
+        exec ${lib.getExe panelLauncher} runtime ycal-toggle "${pkgs.systemd}/bin/systemctl" \
+          "${python}/bin/python" "${package}/share/waybar-ycal/popup.py" "${package}/bin/waybar-ycal-popup"
       '';
     in
     {

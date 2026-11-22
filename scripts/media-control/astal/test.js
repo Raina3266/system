@@ -183,7 +183,7 @@ test('the entire built media tree stays tooltip-free through source, title and c
     panel.rewind.emit('clicked');
     panel.forward.emit('clicked');
     assert.deepEqual(actions, [['toggle', 'one'], ['previous', 'one'], ['next', 'one'], ['toggle', 'two'],
-        ['seek', 'one', 15], ['seek', 'one', 45]]);
+        ['jump', 'one', -15], ['jump', 'one', 15]]);
     for (enabled of [false, true]) {
         panel.render();
         checkTree(panel.content);
@@ -363,55 +363,55 @@ describe('Media view transport feedback', () => {
         assert.equal(total, '--:--');
     });
 
-    test('15-second jumps use each fresh native position, not model or slider values', () => {
+    test('15-second jumps delegate signed offsets to Rust, not model or slider positions', () => {
         const h = jumpHarness();
         h.panel.seekBy(-15);
         h.live.position = 50;
         h.panel.seekBy(15);
-        assert.deepEqual(h.actions, [['seek', 'browser', 15], ['seek', 'browser', 65]]);
+        assert.deepEqual(h.actions, [['jump', 'browser', -15], ['jump', 'browser', 15]]);
         assert.equal(h.selected.position, 10);
         assert.equal(h.live.position, 50, 'jumping must not fabricate a native position update');
         assert.deepEqual(h.failures, []);
     });
 
-    test('display estimates are never used as native seek targets and unavailable progress blocks jumps', () => {
+    test('display estimates are never converted into absolute jump targets by the frontend', () => {
         const h = jumpHarness();
         h.progress = { ...h.live, position: 34.5, samplePosition: 30 };
         h.panel.seekBy(15);
-        assert.deepEqual(h.actions, [['seek', 'browser', 45]], 'use the real 30-second sample, not estimated time');
-        for (const progress of [null, { ...h.live, positionSupported: false }]) {
-            h.progress = progress;
-            h.panel.seekBy(15);
-            assert.equal(h.actions.length, 1, 'stale or unavailable display timing must not queue jumps');
-        }
+        assert.deepEqual(h.actions, [['jump', 'browser', 15]], 'Rust chooses the native sample and absolute target');
+        assert.equal(h.progress.position, 34.5);
+        assert.equal(h.progress.samplePosition, 30);
     });
 
-    test('jumps use a current-track position read rather than an older cached native position', () => {
+    test('jump requests do not select between cached native and current-track progress samples', () => {
         const h = jumpHarness();
         h.live.position = 100;
         h.progress = { ...h.live, position: 20, samplePosition: 20 };
         h.panel.seekBy(15);
-        assert.deepEqual(h.actions, [['seek', 'browser', 35]]);
+        assert.deepEqual(h.actions, [['jump', 'browser', 15]]);
     });
 
-    test('15-second jumps clamp to zero and the live track length, including genuine zero position', () => {
-        for (const [position, seconds, target] of [[2, -15, 0], [35, 15, 40], [0, 15, 15], [40, -15, 25]]) {
+    test('15-second requests leave boundary clamping to Rust, including genuine zero position', () => {
+        for (const [position, seconds] of [[2, -15], [35, 15], [0, 15], [40, -15]]) {
             const h = jumpHarness();
             h.live.position = position;
             h.live.length = 40;
             h.panel.seekBy(seconds);
-            assert.deepEqual(h.actions, [['seek', 'browser', target]], `position ${position}, jump ${seconds}`);
+            assert.deepEqual(h.actions, [['jump', 'browser', seconds]], `position ${position}, jump ${seconds}`);
         }
     });
 
-    test('jumps revalidate native support, finite samples, and exact track identity before dispatch', () => {
+    test('jump buttons disable for unavailable progress or a changed track identity', () => {
         for (const [name, overrides] of unavailableSeekSamples) {
-            for (const seconds of [-15, 15]) {
-                const h = jumpHarness();
-                h.live = overrides && { ...h.live, ...overrides };
-                h.panel.seekBy(seconds);
-                assert.deepEqual(h.actions, [], `${name}, jump ${seconds}`);
-            }
+            const h = jumpHarness();
+            h.live = overrides && { ...h.live, ...overrides };
+            Object.assign(h.panel, {
+                rewind: {}, forward: {}, seek: { set_value() {}, get_value: () => 0 },
+                elapsed: { set_label() {} }, total: { set_label() {} },
+            });
+            MediaPanel.prototype.position.call(h.panel);
+            assert.equal(h.panel.rewind.sensitive, false, name);
+            assert.equal(h.panel.forward.sensitive, false, name);
         }
     });
 
@@ -444,7 +444,7 @@ describe('Media view transport feedback', () => {
         panel.seekBy(15);
         assert.equal(h.resets, 1, 'cancel restores the sampled native position');
         panel.finishSeek(true);
-        assert.deepEqual(h.actions, [['seek', 'browser', 45]], 'release must not queue the old 80-second preview');
+        assert.deepEqual(h.actions, [['jump', 'browser', 15]], 'release must not queue the old 80-second preview');
     });
 
     test('rejected jump queues report backend failures and a nonempty fallback through reportFailure', () => {
@@ -453,7 +453,7 @@ describe('Media view transport feedback', () => {
             h.accepted = false;
             h.panel.backend.failure = failure;
             h.panel.seekBy(15);
-            assert.deepEqual(h.actions, [['seek', 'browser', 45]]);
+            assert.deepEqual(h.actions, [['jump', 'browser', 15]]);
             assert.equal(h.reports.length, 1);
             assert.equal(h.failures.length, 1);
             assert.ok(h.failures[0].length > 0);
@@ -701,26 +701,19 @@ describe('Media view transport feedback', () => {
     });
 });
 
-// Evaluate the real backend with in-memory GI doubles; never connect to a bus
-// or start a helper. Keep production imports native and dependency-free.
+// Evaluate the real adapter with in-memory GI doubles; never connect to a bus
+// or start a real helper. Rust owns discovery, timing, and action policy.
 const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
     .replace(/^import .+;\r?$/gm, '')
     .replace(/^export /gm, '');
-const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', 'queryPosition', `'use strict';
+const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', `'use strict';
     ${source}
     if (helper) runHelper = helper;
-    if (queryPosition) readPosition = queryPosition;
-    return { Planner, NativeMedia, MediaBackend, ModelWorker, runHelper, ownershipStamp, readPosition,
-        DirectPlayer: typeof DirectPlayer === 'undefined' ? undefined : DirectPlayer,
-        LocalPlayerDiscovery: typeof LocalPlayerDiscovery === 'undefined' ? undefined : LocalPlayerDiscovery };
+    return { NativeMedia, MediaBackend, ServiceWorker, runHelper, matchesGuard };
 `);
 
-const variantDouble = {
-    is_object_path: value => typeof value === 'string' && /^\/(?:[A-Za-z0-9_]+(?:\/[A-Za-z0-9_]+)*)?$/.test(value),
-};
-
-function loadBackend({ GLib = {}, Gio = {}, Mpris = {}, Wp = {}, runHelper = null, queryPosition = null } = {}) {
-    return factory({ Variant: variantDouble, ...GLib }, Gio, Mpris, Wp, badge, runHelper, queryPosition);
+function loadBackend({ GLib = {}, Gio = {}, Mpris = {}, Wp = {}, runHelper = null } = {}) {
+    return factory(GLib, Gio, Mpris, Wp, badge, runHelper);
 }
 
 class Signals {
@@ -803,2089 +796,1126 @@ class Stream extends Signals {
     }
 }
 
-// Tuple replies unpack to arrays; a{sv} values stay variants, as they do in GJS.
-class DBusVariant {
-    static is_object_path = variantDouble.is_object_path;
-    constructor(signature, values) { Object.assign(this, { signature, values }); }
-    deep_unpack() { return this.values; }
-}
-
-const dbusVariant = (signature, values) => new DBusVariant(signature, values);
-const mprisPath = '/org/mpris/MediaPlayer2';
-const mprisRoot = 'org.mpris.MediaPlayer2';
-const mprisPlayer = `${mprisRoot}.Player`;
-const propertiesInterface = 'org.freedesktop.DBus.Properties';
-const daemonInterface = 'org.freedesktop.DBus';
-const playbackStatus = { PLAYING: 1, PAUSED: 2, STOPPED: 3 };
-
-function dbusHarness() {
-    const h = { calls: [], pending: new Set(), subscriptions: new Map(), sources: new Map(), time: 0 };
-    let nextSignal = 0, nextSource = 0;
-    h.respond = call => { throw new Error(`Unexpected D-Bus call: ${call.bus} ${call.method}`); };
-    h.connection = {
-        call(bus, path, iface, method, parameters, replyType, flags, timeout, cancellable, callback) {
-            const call = { bus, path, iface, method, parameters, replyType, flags, timeout, cancellable,
-                params: parameters?.deep_unpack() ?? [] };
-            h.calls.push(call);
-            h.pending.add(call);
-            let finished = false, cancelSignal = 0;
-            const finish = result => {
-                if (finished) return;
-                finished = true;
-                h.pending.delete(call);
-                if (cancelSignal) cancellable.disconnect(cancelSignal);
-                queueMicrotask(() => callback(h.connection, result));
-            };
-            call.resolve = value => finish({ value });
-            call.reject = error => finish({ error });
-            if (cancellable?.is_cancelled()) call.reject(new Error('Operation was cancelled'));
-            else if (cancellable) cancelSignal = cancellable.connect(() => call.reject(new Error('Operation was cancelled')));
-            queueMicrotask(() => {
-                if (finished) return;
-                try {
-                    const reply = h.respond(call);
-                    // Undefined deliberately holds a request for race/cancellation tests.
-                    if (reply !== undefined) call.resolve(reply);
-                } catch (error) { call.reject(error); }
-            });
-        },
-        call_finish(result) {
-            if (result.error) throw result.error;
-            return result.value;
-        },
-        signal_subscribe(sender, iface, member, path, arg0, flags, callback) {
-            const id = ++nextSignal;
-            h.subscriptions.set(id, { sender, iface, member, path, arg0, flags, callback });
-            return id;
-        },
-        signal_unsubscribe(id) { h.subscriptions.delete(id); },
-    };
-    h.emit = (sender, iface, member, path, parameters) => {
-        for (const signal of [...h.subscriptions.values()]) {
-            if (signal.sender && signal.sender !== sender || signal.iface && signal.iface !== iface
-                || signal.member && signal.member !== member || signal.path && signal.path !== path
-                || signal.arg0 && signal.arg0 !== parameters.deep_unpack()[0]) continue;
-            signal.callback(h.connection, sender, path, iface, member, parameters);
-        }
-    };
-    const addSource = (kind, interval, callback) => {
-        const id = ++nextSource;
-        h.sources.set(id, { kind, interval, callback, due: h.time + interval });
-        return id;
-    };
-    h.GLib = {
-        Variant: DBusVariant, VariantType: class { constructor(signature) { this.signature = signature; } },
-        PRIORITY_DEFAULT: 0, PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false, SOURCE_CONTINUE: true,
-        get_monotonic_time: () => h.time * 1000, getenv: () => null,
-        idle_add: (_, callback) => addSource('idle', 0, callback),
-        timeout_add: (_, interval, callback) => addSource('timeout', interval, callback),
-        source_remove: id => h.sources.delete(id),
-    };
-    h.Gio = { Cancellable, DBusCallFlags: { NONE: 0 }, DBusSignalFlags: { NONE: 0 }, DBus: { session: h.connection },
-        DBusError: { get_remote_error: error => error.remoteName ?? null } };
-    h.manager = Object.assign(new Signals(), { players: [] });
-    h.audio = Object.assign(new Signals(), { streams: [] });
-    h.api = loadBackend({ GLib: h.GLib, Gio: h.Gio,
-        Mpris: { PlaybackStatus: playbackStatus, get_default: () => h.manager },
-        Wp: { get_default: () => ({ audio: h.audio }) } });
-    h.flush = async () => {
-        for (let turn = 0; turn < 20; turn++) {
-            await new Promise(resolve => setImmediate(resolve));
-            const idle = [...h.sources].filter(([, entry]) => entry.kind === 'idle');
-            if (!idle.length) return;
-            for (const [id, entry] of idle)
-                if (h.sources.has(id) && !entry.callback()) h.sources.delete(id);
-        }
-        assert.fail('Recovery work did not settle after 20 idle turns');
-    };
-    h.advance = async (milliseconds = 1000) => {
-        h.time += milliseconds;
-        for (const [id, entry] of [...h.sources]) {
-            if (entry.kind !== 'timeout' || entry.due > h.time || !h.sources.has(id)) continue;
-            entry.due = h.time + entry.interval;
-            if (!entry.callback()) h.sources.delete(id);
-        }
-        await h.flush();
-    };
-    h.timers = () => [...h.sources.values()].filter(entry => entry.kind === 'timeout');
-    h.positionCalls = () => h.calls.filter(call => call.iface === propertiesInterface
-        && call.method === 'Get' && call.params[1] === 'Position');
-    return h;
-}
-
-function mprisFixture({ identity = 'Haruna', entry = 'org.kde.haruna', status = 'Playing', position = 12_500_000 } = {}) {
-    const metadata = {
-        'mpris:trackid': dbusVariant('o', '/track/lost_name'),
-        'mpris:length': dbusVariant('x', 240_000_000),
-        'xesam:title': dbusVariant('s', 'Recovered track'),
-        'xesam:artist': dbusVariant('as', ['Recovered artist']),
-        'xesam:album': dbusVariant('s', 'Recovered album'),
-        'xesam:url': dbusVariant('s', 'file:///music/recovered.flac'),
-        'mpris:artUrl': dbusVariant('s', 'file:///music/cover.jpg'),
-    };
-    return {
-        root: { Identity: dbusVariant('s', identity), DesktopEntry: dbusVariant('s', entry) },
-        player: {
-            PlaybackStatus: dbusVariant('s', status), Rate: dbusVariant('d', 1.25),
-            Metadata: dbusVariant('a{sv}', metadata), Position: dbusVariant('x', position),
-            CanPlay: dbusVariant('b', true), CanPause: dbusVariant('b', true), CanSeek: dbusVariant('b', true),
-            CanGoNext: dbusVariant('b', false), CanGoPrevious: dbusVariant('b', true),
-        },
-        positionReply: dbusVariant('(v)', [dbusVariant('x', position)]),
-    };
-}
-
-function mprisReply(fixture, call) {
-    assert.equal(call.path, mprisPath);
-    if (call.iface === propertiesInterface && call.method === 'GetAll') {
-        assert.ok([mprisRoot, mprisPlayer].includes(call.params[0]));
-        return dbusVariant('(a{sv})', [call.params[0] === mprisRoot ? fixture.root : fixture.player]);
-    }
-    if (call.iface === propertiesInterface && call.method === 'Get') {
-        assert.deepEqual(call.params, [mprisPlayer, 'Position']);
-        if (fixture.positionReply instanceof Error) throw fixture.positionReply;
-        return fixture.positionReply;
-    }
-    assert.equal(call.iface, mprisPlayer);
-    assert.ok(['Play', 'Pause', 'Next', 'Previous', 'SetPosition'].includes(call.method));
-    return dbusVariant('()', []);
-}
-
-function directPlayerHarness(options) {
-    const h = dbusHarness();
-    assert.equal(typeof h.api.DirectPlayer, 'function', 'backend.js must implement DirectPlayer for lost-name recovery');
-    h.bus = ':1.220';
-    h.fixture = mprisFixture(options);
-    h.respond = call => {
-        assert.equal(call.bus, h.bus, 'MPRIS queries and controls must target the actual private owner');
-        return mprisReply(h.fixture, call);
-    };
-    h.player = new h.api.DirectPlayer(h.bus, { connection: h.connection });
-    h.changed = (values, invalidated = []) => h.emit(h.bus, propertiesInterface, 'PropertiesChanged', mprisPath,
-        dbusVariant('(sa{sv}as)', [mprisPlayer, values, invalidated]));
-    h.seeked = position => h.emit(h.bus, mprisPlayer, 'Seeked', mprisPath, dbusVariant('(x)', [position]));
-    return h;
-}
-
-function assertUnknownPosition(player) {
-    assert.ok(!Number.isFinite(player.position) || player.position < 0,
-        `Missing/invalid Position must not become a fabricated sample: ${player.position}`);
-}
-
-describe('DirectPlayer lost-name recovery', () => {
-    test('decodes Haruna MPRIS exports from a private owner without requiring its lost well-known name', async t => {
-        const h = directPlayerHarness();
-        t.after(() => h.player.dispose());
-        assert.equal(await h.player.start(), h.player);
-        await h.flush();
-        const player = h.player;
-        assert.equal(player.bus_name, ':1.220');
-        assert.equal(player.available, true);
-        assert.equal(player.identity, 'Haruna');
-        assert.equal(player.entry, 'org.kde.haruna');
-        assert.equal(player.playback_status, playbackStatus.PLAYING);
-        assert.equal(player.rate, 1.25);
-        assert.equal(player.length, 240);
-        assert.equal(player.position, 12.5);
-        assert.equal(player.trackid, '/track/lost_name');
-        assert.equal(player.title, 'Recovered track');
-        assert.equal(player.artist, 'Recovered artist');
-        assert.equal(player.album, 'Recovered album');
-        assert.equal(player.art_url, 'file:///music/cover.jpg');
-        assert.equal(typeof player.cover_art, 'string', 'an empty cover is valid; local extraction remains Rust policy');
-        assert.equal(player.get_meta('xesam:url').deep_unpack(), 'file:///music/recovered.flac');
-        assert.deepEqual([player.can_play, player.can_pause, player.can_seek, player.can_go_next, player.can_go_previous],
-            [true, true, true, false, true]);
-        assert.deepEqual(h.calls.filter(call => call.method === 'GetAll').map(call => call.params[0]).sort(),
-            [mprisRoot, mprisPlayer].sort());
-        for (const call of h.calls) {
-            assert.equal(call.timeout, 1500);
-            assert.equal(call.flags, 0);
-            assert.ok(call.cancellable instanceof Cancellable);
-        }
-    });
-
-    test('unknown applications use their own identity and accept double-valued microseconds', async t => {
-        const h = directPlayerHarness({ identity: 'Uncatalogued Audio Lab', entry: 'audio-lab', position: 1_500_000.5 });
-        t.after(() => h.player.dispose());
-        h.fixture.player.Metadata.deep_unpack()['mpris:length'] = dbusVariant('d', 240_000_000.5);
-        h.fixture.player.Position = dbusVariant('d', 1_500_000.5);
-        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('d', 1_500_000.5)]);
-        await h.player.start();
-        await h.flush();
-        assert.equal(h.player.identity, 'Uncatalogued Audio Lab');
-        assert.equal(h.player.entry, 'audio-lab');
-        assert.equal(h.player.length, 240.0000005);
-        assert.equal(h.player.position, 1.5000005);
-    });
-
-    test('PropertiesChanged and Seeked decode the final variant argument and notify live subscribers', async t => {
-        const h = directPlayerHarness();
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const notifications = [];
-        const signal = h.player.connect('notify', (_, property) => notifications.push(property.name));
-        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('x', 21_250_000)]);
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused'), Rate: dbusVariant('d', 0.75),
-            Metadata: dbusVariant('a{sv}', {
-                'mpris:trackid': dbusVariant('o', '/track/two'), 'xesam:title': dbusVariant('s', 'Second track'),
-            }) });
-        h.seeked(21_250_000);
-        await h.flush();
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-        assert.equal(h.player.rate, 0.75);
-        assert.equal(h.player.trackid, '/track/two');
-        assert.equal(h.player.title, 'Second track');
-        assert.equal(h.player.artist, '', 'replacement metadata must not retain the previous artist');
-        assert.equal(h.player.album, '');
-        assert.equal(h.player.art_url, '');
-        assert.equal(h.player.get_meta('xesam:url'), null);
-        assert.equal(h.player.position, 21.25);
-        assert.ok(notifications.includes('position'));
-        assert.ok(notifications.includes('playback-status'));
-        const count = notifications.length;
-        h.player.disconnect(signal);
-        h.fixture.positionReply = dbusVariant('(v)', [dbusVariant('x', 22_000_000)]);
-        h.seeked(22_000_000);
-        await h.flush();
-        assert.equal(h.player.position, 22);
-        assert.equal(notifications.length, count);
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Stopped') });
-        await h.flush();
-        assert.equal(h.player.playback_status, playbackStatus.STOPPED);
-    });
-
-    test('controls dispatch to the unique bus and SetPosition never changes the sampled position optimistically', async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        h.fixture.player.CanGoNext = dbusVariant('b', true);
-        await h.player.start();
-        await h.flush();
-        const before = h.player.position;
-        const start = h.calls.length;
-        h.player.play();
-        h.player.pause();
-        h.player.next();
-        h.player.previous();
-        h.player.position = 42.25;
-        assert.equal(h.player.position, before);
-        await h.flush();
-        const controls = h.calls.slice(start).filter(call => call.iface === mprisPlayer);
-        assert.deepEqual(controls.map(call => call.method), ['Play', 'Pause', 'Next', 'Previous', 'SetPosition']);
-        assert.ok(controls.every(call => call.bus === ':1.220' && call.path === mprisPath && call.timeout === 1500));
-        assert.equal(controls.at(-1).parameters.signature, '(ox)');
-        assert.deepEqual(controls.at(-1).params, ['/track/lost_name', 42_250_000]);
-        assert.equal(h.player.position, before, 'successful dispatch is not a position sample');
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-        h.seeked(41_000_000);
-        assert.equal(h.player.position, 41, 'only a real reply or signal can update progress');
-    });
-
-    test('polls Position asynchronously once per second only while playing, without overlapping queries', async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        assert.equal(h.timers().length, 0);
-        const before = h.positionCalls().length;
-        await h.advance(3000);
-        assert.equal(h.positionCalls().length, before);
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Playing') });
-        await h.flush();
-        assert.equal(h.timers().length, 1);
-        assert.equal(h.timers()[0].interval, 1000);
-        const respond = h.respond;
-        h.respond = call => call.method === 'Get' ? undefined : respond(call);
-        await h.advance();
-        const pending = [...h.pending].find(call => call.method === 'Get');
-        assert.ok(pending, 'a playing timer must issue an async Position read');
-        assert.deepEqual(pending.params, [mprisPlayer, 'Position']);
-        assert.equal(pending.timeout, 1500);
-        const count = h.positionCalls().length;
-        await h.advance();
-        assert.equal(h.positionCalls().length, count, 'a slow read must not produce unbounded overlapping requests');
-        assert.equal(h.player.position, 12.5, 'elapsed time alone must not fabricate a native sample');
-        pending.resolve(dbusVariant('(v)', [dbusVariant('d', 16_500_000.5)]));
-        await h.flush();
-        assert.equal(h.player.position, 16.5000005);
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused') });
-        await h.flush();
-        assert.equal(h.timers().length, 0);
-        const paused = h.positionCalls().length;
-        await h.advance(5000);
-        assert.equal(h.positionCalls().length, paused);
-    });
-
-    test('missing metadata and Position remain unknown rather than inheriting fabricated track or progress data', async t => {
-        for (const metadata of [undefined, dbusVariant('a{sv}', {})]) {
-            const h = directPlayerHarness();
-            t.after(() => h.player.dispose());
-            if (metadata) h.fixture.player.Metadata = metadata;
-            else delete h.fixture.player.Metadata;
-            delete h.fixture.player.Position;
-            h.fixture.positionReply = new Error('org.freedesktop.DBus.Error.UnknownProperty: Position');
-            await h.player.start();
-            await h.flush();
-            assert.equal(h.player.available, true);
-            for (const key of ['title', 'artist', 'album', 'art_url']) assert.equal(h.player[key], '');
-            assert.equal(h.player.get_meta('xesam:url'), null);
-            assert.ok(!Number.isFinite(h.player.length) || h.player.length <= 0);
-            assert.notEqual(h.player.trackid, '/track/lost_name');
-            assertUnknownPosition(h.player);
-            await h.advance(60_000);
-            assertUnknownPosition(h.player);
-        }
-    });
-
-    test('negative, non-finite, or non-numeric Position replies never become numeric samples', async t => {
-        const values = [['x', -1], ['d', NaN], ['d', Infinity], ['s', '1000000'], ['b', true]];
-        for (const [signature, value] of values) {
-            const h = directPlayerHarness();
-            t.after(() => h.player.dispose());
-            delete h.fixture.player.Position;
-            h.fixture.positionReply = dbusVariant('(v)', [dbusVariant(signature, value)]);
-            await h.player.start();
-            await h.flush();
-            await h.advance();
-            assertUnknownPosition(h.player);
-            h.player.dispose();
-        }
-    });
-
-    test('dispose cancels queries and timers, unsubscribes signals, and ignores an already queued successful reply', async t => {
-        const h = directPlayerHarness();
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const respond = h.respond;
-        h.respond = call => call.method === 'Get' ? undefined : respond(call);
-        await h.advance();
-        const pending = [...h.pending].find(call => call.method === 'Get');
-        assert.ok(pending);
-        assert.ok(h.subscriptions.size > 0);
-        const notifications = [];
-        h.player.connect('notify', (_, property) => notifications.push(property.name));
-        pending.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
-        h.player.dispose();
-        const count = notifications.length;
-        await h.flush();
-        assert.equal(pending.cancellable.is_cancelled(), true);
-        assert.equal(h.player.available, false);
-        assert.notEqual(h.player.position, 99);
-        assert.equal(h.sources.size, 0);
-        assert.equal(h.subscriptions.size, 0);
-        const calls = h.calls.length;
-        h.seeked(100_000_000);
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Playing') });
-        await h.advance(5000);
-        assert.equal(h.calls.length, calls);
-        assert.equal(notifications.length, count);
-        assert.doesNotThrow(() => h.player.dispose());
-    });
-
-    test('review race: coalesced reads discard the previous track and recover a fresh sample while paused', { timeout: 3000 }, async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const respond = h.respond;
-        h.respond = call => call.method === 'Get' ? undefined : respond(call);
-        const before = h.positionCalls().length;
-        const refreshing = h.player.refreshPosition();
-        let joinedFinished = false;
-        const joined = h.player.refreshPosition().then(() => { joinedFinished = true; });
-        await h.flush();
-        assert.equal(h.positionCalls().length, before + 1, 'concurrent callers must share one physical read');
-        const old = [...h.pending].find(call => call.method === 'Get');
-        assert.ok(old);
-        const samples = [];
-        h.player.connect('notify', (_, property) => {
-            if (property.name === 'position') samples.push(h.player.position);
-        });
-        h.changed({ Metadata: dbusVariant('a{sv}', {
-            'mpris:trackid': dbusVariant('o', '/track/current'), 'xesam:title': dbusVariant('s', 'Current track'),
-        }) });
-        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
-        await h.flush();
-        assert.equal(h.player.trackid, '/track/current');
-        assert.equal(h.player.title, 'Current track');
-        assert.notEqual(h.player.position, 99);
-        assert.ok(!samples.includes(99), 'an old-track value must not even be published transiently');
-        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
-        assert.ok(fresh, 'discarding an old generation must request one current sample even without a playing timer');
-        assert.equal(h.positionCalls().length, before + 2);
-        assert.equal(joinedFinished, false, 'coalesced callers must wait for current-generation recovery');
-        fresh.resolve(dbusVariant('(v)', [dbusVariant('d', 5_250_000.5)]));
-        await Promise.all([refreshing, joined]);
-        await h.flush();
-        assert.equal(h.player.position, 5.2500005);
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-        assert.equal(h.timers().length, 0);
-        await h.advance(60_000);
-        assert.equal(h.player.position, 5.2500005);
-        assert.equal(h.positionCalls().length, before + 2, 'the recovery read is not a paused polling loop');
-    });
-
-    test('review race: a Position read started before SetPosition cannot overwrite the seek and gets one fresh paused read', { timeout: 3000 }, async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const respond = h.respond;
-        h.respond = call => call.method === 'Get' ? undefined : respond(call);
-        const before = h.positionCalls().length;
-        const refreshing = h.player.refreshPosition();
-        await h.flush();
-        const old = [...h.pending].find(call => call.method === 'Get');
-        assert.ok(old);
-        const position = h.player.position;
-        const samples = [];
-        h.player.connect('notify', (_, property) => {
-            if (property.name === 'position') samples.push(h.player.position);
-        });
-        h.player.position = 80;
-        assert.equal(h.player.position, position, 'SetPosition dispatch must not optimistically change the sample');
-        await h.flush();
-        assert.ok(h.calls.some(call => call.method === 'SetPosition' && call.params[1] === 80_000_000));
-        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
-        await h.flush();
-        assert.notEqual(h.player.position, 99);
-        assert.ok(!samples.includes(99));
-        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
-        assert.ok(fresh, 'a pre-seek generation must be replaced even when the player stays paused');
-        assert.equal(h.positionCalls().length, before + 2);
-        fresh.resolve(dbusVariant('(v)', [dbusVariant('x', 79_500_000)]));
-        await refreshing;
-        await h.flush();
-        assert.equal(h.player.position, 79.5, 'use the remote sample, not the requested 80-second target');
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-        assert.equal(h.timers().length, 0);
-    });
-
-    test('review race: initial GetAll baselines cannot overwrite newer root/player changes or Seeked', { timeout: 3000 }, async t => {
-        const h = directPlayerHarness();
-        t.after(() => h.player.dispose());
-        const respond = h.respond;
-        h.respond = call => call.method === 'GetAll' ? undefined : respond(call);
-        const starting = h.player.start();
-        await h.flush();
-        const root = [...h.pending].find(call => call.params[0] === mprisRoot);
-        const player = [...h.pending].find(call => call.params[0] === mprisPlayer);
-        assert.ok(root && player);
-        h.emit(h.bus, propertiesInterface, 'PropertiesChanged', mprisPath, dbusVariant('(sa{sv}as)', [mprisRoot,
-            { Identity: dbusVariant('s', 'Newer identity'), DesktopEntry: dbusVariant('s', 'newer-entry') }, []]));
-        h.changed({ PlaybackStatus: dbusVariant('s', 'Paused'), Rate: dbusVariant('d', 0.5),
-            Metadata: dbusVariant('a{sv}', {
-                'mpris:trackid': dbusVariant('o', '/track/newer'), 'xesam:title': dbusVariant('s', 'Newer track'),
-            }), Position: dbusVariant('x', 31_000_000) });
-        h.seeked(44_500_000);
-        root.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.root }]));
-        player.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
-        await starting;
-        await h.flush();
-        assert.equal(h.player.available, true);
-        assert.equal(h.player.identity, 'Newer identity');
-        assert.equal(h.player.entry, 'newer-entry');
-        assert.equal(h.player.trackid, '/track/newer');
-        assert.equal(h.player.title, 'Newer track');
-        assert.equal(h.player.artist, '', 'the older baseline must not resurrect old metadata');
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-        assert.equal(h.player.rate, 0.5);
-        assert.equal(h.player.position, 44.5, 'replay changes in arrival order, including Seeked after Position');
-        assert.equal(h.timers().length, 0);
-    });
-
-    test('startup metadata without a new position cannot inherit the previous track sample', async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        const respond = h.respond;
-        h.respond = call => call.method === 'GetAll' ? undefined : respond(call);
-        const starting = h.player.start();
-        await h.flush();
-        const root = [...h.pending].find(call => call.params[0] === mprisRoot);
-        const player = [...h.pending].find(call => call.params[0] === mprisPlayer);
-        player.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
-        await h.flush();
-        h.changed({ Metadata: dbusVariant('a{sv}', {
-            'mpris:trackid': dbusVariant('o', '/track/current'), 'xesam:title': dbusVariant('s', 'Current track'),
-        }) });
-        h.fixture.positionReply = new Error('Position is unavailable');
-        root.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.root }]));
-        await starting;
-        await h.flush();
-        assert.equal(h.player.available, true);
-        assert.equal(h.player.trackid, '/track/current');
-        assertUnknownPosition(h.player);
-        assert.ok(h.positionCalls().length > 0, 'startup must attempt to read the new track position');
-        assert.equal(h.timers().length, 0);
-    });
-
-    test('review race: a reload baseline cannot roll back PropertiesChanged or Seeked received while pending', async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const respond = h.respond;
-        h.respond = call => call.method === 'GetAll' && call.params[0] === mprisPlayer ? undefined : respond(call);
-        h.changed({}, ['Metadata', 'Position']);
-        await h.flush();
-        const reload = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
-        assert.ok(reload);
-        h.changed({ Rate: dbusVariant('d', 2), CanPlay: dbusVariant('b', false),
-            Metadata: dbusVariant('a{sv}', {
-                'mpris:trackid': dbusVariant('o', '/track/reloaded'), 'xesam:title': dbusVariant('s', 'Newer than reload'),
-            }), Position: dbusVariant('x', 15_000_000) });
-        h.seeked(27_500_000);
-        reload.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
-        await h.flush();
-        assert.equal(h.player.trackid, '/track/reloaded');
-        assert.equal(h.player.title, 'Newer than reload');
-        assert.equal(h.player.rate, 2);
-        assert.equal(h.player.can_play, false);
-        assert.equal(h.player.position, 27.5);
-        assert.equal(h.player.playback_status, playbackStatus.PAUSED);
-    });
-
-    test('review race: invalidations during a pending reload coalesce into one follow-up reload without losing newer signals', async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const reloads = () => h.calls.filter(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
-        const before = reloads().length;
-        const respond = h.respond;
-        h.respond = call => call.method === 'GetAll' && call.params[0] === mprisPlayer ? undefined : respond(call);
-        h.changed({}, ['Metadata']);
-        await h.flush();
-        const first = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer);
-        assert.ok(first);
-        h.changed({}, ['Position']);
-        h.changed({}, ['Rate', 'Metadata']);
-        await h.flush();
-        assert.equal(reloads().length, before + 1, 'invalidations must not start overlapping reloads');
-        first.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player }]));
-        await h.flush();
-        const followup = [...h.pending].find(call => call.method === 'GetAll' && call.params[0] === mprisPlayer && call !== first);
-        assert.ok(followup, 'a pending reload must not swallow later invalidations');
-        assert.equal(reloads().length, before + 2);
-        h.changed({ Rate: dbusVariant('d', 0.75), Metadata: dbusVariant('a{sv}', {
-            'mpris:trackid': dbusVariant('o', '/track/latest'), 'xesam:title': dbusVariant('s', 'Latest signal'),
-        }) });
-        h.seeked(77_000_000);
-        followup.resolve(dbusVariant('(a{sv})', [{ ...h.fixture.player, Position: dbusVariant('x', 50_000_000) }]));
-        await h.flush();
-        assert.equal(h.player.trackid, '/track/latest');
-        assert.equal(h.player.title, 'Latest signal');
-        assert.equal(h.player.rate, 0.75);
-        assert.equal(h.player.position, 77);
-        assert.equal(reloads().length, before + 2);
-        assert.equal(h.timers().length, 0);
-    });
-
-    test('review race: NativeMedia refreshes DirectPlayer through its coalesced reader, never a second raw D-Bus query', { timeout: 3000 }, async t => {
-        const h = directPlayerHarness({ status: 'Paused' });
-        t.after(() => h.player.dispose());
-        await h.player.start();
-        await h.flush();
-        const respond = h.respond;
-        h.respond = call => call.method === 'Get' ? undefined : respond(call);
-        const before = h.positionCalls().length;
-        const refreshing = h.player.refreshPosition();
-        await h.flush();
-        const old = [...h.pending].find(call => call.method === 'Get');
-        assert.ok(old);
-        let adapterReads = 0;
-        const refreshPosition = h.player.refreshPosition.bind(h.player);
-        h.player.refreshPosition = (...args) => { adapterReads++; return refreshPosition(...args); };
-        const rawReads = [];
-        const native = new h.api.NativeMedia({ queryPosition: (bus, cancel) => {
-            rawReads.push({ bus, cancel });
-            return Promise.resolve(99);
-        } });
-        t.after(() => native.dispose());
-        native.discovery = { players: [h.player], refresh: () => Promise.resolve(), dispose() {} };
-        native.sync();
-        await h.flush();
-        assert.ok(adapterReads > 0, 'NativeMedia must delegate confirmed reads to the DirectPlayer adapter');
-        assert.deepEqual(rawReads, [], 'raw readPosition bypasses the adapter generation guard');
-        assert.equal(h.positionCalls().length, before + 1);
-        h.changed({ Metadata: dbusVariant('a{sv}', {
-            'mpris:trackid': dbusVariant('o', '/track/native-current'), 'xesam:title': dbusVariant('s', 'Native current track'),
-        }) });
-        old.resolve(dbusVariant('(v)', [dbusVariant('x', 99_000_000)]));
-        await h.flush();
-        assert.notEqual(native.player(h.bus).position, 99);
-        const fresh = [...h.pending].find(call => call.method === 'Get' && call !== old);
-        assert.ok(fresh);
-        fresh.resolve(dbusVariant('(v)', [dbusVariant('x', 6_250_000)]));
-        await refreshing;
-        await h.flush();
-        assert.equal(native.player(h.bus).position, 6.25);
-        assert.equal(native.progress(h.bus).samplePosition, 6.25);
-        assert.equal(native.progress(h.bus).positionSupported, true);
-        assert.deepEqual(rawReads, []);
-        assert.equal(h.positionCalls().length, before + 2);
-        await h.advance(60_000);
-        assert.equal(native.progress(h.bus).position, 6.25);
-        assert.equal(h.positionCalls().length, before + 2);
-    });
-
-    test('dispose during start cancels outstanding GetAll calls and cannot resurrect an available player', { timeout: 3000 }, async t => {
-        const h = directPlayerHarness();
-        t.after(() => h.player.dispose());
-        h.respond = () => undefined;
-        const starting = h.player.start().then(() => null, error => error);
-        await h.flush();
-        const pending = [...h.pending];
-        assert.ok(pending.length > 0);
-        h.player.dispose();
-        assert.ok(pending.every(call => call.cancellable.is_cancelled()));
-        await starting;
-        await h.flush();
-        assert.equal(h.player.available, false);
-        assert.equal(h.sources.size, 0);
-        assert.equal(h.subscriptions.size, 0);
-    });
-});
-
-function discoveryHarness({ owners = {}, streams = [], players = [], standardOwners = {}, realPlayers = false,
-    gated = false, failing = [], startErrors = {} } = {}) {
-    const h = dbusHarness();
-    assert.equal(typeof h.api.LocalPlayerDiscovery, 'function', 'backend.js must implement LocalPlayerDiscovery for lost-name recovery');
-    h.owners = new Map(Object.entries(owners));
-    h.names = [daemonInterface, ...h.owners.keys(), ...Object.keys(standardOwners)];
-    h.standardOwners = standardOwners;
-    h.streams = streams;
-    h.standardPlayers = players;
-    h.applicationReads = [];
-    h.created = [];
-    h.starts = [];
-    h.gates = new Map();
-    h.startErrors = new Map(Object.entries(startErrors).map(([bus, errors]) => [bus, [...errors]]));
-    h.changes = 0;
-    h.fixture = mprisFixture();
-    h.respond = call => {
-        if (call.iface !== daemonInterface) return mprisReply(h.fixture, call);
-        assert.equal(call.bus, daemonInterface);
-        assert.equal(call.path, '/org/freedesktop/DBus');
-        if (call.method === 'ListNames') return dbusVariant('(as)', [h.names]);
-        if (call.method === 'GetNameOwner') {
-            const owner = h.standardOwners[call.params[0]];
-            if (!owner) throw new Error('org.freedesktop.DBus.Error.NameHasNoOwner');
-            return dbusVariant('(s)', [owner]);
-        }
-        assert.equal(call.method, 'GetConnectionUnixProcessID');
-        const owner = h.owners.get(call.params[0]);
-        if (!owner) throw new Error('org.freedesktop.DBus.Error.NameHasNoOwner');
-        return dbusVariant('(u)', [owner.pid]);
-    };
-    h.discovery = new h.api.LocalPlayerDiscovery({
-        connection: h.connection, getStreams: () => h.streams, getPlayers: () => h.standardPlayers,
-        onChange: () => { h.changes++; h.onDiscoveryChange?.(); },
-        applicationForPid: pid => {
-            h.applicationReads.push(pid);
-            return [...h.owners.values()].find(owner => owner.pid === pid)?.application ?? '';
-        },
-        createPlayer: bus => {
-            let player;
-            if (realPlayers) {
-                assert.equal(typeof h.api.DirectPlayer, 'function', 'the real discovery path needs DirectPlayer');
-                player = new h.api.DirectPlayer(bus, { connection: h.connection });
-            } else {
-                player = new Player({ bus_name: bus });
-                player.start = async () => {
-                    h.starts.push(bus);
-                    if (gated) await new Promise(resolve => h.gates.set(bus, resolve));
-                    const errors = h.startErrors.get(bus);
-                    if (errors?.length) throw errors.shift();
-                    if (failing.includes(bus)) throw new Error('No MPRIS exports on this connection');
-                    return player;
-                };
-                player.disposeCalls = 0;
-                player.dispose = () => { player.disposeCalls++; player.available = false; };
-            }
-            h.created.push(player);
-            return player;
-        },
-    });
-    h.ownerChanged = (name, oldOwner, newOwner) => h.emit(daemonInterface, daemonInterface, 'NameOwnerChanged',
-        '/org/freedesktop/DBus', dbusVariant('(sss)', [name, oldOwner, newOwner]));
-    h.credentials = () => h.calls.filter(call => call.method === 'GetConnectionUnixProcessID');
-    h.buses = () => h.discovery.players.map(player => player.bus_name).sort();
-    h.refresh = async () => { await h.discovery.refresh(); await h.flush(); };
-    return h;
-}
-
-function dbusRemoteError(name) {
-    const remoteName = `${daemonInterface}.Error.${name}`;
-    return Object.assign(new Error(`GDBus.Error:${remoteName}: Player exports are not ready`), { remoteName });
-}
-
-describe('LocalPlayerDiscovery lost-name recovery', () => {
-    test('recovers the exact Haruna case: no org.mpris Haruna name, but a matching private owner exports MPRIS', async t => {
-        const h = discoveryHarness({
-            owners: { ':1.220': { pid: 2200, application: 'haruna' }, ':1.221': { pid: 2210, application: 'unrelated-daemon' } },
-            streams: [new Stream({ name: 'Recovered track', properties: { 'application.name': 'Haruna', 'application.process.binary': 'haruna' } })],
-            realPlayers: true,
-        });
-        t.after(() => h.discovery.dispose());
-        assert.ok(!h.names.some(name => name.startsWith('org.mpris.')));
-        await h.discovery.start();
-        await h.flush();
-        assert.deepEqual(h.buses(), [':1.220']);
-        assert.equal(h.discovery.players[0].identity, 'Haruna');
-        assert.equal(h.discovery.players[0].title, 'Recovered track');
-        assert.equal(h.discovery.players[0].position, 12.5);
-        const probes = h.calls.filter(call => call.method === 'GetAll');
-        assert.ok(probes.length > 0);
-        assert.ok(probes.every(call => call.bus === ':1.220'), 'unrelated processes must never receive MPRIS probes');
-        const before = h.calls.length;
-        h.discovery.players[0].pause();
-        await h.flush();
-        assert.ok(h.calls.slice(before).some(call => call.bus === ':1.220' && call.method === 'Pause'));
-    });
-
-    test('unknown application matching is generic across application.name, application.id, and process binary', async t => {
-        for (const key of ['application.name', 'application.id', 'application.process.binary']) {
-            const h = discoveryHarness({
-                owners: { ':1.310': { pid: 3100, application: 'uncatalogued-player' }, ':1.311': { pid: 3110, application: 'other-process' } },
-                streams: [new Stream({ name: 'A track, not the application', properties: { [key]: 'uncatalogued-player' } })],
-                realPlayers: true,
-            });
-            t.after(() => h.discovery.dispose());
-            h.fixture = mprisFixture({ identity: 'Uncatalogued Player', entry: 'uncatalogued-player' });
-            await h.discovery.start();
-            await h.flush();
-            assert.deepEqual(h.buses(), [':1.310'], key);
-            assert.equal(h.discovery.players[0].identity, 'Uncatalogued Player');
-            assert.ok(h.calls.filter(call => call.method === 'GetAll').every(call => call.bus === ':1.310'));
-            h.discovery.dispose();
-        }
-    });
-
-    test('standard Astal players retain the fast path and their unique owners are not probed or duplicated', async t => {
-        const standardBus = 'org.mpris.MediaPlayer2.uncatalogued';
-        const h = discoveryHarness({
-            owners: { ':1.401': { pid: 4010, application: 'uncatalogued-player' }, ':1.402': { pid: 4020, application: 'uncatalogued-player' } },
-            streams: [new Stream({ properties: { 'application.process.binary': 'uncatalogued-player' } })],
-            players: [new Player({ bus_name: standardBus })], standardOwners: { [standardBus]: ':1.401' },
-        });
-        t.after(() => h.discovery.dispose());
-        await h.discovery.start();
-        await h.flush();
-        assert.deepEqual(h.buses(), [':1.402']);
-        assert.deepEqual(h.starts, [':1.402']);
-        assert.ok(h.calls.some(call => call.method === 'GetNameOwner' && call.params[0] === standardBus));
-        await h.refresh();
-        assert.deepEqual(h.starts, [':1.402']);
-        assert.equal(h.standardPlayers[0].available, true, 'discovery must not dispose the standard Astal player');
-    });
-
-    test('volume notifications and unchanged refreshes reuse cached credentials and never repeat probes or discovery timers', async t => {
-        const stream = new Stream({ properties: { 'application.process.binary': 'audio-lab' } });
-        const h = discoveryHarness({
-            owners: { ':1.501': { pid: 5010, application: 'audio-lab' }, ':1.502': { pid: 5020, application: 'unrelated' } },
-            streams: [stream],
-        });
-        t.after(() => h.discovery.dispose());
-        await h.discovery.start();
-        await h.flush();
-        const credentials = h.credentials().length;
-        const applications = [...h.applicationReads];
-        assert.ok(credentials > 0);
-        assert.deepEqual(h.starts, [':1.501']);
-        for (const volume of [0.2, 0.4, 0.6, 0.8]) {
-            stream.publish('volume', volume);
-            await h.refresh();
-        }
-        assert.equal(h.credentials().length, credentials);
-        assert.deepEqual(h.applicationReads, applications);
-        assert.deepEqual(h.starts, [':1.501']);
-        assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
-        assert.equal(h.timers().length, 0, 'discovery is event-driven, not a recurring bus scan');
-        const calls = h.calls.length;
-        await h.advance(60_000);
-        assert.equal(h.calls.length, calls);
-    });
-
-    test('review race: streams admit new owners but pause/removal retain the verified object until its owner disappears', async t => {
-        const h = discoveryHarness({ owners: { ':1.601': { pid: 6010, application: 'audio-lab' } } });
-        t.after(() => h.discovery.dispose());
-        await h.discovery.start();
-        await h.flush();
-        assert.deepEqual(h.starts, []);
-        assert.equal(h.credentials().length, 0, 'no playback applications means no process lookup or MPRIS scan');
-        h.streams = [new Stream({ properties: { 'application.name': 'audio-lab' } })];
-        await h.refresh();
-        assert.deepEqual(h.buses(), [':1.601']);
-        const credentials = h.credentials().length;
-        const applications = [...h.applicationReads];
-        const recovered = h.discovery.players[0];
-        recovered.publish('playback-status', playbackStatus.PAUSED);
-        h.streams = [];
-        await h.refresh();
-        assert.deepEqual(h.discovery.players, [recovered]);
-        assert.equal(recovered.available, true);
-        assert.equal(recovered.disposeCalls, 0, 'a missing playback stream is not evidence of a vanished MPRIS owner');
-        h.streams = [new Stream({ id: 125, properties: { 'application.name': 'audio-lab' } })];
-        await h.refresh();
-        assert.equal(h.discovery.players[0], recovered, 'resuming must preserve the adapter instance and action guards');
-        assert.deepEqual(h.starts, [':1.601']);
-        assert.equal(h.credentials().length, credentials);
-        assert.deepEqual(h.applicationReads, applications);
-        h.streams = [];
-        await h.refresh();
-        h.owners.delete(':1.601');
-        h.ownerChanged(':1.601', ':1.601', '');
-        await h.flush();
-        assert.deepEqual(h.buses(), []);
-        assert.equal(recovered.disposeCalls, 1);
-    });
-
-    test('NameOwnerChanged discovers a new matching private connection and removes a disconnected owner', async t => {
-        const h = discoveryHarness({ streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
-        t.after(() => h.discovery.dispose());
-        await h.discovery.start();
-        await h.flush();
-        h.owners.set(':1.701', { pid: 7010, application: 'audio-lab' });
-        h.ownerChanged(':1.701', '', ':1.701');
-        await h.flush();
-        assert.deepEqual(h.buses(), [':1.701']);
-        const recovered = h.created[0];
-        const changes = h.changes;
-        h.owners.delete(':1.701');
-        h.ownerChanged(':1.701', ':1.701', '');
-        await h.flush();
-        assert.deepEqual(h.buses(), []);
-        assert.equal(recovered.disposeCalls, 1);
-        assert.ok(h.changes > changes);
-        assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1,
-            'the daemon signal already identifies the changed owner');
-        assert.equal(h.timers().length, 0);
-    });
-
-    test('matching processes without MPRIS exports are not repeatedly reprobed on volume-only refreshes', async t => {
-        const h = discoveryHarness({
-            owners: { ':1.801': { pid: 8010, application: 'audio-lab' } }, failing: [':1.801'],
-            streams: [new Stream({ properties: { 'application.process.binary': 'audio-lab' } })],
-        });
-        t.after(() => h.discovery.dispose());
-        await h.discovery.start();
-        await h.flush();
-        assert.deepEqual(h.buses(), []);
-        assert.deepEqual(h.starts, [':1.801']);
-        for (let index = 0; index < 3; index++) await h.refresh();
-        assert.equal(h.timers().length, 0, 'an unclassified failure must not schedule a startup retry');
-        await h.advance(60_000);
-        assert.deepEqual(h.starts, [':1.801']);
-        assert.equal(h.created[0].disposeCalls, 1, 'failed probes must release their player');
-    });
-
-    for (const name of ['UnknownObject', 'UnknownInterface', 'UnknownMethod']) {
-        test(`review race: startup ${name} gets one 250ms retry and can then recover`, { timeout: 3000 }, async t => {
-            const bus = ':1.1201';
-            const h = discoveryHarness({ owners: { [bus]: { pid: 12010, application: 'audio-lab' } },
-                streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
-                startErrors: { [bus]: [dbusRemoteError(name)] } });
-            t.after(() => h.discovery.dispose());
-            const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-            await h.flush();
-            assert.deepEqual(h.starts, [bus]);
-            assert.deepEqual(h.buses(), []);
-            assert.equal(h.created[0].disposeCalls, 1);
-            assert.equal(h.timers().length, 1);
-            assert.equal(h.timers()[0].interval, 250);
-            await h.advance(249);
-            assert.deepEqual(h.starts, [bus], 'do not retry early or spin through microtasks');
-            await h.advance(1);
-            await starting;
-            await h.flush();
-            assert.deepEqual(h.starts, [bus, bus]);
-            assert.deepEqual(h.buses(), [bus]);
-            assert.equal(h.created.length, 2, 'a disposed failed adapter must not be restarted');
-            assert.equal(h.discovery.players[0], h.created[1]);
-            assert.equal(h.created[1].disposeCalls, 0);
-            assert.equal(h.credentials().length, 1, 'the retry must reuse the owner credential lookup');
-            assert.equal(h.timers().length, 0);
-            await h.refresh();
-            await h.advance(60_000);
-            assert.deepEqual(h.starts, [bus, bus]);
-            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
-        });
-
-        test(`review race: a second startup ${name} is negatively cached with no third attempt`, { timeout: 3000 }, async t => {
-            const bus = ':1.1202';
-            const stream = new Stream({ properties: { 'application.process.binary': 'audio-lab' } });
-            const h = discoveryHarness({ owners: { [bus]: { pid: 12020, application: 'audio-lab' } }, streams: [stream],
-                startErrors: { [bus]: [dbusRemoteError(name), dbusRemoteError(name)] } });
-            t.after(() => h.discovery.dispose());
-            const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-            await h.flush();
-            assert.deepEqual(h.starts, [bus]);
-            assert.equal(h.timers().length, 1);
-            assert.equal(h.timers()[0].interval, 250);
-            await h.advance(250);
-            await starting;
-            await h.flush();
-            assert.deepEqual(h.starts, [bus, bus]);
-            assert.deepEqual(h.buses(), []);
-            assert.equal(h.timers().length, 0, 'the retry budget is one, not a discovery loop');
-            for (const volume of [0.3, 0.5, 0.7]) {
-                stream.publish('volume', volume);
-                await h.refresh();
-            }
-            await h.advance(60_000);
-            assert.deepEqual(h.starts, [bus, bus]);
-            assert.ok(h.created.every(player => player.disposeCalls === 1));
-            assert.equal(h.credentials().length, 1);
-            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
-        });
-    }
-
-    for (const name of ['Timeout', 'NoReply', 'UnknownProperty', 'AccessDenied']) {
-        test(`review race: startup ${name} is not retryable and stays negatively cached`, { timeout: 3000 }, async t => {
-            const bus = ':1.1203';
-            const h = discoveryHarness({ owners: { [bus]: { pid: 12030, application: 'audio-lab' } },
-                streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
-                startErrors: { [bus]: [dbusRemoteError(name)] } });
-            t.after(() => h.discovery.dispose());
-            await h.discovery.start();
-            await h.flush();
-            assert.deepEqual(h.buses(), []);
-            assert.deepEqual(h.starts, [bus]);
-            assert.equal(h.timers().length, 0);
-            await h.advance(250);
-            await h.refresh();
-            await h.advance(60_000);
-            assert.deepEqual(h.starts, [bus]);
-            assert.equal(h.created[0].disposeCalls, 1);
-            assert.equal(h.credentials().length, 1);
-            assert.equal(h.calls.filter(call => call.method === 'ListNames').length, 1);
-        });
-    }
-
-    test('review race: disposal cancels a pending startup retry instead of creating another adapter', { timeout: 3000 }, async t => {
-        const bus = ':1.1204';
-        const h = discoveryHarness({ owners: { [bus]: { pid: 12040, application: 'audio-lab' } },
-            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })],
-            startErrors: { [bus]: [dbusRemoteError('UnknownObject')] } });
-        t.after(() => h.discovery.dispose());
-        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-        await h.flush();
-        assert.equal(h.timers().length, 1);
-        h.discovery.dispose();
-        const changes = h.changes;
-        assert.equal(h.sources.size, 0);
-        assert.equal(h.subscriptions.size, 0);
-        await h.advance(60_000);
-        await starting;
-        assert.deepEqual(h.starts, [bus]);
-        assert.deepEqual(h.buses(), []);
-        assert.equal(h.changes, changes);
-    });
-
-    test('review race: a standard Astal arrival replaces the verified adapter and cleans up native records and subscriptions', async t => {
-        const bus = ':1.1301';
-        const standardBus = 'org.mpris.MediaPlayer2.audio_lab';
-        const h = discoveryHarness({ owners: { [bus]: { pid: 13010, application: 'audio-lab' } }, realPlayers: true,
-            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
-        t.after(() => h.discovery.dispose());
-        h.fixture = mprisFixture({ identity: 'Audio Lab', entry: 'audio-lab', status: 'Paused' });
-        h.audio.streams = h.streams;
-        const native = new h.api.NativeMedia({ queryPosition: () => Promise.resolve(12.5) });
-        t.after(() => native.dispose());
-        native.discovery = h.discovery;
-        h.onDiscoveryChange = () => native.sync();
-        native.sync();
-        await h.discovery.start();
-        await h.flush();
-        const recovered = h.discovery.players[0];
-        assert.ok(recovered);
-        assert.deepEqual(native.capture().players.map(player => player.bus), [bus]);
-        assert.ok(recovered.handlers.size > 0);
-        h.standardOwners[standardBus] = bus;
-        h.ownerChanged(standardBus, '', bus);
-        await h.flush();
-        assert.equal(h.discovery.players[0], recovered, 'a well-known alias alone is not an Astal replacement');
-        const standard = new Player({ bus_name: standardBus, playback_status: playbackStatus.PAUSED });
-        h.standardPlayers = h.manager.players = [standard];
-        h.manager.emit('notify::players');
-        await h.flush();
-        assert.deepEqual(h.discovery.players, []);
-        assert.deepEqual(native.capture().players.map(player => player.bus), [standardBus]);
-        assert.equal(native.player(bus), null);
-        assert.equal(native.players.get(standardBus).object, standard);
-        assert.equal(recovered.available, false);
-        assert.equal(recovered.handlers.size, 0);
-        assert.ok([...h.subscriptions.values()].every(signal => signal.iface === daemonInterface),
-            'all direct MPRIS subscriptions must be removed at takeover');
-        assert.equal(h.created.length, 1);
-        assert.equal(h.timers().length, 0);
-        assert.equal(standard.available, true);
-        assert.deepEqual(standard.calls, [], 'deduplication must not dispatch playback controls');
-    });
-
-    test('review race: standard Astal takeover during a probe prevents the late adapter from being published', { timeout: 3000 }, async t => {
-        const bus = ':1.1302';
-        const standardBus = 'org.mpris.MediaPlayer2.audio_lab';
-        const h = discoveryHarness({ owners: { [bus]: { pid: 13020, application: 'audio-lab' } }, gated: true,
-            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
-        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
-        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-        await h.flush();
-        assert.equal(h.gates.size, 1);
-        const standard = new Player({ bus_name: standardBus });
-        h.standardOwners[standardBus] = bus;
-        h.standardPlayers = [standard];
-        h.ownerChanged(standardBus, '', bus);
-        for (const resolve of h.gates.values()) resolve();
-        h.gates.clear();
-        await starting;
-        await h.flush();
-        assert.deepEqual(h.buses(), []);
-        assert.equal(h.created.length, 1);
-        assert.equal(h.created[0].disposeCalls, 1);
-        assert.equal(standard.available, true);
-        assert.deepEqual(standard.calls, []);
-    });
-
-    test('candidate MPRIS probes are bounded to four concurrent starts', { timeout: 3000 }, async t => {
-        const owners = Object.fromEntries(Array.from({ length: 9 }, (_, index) =>
-            [`:1.${900 + index}`, { pid: 9000 + index, application: 'audio-lab' }]));
-        const h = discoveryHarness({ owners, gated: true,
-            streams: [new Stream({ properties: { 'application.process.binary': 'audio-lab' } })] });
-        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
-        const starting = h.discovery.start();
-        await h.flush();
-        assert.equal(h.gates.size, 4);
-        const [bus, release] = h.gates.entries().next().value;
-        h.gates.delete(bus);
-        release();
-        await h.flush();
-        assert.equal(h.starts.length, 5);
-        assert.equal(h.gates.size, 4, 'finishing one probe permits exactly one replacement');
-        for (let batch = 0; batch < 3; batch++) {
-            assert.ok(h.gates.size <= 4);
-            const gates = [...h.gates.values()];
-            h.gates.clear();
-            gates.forEach(resolve => resolve());
-            await h.flush();
-        }
-        await starting;
-        assert.equal(h.starts.length, 9);
-        assert.deepEqual(h.buses(), Object.keys(owners).sort());
-    });
-
-    test('dispose cancels a credential query and ignores its already queued success', { timeout: 3000 }, async t => {
-        const h = discoveryHarness({ owners: { ':1.1001': { pid: 10010, application: 'audio-lab' } },
-            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
-        t.after(() => h.discovery.dispose());
-        const respond = h.respond;
-        h.respond = call => call.method === 'GetConnectionUnixProcessID' ? undefined : respond(call);
-        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-        await h.flush();
-        const pending = [...h.pending].find(call => call.method === 'GetConnectionUnixProcessID');
-        assert.ok(pending);
-        pending.resolve(dbusVariant('(u)', [10010]));
-        h.discovery.dispose();
-        const changes = h.changes;
-        await starting;
-        await h.flush();
-        assert.equal(pending.cancellable.is_cancelled(), true);
-        assert.deepEqual(h.created, []);
-        assert.deepEqual(h.buses(), []);
-        assert.equal(h.subscriptions.size, 0);
-        assert.equal(h.sources.size, 0);
-        assert.equal(h.changes, changes);
-    });
-
-    test('a probe completing after disposal cannot publish or retain a recovered player', { timeout: 3000 }, async t => {
-        const h = discoveryHarness({ owners: { ':1.1101': { pid: 11010, application: 'audio-lab' } }, gated: true,
-            streams: [new Stream({ properties: { 'application.name': 'audio-lab' } })] });
-        t.after(() => { h.discovery.dispose(); for (const resolve of h.gates.values()) resolve(); });
-        const starting = Promise.resolve(h.discovery.start()).then(() => null, error => error);
-        await h.flush();
-        assert.equal(h.gates.size, 1);
-        h.discovery.dispose();
-        const changes = h.changes;
-        for (const resolve of h.gates.values()) resolve();
-        h.gates.clear();
-        await starting;
-        await h.flush();
-        assert.deepEqual(h.buses(), []);
-        assert.ok(h.created[0].disposeCalls >= 1);
-        assert.equal(h.changes, changes);
-        assert.equal(h.subscriptions.size, 0);
-        assert.equal(h.sources.size, 0);
-    });
-});
-
-function nativeHarness({ player = new Player(), stream = null, isObjectPath = variantDouble.is_object_path } = {}) {
-    const manager = Object.assign(new Signals(), { players: [player] });
-    const audio = Object.assign(new Signals(), { streams: stream ? [stream] : [] });
-    const sources = new Map();
+function clockHarness() {
     let nextSource = 0;
-    const h = { time: 0, changes: 0, modelChanges: [], player, stream, manager, audio, sources, positionQueries: [] };
-    const GLib = {
-        PRIORITY_DEFAULT_IDLE: 0, PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
+    const h = { time: 100, idles: new Map(), timers: new Map() };
+    h.GLib = {
+        PRIORITY_DEFAULT_IDLE: 0, PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false, SOURCE_CONTINUE: true,
         get_monotonic_time: () => h.time * 1e6,
         getenv: () => null,
-        idle_add: (_, callback) => { const id = ++nextSource; sources.set(id, callback); return id; },
-        source_remove: id => sources.delete(id),
-        Variant: { is_object_path: isObjectPath },
+        idle_add: (_, callback) => { const id = ++nextSource; h.idles.set(id, callback); return id; },
+        timeout_add: (_, delay, callback) => { const id = ++nextSource; h.timers.set(id, { delay, callback }); return id; },
+        source_remove: id => h.idles.delete(id) || h.timers.delete(id),
     };
-    const Gio = { Cancellable };
-    const api = loadBackend({
-        GLib, Gio,
-        queryPosition: (bus, cancel) => new Promise((resolve, reject) => h.positionQueries.push({ bus, cancel, resolve, reject })),
-        Mpris: { get_default: () => manager, PlaybackStatus: { PLAYING: 1, PAUSED: 2, STOPPED: 3 } },
-        Wp: { get_default: () => ({ audio }) },
-    });
-    const native = new api.NativeMedia({ onChange: modelChanged => {
-        h.changes++;
-        h.modelChanges.push(modelChanged);
-    } });
-    return Object.assign(h, api, {
-        native,
-        stamp: () => api.ownershipStamp(native.capture()),
-        group: () => ({ primary: native.player(player.bus_name), streamId: stream?.id ?? null }),
-        flush: () => {
-            for (const [id, callback] of [...sources]) {
-                sources.delete(id);
+    h.flush = () => {
+        let rounds = 0;
+        while (h.idles.size) {
+            assert.ok(++rounds < 50, 'idle callbacks must settle');
+            for (const [id, callback] of [...h.idles]) {
+                h.idles.delete(id);
                 callback();
             }
-        },
-    });
+        }
+    };
+    h.fireTimer = id => {
+        const timer = h.timers.get(id);
+        assert.ok(timer, 'expected a scheduled timer');
+        h.timers.delete(id);
+        if (timer.callback() === h.GLib.SOURCE_CONTINUE) h.timers.set(id, timer);
+    };
+    return h;
 }
 
-describe('Native service integration', () => {
-    const seek = (h, value = 80) => h.native.apply({ player: h.player.bus_name, operation: 'seek', value });
-    const volume = h => h.native.volume(h.group(), h.stamp());
+function nativeHarness({ player = new Player(), stream = null } = {}) {
+    const h = Object.assign(clockHarness(), { player, stream, changes: [] });
+    h.manager = Object.assign(new Signals(), { players: player ? [player] : [] });
+    h.audio = Object.assign(new Signals(), { streams: stream ? [stream] : [] });
+    const api = loadBackend({
+        GLib: h.GLib, Gio: { Cancellable },
+        Mpris: { get_default: () => h.manager, PlaybackStatus: { PLAYING: 1, PAUSED: 2, STOPPED: 3 } },
+        Wp: { get_default: () => ({ audio: h.audio }) },
+    });
+    h.native = new api.NativeMedia({ onChange: (...args) => h.changes.push(args) });
+    h.rawPlayer = () => h.native.capture().players.find(value => value.bus === player.bus_name);
+    return Object.assign(h, api);
+}
 
-    test('volume and cover notifications update the view without invalidating grouping', () => {
-        const h = nativeHarness();
-        h.flush();
-        assert.deepEqual(h.modelChanges, [true]);
-        for (const [property, value] of [['volume', 0.8], ['cover-art', '/cache/cover.png']]) {
-            h.player.publish(property, value);
-            h.flush();
-        }
-        assert.deepEqual(h.modelChanges, [true, false, false]);
-        h.player.publish('position', 11);
-        h.flush();
-        assert.equal(h.modelChanges.at(-1), true, 'Rust grouping can depend on relative playback positions');
-        assert.equal(h.native.player(h.player.bus_name).position, 11);
-        assert.equal(h.native.player(h.player.bus_name).cover, '/cache/cover.png');
-        h.player.publish('title', 'New title');
-        h.flush();
-        assert.equal(h.modelChanges.at(-1), true);
+describe('Native Astal adapter', () => {
+    test('the factory exposes only the native adapter, cached backend, service worker, and thin helpers', () => {
+        assert.deepEqual(Object.keys(loadBackend()).sort(),
+            ['NativeMedia', 'MediaBackend', 'ServiceWorker', 'runHelper', 'matchesGuard'].sort());
+        assert.doesNotMatch(source, /class\s+(?:Planner|DirectPlayer|LocalPlayerDiscovery)\b/);
+        assert.doesNotMatch(source, /\b(?:readPosition|ownershipStamp|projectedPosition|sampleProgress|applicationForPid)\b|\/proc\//);
+        assert.doesNotMatch(source, /Gio\.DBus|ListNames|NameOwnerChanged|GetConnectionUnixProcessID/);
     });
 
-    test('coalescing a view notification never drops a model-changing notification', () => {
-        for (const first of ['volume', 'title']) {
-            const h = nativeHarness();
-            h.flush();
-            h.player.publish(first, first === 'volume' ? 0.8 : 'Changed');
-            h.player.publish(first === 'volume' ? 'title' : 'volume', first === 'volume' ? 'Changed' : 0.8);
-            assert.equal(h.sources.size, 1);
-            h.flush();
-            assert.deepEqual(h.modelChanges, [true, true]);
-        }
-    });
-
-    test('stream readiness and object-list notifications still invalidate the model', () => {
-        const h = nativeHarness({ stream: new Stream({ _volume: -1 }) });
-        h.flush();
-        h.stream.publish('volume', 0.5);
-        h.flush();
-        h.manager.emit('notify::players');
-        h.audio.emit('notify::streams');
-        h.flush();
-        assert.deepEqual(h.modelChanges, [true, true, true]);
-        assert.equal(h.native.capture().streams[0].ready, true);
-    });
-
-    test('the public backend refreshes grouping only for model-changing native notifications', () => {
-        const h = nativeHarness();
-        let refreshes = 0, changes = 0;
-        const backend = new h.MediaBackend({ onChange: () => changes++ });
-        backend.planner.refresh = () => { refreshes++; return true; };
-        h.flush();
-        refreshes = changes = 0;
-        h.player.publish('position', 11);
-        h.flush();
-        h.player.publish('volume', 0.7);
-        h.flush();
-        assert.equal(refreshes, 1, 'position changes still reconcile position-dependent grouping');
-        assert.equal(changes, 2, 'visible views still receive native progress/volume changes');
-        h.player.publish('title', 'New track');
-        h.flush();
-        assert.equal(refreshes, 2);
-        backend.dispose();
-    });
-
-    test('repeated status requests read current metadata without refreshing the Rust model', () => {
-        const h = nativeHarness();
-        const group = h.group();
-        let captures = 0;
-        const capture = h.native.capture.bind(h.native);
-        h.native.capture = () => { captures++; return capture(); };
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            activePlayer: h.player.bus_name, resolveGroups: () => [group], native: h.native, modelStamp: h.stamp(),
-            planner: { ready: true, refresh() { assert.fail('Unchanged status must not schedule model work'); } },
+    test('capture serializes raw Astal fields and instance/revision fences without JS track or duration policy', () => {
+        const player = new Player({ length: -1, rate: 1.25, cover_art: '/cache/native.avif',
+            art_url: 'https://example.test/art', metadata: {
+                'xesam:url': 'file:///music/track.flac', 'mpris:length': 361929437.5, 'mprisence:browser': 'browser',
+            } });
+        const h = nativeHarness({ player });
+        const record = h.native.players.get(player.bus_name);
+        const raw = h.rawPlayer();
+        assert.equal(record.object, player);
+        assert.ok(Number.isSafeInteger(record.instance));
+        assert.ok(Number.isSafeInteger(record.seekRevision));
+        assert.ok(Number.isSafeInteger(record.positionRevision));
+        assert.deepEqual(raw, {
+            bus: player.bus_name, instance: record.instance, trackId: '/track/one',
+            identity: 'Test Player', desktopEntry: 'test-player', title: 'Track', artist: 'Artist', album: 'Album',
+            url: 'file:///music/track.flac', artUrl: 'https://example.test/art', browserHint: 'browser',
+            playing: true, stopped: false, position: 10, positionSupported: true,
+            seekRevision: record.seekRevision, positionRevision: record.positionRevision,
+            rate: 1.25, length: -1, lengthMicros: 361929437.5,
+            canPlay: true, canPause: true, canSeek: true, canNext: true, canPrevious: true,
+            cover: '/cache/native.avif', volume: 0.6, available: true,
         });
-        captures = 0;
-        for (let index = 0; index < 100; index++)
-            assert.deepEqual(JSON.parse(backend.status()), badge(group));
-        assert.equal(captures, 1, 'three monitor badges share one bounded ownership check');
-        h.time = 5;
-        backend.status();
-        assert.equal(captures, 2);
-        group.primary.title = 'Current title';
-        assert.equal(JSON.parse(backend.status()).tooltip, 'Current title — Artist');
-    });
-
-    test('status reconciliation recovers silent PipeWire changes without a polling timer', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
-        let refreshes = 0;
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            activePlayer: h.player.bus_name, resolveGroups: () => [h.group()], native: h.native, modelStamp: h.stamp(),
-            planner: { ready: true, refresh() { refreshes++; return true; } },
-        });
-        const descriptor = h.native.volume(h.group(), h.stamp());
-        backend.status();
-        assert.equal(refreshes, 0);
-        h.stream.properties['application.id'] = 'a-replaced-owner';
-        assert.equal(descriptor.set(0.1), false, 'old ownership is rejected immediately, before reconciliation');
-        h.time = 1;
-        backend.status();
-        assert.equal(refreshes, 0);
-        h.time = 5;
-        backend.status();
-        assert.equal(refreshes, 1, 'silent property changes eventually trigger a fresh model');
-        backend.modelStamp = h.stamp();
-        h.time = 10;
-        backend.status();
-        assert.equal(refreshes, 1, 'reconciled state does not repeatedly refresh');
-    });
-
-    test('position refresh uses a bounded cancellable D-Bus read and accepts only numeric microseconds', async () => {
-        let value;
-        const cancel = new Cancellable();
-        const api = loadBackend({
-            GLib: {
-                Variant: class { constructor(signature, values) { Object.assign(this, { signature, values }); } },
-                VariantType: class { constructor(signature) { this.signature = signature; } },
-            },
-            Gio: { DBusCallFlags: { NONE: 0 }, DBus: { session: {
-                call(bus, path, iface, method, params, replyType, flags, timeout, cancellable, callback) {
-                    assert.equal(bus, 'org.mpris.MediaPlayer2.test');
-                    assert.equal(path, '/org/mpris/MediaPlayer2');
-                    assert.equal(iface, 'org.freedesktop.DBus.Properties');
-                    assert.equal(method, 'Get');
-                    assert.equal(params.signature, '(ss)');
-                    assert.deepEqual(params.values, ['org.mpris.MediaPlayer2.Player', 'Position']);
-                    assert.equal(replyType.signature, '(v)');
-                    assert.equal(flags, 0);
-                    assert.equal(timeout, 1500);
-                    assert.equal(cancellable, cancel);
-                    queueMicrotask(() => callback({ call_finish() {
-                        if (value instanceof Error) throw value;
-                        return { deep_unpack: () => [{ deep_unpack: () => value }] };
-                    } }, {}));
-                },
-            } } },
-        });
-        for (value of [0, 1000000, 1500000.5])
-            assert.equal(await api.readPosition('org.mpris.MediaPlayer2.test', cancel), value / 1e6);
-        for (value of [-1, NaN, Infinity, null, undefined, '1000000', true, {}, []])
-            await assert.rejects(api.readPosition('org.mpris.MediaPlayer2.test', cancel), /Unsupported/);
-        value = new Error('The player disappeared');
-        await assert.rejects(api.readPosition('org.mpris.MediaPlayer2.test', cancel), /disappeared/);
-    });
-
-    test('worker UTF-8 decoding stays strict and independent across failed and successful replies', () => {
-        const { ModelWorker } = loadBackend({ GLib: {
-            PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
-            timeout_add: () => 1, source_remove() {},
-        } });
-        const responses = [], failures = [];
-        const reply = bytes => {
-            let callback;
-            const worker = new ModelWorker('unused', {
-                onReady() {}, onResponse: value => responses.push(value), onFailure: error => failures.push(error),
-            });
-            worker.pending = 1;
-            worker.buffer = new Uint8Array();
-            worker.output = {
-                read_bytes_async(_size, _priority, _cancel, next) { callback = next; },
-                read_bytes_finish: bytes => ({ toArray: () => bytes }),
-            };
-            worker.read(worker.generation);
-            callback(worker.output, bytes);
-            worker.dispose();
-        };
-        reply(new Uint8Array([0xff, 10]));
-        assert.equal(responses.length, 0);
-        assert.match(failures[0], /protocol failed/);
-        const response = { requestId: 1, title: '作者 🎵' };
-        const bytes = new TextEncoder().encode(JSON.stringify(response) + '\n');
-        reply(bytes);
-        reply(bytes);
-        assert.deepEqual(responses, [response, response]);
-        assert.equal(failures.length, 1, 'a failed decode must not poison later workers');
-    });
-
-    test('capture reuses its native player snapshot while deriving model progress', () => {
-        const h = nativeHarness();
-        const player = h.native.player.bind(h.native);
-        let reads = 0;
-        h.native.player = bus => { reads++; return player(bus); };
-        const snapshot = h.native.capture().players[0];
-        assert.equal(reads, 1, 'one native snapshot per captured player');
-        assert.equal(snapshot.position, 10);
-        assert.equal(snapshot.modelPosition, 10);
-        assert.equal(snapshot.title, h.player.title);
-        h.native.progress(h.player.bus_name);
-        assert.equal(reads, 2, 'standalone progress still obtains its own fresh native snapshot');
-    });
-
-    test('display progress interpolates from real samples without changing native snapshots or ownership', () => {
-        const h = nativeHarness();
-        const stamp = h.stamp();
-        h.time = 1.5;
-        assert.equal(h.native.progress(h.player.bus_name).position, 11.5);
-        assert.equal(h.native.progress(h.player.bus_name).samplePosition, 10);
-        assert.equal(h.native.player(h.player.bus_name).position, 10);
-        assert.equal(h.native.capture().players[0].position, 10);
-        assert.equal(h.stamp(), stamp);
-        h.player.publish('position', 20);
-        h.time = 2;
-        assert.equal(h.native.progress(h.player.bus_name).position, 20.5);
-        h.player.publish('position', 5);
-        h.time = 3;
-        assert.equal(h.native.progress(h.player.bus_name).position, 6, 'backward seeks reanchor immediately');
-        h.player.length = 5.5;
-        assert.equal(h.native.progress(h.player.bus_name).position, 5.5);
-        assert.equal(h.native.player(h.player.bus_name).position, 5);
-    });
-
-    test('display progress freezes on pause, resumes without counting paused time, and follows rate changes', () => {
-        const h = nativeHarness();
-        const progress = () => h.native.progress(h.player.bus_name);
-        h.time = 1;
-        h.player.publish('rate', 2);
-        h.time = 2;
-        assert.equal(progress().position, 13);
-        h.player.publish('playback-status', 2);
-        h.time = 40;
-        assert.equal(progress().position, 13);
-        h.player.publish('playback-status', 1);
-        h.time = 41;
-        assert.equal(progress().position, 15);
-        h.player.publish('playback-status', 3);
-        assert.equal(progress().positionSupported, false);
-    });
-
-    test('playing placeholder zeros never start a synthetic clock, regardless of application or seek support', () => {
-        for (const bus_name of ['org.mpris.MediaPlayer2.test', 'org.mpris.MediaPlayer2.future.tab']) {
-            for (const can_seek of [false, true]) {
-                const h = nativeHarness({ player: new Player({ bus_name, can_seek, _position: 0 }) });
-                const progress = () => h.native.progress(bus_name);
-                h.time = 2;
-                h.player.publish('position', 0);
-                assert.equal(progress().positionSupported, false);
-                assert.equal(progress().position, 0);
-                assert.equal(progress().canSeek, can_seek, 'do not rewrite advertised capabilities');
-                h.time = 10;
-                assert.equal(progress().positionSupported, false);
-                h.player.publish('position', 25);
-                assert.equal(progress().position, 25);
-                assert.equal(progress().positionSupported, true);
-                h.time = 11;
-                h.player.publish('position', 0);
-                assert.equal(progress().positionSupported, false, 'loss of timing must not restart at zero');
-            }
-        }
-    });
-
-    test('expired nonzero samples become unknown only for matching, and quality changes refresh grouping once', () => {
-        const h = nativeHarness({ player: new Player({ _position: 0.208 }) });
-        const initial = h.native.capture().players[0];
-        assert.equal(initial.position, 0.208);
-        assert.equal(initial.modelPosition, 0.208);
-        const stamp = h.stamp();
-        h.flush();
-        const changes = h.modelChanges.length;
-        h.time = 6;
-        const stale = h.native.capture().players[0];
-        assert.equal(stale.position, 0.208, 'never overwrite native state with a model sentinel');
-        assert.equal(stale.positionSupported, true, 'native syntactic support is unchanged');
-        assert.equal(stale.modelPosition, 0, 'a frozen sample must not veto a matching live publisher');
-        assert.equal(h.native.player(h.player.bus_name).position, 0.208);
-        assert.equal(h.stamp(), stamp, 'sample quality is not an ownership change');
-        h.flush();
-        assert.equal(h.modelChanges.length, changes + 1);
-        assert.equal(h.modelChanges.at(-1), true, 'expiry requests a new grouping decision');
-        h.native.capture();
-        h.flush();
-        assert.equal(h.modelChanges.length, changes + 1, 'do not repeatedly refresh an already stale source');
-        h.player.publish('position', 12);
-        assert.equal(h.native.capture().players[0].modelPosition, 12, 'fresh real disagreement remains available to the matcher');
-    });
-
-    test('confirmed paused reads refresh grouping even when position quality stays supported', async () => {
-        const h = nativeHarness({ player: new Player({ playback_status: 2, _position: 100 }) });
-        assert.equal(h.native.capture().players[0].modelPosition, 100);
-        h.flush();
-        const changes = h.modelChanges.length;
-        h.positionQueries[0].resolve(20);
-        await new Promise(resolve => setImmediate(resolve));
-        h.flush();
-        assert.equal(h.modelChanges.length, changes + 1);
-        assert.equal(h.modelChanges.at(-1), true, 'a corrected sample affects matching even without a quality transition');
-        const player = h.native.capture().players[0];
-        assert.equal(player.position, 100);
-        assert.equal(player.modelPosition, 20);
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
-    });
-
-    test('model positions use confirmed reads rather than old native or interpolated display positions', async () => {
-        const h = nativeHarness({ player: new Player({ playback_status: 2, _position: 100 }) });
-        h.player.publish('trackid', '/track/two');
-        h.positionQueries.at(-1).resolve(20);
-        await new Promise(resolve => setImmediate(resolve));
-        h.player.publish('playback-status', 1);
-        h.time = 2;
-        const snapshot = h.native.capture().players[0];
-        assert.equal(snapshot.position, 100);
-        assert.equal(snapshot.modelPosition, 20);
-        assert.equal(h.native.progress(h.player.bus_name).position, 22);
-    });
-
-    test('display estimates expire without fresh samples and unrelated notifications cannot renew them', () => {
-        const h = nativeHarness();
-        const progress = () => h.native.progress(h.player.bus_name);
-        h.time = 5;
-        assert.equal(progress().positionSupported, true);
-        h.time = 5.01;
-        h.player.publish('cover-art', '/cover.png');
-        h.player.publish('volume', 0.5);
-        h.player.emit('notify', { name: 'metadata' });
-        assert.equal(progress().positionSupported, false);
-        h.player.publish('playback-status', 2);
-        assert.equal(progress().positionSupported, false, 'pausing must not revive an expired sample');
-        h.player.publish('position', 15);
-        assert.equal(progress().positionSupported, true);
-        h.time = 100;
-        assert.equal(progress().position, 15, 'a confirmed paused position does not expire');
-    });
-
-    test('seek dispatch invalidates display estimates until a real position update arrives', () => {
-        const h = nativeHarness();
-        h.time = 1;
-        assert.equal(h.native.progress(h.player.bus_name).position, 11);
-        seek(h, 80);
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
-        assert.equal(h.native.player(h.player.bus_name).position, 10, 'dispatch is not an acknowledgement');
-        h.player.publish('position', 79.5);
-        assert.equal(h.native.progress(h.player.bus_name).position, 79.5);
-    });
-
-    test('track changes do not inherit cached progress and paused tracks recover through an explicit read', async () => {
-        const h = nativeHarness({ player: new Player({ playback_status: 2 }) });
-        h.player.publish('position', 30);
-        h.player.title = 'Another track';
-        h.player.metadata['xesam:url'] = 'file:///music/another.flac';
-        h.player.emit('notify', { name: 'metadata' });
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
-        assert.equal(h.positionQueries[0].cancel.is_cancelled(), true);
-        h.positionQueries.at(-1).resolve(30);
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(h.native.progress(h.player.bus_name).position, 30);
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
-        h.time = 100;
-        assert.equal(h.native.progress(h.player.bus_name).position, 30);
-        h.player.publish('playback-status', 1);
-        h.time = 101;
-        assert.equal(h.native.progress(h.player.bus_name).position, 31);
-    });
-
-    test('pause and rate transitions renew pending recovery reads instead of stranding paused progress', async () => {
-        const h = nativeHarness();
-        h.player.publish('trackid', '/track/two');
-        const playingRead = h.positionQueries.at(-1);
-        h.player.publish('playback-status', 2);
-        const pausedRead = h.positionQueries.at(-1);
-        assert.notEqual(pausedRead, playingRead);
-        assert.equal(playingRead.cancel.is_cancelled(), true);
-        h.player.publish('rate', 2);
-        const rateRead = h.positionQueries.at(-1);
-        assert.notEqual(rateRead, pausedRead);
-        assert.equal(pausedRead.cancel.is_cancelled(), true);
-        playingRead.resolve(99);
-        pausedRead.resolve(99);
-        rateRead.resolve(20);
-        await new Promise(resolve => setImmediate(resolve));
-        h.time = 60;
-        const progress = h.native.progress(h.player.bus_name);
-        assert.equal(progress.positionSupported, true);
-        assert.equal(progress.position, 20);
-        assert.equal(progress.samplePosition, 20);
-        assert.equal(h.native.player(h.player.bus_name).position, 10, 'raw native state remains untouched');
-    });
-
-    test('late position reads cannot overwrite newer samples, tracks, or replacement players', async () => {
-        const h = nativeHarness();
-        const initial = h.positionQueries[0];
-        h.player.publish('position', 20);
-        initial.resolve(99);
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(h.native.progress(h.player.bus_name).position, 20);
-        h.player.publish('trackid', '/track/two');
-        const changed = h.positionQueries.at(-1);
-        h.manager.players = [new Player({ _position: 40 })];
-        h.manager.emit('notify::players');
-        changed.resolve(99);
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(changed.cancel.is_cancelled(), true);
-        assert.equal(h.native.progress(h.player.bus_name).position, 40);
-        const replacement = h.positionQueries.at(-1);
+        assert.equal(Object.hasOwn(raw, 'trackKey'), false);
+        assert.equal(Object.hasOwn(raw, 'modelPosition'), false);
+        assert.deepEqual(JSON.parse(JSON.stringify(h.native.capture())).players[0], raw);
         h.native.dispose();
-        replacement.resolve(99);
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(replacement.cancel.is_cancelled(), true);
-        assert.equal(h.native.progress(h.player.bus_name), null);
     });
 
-    test('explicit position reads can supply display timing without fabricating native position support', async () => {
-        const h = nativeHarness({ player: new Player({ _position: -1 }) });
-        h.positionQueries[0].resolve(25.5);
-        await new Promise(resolve => setImmediate(resolve));
-        h.time = 1;
-        assert.equal(h.native.progress(h.player.bus_name).position, 26.5);
-        assert.equal(h.native.progress(h.player.bus_name).samplePosition, 25.5);
-        assert.equal(h.native.player(h.player.bus_name).positionSupported, false);
-        h.player.publish('playback-status', 2);
-        h.time = 100;
-        assert.equal(h.native.progress(h.player.bus_name).position, 26.5);
-    });
-
-    test('zero and invalid native positions stay unavailable while playing, but paused zero is valid', () => {
-        for (const position of [-1, NaN, Infinity, null, undefined, 0]) {
-            const h = nativeHarness({ player: new Player({ _position: position }) });
-            assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
+    test('invalid track IDs and untyped duration metadata are passed to Rust, never synthesized or coerced', () => {
+        for (const trackid of ['', 'not an object path', '/org/mpris/MediaPlayer2/TrackList/NoTrack']) {
+            const h = nativeHarness({ player: new Player({ trackid, length: 0,
+                metadata: { 'mpris:length': '200000000' } }) });
+            const raw = h.rawPlayer();
+            assert.equal(raw.trackId, trackid);
+            assert.equal(raw.length, 0);
+            assert.equal(raw.lengthMicros, '200000000');
+            assert.equal(Object.hasOwn(raw, 'trackKey'), false);
+            h.native.dispose();
         }
-        const h = nativeHarness({ player: new Player({ _position: 0, playback_status: 2 }) });
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, true);
-        assert.equal(h.native.progress(h.player.bus_name).position, 0);
-        h.player.publish('playback-status', 1);
-        assert.equal(h.native.progress(h.player.bus_name).positionSupported, false);
     });
 
-    test('position comes only from Astal: no elapsed-time, rate, or length projection', () => {
+    test('unsupported positions remain raw negative or null values and duration recovery stays in Rust', () => {
+        for (const [position, expected] of [[-1, -1], [null, null], [undefined, null], [NaN, null], [Infinity, null]]) {
+            const h = nativeHarness({ player: new Player({ _position: position, length: -1,
+                metadata: { 'mpris:length': 200000000 } }) });
+            const raw = h.rawPlayer();
+            assert.equal(raw.position, expected, String(position));
+            assert.equal(raw.positionSupported, false);
+            assert.equal(raw.canSeek, true, 'unsupported position does not rewrite an advertised capability');
+            assert.equal(raw.length, -1);
+            assert.equal(raw.lengthMicros, 200000000);
+            h.native.dispose();
+        }
+    });
+
+    test('raw position and advertised capabilities never acquire an elapsed-time projection', () => {
+        for (const position of [0, 10]) {
+            const h = nativeHarness({ player: new Player({ _position: position, rate: 2 }) });
+            const before = h.native.capture();
+            h.time += 500;
+            assert.deepEqual(h.native.capture(), before);
+            assert.equal(h.rawPlayer().position, position);
+            assert.equal(h.rawPlayer().canSeek, true);
+            assert.equal(h.timers.size, 0, 'native polling and sample expiry belong to Rust');
+            h.native.dispose();
+        }
+    });
+
+    test('stream snapshots use native names and flags, with no ownership or volume descriptor', () => {
+        const stream = new Stream({ _mute: true, name: 'Native media name',
+            properties: { 'application.name': 'Test Player', 'media.name': 'Wrong raw name', 'node.nick': 'Native nickname' } });
+        const h = nativeHarness({ stream });
+        const raw = h.native.capture().streams[0];
+        assert.equal(h.native.streams.get(stream.id).object, stream);
+        assert.equal(raw.instance, h.native.streams.get(stream.id).instance);
+        assert.equal(raw.id, 42);
+        assert.equal(raw.name, 'Native media name');
+        assert.equal(raw.nickname, 'Native nickname');
+        assert.equal(raw.properties['media.name'], 'Native media name');
+        assert.equal(raw.properties['application.name'], 'Test Player');
+        assert.equal(raw.ready, true);
+        assert.equal(raw.volume, 0.7);
+        assert.equal(raw.muted, true);
+        assert.equal(typeof h.native.volume, 'undefined');
+        h.native.dispose();
+    });
+
+    test('repeated position notifications advance only positionRevision, including an unchanged sample', () => {
         const h = nativeHarness();
-        h.time = 100;
-        h.player.rate = 2;
-        assert.equal(h.native.player(h.player.bus_name).position, 10);
-        h.player.publish('position', 250);
-        assert.equal(h.native.player(h.player.bus_name).position, 250, 'do not clamp a native sample to length');
-        h.time = 200;
-        assert.equal(h.native.capture().players[0].position, 250);
-    });
-
-    test('numeric microseconds supply duration when the typed native length is unavailable', () => {
-        const h = nativeHarness({ player: new Player({
-            length: -1, metadata: { 'mpris:length': 361929437.5 },
-        }) });
-        const sample = () => h.native.player(h.player.bus_name);
-        assert.equal(sample().length, 361.9294375);
-        assert.equal(sample().canSeek, true);
-        assert.equal(sample().position, 10);
-        h.player.length = 200;
-        assert.equal(sample().length, 200, 'valid native seconds take precedence over raw metadata');
-        for (const length of [-1, 0, NaN, Infinity, null, undefined]) {
-            h.player.length = length;
-            assert.equal(sample().length, 361.9294375);
+        const before = h.rawPlayer();
+        for (let index = 1; index <= 2; index++) {
+            h.player.publish('position', 10);
+            assert.equal(h.rawPlayer().positionRevision, before.positionRevision + index);
+            assert.equal(h.rawPlayer().seekRevision, before.seekRevision);
         }
-        h.player.metadata['mpris:length'] = 200000000;
-        assert.equal(sample().length, 200, 'integer microseconds work too');
-        for (const raw of [undefined, null, 0, -1, NaN, Infinity, -Infinity, '200000000', true, [], {}]) {
-            h.player.metadata['mpris:length'] = raw;
-            assert.equal(sample().length, null, `invalid raw duration ${String(raw)}`);
-        }
-        delete h.player.metadata['mpris:length'];
-        assert.equal(sample().length, null);
+        for (const [property, value] of [['volume', 0.8], ['cover-art', '/cache/new.png'], ['title', 'Renamed']])
+            h.player.publish(property, value);
+        assert.equal(h.rawPlayer().positionRevision, before.positionRevision + 2);
+        assert.equal(h.rawPlayer().seekRevision, before.seekRevision);
+        h.native.dispose();
     });
 
-    test('duration recovery is independent of player identity and preserves advertised capabilities', () => {
-        for (const [bus_name, identity, entry] of [
-            ['org.mpris.MediaPlayer2.test', 'Test Player', 'test-player'],
-            ['org.mpris.MediaPlayer2.future_player.instance42', 'An Unknown Future Player', 'future-player'],
-            ['org.mpris.MediaPlayer2.browser.tab17', '', ''],
-        ]) {
-            for (const can_seek of [false, true]) {
-                const h = nativeHarness({ player: new Player({
-                    bus_name, identity, entry, can_seek, length: -1,
-                    metadata: { 'mpris:length': 361929437.5 },
-                }) });
-                const recovered = h.native.player(bus_name);
-                assert.equal(recovered.length, 361.9294375, bus_name);
-                assert.equal(recovered.canSeek, can_seek, 'duration recovery must not invent seek support');
-                h.player.metadata = {};
-                assert.equal(h.native.player(bus_name).length, null, 'missing data stays unknown for every player');
-                h.player.length = 120;
-                assert.equal(h.native.player(bus_name).length, 120, 'standard native duration remains unchanged');
-            }
-        }
-    });
-
-    test('unsupported native positions normalize to zero without disabling native can_seek', () => {
-        const h = nativeHarness();
-        for (const position of [-1, NaN, Infinity, null, undefined]) {
-            h.player.publish('position', position);
-            const player = h.native.capture().players[0];
-            assert.equal(player.positionSupported, false);
-            assert.equal(player.position, 0);
-            assert.equal(player.canSeek, true);
-        }
-        h.player.publish('position', 0);
-        assert.equal(h.native.capture().players[0].positionSupported, true);
-        h.player.publish('can-seek', false);
-        assert.equal(h.native.capture().players[0].canSeek, false);
-    });
-
-    test('metadata changes preserve native position/support and prefer a valid native track ID', () => {
-        const h = nativeHarness({ player: new Player({ playback_status: 2 }) });
-        const before = h.native.capture().players[0];
-        h.player.title = 'Corrected title';
-        h.player.artist = 'Corrected artist';
-        h.player.metadata['xesam:url'] = 'file:///music/corrected.flac';
-        h.player.emit('notify', { name: 'metadata' });
-        const after = h.native.capture().players[0];
-        assert.equal(after.trackKey, '/track/one');
-        assert.equal(after.trackKey, before.trackKey);
-        assert.equal(after.positionSupported, true);
-        assert.equal(after.canSeek, true);
-        assert.equal(after.position, 10);
-        assert.equal(after.seekRevision, 0);
-        h.player.trackid = '/track/two';
-        h.player.emit('notify', { name: 'metadata' });
-        assert.equal(h.native.capture().players[0].trackKey, '/track/two');
-        assert.equal(h.native.capture().players[0].positionSupported, true);
-    });
-
-    test('invalid/missing/NoTrack IDs use metadata only as a freshness key', () => {
-        for (const trackid of ['', 'not/a/path', '/invalid-dash', '/trailing/', '/org/mpris/MediaPlayer2/TrackList/NoTrack']) {
-            const h = nativeHarness({ player: new Player({ trackid }) });
-            const before = h.native.capture().players[0];
-            h.player.title = 'Different metadata';
-            h.player.emit('notify', { name: 'metadata' });
-            const after = h.native.capture().players[0];
-            assert.notEqual(after.trackKey, before.trackKey);
-            assert.equal(after.positionSupported, true);
-            assert.equal(after.canSeek, true, 'the advertised native capability is not rewritten');
-            assert.throws(() => seek(h), /unavailable/);
-            assert.deepEqual(h.player.calls, []);
-        }
-    });
-
-    test('track identity and seek preflight defer syntax validation to GLib.Variant.is_object_path', () => {
-        const checked = [];
-        const h = nativeHarness({
-            isObjectPath: value => { checked.push(value); return false; },
-        });
-        const player = h.native.capture().players[0];
-        assert.notEqual(player.trackKey, h.player.trackid, 'use metadata when native syntax validation rejects the ID');
-        assert.throws(() => seek(h), /unavailable/);
-        assert.deepEqual(checked, ['/track/one', '/track/one', '/track/one', '/track/one']);
-        assert.deepEqual(h.player.calls, []);
-    });
-
-    test('paused seeks only dispatch and advance a dispatch revision; native state stays unchanged', () => {
-        for (const position of [-1, 10]) {
-            const h = nativeHarness({ player: new Player({ playback_status: 2, _position: position }) });
-            const before = h.native.capture().players[0];
-            seek(h);
-            assert.deepEqual(h.player.calls, [['position', 80]]);
-            h.time = 100;
-            let after = h.native.capture().players[0];
-            assert.equal(after.seekRevision, 1);
-            assert.equal(after.position, before.position);
-            assert.equal(after.positionSupported, before.positionSupported);
-            h.player.publish('position', 20);
-            after = h.native.capture().players[0];
-            assert.equal(after.position, 20, 'never suppress a native sample as a pre-seek trajectory');
-            assert.equal(after.seekRevision, 1, 'native samples are not synthetic dispatches or acknowledgements');
-        }
-    });
-
-    test('seek preflight and synchronous dispatch errors do not advance revisions', () => {
-        const h = nativeHarness();
-        for (const value of [-1, NaN, Infinity]) assert.throws(() => seek(h, value), /finite and nonnegative/);
-        h.player.can_seek = false;
-        assert.throws(() => seek(h), /unavailable/);
-        h.player.can_seek = true;
-        h.player.seekError = 'native dispatch failed';
-        assert.throws(() => seek(h), /native dispatch failed/);
-        assert.equal(h.native.capture().players[0].seekRevision, 0);
-        h.player.available = false;
-        assert.throws(() => seek(h), /disappeared/);
-    });
-
-    test('native notifications are coalesced and replacement/disposal disconnect old objects', () => {
+    test('coalesced notifications retain metadata, artwork, volume, and stream changes in the next capture', () => {
         const h = nativeHarness({ stream: new Stream() });
         h.flush();
-        assert.equal(h.changes, 1);
-        h.player.publish('position', 11);
-        h.player.publish('position', 12);
+        h.changes.length = 0;
+        h.player.publish('volume', 0.8);
+        h.player.publish('cover-art', '/cache/updated.avif');
+        h.player.publish('title', 'Changed track');
+        h.stream.publish('mute', true);
+        assert.equal(h.idles.size, 1);
         h.flush();
-        assert.equal(h.changes, 2);
-        const oldPlayer = h.player;
-        const oldInstance = h.native.capture().players[0].instance;
-        h.manager.players = [new Player()];
+        assert.equal(h.changes.length, 1);
+        const raw = h.native.capture();
+        assert.equal(raw.players[0].title, 'Changed track');
+        assert.equal(raw.players[0].cover, '/cache/updated.avif');
+        assert.equal(raw.players[0].volume, 0.8);
+        assert.equal(raw.streams[0].muted, true);
+        h.native.dispose();
+    });
+
+    test('object-list notifications replace instance fences and disconnect removed native objects', () => {
+        const h = nativeHarness({ stream: new Stream() });
+        h.flush();
+        const before = h.native.capture();
+        const player = new Player();
+        const stream = new Stream();
+        h.manager.players = [player];
+        h.audio.streams = [stream];
         h.manager.emit('notify::players');
-        assert.equal(oldPlayer.handlers.size, 0);
-        assert.notEqual(h.native.capture().players[0].instance, oldInstance);
+        h.audio.emit('notify::streams');
+        const after = h.native.capture();
+        assert.notEqual(after.players[0].instance, before.players[0].instance);
+        assert.notEqual(after.streams[0].instance, before.streams[0].instance);
+        assert.equal(h.player.handlers.size, 0);
+        assert.equal(h.stream.handlers.size, 0);
+        h.manager.players = [];
+        h.audio.streams = [];
+        h.native.sync();
+        assert.deepEqual(h.native.capture(), { players: [], streams: [] });
+        assert.equal(player.handlers.size, 0);
+        assert.equal(stream.handlers.size, 0);
         h.native.dispose();
         assert.equal(h.manager.handlers.size, 0);
         assert.equal(h.audio.handlers.size, 0);
-        assert.equal(h.manager.players[0].handlers.size, 0);
-        assert.equal(h.stream.handlers.size, 0);
-        assert.equal(h.sources.size, 0);
+        assert.equal(h.idles.size, 0);
     });
 
-    test('stream snapshots use the exact native media.name property, not the raw getter', () => {
-        const stream = new Stream();
-        stream.properties['media.name'] = 'stale raw name';
-        const h = nativeHarness({ stream });
-        assert.equal(h.native.capture().streams[0].properties['media.name'], stream.name);
-        assert.equal(stream.propertyReads.includes('media.name'), false);
-        assert.equal(stream.propertyReads.includes('application.name'), true);
+    test('native playback operations are thin Astal dispatches', () => {
+        const h = nativeHarness();
+        for (const operation of ['play', 'pause', 'next', 'previous'])
+            h.native.apply({ player: h.player.bus_name, operation });
+        assert.deepEqual(h.player.calls, [['play'], ['pause'], ['next'], ['previous']]);
+        h.native.dispose();
     });
 
-    test('advertised artwork follows native cover_art without deriving or checking cache paths', () => {
-        for (const art_url of ['file:///art/current.png', 'https://example.test/art.png', '', 'not a URI']) {
-            const h = nativeHarness({ player: new Player({ art_url, cover_art: '/native/arbitrary-cover-path' }) });
-            assert.equal(h.native.capture().players[0].cover, h.player.cover_art);
-            h.player.publish('cover-art', '/native/updated-cover');
-            assert.equal(h.native.capture().players[0].cover, '/native/updated-cover');
-            h.player.publish('cover-art', '');
-            assert.equal(h.native.capture().players[0].cover, '');
-        }
+    test('seek advances exactly one dispatch revision without an optimistic position or sample revision', () => {
+        const h = nativeHarness();
+        const before = h.rawPlayer();
+        h.native.apply({ player: h.player.bus_name, operation: 'seek', value: 80 });
+        const after = h.rawPlayer();
+        assert.deepEqual(h.player.calls, [['position', 80]]);
+        assert.equal(after.seekRevision, before.seekRevision + 1);
+        assert.equal(after.positionRevision, before.positionRevision);
+        assert.equal(after.position, before.position);
+        h.player.publish('position', 79.5);
+        assert.equal(h.rawPlayer().position, 79.5);
+        assert.equal(h.rawPlayer().positionRevision, before.positionRevision + 1);
+        assert.equal(h.rawPlayer().seekRevision, before.seekRevision + 1);
+        h.native.dispose();
     });
 
-    test('web bridge placeholder volume uses only a uniquely owned native stream', () => {
-        const player = new Player({ bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.ptest', _volume: 1 });
-        const h = nativeHarness({ player, stream: new Stream() });
-        const control = volume(h);
-        assert.equal(control.enabled, true);
-        assert.equal(control.value, 0.7);
-        assert.equal(control.set(0.3), true);
+    test('a synchronous native seek failure does not advance either revision or invent a position', () => {
+        const h = nativeHarness();
+        const before = h.rawPlayer();
+        h.player.seekError = 'Native seek failed';
+        assert.throws(() => h.native.apply({ player: h.player.bus_name, operation: 'seek', value: 80 }), /Native seek failed/);
+        assert.deepEqual(h.rawPlayer(), before);
         assert.deepEqual(h.player.calls, []);
-        assert.deepEqual(h.stream.calls, [['volume', 0.3], ['mute', false]]);
-        const shared = h.native.volume({ ...h.group(), streamId: null }, h.stamp());
-        assert.equal(shared.enabled, false);
-        assert.equal(shared.set(0.2), false);
-        assert.match(shared.reason, /does not support tab volume/);
+        h.native.dispose();
     });
 
-    test('WirePlumber mute uses its native flag and retains volume even while muted', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
-        let descriptor = volume(h);
-        assert.equal(descriptor.value, 0.7);
-        assert.equal(descriptor.muteEnabled, true);
-        assert.equal(descriptor.muted, false);
-        assert.equal(descriptor.toggleMute(), true);
-        assert.deepEqual(h.stream.calls, [['mute', true]]);
-        assert.equal(h.stream.volume, 0.7);
-        assert.equal(h.stream.mute, false, 'a dispatched setter is not remote completion');
-        h.stream.publish('mute', true);
-        descriptor = volume(h);
-        assert.equal(descriptor.value, 0.7, 'muted volume remains available to the slider');
-        assert.equal(descriptor.muted, true);
-        assert.equal(descriptor.setMuted(false), true);
-        assert.deepEqual(h.stream.calls.at(-1), ['mute', false]);
-        assert.equal(h.stream.calls.some(([name]) => name === 'volume'), false);
-        assert.equal(descriptor.setMuted('false'), false);
-    });
-
-    test('MPRIS slider volume and owned-stream native mute are independent', () => {
-        const h = nativeHarness({ stream: new Stream() });
-        let descriptor = volume(h);
-        assert.equal(descriptor.enabled, true);
-        assert.equal(descriptor.value, 0.6);
-        assert.match(descriptor.key, /^player:/);
-        assert.equal(descriptor.muteEnabled, true);
-        assert.equal(descriptor.muted, false);
-        assert.equal(descriptor.toggleMute(), true);
-        assert.deepEqual(h.stream.calls, [['mute', true]]);
-        assert.deepEqual(h.player.calls, []);
-        assert.equal(h.stream.volume, 0.7);
-        assert.equal(h.stream.mute, false, 'dispatch does not fabricate native mute completion');
-        h.stream.publish('mute', true);
-        descriptor = volume(h);
-        assert.equal(descriptor.value, 0.6);
-        assert.equal(descriptor.muted, true);
-        assert.equal(descriptor.setMuted(false), true);
-        assert.deepEqual(h.stream.calls.at(-1), ['mute', false]);
-        h.stream.publish('mute', false);
-        h.player.publish('volume', 0);
-        descriptor = volume(h);
-        assert.equal(descriptor.value, 0);
-        assert.equal(descriptor.muted, false, 'zero MPRIS volume is not a synthetic mute flag');
-        assert.equal(descriptor.set(0.4), true);
-        assert.deepEqual(h.player.calls, [['volume', 0.4]]);
-        assert.deepEqual(h.stream.calls, [['mute', true], ['mute', false]]);
-    });
-
-    test('MPRIS volume remains enabled without an owned stream, but mute never zeroes or restores volume', () => {
-        for (const level of [0, 0.6]) {
-            const h = nativeHarness({ player: new Player({ _volume: level }) });
-            const group = { ...h.group(), streamReason: 'Shared or ambiguous audio stream.' };
-            const descriptor = h.native.volume(group, h.stamp());
-            assert.equal(descriptor.enabled, true);
-            assert.equal(descriptor.value, level);
-            assert.equal(descriptor.muteEnabled, false);
-            assert.equal(descriptor.muted, false);
-            assert.match(descriptor.muteReason, /Native mute requires/);
-            assert.match(descriptor.muteReason, /Shared or ambiguous/);
-            assert.equal(descriptor.setMuted(true), false);
-            assert.equal(descriptor.setMuted(false), false);
-            assert.equal(descriptor.toggleMute(), false);
-            assert.deepEqual(h.player.calls, []);
-            assert.equal(descriptor.set(0.3), true);
-            assert.deepEqual(h.player.calls, [['volume', 0.3]]);
-        }
-    });
-
-    test('an available stream is not a mute target unless the Rust model assigns it', () => {
+    test('volume and mute dispatch only the explicit native setters supplied by Rust', () => {
         const h = nativeHarness({ stream: new Stream({ _mute: true }) });
-        const descriptor = h.native.volume({ ...h.group(), streamId: null }, h.stamp());
-        assert.equal(descriptor.enabled, true);
-        assert.equal(descriptor.muteEnabled, false);
-        assert.equal(descriptor.muted, false);
-        assert.equal(descriptor.toggleMute(), false);
+        h.native.apply({ player: h.player.bus_name, operation: 'volume', value: 0.25 });
+        assert.deepEqual(h.player.calls, [['volume', 0.25]]);
         assert.deepEqual(h.stream.calls, []);
+        h.native.apply({ player: h.player.bus_name, streamId: 42, operation: 'volume', value: 0.4 });
+        assert.deepEqual(h.stream.calls, [['volume', 0.4]], 'JS must not infer unmuting');
+        h.stream.calls.length = 0;
+        h.native.apply({ player: h.player.bus_name, streamId: 42, operation: 'volume', value: 0.5, muted: false });
+        assert.deepEqual(h.stream.calls, [['volume', 0.5], ['mute', false]]);
+        h.stream.calls.length = 0;
+        h.native.apply({ player: h.player.bus_name, streamId: 42, operation: 'mute', muted: true });
+        assert.deepEqual(h.stream.calls, [['mute', true]], 'mute is never implemented by zeroing volume');
+        h.native.dispose();
     });
 
-    test('replacement of a player invalidates both MPRIS slider and owned-stream mute setters', () => {
+    test('disposal cancels queued notifications and disconnects all GI subscriptions', () => {
         const h = nativeHarness({ stream: new Stream() });
-        const descriptor = volume(h);
-        const replacement = new Player();
-        h.manager.players = [replacement];
-        h.manager.emit('notify::players');
-        assert.equal(descriptor.set(0.2), false);
-        assert.equal(descriptor.setMuted(true), false);
-        assert.equal(descriptor.toggleMute(), false);
-        assert.deepEqual(h.player.calls, []);
-        assert.deepEqual(replacement.calls, []);
-        assert.deepEqual(h.stream.calls, []);
+        h.native.dispose();
+        h.player.publish('title', 'After disposal');
+        h.stream.publish('mute', true);
+        h.flush();
+        assert.equal(h.changes.length, 0);
+        for (const object of [h.player, h.stream, h.manager, h.audio]) assert.equal(object.handlers.size, 0);
+        assert.equal(h.idles.size, 0);
+        assert.equal(h.timers.size, 0);
+    });
+});
+
+describe('Opaque Rust snapshot guards', () => {
+    const matchesGuard = (guard, snapshot) => loadBackend().matchesGuard(guard, snapshot);
+    const snapshot = () => ({ players: [{ bus: 'native', instance: 7, position: 10, volume: 0.6,
+        futureFence: { nested: { b: 2, a: 1 }, order: ['one', 'two'] } }],
+        streams: [{ id: 42, instance: 8, properties: { 'media.name': 'Track', 'application.name': 'Test' }, volume: 0.7 }] });
+
+    test('partial record fields are selected by Rust, not a JS domain whitelist', () => {
+        const raw = snapshot();
+        const guard = { players: [{ bus: 'native', futureFence: { order: ['one', 'two'], nested: { a: 1, b: 2 } } }],
+            streams: [{ id: 42 }] };
+        assert.equal(matchesGuard(guard, raw), true);
+        raw.players[0].position = 99;
+        raw.players[0].volume = 0.1;
+        assert.equal(matchesGuard(guard, raw), true, 'fields omitted by Rust are not independently guarded');
+        raw.players[0].futureFence.nested.a = 9;
+        assert.equal(matchesGuard(guard, raw), false, 'unknown future fields are still meaningful fences');
     });
 
-    test('volume setters retain finite/range guards and a positive stream volume unmutes natively', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream({ _mute: true }) });
-        const descriptor = volume(h);
-        assert.equal(descriptor.set(NaN), false);
-        assert.equal(descriptor.set(Infinity), false);
-        assert.equal(descriptor.set(2), true);
-        assert.deepEqual(h.stream.calls, [['volume', 1], ['mute', false]]);
-        assert.equal(h.stream.volume, 0.7);
-        const m = nativeHarness();
-        assert.equal(volume(m).set(-1), true);
-        assert.deepEqual(m.player.calls, [['volume', 0]]);
-    });
-
-    test('all volume/mute operations reject stale ownership and replaced streams', () => {
-        for (const useStream of [false, true]) {
-            const h = nativeHarness({ player: new Player({ _volume: useStream ? -1 : 0.6 }), stream: new Stream() });
-            const descriptor = volume(h);
-            h.player.title = 'Next source';
-            assert.equal(descriptor.set(0.2), false);
-            assert.equal(descriptor.setMuted(true), false);
-            assert.equal(descriptor.toggleMute(), false);
-            assert.deepEqual(h.player.calls, []);
-            assert.deepEqual(h.stream.calls, []);
-        }
-        for (const level of [-1, 0.6]) {
-            const h = nativeHarness({ player: new Player({ _volume: level }), stream: new Stream() });
-            const descriptor = volume(h);
-            h.audio.streams = [new Stream()];
-            h.audio.emit('notify::streams');
-            assert.equal(descriptor.set(0.2), false);
-            assert.equal(descriptor.setMuted(true), false);
-            assert.equal(descriptor.toggleMute(), false);
-            assert.deepEqual(h.stream.calls, []);
-            assert.deepEqual(h.player.calls, []);
+    test('any explicitly supplied field, including volume and position revisions, participates in equality', () => {
+        for (const [field, before, after] of [['volume', 0.6, 0.9], ['positionRevision', 2, 3], ['opaque', 'one', 'two']]) {
+            const raw = snapshot();
+            raw.players[0][field] = before;
+            const guard = { players: [{ [field]: before }], streams: [{}] };
+            assert.equal(matchesGuard(guard, raw), true, field);
+            raw.players[0][field] = after;
+            assert.equal(matchesGuard(guard, raw), false, field);
         }
     });
 
-    test('new MPRIS volume disables stale stream slider dispatch, not its owned-stream mute', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
-        const group = h.group();
-        const descriptor = h.native.volume(group, h.stamp());
-        group.streamId = 999;
-        assert.equal(descriptor.setMuted(true), true, 'the descriptor captures its original native target');
-        h.player.publish('volume', 0.4);
-        assert.equal(descriptor.setMuted(false), true);
-        assert.equal(descriptor.set(0.1), false);
-        assert.deepEqual(h.stream.calls, [['mute', true], ['mute', false]]);
-        assert.deepEqual(h.player.calls, []);
+    test('nested property maps ignore insertion order but not membership or nested array order', () => {
+        const raw = snapshot();
+        const guard = { players: [{ futureFence: { order: ['one', 'two'], nested: { a: 1, b: 2 } } }],
+            streams: [{ properties: { 'application.name': 'Test', 'media.name': 'Track' } }] };
+        assert.equal(matchesGuard(guard, raw), true);
+        raw.streams[0].properties.extra = 'new';
+        assert.equal(matchesGuard(guard, raw), false, 'property maps are complete canonical values');
+        delete raw.streams[0].properties.extra;
+        raw.players[0].futureFence.order.reverse();
+        assert.equal(matchesGuard(guard, raw), false);
     });
 
-    test('disabled descriptors expose the same safe mute API and disposal invalidates live descriptors', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }) });
-        const disabled = volume(h);
-        assert.equal(disabled.enabled, false);
-        assert.equal(disabled.muteEnabled, false);
-        assert.match(disabled.muteReason, /Native mute requires/);
-        assert.equal(disabled.muted, false);
-        assert.equal(disabled.set(1), false);
-        assert.equal(disabled.setMuted(true), false);
-        assert.equal(disabled.toggleMute(), false);
-        const m = nativeHarness({ stream: new Stream() });
-        const live = volume(m);
-        assert.equal(live.muteEnabled, true);
-        m.native.dispose();
-        assert.equal(live.set(0.2), false);
-        assert.equal(live.setMuted(true), false);
-        assert.equal(live.toggleMute(), false);
+    test('player and stream array membership and order are exact even for partial records', () => {
+        const raw = snapshot();
+        raw.players.push({ bus: 'other', instance: 9 });
+        raw.streams.push({ id: 43, instance: 10 });
+        const guard = { players: [{ bus: 'native' }, { bus: 'other' }], streams: [{ id: 42 }, { id: 43 }] };
+        assert.equal(matchesGuard(guard, raw), true);
+        for (const key of ['players', 'streams']) {
+            const changed = structuredClone(raw);
+            changed[key].reverse();
+            assert.equal(matchesGuard(guard, changed), false, `${key} order`);
+            changed[key].pop();
+            assert.equal(matchesGuard(guard, changed), false, `${key} removal`);
+            changed[key].push({}, {});
+            assert.equal(matchesGuard(guard, changed), false, `${key} addition`);
+        }
     });
 
-    test('public backend descriptors require a current Rust ownership decision, including at dispatch', () => {
-        const h = nativeHarness({ player: new Player({ _volume: -1 }), stream: new Stream() });
-        const model = { primary: h.player.bus_name, streamId: h.stream.id };
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            native: h.native, modelStamp: h.stamp(), disposed: false,
-            planner: { ready: true }, groups: [model],
+    test('missing fields, replacements, and malformed guard containers never match', () => {
+        const raw = snapshot();
+        assert.equal(matchesGuard({ players: [{ missing: 'fence' }], streams: [{}] }, raw), false);
+        assert.equal(matchesGuard({ players: [{ instance: 999 }], streams: [{}] }, raw), false);
+        for (const guard of [null, [], {}, { players: null, streams: [] }, { players: [], streams: null }])
+            assert.equal(matchesGuard(guard, raw), false);
+        assert.equal(matchesGuard({ players: [], streams: [] }, { players: [], streams: [] }), true);
+    });
+});
+
+function backendFixture() {
+    const h = Object.assign(clockHarness(), { sent: [], applied: [], changes: 0, progressChanges: 0, captures: 0 });
+    const { MediaBackend } = loadBackend({ GLib: h.GLib, Gio: { Cancellable } });
+    h.snapshot = {
+        players: [{ bus: 'native', instance: 7, trackId: '/track/one', seekRevision: 0, positionRevision: 2,
+            identity: 'Native', desktopEntry: 'native', title: 'Raw title', artist: 'Raw artist', album: '',
+            url: 'file:///track', artUrl: '', browserHint: null, playing: true, stopped: false,
+            position: 10, positionSupported: true, rate: 1, length: 90, lengthMicros: null,
+            canPlay: false, canPause: false, canSeek: false, canNext: false, canPrevious: false,
+            cover: '/cache/raw.avif', volume: 0.6, available: true, futureFence: { b: 2, a: 1 } }],
+        streams: [{ id: 42, instance: 8, name: 'Track', nickname: 'Stream', ready: true,
+            properties: { 'application.name': 'Native', 'media.name': 'Track' }, volume: 0.7, muted: false }],
+    };
+    h.native = {
+        capture() { h.captures++; return structuredClone(h.snapshot); },
+        apply(operation) { h.applied.push(structuredClone(operation)); return h.onApply?.(operation); },
+        sync() {}, dispose() { h.nativeDisposed = true; h.snapshot = { players: [], streams: [] }; },
+    };
+    h.worker = {
+        ready: true,
+        send(message) {
+            if (!this.ready) return false;
+            h.sent.push(structuredClone(message));
+            return h.onSend ? h.onSend(message) : true;
+        },
+        start() { h.workerStarted = true; },
+        stop() { this.ready = false; },
+        failed(reason) { this.stop(); h.backend._failed(reason); },
+        dispose() { this.stop(); h.workerDisposed = true; },
+    };
+    h.backend = Object.assign(Object.create(MediaBackend.prototype), {
+        helper: '/bin/media-control', disposed: false, ready: false,
+        groups: [], players: new Map(), positions: new Map(), transports: {}, guard: null,
+        activePlayer: '', failure: '', native: h.native, worker: h.worker,
+        onChange() { h.changes++; }, onProgress() { h.progressChanges++; },
+    });
+    h.handshake = () => { h.worker.ready = true; h.backend._receive({ type: 'ready' }); };
+    const player = { ...structuredClone(h.snapshot.players[0]), title: 'Rust title', artist: 'Rust artist',
+        trackKey: 'rust-track-key', cover: '/cache/rust.avif' };
+    h.state = {
+        type: 'state', ready: true,
+        groups: [{ primary: 'native', players: ['native'], title: 'Rust group', displayName: 'Rust source',
+            streamId: 42, streamReason: 'Rust owns this stream' }],
+        activePlayer: 'native', players: [player],
+        progress: [{ ...player, position: 14.25, samplePosition: 10, positionSupported: true }],
+        transports: { native: { enabled: true, reason: 'Rust transport decision' } },
+        volumes: { native: { enabled: true, value: 0.4, key: 'rust-volume-key', reason: 'Rust volume decision',
+            muteEnabled: true, muted: true, muteReason: 'Rust mute decision' } },
+        failure: '', guard: { players: [{ bus: 'native', instance: 7, seekRevision: 0, futureFence: { a: 1, b: 2 } }],
+            streams: [{ id: 42, instance: 8 }] },
+    };
+    h.publish = (state = h.state) => h.backend._receive(structuredClone(state));
+    h.publish();
+    h.sent.length = 0;
+    h.changes = 0;
+    h.progressChanges = 0;
+    return h;
+}
+
+describe('Cached Rust media backend', () => {
+    test('resolves Rust groups and metadata without native regrouping, projection, or metadata overlay', () => {
+        const h = backendFixture();
+        const captures = h.captures;
+        const groups = h.backend.resolveGroups();
+        assert.equal(groups.length, 1);
+        assert.deepEqual(groups[0], { ...h.state.groups[0], primary: h.state.players[0] });
+        assert.deepEqual(h.backend.player('native'), h.state.players[0]);
+        assert.deepEqual(h.backend.progress('native'), h.state.progress[0]);
+        assert.equal(h.backend.player('missing'), null);
+        assert.equal(h.backend.progress('missing'), null);
+        assert.equal(h.backend.activePlayer, 'native');
+        assert.equal(h.captures, captures, 'cache access must not synchronously query native state');
+        assert.deepEqual(h.sent, []);
+    });
+
+    test('private-owner player views are cached Rust records, not locally discovered JS objects', () => {
+        const h = backendFixture();
+        const recovered = { ...h.state.players[0], bus: ':1.220', instance: 901, identity: 'Haruna', title: 'Recovered' };
+        const state = { ...h.state, players: [recovered], progress: [{ ...recovered, samplePosition: 10 }],
+            activePlayer: recovered.bus, groups: [{ ...h.state.groups[0], primary: recovered.bus, players: [recovered.bus] }],
+            transports: { [recovered.bus]: { enabled: true, reason: 'Recovered by Rust' } } };
+        h.publish(state);
+        assert.deepEqual(h.backend.player(recovered.bus), recovered);
+        assert.equal(h.backend.resolveGroups()[0].primary.bus, recovered.bus);
+        assert.equal(h.native.players, undefined);
+        assert.equal(h.snapshot.players.some(player => player.bus === recovered.bus), false);
+        assert.deepEqual(h.backend.transport(h.backend.resolveGroups()[0]), state.transports[recovered.bus]);
+    });
+
+    test('state replaces the cache and notifies the view; progress updates only its separate display cache', () => {
+        const h = backendFixture();
+        const progress = [{ ...h.state.progress[0], position: 22.75, samplePosition: 20 }];
+        h.backend._receive({ type: 'progress', progress });
+        assert.deepEqual(h.backend.progress('native'), progress[0]);
+        assert.equal(h.backend.player('native').position, 10, 'projected progress is not a raw player update');
+        assert.equal(h.changes, 0, 'display frames must not trigger a complete GTK model render');
+        assert.equal(h.progressChanges, 1);
+        const empty = { ...h.state, groups: [], players: [], progress: [], transports: {}, volumes: {}, activePlayer: '' };
+        h.publish(empty);
+        assert.equal(h.changes, 1);
+        assert.deepEqual(h.backend.resolveGroups(), []);
+        assert.equal(h.backend.player('native'), null);
+        assert.equal(h.backend.progress('native'), null);
+        assert.equal(h.backend.activePlayer, '');
+    });
+
+    test('current checks only the opaque state guard against the latest native snapshot', () => {
+        const h = backendFixture();
+        assert.equal(h.backend.current(), true);
+        h.snapshot.players[0].position = 99;
+        h.snapshot.players[0].volume = 0.1;
+        assert.equal(h.backend.current(), true, 'Rust decides which fields matter to freshness');
+        h.snapshot.players[0].futureFence.a = 9;
+        assert.equal(h.backend.current(), false, 'a future opaque fence cannot be ignored by JS');
+        h.snapshot.players[0].futureFence.a = 1;
+        h.snapshot.players[0].instance++;
+        assert.equal(h.backend.current(), false);
+    });
+
+    test('transport is the Rust cache decision, not a reconstruction from native capabilities', () => {
+        const h = backendFixture();
+        const group = h.backend.resolveGroups()[0];
+        assert.deepEqual(h.backend.transport(group), h.state.transports.native);
+        h.publish({ ...h.state, transports: { native: { enabled: false, reason: 'Rust disabled this source' } } });
+        assert.deepEqual(h.backend.transport(group), { enabled: false, reason: 'Rust disabled this source' });
+        assert.equal(h.backend.transport({ primary: { bus: 'missing' } }).enabled, false);
+    });
+
+    test('refresh sends raw snapshots and ticks request Rust progress without deriving elapsed time', () => {
+        const h = backendFixture();
+        assert.equal(h.backend.refresh(), true);
+        const captures = h.captures;
+        h.time += 12;
+        assert.equal(h.backend.tick(), true);
+        assert.equal(h.captures, captures, 'a display tick does not recapture native properties');
+        assert.deepEqual(h.sent, [{ type: 'snapshot', snapshot: h.snapshot }, { type: 'tick' }]);
+        assert.equal(h.backend.progress('native').position, 14.25, 'display time changes only on a Rust reply');
+        assert.equal(Object.hasOwn(h.sent[0].snapshot.players[0], 'trackKey'), false);
+        assert.equal(Object.hasOwn(h.sent[0].snapshot.players[0], 'modelPosition'), false);
+    });
+
+    test('actions, signed jumps, selection, and cycling are requests, never local plans or native dispatches', () => {
+        const h = backendFixture();
+        h.time = 321;
+        assert.equal(h.backend.action('jump', 'native', -15), true);
+        assert.equal(h.backend.action('seek', 'native', 85), true);
+        assert.equal(h.backend.action('toggle'), true);
+        assert.equal(h.backend.select('native'), true);
+        assert.equal(h.backend.cycle(), true);
+        assert.deepEqual(h.sent, [
+            { type: 'action', action: { kind: 'jump', player: 'native', position: -15 }, createdAt: 321, snapshot: h.snapshot },
+            { type: 'action', action: { kind: 'seek', player: 'native', position: 85 }, createdAt: 321, snapshot: h.snapshot },
+            { type: 'action', action: { kind: 'toggle', player: '', position: 0 }, createdAt: 321, snapshot: h.snapshot },
+            { type: 'select', player: 'native', snapshot: h.snapshot }, { type: 'cycle', snapshot: h.snapshot },
+        ]);
+        assert.deepEqual(h.applied, []);
+        assert.equal(h.backend.activePlayer, 'native', 'selection is updated only by a Rust state reply');
+    });
+
+    test('Rust volume descriptors are accepted without retaining an unused UI facade or cache', () => {
+        const h = backendFixture();
+        assert.ok(h.state.volumes.native);
+        assert.equal('volume' in h.backend, false);
+        assert.equal('volumes' in h.backend, false);
+        h.publish({ ...h.state, volumes: {} });
+        assert.equal('volumes' in h.backend, false);
+        assert.deepEqual(h.sent, []);
+        assert.deepEqual(h.applied, []);
+    });
+
+    test('view failures are reported to Rust and retained through an error-bearing recovery state', () => {
+        const h = backendFixture();
+        const failure = 'Media changed; try the action again.';
+        h.backend.reportFailure(failure);
+        assert.equal(h.backend.failure, failure);
+        assert.ok(h.sent.some(message => message.type === 'report' && message.error === failure));
+        h.publish({ ...h.state, failure });
+        assert.equal(h.backend.failure, failure);
+        h.publish({ ...h.state, failure: '' });
+        assert.equal(h.backend.failure, '');
+    });
+
+    test('status is the serialized presentation badge for the Rust-selected cached primary', () => {
+        const h = backendFixture();
+        const expected = badge({ primary: h.state.players[0] });
+        assert.deepEqual(JSON.parse(h.backend.status()), expected);
+        assert.equal(h.applied.length, 0);
+    });
+
+    test('transport acknowledgements leave cached media and UI callbacks unchanged', () => {
+        const h = backendFixture();
+        const before = h.backend.player('native');
+        h.backend._receive({ type: 'ack' });
+        assert.equal(h.backend.player('native'), before);
+        assert.equal(h.backend.current(), true);
+        assert.equal(h.changes, 0);
+        assert.equal(h.progressChanges, 0);
+        assert.deepEqual(h.sent, []);
+    });
+
+    test('ready and capture requests send fresh snapshots without inventing action requests', () => {
+        const h = backendFixture();
+        h.backend.ready = false;
+        h.worker.ready = false;
+        h.handshake();
+        assert.equal(h.worker.ready, true);
+        assert.equal(h.backend.ready, false, 'a service handshake is not yet a ready Rust model');
+        assert.equal(h.backend.current(), false);
+        assert.equal(h.sent.at(-1).type, 'snapshot');
+        assert.deepEqual(h.sent.at(-1).snapshot, h.snapshot);
+        h.snapshot.players[0].position = 12;
+        h.backend._receive({ type: 'capture', id: 17 });
+        assert.equal(h.sent.at(-1).type, 'snapshot');
+        assert.deepEqual(h.sent.at(-1).snapshot, h.snapshot);
+        assert.equal(h.sent.some(message => message.type === 'action'), false);
+    });
+
+    test('failure clears every cache and a new ready handshake never replays old actions', () => {
+        const h = backendFixture();
+        h.backend.action('next', 'native');
+        h.worker.failed('Media service exited.');
+        assert.equal(h.backend.ready, false);
+        assert.equal(h.backend.current(), false);
+        assert.deepEqual(h.backend.resolveGroups(), []);
+        assert.equal(h.backend.player('native'), null);
+        assert.equal(h.backend.progress('native'), null);
+        assert.equal(h.backend.activePlayer, '');
+        assert.equal(h.backend.transport({ primary: { bus: 'native' } }).enabled, false);
+
+        assert.match(h.backend.failure, /exited/);
+        h.sent.length = 0;
+        assert.equal(h.backend.action('next', 'native'), false);
+        assert.equal(h.backend.select('native'), false);
+        assert.equal(h.backend.cycle(), false);
+        assert.equal(h.backend.refresh(), false);
+        assert.equal(h.backend.tick(), false);
+        h.handshake();
+        assert.equal(h.backend.ready, false);
+        h.publish();
+        assert.equal(h.sent.some(message => ['action', 'select', 'cycle', 'volume', 'mute'].includes(message.type)), false);
+        assert.equal(h.backend.action('next', 'native'), true);
+        assert.equal(h.sent.filter(message => message.type === 'action').length, 1);
+    });
+
+    test('a pipe failure after an accepted send clears the cache and the next handshake sends only a fresh snapshot', () => {
+        const h = backendFixture();
+        assert.equal(h.backend.action('next', 'native'), true);
+        h.worker.failed('Service input pipe failed');
+        assert.equal(h.backend.ready, false);
+        assert.equal(h.backend.current(), false);
+        assert.deepEqual(h.backend.resolveGroups(), []);
+        assert.match(h.backend.failure, /Service input pipe failed/);
+        h.sent.length = 0;
+        h.handshake();
+        assert.deepEqual(h.sent, [{ type: 'snapshot', snapshot: h.snapshot }]);
+    });
+
+    test('disposal closes both adapters and late state replies cannot repopulate the cache', () => {
+        const h = backendFixture();
+        h.backend.dispose();
+        assert.equal(h.workerDisposed, true);
+        assert.equal(h.nativeDisposed, true);
+        assert.equal(h.backend.current(), false);
+        const changes = h.changes;
+        h.publish({ ...h.state, failure: 'Late reply' });
+        assert.equal(h.changes, changes);
+        assert.equal(h.backend.action('next', 'native'), false);
+    });
+});
+
+describe('Guarded Rust native apply acknowledgements', () => {
+    const request = (h, extra = {}) => ({ type: 'apply', id: 7,
+        operation: { player: 'native', operation: 'next' }, guard: structuredClone(h.state.guard), expiresAt: h.time + 5, ...extra });
+
+    test('a current, unexpired request applies exactly once and acknowledges a fresh raw snapshot', () => {
+        const h = backendFixture();
+        const message = request(h);
+        h.onApply = () => { h.snapshot.players[0].title = 'Native changed during dispatch'; };
+        h.backend._receive(message);
+        assert.deepEqual(h.applied, [message.operation]);
+        const result = h.sent.at(-1);
+        assert.equal(result.type, 'result');
+        assert.equal(result.id, 7);
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.snapshot, h.snapshot);
+        assert.equal(h.sent.filter(value => value.type === 'result').length, 1);
+    });
+
+    test('Rust-supplied sampling fences reject a changed raw sample without JS regrouping', () => {
+        const h = backendFixture();
+        const guard = structuredClone(h.state.guard);
+        guard.players[0].position = h.snapshot.players[0].position;
+        guard.players[0].positionRevision = h.snapshot.players[0].positionRevision;
+        h.snapshot.players[0].positionRevision++;
+        h.backend._receive(request(h, { guard }));
+        assert.deepEqual(h.applied, []);
+        assert.equal(h.sent.at(-1).ok, false);
+        assert.match(h.sent.at(-1).error, /changed/);
+    });
+
+    test('an opaque native fence mismatch rejects apply and returns the current snapshot to Rust', () => {
+        const h = backendFixture();
+        h.snapshot.players[0].futureFence.a = 9;
+        h.backend._receive(request(h));
+        assert.deepEqual(h.applied, []);
+        const result = h.sent.at(-1);
+        assert.equal(result.type, 'result');
+        assert.equal(result.ok, false);
+        assert.match(result.error, /changed|stale|current/i);
+        assert.deepEqual(result.snapshot, h.snapshot);
+    });
+
+    test('per-operation guards are used verbatim, including fields omitted from the cached state guard', () => {
+        const h = backendFixture();
+        const guard = structuredClone(h.state.guard);
+        guard.players[0].volume = 0.6;
+        h.snapshot.players[0].volume = 0.9;
+        assert.equal(h.backend.current(), true, 'the state guard deliberately does not fence volume');
+        h.backend._receive(request(h, { guard, operation: { player: 'native', operation: 'volume', value: 0.2 } }));
+        assert.deepEqual(h.applied, []);
+        assert.equal(h.sent.at(-1).ok, false);
+    });
+
+    test('expired or invalid deadlines reject native calls instead of extending or replaying the action', () => {
+        for (const expiresAt of [99, NaN, Infinity, undefined]) {
+            const h = backendFixture();
+            h.backend._receive(request(h, { expiresAt }));
+            assert.deepEqual(h.applied, [], String(expiresAt));
+            assert.equal(h.sent.at(-1).type, 'result');
+            assert.equal(h.sent.at(-1).ok, false);
+            assert.ok(h.sent.at(-1).error.length > 0);
+        }
+    });
+
+    test('native dispatch errors return a useful failure and are never retried locally', () => {
+        const h = backendFixture();
+        h.onApply = () => { throw new Error('Native call failed'); };
+        h.backend._receive(request(h));
+        assert.equal(h.applied.length, 1);
+        assert.equal(h.sent.at(-1).ok, false);
+        assert.match(h.sent.at(-1).error, /Native call failed/);
+        assert.deepEqual(h.sent.at(-1).snapshot, h.snapshot);
+        assert.equal(h.timers.size, 0);
+    });
+
+    test('real Astal seek acknowledgements contain one dispatch revision and no optimistic position', () => {
+        const native = nativeHarness();
+        const h = backendFixture();
+        h.backend.native = native.native;
+        h.snapshot = native.native.capture();
+        const before = h.snapshot.players[0];
+        h.backend._receive(request(h, {
+            operation: { player: native.player.bus_name, operation: 'seek', value: 80 },
+            guard: { players: [{ bus: native.player.bus_name, instance: before.instance, seekRevision: before.seekRevision }], streams: [] },
+        }));
+        const result = h.sent.at(-1);
+        assert.equal(result.ok, true);
+        assert.equal(result.snapshot.players[0].seekRevision, before.seekRevision + 1);
+        assert.equal(result.snapshot.players[0].positionRevision, before.positionRevision);
+        assert.equal(result.snapshot.players[0].position, before.position);
+        assert.deepEqual(native.player.calls, [['position', 80]]);
+        native.native.dispose();
+    });
+});
+
+class Bytes {
+    constructor(data) { this.data = Uint8Array.from(data); }
+    get_size() { return this.data.length; }
+    toArray() { return Uint8Array.from(this.data); }
+}
+
+function pipeHarness() {
+    const h = Object.assign(clockHarness(), { processes: [], messages: [], failures: [] });
+    class ReadPipe {
+        constructor() { this.pending = null; this.closed = false; this.reads = []; }
+        read_bytes_async(size, _priority, cancel, callback) {
+            assert.equal(this.pending, null, 'only one async pipe read may be outstanding');
+            this.pending = { size, cancel, callback };
+            this.reads.push(this.pending);
+        }
+        read_bytes_finish(result) {
+            if (result.error) throw result.error;
+            return new Bytes(result.bytes);
+        }
+        feed(bytes, error = null) {
+            const read = this.pending;
+            assert.ok(read, 'expected an outstanding stdout read');
+            this.pending = null;
+            read.callback(this, { bytes: typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes, error });
+        }
+        is_closed() { return this.closed; }
+        has_pending() { return this.pending !== null; }
+        close_async(_priority, _cancel, callback) { this.closed = true; callback(this, {}); }
+        close_finish() { return true; }
+    }
+    class WritePipe {
+        constructor() { this.pending = null; this.closed = false; this.writes = []; this.chunks = []; }
+        enqueue(bytes, cancel, callback) {
+            assert.equal(this.pending, null, 'queued messages must not overlap async pipe writes');
+            this.pending = { bytes: bytes instanceof Bytes ? bytes.toArray() : Uint8Array.from(bytes), cancel, callback };
+            this.writes.push(this.pending);
+        }
+        write_bytes_async(bytes, _priority, cancel, callback) {
+            assert.ok(bytes instanceof Bytes, 'GLib.Bytes must retain the input buffer for each async write');
+            this.enqueue(bytes, cancel, callback);
+        }
+        write_bytes_finish(result) {
+            if (result.error) throw result.error;
+            return result.written;
+        }
+
+        finish(written = this.pending?.bytes.length, error = null) {
+            const write = this.pending;
+            assert.ok(write, 'expected an outstanding stdin write');
+            this.pending = null;
+            if (!error && written > 0) this.chunks.push(write.bytes.slice(0, written));
+            write.callback(this, { written, error });
+        }
+        text() {
+            const data = new Uint8Array(this.chunks.reduce((total, chunk) => total + chunk.length, 0));
+            let offset = 0;
+            for (const chunk of this.chunks) { data.set(chunk, offset); offset += chunk.length; }
+            return new TextDecoder('utf-8', { fatal: true }).decode(data);
+        }
+        is_closed() { return this.closed; }
+        has_pending() { return this.pending !== null; }
+        close_async(_priority, _cancel, callback) { this.closed = true; callback(this, {}); }
+        close_finish() { return true; }
+    }
+    h.GLib.Bytes = Bytes;
+    h.Gio = {
+        Cancellable,
+        SubprocessFlags: { STDIN_PIPE: 1, STDOUT_PIPE: 2 },
+        Subprocess: { new(argv, flags) {
+            const child = {
+                argv, flags, input: new WritePipe(), output: new ReadPipe(), killed: false, waiter: null,
+                get_stdin_pipe() { return this.input; }, get_stdout_pipe() { return this.output; },
+                force_exit() { this.killed = true; },
+                wait_async(cancel, callback) { assert.equal(cancel, null, 'child reaping must not be cancelled'); this.waiter = callback; },
+                wait_finish(result) { if (result.error) throw result.error; return true; },
+                get_successful() { return this.successful !== false; },
+                exit(successful = true, error = null) {
+                    this.successful = successful;
+                    const callback = this.waiter;
+                    assert.ok(callback, 'expected a child wait callback');
+                    this.waiter = null;
+                    callback(this, { error });
+                },
+            };
+            h.processes.push(child);
+            return child;
+        } },
+    };
+    Object.assign(h, loadBackend({ GLib: h.GLib, Gio: h.Gio }));
+    h.startWorker = () => {
+        h.worker = new h.ServiceWorker('/bin/media-control', {
+            onMessage: message => h.messages.push(message), onFailure: reason => h.failures.push(reason),
         });
-        const descriptor = backend.volume(h.group());
-        assert.equal(descriptor.enabled, true);
-        assert.equal(descriptor.muteEnabled, true);
-        backend.planner.ready = false;
-        assert.equal(descriptor.toggleMute(), false);
-        assert.equal(backend.volume(h.group()).enabled, false);
-        assert.equal(backend.volume(h.group()).muteEnabled, false);
-        backend.planner.ready = true;
-        backend.groups = [];
-        assert.equal(descriptor.setMuted(true), false);
-        backend.groups = [{ ...model, streamId: null }];
-        assert.equal(descriptor.set(0.2), false);
-        assert.deepEqual(h.stream.calls, []);
+        h.worker.start();
+        return h.processes.at(-1);
+    };
+    h.drainInput = child => {
+        let count = 0;
+        while (child.input.pending) {
+            assert.ok(++count < 1000, 'bounded asynchronous writes must settle');
+            child.input.finish();
+        }
+        return child.input.text().trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    };
+    h.reply = (child, ...messages) => child.output.feed(messages.map(value => JSON.stringify(value) + '\n').join(''));
+    return h;
+}
+
+describe('Rust service JSONL worker', () => {
+    test('starts the service command and accepts unsolicited ready, state, progress, apply, and capture messages', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        assert.deepEqual(child.argv, ['/bin/media-control', 'service']);
+        assert.equal(child.flags, h.Gio.SubprocessFlags.STDIN_PIPE | h.Gio.SubprocessFlags.STDOUT_PIPE);
+        assert.equal(h.worker.ready, false);
+        assert.equal(h.worker.send({ type: 'tick' }), false, 'requests are rejected before the service handshake');
+        assert.equal(child.input.writes.length, 0);
+        const messages = [{ type: 'ready' }, { type: 'state', groups: [], players: [], progress: [] },
+            { type: 'progress', progress: [] }, { type: 'apply', id: 7 }, { type: 'capture', id: 8 }];
+        h.reply(child, ...messages);
+        assert.deepEqual(h.messages, messages);
+        assert.equal(h.worker.ready, true);
+        assert.deepEqual(h.failures, []);
+        h.worker.dispose();
     });
 
-    test('transport availability uses native capabilities from every current group member', () => {
-        const h = nativeHarness({ player: new Player({
-            bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.pmetadata', can_play: false, can_pause: false,
-        }) });
-        const model = { primary: h.player.bus_name, players: [h.player.bus_name], streamId: null };
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            native: h.native, modelStamp: h.stamp(), disposed: false,
-            planner: { ready: true }, groups: [model],
-        });
-        assert.equal(h.native.player(h.player.bus_name).canPlay, false);
-        assert.equal(h.native.player(h.player.bus_name).canPause, false);
-        assert.equal(backend.transport(h.group()).enabled, false);
-        assert.match(backend.transport(h.group()).reason, /browser bridge does not expose pause/);
-        assert.deepEqual(h.player.calls, []);
-
-        const real = new Player({ bus_name: 'org.mpris.MediaPlayer2.mprisence_web.generic.preal' });
-        h.manager.players.push(real);
-        h.manager.emit('notify::players');
-        model.players.push(real.bus_name);
-        backend.modelStamp = h.stamp();
-        assert.equal(backend.transport(h.group()).enabled, true, 'a capable alias can control the group');
-        assert.equal(backend.transport(h.group()).reason, 'Pause');
-        real.publish('can-pause', false);
-        assert.equal(backend.transport(h.group()).enabled, false);
-        assert.match(backend.transport(h.group()).reason, /changed/);
-        backend.modelStamp = h.stamp();
-        assert.match(backend.transport(h.group()).reason, /does not expose pause/);
-
-        h.player.publish('playback-status', 2);
-        real.publish('playback-status', 2);
-        backend.modelStamp = h.stamp();
-        assert.equal(backend.transport(h.group()).reason, 'Play');
-        h.native.apply({ player: h.player.bus_name, operation: 'pause' });
-        assert.deepEqual(h.player.calls, [['pause']], 'native pause-all dispatch still bypasses inaccurate CanPause flags');
-        backend.planner.ready = false;
-        assert.equal(backend.transport(h.group()).enabled, false);
-        backend.planner.ready = true;
-        h.player.available = false;
-        assert.equal(backend.transport(h.group()).enabled, false);
+    test('a no-op acknowledgement clears the request watchdog without scheduling a restart', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        h.reply(child, { type: 'ready' });
+        assert.equal(h.worker.send({ type: 'snapshot', snapshot: { players: [], streams: [] } }), true);
+        h.drainInput(child);
+        assert.notEqual(h.worker.watchdog, 0);
+        h.reply(child, { type: 'ack' });
+        assert.equal(h.worker.watchdog, 0);
+        assert.equal(h.timers.size, 0);
+        assert.equal(child.killed, false);
+        assert.deepEqual(h.failures, []);
+        h.worker.dispose();
     });
 
-    test('an unavailable non-primary member cannot leave group transport enabled', () => {
-        const h = nativeHarness();
-        const alias = new Player({ bus_name: 'org.mpris.MediaPlayer2.alias', available: false });
-        h.manager.players.push(alias);
-        h.manager.emit('notify::players');
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            native: h.native, modelStamp: h.stamp(), disposed: false,
-            planner: { ready: true }, groups: [{ primary: h.player.bus_name, players: [alias.bus_name, h.player.bus_name] }],
-        });
-        assert.equal(backend.current(), true, 'availability can change before native discovery removes an object');
-        assert.equal(backend.transport(h.group()).enabled, false);
-        assert.match(backend.transport(h.group()).reason, /member is unavailable/);
-        assert.deepEqual(h.player.calls, []);
-        alias.available = true;
-        assert.equal(backend.transport(h.group()).enabled, true);
-        backend.disposed = true;
-        assert.equal(backend.transport(h.group()).enabled, false);
+    test('retains partial JSON lines and UTF-8 scalars across asynchronous reads', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        const message = { type: 'state', title: '作者😀' };
+        const bytes = new TextEncoder().encode(JSON.stringify(message) + '\n');
+        const split = bytes.indexOf(0xe4) + 1;
+        child.output.feed(bytes.slice(0, split));
+        assert.deepEqual(h.messages, []);
+        child.output.feed(bytes.slice(split, -1));
+        assert.deepEqual(h.messages, []);
+        child.output.feed(bytes.slice(-1));
+        assert.deepEqual(h.messages, [message]);
+        assert.deepEqual(h.failures, []);
+        h.worker.dispose();
     });
 
-    test('transport rejects replaced representatives and missing Rust group decisions', () => {
-        const h = nativeHarness();
-        const group = h.group();
-        const backend = Object.assign(Object.create(h.MediaBackend.prototype), {
-            native: h.native, modelStamp: h.stamp(), disposed: false,
-            planner: { ready: true }, groups: [{ primary: h.player.bus_name, players: [h.player.bus_name] }],
-        });
-        assert.equal(backend.transport(group).enabled, true);
-        h.manager.players = [new Player({ bus_name: h.player.bus_name })];
-        h.manager.emit('notify::players');
-        backend.modelStamp = h.stamp();
-        assert.equal(backend.transport(group).enabled, false);
-        assert.equal(backend.transport(h.group()).enabled, true);
-        backend.groups = [];
-        assert.equal(backend.transport(h.group()).enabled, false);
-        assert.equal(backend.transport(null).enabled, false);
+    test('queues multiple outbound messages and completes partial pipe writes in exact JSONL order', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        h.reply(child, { type: 'ready' });
+        const messages = [
+            { type: 'snapshot', snapshot: { players: [], streams: [], metadata: '作者'.repeat(2500) } },
+            { type: 'action', action: { kind: 'jump', player: 'native', position: -15 } },
+            { type: 'tick' },
+        ];
+        messages.forEach(value => assert.equal(h.worker.send(value), true));
+        assert.equal(child.input.writes.length, 1, 'only the first queued message starts writing immediately');
+        child.input.finish(7);
+        assert.deepEqual(h.drainInput(child), messages);
+        assert.ok(child.input.writes.every(write => write.bytes.length <= 4096), 'each async write stays within PIPE_BUF');
+        assert.deepEqual(h.failures, []);
+        h.worker.dispose();
     });
 
-    test('the real native bridge and Planner coalesce seeks without fabricated playback state', async () => {
-        const h = nativeHarness({ player: new Player({ playback_status: 2 }) });
-        const sent = [];
-        const planner = new h.Planner({
-            capture: () => h.native.capture(), now: () => h.time,
-            send: request => { sent.push(request); }, apply: operation => h.native.apply(operation),
-        });
-        const response = (actions = []) => ({
-            requestId: sent.at(-1).requestId, activePlayer: h.player.bus_name, actions,
-            groups: [{
-                primary: h.player.bus_name, players: [h.player.bus_name], title: 'Track',
-                displayName: 'Test Player', streamId: null, streamReason: 'No stream',
-            }],
-        });
-        planner.refresh();
-        await Promise.resolve();
-        assert.equal(planner.receive(response()), true);
-        planner.action('seek', h.player.bus_name, 80);
-        await Promise.resolve();
-        planner.action('seek', h.player.bus_name, 90);
-        assert.equal(planner.receive(response([{ player: h.player.bus_name, operation: 'seek', value: 80 }])), true);
-        await Promise.resolve();
-        assert.equal(sent.at(-1).action.position, 90);
-        assert.equal(sent.at(-1).players[0].position, 0, 'position is unknown until a seek is confirmed');
-        assert.equal('trackKey' in sent.at(-1).players[0], false, 'native freshness keys do not change the Rust protocol');
-        assert.equal(planner.receive(response([{ player: h.player.bus_name, operation: 'seek', value: 90 }])), true);
-        assert.deepEqual(h.player.calls, [['position', 80], ['position', 90]]);
-        assert.equal(h.native.capture().players[0].position, 10);
-        assert.equal(h.native.capture().players[0].seekRevision, 2);
-        h.player.publish('position', 85);
-        assert.equal(h.native.capture().players[0].position, 85);
+    test('rejects an oversized outbound JSON message before writing it', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        h.reply(child, { type: 'ready' });
+        assert.throws(() => h.worker.send({ type: 'report', error: '界'.repeat(1024 * 1024 / 2) }), /large|limit|MiB/i);
+        assert.equal(child.input.writes.length, 0);
+        h.worker.dispose();
     });
 
+    test('malformed JSON and invalid UTF-8 fail closed, and a fresh worker decodes independently', () => {
+        for (const bytes of [new TextEncoder().encode('{broken}\n'),
+            Uint8Array.from([123, 34, 116, 121, 112, 101, 34, 58, 34, 0xc3, 0x28, 34, 125, 10])]) {
+            const h = pipeHarness();
+            const child = h.startWorker();
+            child.output.feed(bytes);
+            assert.equal(h.messages.length, 0);
+            assert.equal(h.failures.length, 1);
+            assert.equal(child.killed, true);
+            assert.equal(h.timers.size, 1, 'one bounded restart is scheduled');
+            h.fireTimer([...h.timers.keys()][0]);
+            const restarted = h.processes.at(-1);
+            assert.notEqual(restarted, child);
+            h.reply(restarted, { type: 'ready' }, { type: 'state', title: '作者😀' });
+            assert.equal(h.messages.at(-1).title, '作者😀');
+            assert.equal(h.failures.length, 1);
+            h.worker.dispose();
+        }
+    });
+
+    test('bounds unterminated inbound frames to one MiB', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        const chunk = new Uint8Array(8192).fill(32);
+        for (let index = 0; index < 129 && !h.failures.length; index++) child.output.feed(chunk);
+        assert.equal(h.messages.length, 0);
+        assert.equal(h.failures.length, 1);
+        assert.match(h.failures[0], /large|limit|MiB/i);
+        assert.equal(child.killed, true);
+        h.worker.dispose();
+    });
+
+    test('EOF cancels queued writes; restarted workers never replay old action requests or callbacks', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        h.reply(child, { type: 'ready' });
+        h.worker.send({ type: 'action', action: { kind: 'next', player: 'native', position: 0 } });
+        h.worker.send({ type: 'action', action: { kind: 'seek', player: 'native', position: 80 } });
+        const write = child.input.pending;
+        child.output.feed(new Uint8Array());
+        assert.equal(h.failures.length, 1);
+        assert.equal(write.cancel.is_cancelled(), true);
+        assert.equal(child.killed, true);
+        h.fireTimer([...h.timers.keys()][0]);
+        const restarted = h.processes.at(-1);
+        h.reply(restarted, { type: 'ready' });
+        child.input.finish(0, new Error('late cancelled write'));
+        child.exit();
+        assert.equal(restarted.input.writes.length, 0, 'dropped work must not reach the new service');
+        assert.equal(h.failures.length, 1, 'late callbacks from the old generation do not kill its replacement');
+        h.worker.send({ type: 'tick' });
+        assert.deepEqual(h.drainInput(restarted), [{ type: 'tick' }]);
+        h.worker.dispose();
+    });
+
+    test('write errors and zero-byte writes fail once without blindly retrying the request', () => {
+        for (const error of [null, new Error('broken pipe')]) {
+            const h = pipeHarness();
+            const child = h.startWorker();
+            h.reply(child, { type: 'ready' });
+            h.worker.send({ type: 'tick' });
+            child.input.finish(0, error);
+            assert.equal(h.failures.length, 1);
+            assert.equal(child.killed, true);
+            assert.equal(child.input.writes.length, 1);
+            assert.equal(h.timers.size, 1);
+            h.worker.dispose();
+        }
+    });
+
+    test('disposal cancels pending I/O and restart timers and ignores a previously queued read', () => {
+        const h = pipeHarness();
+        const child = h.startWorker();
+        const read = child.output.pending;
+        h.worker.dispose();
+        assert.equal(read.cancel.is_cancelled(), true);
+        assert.equal(child.killed, true);
+        assert.equal(h.timers.size, 0);
+        child.output.feed('{"type":"ready"}\n');
+        child.exit();
+        assert.deepEqual(h.messages, []);
+        assert.deepEqual(h.failures, []);
+        assert.equal(h.timers.size, 0);
+        h.worker.start();
+        assert.equal(h.processes.length, 1);
+    });
+});
+
+describe('Native/backend/service wiring', () => {
+    test('an empty native guard cannot leave a disposed backend current', () => {
+        const h = nativeHarness({ player: null });
+        const backend = new h.MediaBackend();
+        backend._receive({ type: 'state', ready: true, groups: [], players: [], progress: [],
+            transports: {}, volumes: {}, activePlayer: '', failure: '', guard: { players: [], streams: [] } });
+        assert.equal(backend.current(), true);
+        backend.dispose();
+        h.native.dispose();
+        assert.equal(backend.disposed, true);
+        assert.deepEqual(backend.native.capture(), { players: [], streams: [] });
+        assert.equal(backend.current(), false, 'disposed state must invalidate even an otherwise matching empty guard');
+    });
+
+    test('the public constructor forwards GI captures, Rust cache updates, ticks, and guarded native results', () => {
+        const h = pipeHarness();
+        const player = new Player();
+        const manager = Object.assign(new Signals(), { players: [player] });
+        const audio = Object.assign(new Signals(), { streams: [] });
+        let changes = 0, progressChanges = 0;
+        const { MediaBackend } = loadBackend({ GLib: h.GLib, Gio: h.Gio,
+            Mpris: { get_default: () => manager, PlaybackStatus: { PLAYING: 1, PAUSED: 2, STOPPED: 3 } },
+            Wp: { get_default: () => ({ audio }) } });
+        const backend = new MediaBackend({ onChange() { changes++; }, onProgress() { progressChanges++; } });
+        backend.start();
+        h.flush();
+        const child = h.processes[0];
+        assert.deepEqual(child.argv.slice(1), ['service']);
+        assert.equal(child.input.writes.length, 0, 'process creation alone is not the service-ready handshake');
+        h.reply(child, { type: 'ready' });
+        const startup = h.drainInput(child);
+        assert.equal(startup.length, 1);
+        assert.equal(startup[0].type, 'snapshot');
+        const snapshot = startup[0].snapshot;
+        const raw = snapshot.players[0];
+        const guard = { players: [{ bus: raw.bus, instance: raw.instance, seekRevision: raw.seekRevision }], streams: [] };
+        const view = { ...raw, trackKey: '/track/one' };
+        const state = { type: 'state', ready: true,
+            groups: [{ primary: raw.bus, players: [raw.bus], title: raw.title, displayName: raw.identity,
+                streamId: null, streamReason: 'No stream' }],
+            activePlayer: raw.bus, players: [view], progress: [{ ...view, samplePosition: 10 }],
+            transports: { [raw.bus]: { enabled: true, reason: 'Pause' } }, volumes: {}, failure: '', guard };
+        h.reply(child, state);
+        assert.equal(backend.current(), true);
+        assert.equal(backend.resolveGroups()[0].primary.trackKey, '/track/one');
+        const renders = changes;
+        h.reply(child, { type: 'progress', progress: [{ ...view, position: 12.5, samplePosition: 10 }] });
+        assert.equal(backend.progress(raw.bus).position, 12.5);
+        assert.equal(changes, renders);
+        assert.ok(progressChanges > 0);
+        player.publish('volume', 0.8);
+        h.flush();
+        h.drainInput(child);
+        const requests = child.input.text().trim().split('\n').map(line => JSON.parse(line));
+        assert.equal(requests.at(-1).snapshot.players[0].volume, 0.8);
+        backend.tick();
+        h.drainInput(child);
+        assert.equal(JSON.parse(child.input.text().trim().split('\n').at(-1)).type, 'tick');
+        h.reply(child, { type: 'apply', id: 17, operation: { player: raw.bus, operation: 'seek', value: 80 },
+            guard, expiresAt: h.time + 5 });
+        h.drainInput(child);
+        const result = JSON.parse(child.input.text().trim().split('\n').at(-1));
+        assert.equal(result.type, 'result');
+        assert.equal(result.id, 17);
+        assert.equal(result.ok, true);
+        assert.equal(result.snapshot.players[0].seekRevision, raw.seekRevision + 1);
+        assert.equal(result.snapshot.players[0].position, 10);
+        assert.equal(result.snapshot.players[0].positionRevision, raw.positionRevision);
+        assert.deepEqual(player.calls, [['position', 80]]);
+        assert.equal(backend.current(), false, 'only a new Rust state can acknowledge the changed guard');
+        backend.dispose();
+        assert.equal(child.killed, true);
+        assert.equal(player.handlers.size, 0);
+        assert.equal(manager.handlers.size, 0);
+        assert.equal(audio.handlers.size, 0);
+        assert.equal(h.timers.size, 0);
+    });
+});
+
+describe('Bounded metadata helper I/O', () => {
+    test('waits for stdout EOF and child exit, then strictly decodes the complete UTF-8 reply', async () => {
+        const h = pipeHarness();
+        const pending = h.runHelper(['/bin/media-control', 'artwork', 'file:///track']);
+        const child = h.processes[0];
+        const bytes = new TextEncoder().encode('/cache/作者.png\n');
+        child.output.feed(bytes.slice(0, 8));
+        child.output.feed(bytes.slice(8));
+        child.output.feed(new Uint8Array());
+        child.exit();
+        assert.equal(await pending, '/cache/作者.png\n');
+        assert.equal(h.timers.size, 0);
+        h.flush();
+    });
+
+    test('credit input uses bounded async writes and the helper receives exactly one input string', async () => {
+        const h = pipeHarness();
+        const input = JSON.stringify({ url: 'https://example.test/', artist: '作者'.repeat(2500), album: '' });
+        const pending = h.runHelper(['/bin/media-control', 'credit'], input);
+        const child = h.processes[0];
+        child.input.finish(3);
+        let writes = 0;
+        while (child.input.pending) { assert.ok(++writes < 100); child.input.finish(); }
+        assert.equal(child.input.text(), input);
+        assert.ok(child.input.writes.every(write => write.bytes.length <= 4096));
+        assert.equal(child.input.closed, true);
+        child.output.feed('reply');
+        child.output.feed(new Uint8Array());
+        child.exit();
+        assert.equal(await pending, 'reply');
+        h.flush();
+    });
+
+    test('invalid UTF-8 and oversized input fail without poisoning the next helper reply', async () => {
+        const h = pipeHarness();
+        const bad = h.runHelper(['/bin/media-control', 'credit']);
+        const child = h.processes[0];
+        child.output.feed(Uint8Array.from([0xc3, 0x28]));
+        child.output.feed(new Uint8Array());
+        child.exit();
+        await assert.rejects(bad, /encoded|encoding|UTF/i);
+        await assert.rejects(h.runHelper(['/bin/media-control', 'credit'], '界'.repeat(600000)), /large/i);
+        assert.equal(h.processes.length, 1, 'oversized input is rejected before spawning');
+        const good = h.runHelper(['/bin/media-control', 'credit']);
+        const restarted = h.processes[1];
+        restarted.output.feed('作者');
+        restarted.output.feed(new Uint8Array());
+        restarted.exit();
+        assert.equal(await good, '作者');
+        h.flush();
+    });
+
+    test('view cancellation terminates the helper, cancels I/O, and still reaps its child', async () => {
+        const h = pipeHarness();
+        const cancel = new Cancellable();
+        const pending = h.runHelper(['/bin/media-control', 'credit'], 'input', cancel);
+        const child = h.processes[0];
+        const read = child.output.pending;
+        cancel.cancel();
+        await assert.rejects(pending, /cancelled/);
+        assert.equal(child.killed, true);
+        assert.equal(read.cancel.is_cancelled(), true);
+        child.output.feed(new Uint8Array(), new Error('cancelled read'));
+        child.input.finish(0, new Error('cancelled write'));
+        child.exit(false);
+        h.flush();
+        assert.equal(cancel.handlers.size, 0);
+        assert.equal(h.timers.size, 0);
+    });
+});
+
+describe('Rust metadata helper bridge', () => {
     function lookupHarness(respond) {
         const calls = [];
         const { MediaBackend } = loadBackend({
@@ -2972,817 +2002,6 @@ describe('Native service integration', () => {
             h.backend.disposed = true;
             await assert.rejects(h.backend[kind](input), /disposed/);
             assert.equal(h.calls.length, 0);
-        }
-    });
-});
-describe('Planner', () => {
-    const { Planner, MediaBackend } = loadBackend();
-
-    function player(bus = 'a', extra = {}) {
-        return {
-            bus, identity: `App ${bus}`, desktopEntry: `app-${bus}`, title: `Track ${bus}`,
-            artist: 'Artist', album: 'Album', url: '', artUrl: '', browserHint: null,
-            playing: true, stopped: false, position: 10, length: 200,
-            canPlay: true, canPause: true, canSeek: true, canNext: true, canPrevious: true,
-            trackId: `/track/${bus}`, instance: `${bus}-instance-1`, seekRevision: 0,
-            positionSupported: true, rate: 1, volume: 0.5, ...extra,
-        };
-    }
-
-    function stream(extra = {}) {
-        return {
-            id: 42, name: 'App a', nickname: '', ready: true,
-            properties: { 'application.name': 'App a', 'media.name': 'Track a' },
-            instance: 'stream-instance-1', volume: 0.5, ...extra,
-        };
-    }
-
-    function harness(players = [player()], streams = []) {
-        const h = {
-            state: { players, streams }, time: 100, sent: [], applied: [], models: [], errors: [],
-            onApply: null, onSend: null, onModel: null,
-        };
-        h.planner = new Planner({
-            capture: () => h.state,
-            now: () => h.time,
-            send: request => {
-                h.sent.push(request);
-                return h.onSend?.(request);
-            },
-            apply: operation => {
-                h.applied.push({ ...operation });
-                if (h.onApply) return h.onApply(operation);
-                if (operation.operation === 'seek') {
-                    const target = h.state.players.find(p => p.bus === operation.player);
-                    target.seekRevision++;
-                }
-            },
-            onModel: (groups, active) => {
-                h.models.push({ groups, active });
-                h.onModel?.(groups, active);
-            },
-            onError: error => h.errors.push(error),
-        });
-        return h;
-    }
-
-    function group(h, primary = 'a', players = [primary], extra = {}) {
-        const native = h.state.players.find(p => p.bus === primary);
-        return {
-            title: native?.title ?? '', primary, players,
-            displayName: native?.identity ?? '', streamId: null, streamReason: 'No matching audio stream.',
-            ...extra,
-        };
-    }
-
-    function response(h, options = {}, request = h.sent.at(-1)) {
-        const groups = options.groups ?? h.state.players.map(p => group(h, p.bus));
-        const active = options.active ?? (groups.find(g => g.players.includes(request.selectedPlayer)) ?? groups[0])?.primary ?? '';
-        return {
-            requestId: request.requestId, groups, activePlayer: active, actions: [], ...options,
-        };
-    }
-
-    const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
-
-    async function prime(h, groups) {
-        assert.equal(h.planner.refresh(), true);
-        await tick();
-        assert.equal(h.planner.receive(response(h, groups ? { groups } : {})), true);
-        await tick();
-        return h;
-    }
-
-    function seek(player, value) { return { player, operation: 'seek', value }; }
-    function op(player, operation) { return { player, operation }; }
-
-    test('read-only startup races refresh silently without publishing stale models', async () => {
-        const h = harness();
-        h.planner.refresh();
-        await tick();
-        h.state.players[0].title = 'Metadata arrived';
-        assert.equal(h.planner.receive(response(h)), false);
-        assert.deepEqual(h.errors, []);
-        assert.deepEqual(h.models, []);
-        assert.deepEqual(h.applied, []);
-        await tick();
-        assert.equal(h.sent.length, 2);
-        assert.equal(h.sent[1].players[0].title, 'Metadata arrived');
-        assert.equal(h.planner.receive(response(h)), true);
-        assert.deepEqual(h.errors, []);
-        assert.equal(h.models.length, 1);
-    });
-
-    test('view errors survive recovery refreshes and clear after a successful explicit action', async () => {
-        const h = await prime(harness());
-        const backend = Object.assign(Object.create(MediaBackend.prototype), { planner: h.planner });
-        backend.reportFailure('Source changed. Try the action again.');
-        assert.match(h.planner.error, /Try the action again/);
-        h.planner.refresh();
-        await tick();
-        assert.equal(h.planner.receive(response(h)), true);
-        assert.match(h.planner.error, /Try the action again/);
-        assert.deepEqual(h.applied, []);
-        h.planner.action('next', 'a');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), true);
-        assert.equal(h.planner.error, '');
-        assert.equal(h.errors.at(-1), '');
-        assert.deepEqual(h.applied, [op('a', 'next')]);
-    });
-
-    test('matching receives normalized positions without leaking extra fields or changing raw capture', async () => {
-        const h = harness([player('a', { position: 0.208, modelPosition: 0 })]);
-        h.planner.refresh();
-        await tick();
-        assert.equal(h.sent[0].players[0].position, 0);
-        assert.equal('modelPosition' in h.sent[0].players[0], false);
-        assert.equal(h.state.players[0].position, 0.208);
-        h.state.players[0].modelPosition = 12;
-        assert.equal(h.planner.receive(response(h)), true, 'matching samples, like native positions, are not ownership guards');
-        h.planner.refresh();
-        await tick();
-        assert.equal(h.sent.at(-1).players[0].position, 12);
-        assert.equal(h.state.players[0].position, 0.208);
-    });
-
-    test('invalid matching positions are rejected instead of serialized as invented samples', async () => {
-        for (const modelPosition of [-1, NaN, Infinity, null, '12']) {
-            const h = harness([player('a', { modelPosition })]);
-            h.planner.refresh();
-            await tick();
-            assert.equal(h.sent.length, 0);
-            assert.match(h.planner.error, /Model positions must be finite and nonnegative/);
-        }
-    });
-
-    test('refresh coalesces and sends detached JSON OBJECT protocol fields only', async () => {
-        const h = harness([player('a', { position: -1, positionSupported: false, length: Infinity })], [stream()]);
-        for (let i = 0; i < 20; i++) h.planner.refresh();
-        assert.equal(h.sent.length, 0, 'dispatch is deferred');
-        await tick();
-        assert.equal(h.sent.length, 1);
-        const request = h.sent[0];
-        assert.equal(typeof request, 'object');
-        assert.deepEqual(Object.keys(request).sort(), ['players', 'requestId', 'selectedPlayer', 'streams']);
-        assert.equal(request.players[0].position, 0);
-        assert.equal(request.players[0].length, null);
-        assert.equal(request.players[0].canPlay, true);
-        assert.equal(request.players[0].canPause, true);
-        for (const key of ['instance', 'trackId', 'seekRevision', 'positionSupported', 'rate', 'volume'])
-            assert.equal(key in request.players[0], false);
-        assert.equal('instance' in request.streams[0], false);
-        assert.equal('volume' in request.streams[0], false);
-        assert.equal('routing' in request, false);
-        assert.deepEqual(JSON.parse(JSON.stringify(request)), request);
-        h.state.streams[0].properties['application.name'] = 'Changed owner';
-        assert.equal(request.streams[0].properties['application.name'], 'App a');
-        assert.ok(Object.isFrozen(request));
-    });
-
-    test('group responses omit artist and artwork while retaining native player metadata', async () => {
-        const native = player('a', { artist: 'Native artist', artUrl: 'https://i.ytimg.com/vi/id/hq.jpg?format=avif' });
-        const h = await prime(harness([native]));
-        assert.equal(h.sent[0].players[0].artist, native.artist);
-        assert.equal(h.sent[0].players[0].artUrl, native.artUrl);
-        assert.deepEqual(Object.keys(h.planner.groups[0]).sort(),
-            ['displayName', 'players', 'primary', 'streamId', 'streamReason', 'title']);
-        const backend = Object.assign(Object.create(MediaBackend.prototype), {
-            groups: h.planner.groups,
-            native: { player: bus => h.state.players.find(player => player.bus === bus) ?? null },
-        });
-        const [resolved] = backend.resolveGroups();
-        assert.equal(resolved.primary, native);
-        assert.equal(resolved.primary.artist, 'Native artist');
-        assert.equal(resolved.primary.artUrl, native.artUrl);
-        assert.equal('artist' in resolved, false);
-        assert.equal('artUrl' in resolved, false);
-    });
-
-    test('fresh response publishes Rust groups without JS regrouping and remembers selection', async () => {
-        const h = harness([player(), player('alias', { playing: false }), player('other')]);
-        const groups = [group(h, 'a', ['a', 'alias']), group(h, 'other')];
-        await prime(h, groups);
-        assert.deepEqual(h.planner.groups, groups);
-        assert.equal(h.planner.activePlayer, 'a');
-        assert.equal(h.planner.selectedPlayer, 'a');
-        assert.ok(Object.isFrozen(h.planner.groups[0].players));
-        assert.equal(h.planner.select('alias'), true);
-        await tick();
-        assert.equal(h.sent.at(-1).selectedPlayer, 'alias');
-        assert.equal(h.planner.receive(response(h, { groups, active: 'a' })), true);
-        assert.equal(h.planner.selectedPlayer, 'alias', 'retain an explicit member selection');
-    });
-
-    test('only one request is in flight; a pending refresh is not lost', async () => {
-        const h = await prime(harness());
-        h.planner.refresh();
-        await tick();
-        const pending = h.sent.at(-1);
-        h.planner.refresh();
-        h.planner.refresh();
-        h.planner.action('next');
-        await tick();
-        assert.equal(h.sent.length, 2);
-        h.planner.receive(response(h, {}, pending));
-        await tick();
-        assert.equal(h.sent.length, 3);
-        assert.equal(h.sent.at(-1).action.kind, 'next');
-        h.planner.receive(response(h, { actions: [op('a', 'next')] }));
-        await tick();
-        assert.equal(h.sent.length, 3, 'action response also satisfies the pending refresh');
-        assert.deepEqual(h.applied, [op('a', 'next')]);
-    });
-
-    test('position, volume, and property insertion order are excluded from staleness', async () => {
-        const h = await prime(harness([player()], [stream()]));
-        h.planner.action('next');
-        h.state.players[0].position = 11;
-        h.state.players[0].volume = 0.9;
-        h.state.streams[0].volume = 0.1;
-        h.state.streams[0].properties = { 'media.name': 'Track a', 'application.name': 'App a' };
-        await tick();
-        assert.equal(h.sent.at(-1).players[0].position, 11, 'send recaptures rather than reusing the queued position');
-        h.state.players[0].position = 12;
-        h.time++;
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), true);
-        assert.deepEqual(h.applied, [op('a', 'next')]);
-        assert.deepEqual(h.errors, []);
-    });
-
-    const playerChanges = {
-        bus: p => { p.bus = 'replacement-bus'; },
-        identity: p => { p.identity = 'Replacement App'; },
-        desktopEntry: p => { p.desktopEntry = 'other.desktop'; },
-        title: p => { p.title = 'Next track'; },
-        artist: p => { p.artist = 'Other artist'; },
-        album: p => { p.album = 'Other album'; },
-        url: p => { p.url = 'https://example.test/other'; },
-        artUrl: p => { p.artUrl = 'file:///other-art'; },
-        browserHint: p => { p.browserHint = 'firefox'; },
-        playing: p => { p.playing = false; },
-        stopped: p => { p.stopped = true; },
-        length: p => { p.length = 201; },
-        canPlay: p => { p.canPlay = false; },
-        canPause: p => { p.canPause = false; },
-        canSeek: p => { p.canSeek = false; },
-        canNext: p => { p.canNext = false; },
-        canPrevious: p => { p.canPrevious = false; },
-        trackId: p => { p.trackId = '/track/next'; },
-        instance: p => { p.instance = 'a-instance-2'; },
-        seekRevision: p => { p.seekRevision++; },
-        positionSupported: p => { p.positionSupported = false; },
-        rate: p => { p.rate = 2; },
-    };
-
-    for (const [field, change] of Object.entries(playerChanges)) {
-        test(`player ${field} invalidates both queued and in-flight actions`, async () => {
-            for (const inFlight of [false, true]) {
-                const h = await prime(harness());
-                h.planner.action('next');
-                if (inFlight) await tick();
-                change(h.state.players[0]);
-                if (inFlight) assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-                await tick();
-                assert.equal(h.applied.length, 0);
-                assert.match(h.planner.error, /stale|Stale/);
-                assert.match(h.planner.error, /not retried/);
-                assert.equal(h.sent.at(-1).action, undefined, 'refreshes may recover, actions never retry');
-            }
-        });
-    }
-
-    const streamChanges = {
-        id: s => { s.id = 43; },
-        name: s => { s.name = 'Other'; },
-        nickname: s => { s.nickname = 'Other'; },
-        ready: s => { s.ready = false; },
-        properties: s => { s.properties['application.process.id'] = '5678'; },
-        instance: s => { s.instance = 'stream-instance-2'; },
-    };
-    for (const [field, change] of Object.entries(streamChanges)) {
-        test(`stream ${field} invalidates both queued and in-flight plans`, async () => {
-            for (const inFlight of [false, true]) {
-                const h = await prime(harness([player()], [stream()]));
-                h.planner.action('toggle');
-                if (inFlight) await tick();
-                change(h.state.streams[0]);
-                if (inFlight) assert.equal(h.planner.receive(response(h, { actions: [op('a', 'pause')] })), false);
-                await tick();
-                assert.equal(h.applied.length, 0);
-                assert.match(h.planner.error, /ownership changed/);
-            }
-        });
-    }
-
-    test('player/stream addition, removal, and order changes invalidate pending work', async () => {
-        const changes = [
-            h => h.state.players.push(player('c')),
-            h => { h.state.players = []; },
-            h => h.state.players.reverse(),
-            h => h.state.streams.push(stream({ id: 44, instance: 3 })),
-            h => { h.state.streams = []; },
-            h => h.state.streams.reverse(),
-        ];
-        for (const change of changes) {
-            const h = await prime(harness([player(), player('b')], [stream(), stream({ id: 43, instance: 2 })]));
-            h.planner.action('next');
-            await tick();
-            change(h);
-            assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-            assert.equal(h.applied.length, 0);
-        }
-    });
-
-    test('a replaced native object with a reused bus or stream ID is not mistaken for the old instance', async () => {
-        for (const replace of [
-            h => { h.state.players[0] = { ...h.state.players[0], instance: 'new-player-object' }; },
-            h => { h.state.streams[0] = { ...h.state.streams[0], instance: 'new-stream-object' }; },
-        ]) {
-            const h = await prime(harness([player()], [stream()]));
-            h.planner.action('next');
-            await tick();
-            replace(h);
-            assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-            assert.equal(h.applied.length, 0);
-        }
-    });
-
-    test('selection revision detects an A -> B -> A change before send or response', async () => {
-        for (const inFlight of [false, true]) {
-            const h = await prime(harness([player(), player('b')]));
-            h.planner.action('next');
-            if (inFlight) await tick();
-            h.planner.select('b');
-            h.planner.select('a');
-            if (inFlight) assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-            await tick();
-            assert.equal(h.applied.length, 0);
-            assert.match(h.planner.error, /selection changed/);
-        }
-    });
-
-    test('cycle follows the selected group, including a selection whose model reply is still pending', async () => {
-        const h = await prime(harness([player(), player('b'), player('c')]));
-        assert.equal(h.planner.select('b'), true);
-        assert.equal(h.planner.cycle(), true);
-        assert.equal(h.planner.selectedPlayer, 'c');
-        assert.equal(h.planner.cycle(), true);
-        assert.equal(h.planner.selectedPlayer, 'a');
-        assert.equal(h.planner.select('gone'), false);
-        assert.match(h.planner.error, /no longer available/);
-        assert.equal(harness([]).planner.cycle(), false);
-    });
-
-    test('seek gesture coalesces to the final queued seek and rebases only our own revision change', async () => {
-        const h = await prime(harness());
-        h.planner.action('seek', 'a', 20);
-        await tick();
-        const first = h.sent.at(-1);
-        for (const value of [30, 40, 50]) h.planner.action('seek', 'a', value);
-        assert.equal(h.planner.receive(response(h, { actions: [seek('a', 20)] }, first)), true);
-        assert.equal(h.state.players[0].seekRevision, 1);
-        await tick();
-        assert.equal(h.sent.length, 3);
-        assert.equal(h.sent.at(-1).action.position, 50);
-        assert.equal(h.sent.at(-1).players[0].position, 10, 'dispatch does not change the sampled native position');
-        assert.equal(h.planner.receive(response(h, { actions: [seek('a', 50)] })), true);
-        assert.deepEqual(h.applied, [seek('a', 20), seek('a', 50)]);
-        assert.equal(h.state.players[0].seekRevision, 2);
-        assert.equal(h.planner.error, '');
-    });
-
-    test('a paused native seek is dispatch-only, even when native position is unsupported', async () => {
-        for (const supported of [false, true]) {
-            const h = await prime(harness([player('a', {
-                playing: false, position: supported ? 10 : -1, positionSupported: supported,
-            })]));
-            h.planner.action('seek', 'a', 80);
-            await tick();
-            assert.equal(h.planner.receive(response(h, { actions: [seek('a', 80)] })), true);
-            assert.equal(h.state.players[0].position, supported ? 10 : -1);
-            assert.equal(h.state.players[0].positionSupported, supported);
-            assert.equal(h.state.players[0].seekRevision, 1);
-            h.time += 100;
-            h.planner.refresh();
-            await tick();
-            assert.equal(h.sent.at(-1).players[0].position, supported ? 10 : 0);
-            assert.equal(h.sent.at(-1).action, undefined, 'no acknowledgement, retry, or fabricated timeout');
-        }
-    });
-
-    test('seeks also coalesce before the first deferred send', async () => {
-        const h = await prime(harness());
-        for (let position = 0; position < 100; position++) h.planner.action('seek', '', position);
-        await tick();
-        assert.equal(h.sent.length, 2);
-        assert.equal(h.sent.at(-1).action.position, 99);
-    });
-
-    test('grouped seek validates and rebases exact per-player own revision increments', async () => {
-        const h = harness([player(), player('alias', { playing: false })]);
-        const groups = [group(h, 'a', ['a', 'alias'])];
-        await prime(h, groups);
-        h.planner.action('seek', 'alias', 20);
-        await tick();
-        h.planner.action('seek', 'alias', 40);
-        assert.equal(h.planner.receive(response(h, { groups, actions: [seek('a', 20), seek('alias', 20)] })), true);
-        await tick();
-        assert.equal(h.sent.at(-1).action.position, 40);
-        assert.deepEqual(h.state.players.map(p => p.seekRevision), [1, 1]);
-    });
-
-    test('an external change before, during, or after own seek apply never rebases a queued seek', async () => {
-        for (const when of ['before', 'during', 'after']) {
-            const h = await prime(harness());
-            h.planner.action('seek', 'a', 20);
-            await tick();
-            const request = h.sent.at(-1);
-            h.planner.action('seek', 'a', 50);
-            if (when === 'before') h.state.players[0].trackId = '/track/other';
-            if (when === 'during') h.onApply = () => {
-                h.state.players[0].seekRevision++;
-                h.state.players[0].trackId = '/track/other';
-            };
-            h.planner.receive(response(h, { actions: [seek('a', 20)] }, request));
-            if (when === 'after') h.state.players[0].trackId = '/track/other';
-            await tick();
-            assert.equal(h.sent.at(-1).action, undefined);
-            assert.equal(h.applied.length, when === 'before' ? 0 : 1);
-            assert.match(h.planner.error, /not retried/);
-        }
-    });
-
-    test('seek rebase cannot cross a different target or an intervening non-seek action', async () => {
-        for (const barrier of ['other-bus', 'next']) {
-            const h = await prime(harness([player(), player('b')]));
-            h.planner.action('seek', 'a', 20);
-            await tick();
-            if (barrier === 'other-bus') h.planner.action('seek', 'b', 30);
-            else {
-                h.planner.action('next', 'a');
-                h.planner.action('seek', 'a', 30);
-            }
-            h.planner.receive(response(h, { actions: [seek('a', 20)] }));
-            await tick();
-            assert.deepEqual(h.applied, [seek('a', 20)]);
-            assert.equal(h.sent.at(-1).action, undefined);
-            assert.match(h.planner.error, /stale queued/);
-        }
-    });
-
-    test('pending queue is bounded to eight actions, with no blind retries', async () => {
-        const h = await prime(harness());
-        h.planner.refresh();
-        await tick();
-        for (let i = 0; i < 8; i++) assert.equal(h.planner.action('next'), true);
-        assert.equal(h.planner.action('next'), false);
-        assert.match(h.planner.error, /queue is full/);
-        h.planner.receive(response(h));
-        await tick();
-        assert.equal(h.sent.at(-1).action.kind, 'next');
-    });
-
-    test('five-second action age is checked before send and before applying a response', async () => {
-        for (const inFlight of [false, true]) {
-            const h = await prime(harness());
-            h.planner.action('next');
-            if (inFlight) await tick();
-            h.time += 5.01;
-            if (inFlight) assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-            await tick();
-            assert.equal(h.applied.length, 0);
-            assert.match(h.planner.error, /expired/);
-        }
-    });
-
-    test('stale refresh cannot publish old groups, and errors survive a successful recovery refresh', async () => {
-        const h = await prime(harness());
-        const previous = h.planner.groups;
-        h.planner.refresh();
-        await tick();
-        h.state.players[0].trackId = '/new-track';
-        assert.equal(h.planner.receive(response(h)), false);
-        assert.equal(h.planner.groups, previous);
-        const error = h.planner.error;
-        await tick();
-        assert.equal(h.planner.receive(response(h)), true);
-        assert.equal(h.planner.error, error);
-    });
-
-    test('invalid action kinds/routing, invalid seconds, and unavailable bus do not dispatch native calls', async () => {
-        const h = await prime(harness());
-        for (const args of [['move', 'a'], ['seek', 'a', -1], ['seek', 'a', NaN], ['next', {}, 0]])
-            assert.equal(h.planner.action(...args), false);
-        assert.equal(h.sent.length, 1);
-        h.planner.action('next', 'gone');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { error: 'The requested media source is no longer available.' })), true);
-        assert.equal(h.applied.length, 0);
-        assert.match(h.planner.error, /no longer available/);
-    });
-
-    test('model policy errors can publish valid groups but cannot apply operations', async () => {
-        const h = await prime(harness());
-        h.planner.action('seek', 'a', 20);
-        await tick();
-        assert.equal(h.planner.receive(response(h, { error: 'Source cannot seek.' })), true);
-        assert.match(h.planner.error, /cannot seek/);
-        assert.equal(h.applied.length, 0);
-        h.planner.action('next');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), true);
-        assert.equal(h.planner.error, '');
-        assert.equal(h.errors.at(-1), '');
-    });
-
-    test('the entire native plan is validated before the first operation is applied', async () => {
-        const h = harness([player(), player('alias')]);
-        const groups = [group(h, 'a', ['a', 'alias'])];
-        await prime(h, groups);
-        h.planner.action('toggle', 'a');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { groups, actions: [op('a', 'pause'), op('alias', 'move')] })), false);
-        assert.equal(h.applied.length, 0);
-        assert.match(h.planner.error, /routing is not supported/);
-    });
-
-    const invalidPlans = [
-        ['wrong operation', {}, 'next', [op('a', 'pause')]],
-        ['wrong target', {}, 'next', [op('b', 'next')]],
-        ['missing next capability', { canNext: false }, 'next', [op('a', 'next')]],
-        ['missing previous capability', { canPrevious: false }, 'previous', [op('a', 'previous')]],
-        ['missing seek capability', { canSeek: false }, 'seek', [seek('a', 20)]],
-        ['wrong seek value', {}, 'seek', [seek('a', 21)]],
-        ['negative seek value', {}, 'seek', [seek('a', -1)]],
-        ['nonfinite seek value', {}, 'seek', [seek('a', NaN)]],
-        ['unrequested native value', {}, 'next', [{ ...op('a', 'next'), value: 20 }]],
-        ['routing field', {}, 'next', [{ ...op('a', 'next'), target: 'speaker' }]],
-        ['duplicate native target', {}, 'next', [op('a', 'next'), op('a', 'next')]],
-    ];
-    for (const [name, extra, kind, actions] of invalidPlans) {
-        test(`reject invalid plan: ${name}`, async () => {
-            const h = await prime(harness([player('a', extra), player('b')]));
-            h.planner.action(kind, 'a', kind === 'seek' ? 20 : 0);
-            await tick();
-            assert.equal(h.planner.receive(response(h, { actions })), false);
-            assert.equal(h.applied.length, 0);
-            assert.match(h.planner.error, /rejected/);
-        });
-    }
-
-    test('refresh actions, error actions, malformed groups, invalid active bus, and unavailable streams are rejected', async () => {
-        const modifications = [
-            h => ({ actions: [op('a', 'pause')] }),
-            h => ({ actions: [op('a', 'pause')], error: 'Failure' }),
-            h => ({ groups: [group(h, 'gone')] }),
-            h => ({ groups: [group(h, 'a', ['a', 'a'])] }),
-            h => ({ groups: [group(h), group(h)] }),
-            h => ({ groups: [group(h, 'a', ['b'])] }),
-            h => ({ activePlayer: 'gone' }),
-            h => ({ groups: [group(h, 'a', ['a'], { streamId: 999 })] }),
-            h => ({ groups: [group(h, 'a', ['a'], { streamId: 0 })] }),
-            h => ({ groups: [group(h, 'a', ['a'], { streamId: 42 })] }),
-            h => ({ groups: null }),
-            h => ({ actions: null }),
-            h => ({ error: 42 }),
-        ];
-        for (const modify of modifications) {
-            const h = await prime(harness([player(), player('b')], [stream({ ready: false })]));
-            h.planner.refresh();
-            await tick();
-            assert.equal(h.planner.receive(response(h, modify(h))), false);
-            assert.equal(h.applied.length, 0);
-        }
-    });
-
-    test('valid ready stream ownership and ungrouped playing pause-all targets are accepted', async () => {
-        const h = harness([player(), player('filtered')], [stream()]);
-        const groups = [group(h, 'a', ['a'], { streamId: 42 })];
-        await prime(h, groups);
-        h.planner.action('pauseAll');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { groups, actions: [op('a', 'pause'), op('filtered', 'pause')] })), true);
-        assert.deepEqual(h.applied, [op('a', 'pause'), op('filtered', 'pause')]);
-    });
-
-    test('toggle follows the Rust group, next/previous only its primary, and idle togglePauseAll resumes selected group', async () => {
-        const h = harness([player('a', { playing: false }), player('alias', { playing: false }), player('b', { playing: false })]);
-        const groups = [group(h, 'a', ['a', 'alias']), group(h, 'b')];
-        await prime(h, groups);
-        for (const [kind, actions] of [
-            ['toggle', [op('a', 'play'), op('alias', 'play')]],
-            ['next', [op('a', 'next')]],
-            ['previous', [op('a', 'previous')]],
-            ['togglePauseAll', [op('a', 'play'), op('alias', 'play')]],
-        ]) {
-            h.planner.action(kind, 'alias');
-            await tick();
-            assert.equal(h.planner.receive(response(h, { groups, actions })), true);
-        }
-        assert.equal(h.applied.length, 6);
-    });
-
-    test('togglePauseAll must not mix play and pause; pauseAll must not play', async () => {
-        for (const [kind, actions] of [
-            ['togglePauseAll', [op('a', 'pause'), op('b', 'play')]],
-            ['pauseAll', [op('a', 'play')]],
-        ]) {
-            const h = await prime(harness([player(), player('b', { playing: false })]));
-            h.planner.action(kind);
-            await tick();
-            assert.equal(h.planner.receive(response(h, { actions })), false);
-            assert.equal(h.applied.length, 0);
-        }
-    });
-
-    test('snapshot is guarded between native operations; external changes stop the remaining plan', async () => {
-        const h = harness([player(), player('alias')]);
-        const groups = [group(h, 'a', ['a', 'alias'])];
-        await prime(h, groups);
-        h.onApply = () => { h.state.players[1].instance = 'new-alias-instance'; };
-        h.planner.action('toggle');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { groups, actions: [op('a', 'pause'), op('alias', 'pause')] })), false);
-        assert.deepEqual(h.applied, [op('a', 'pause')]);
-        assert.match(h.planner.error, /remaining actions were not retried/);
-    });
-
-    test('apply errors, false, and explicit error results are useful and never retry the operation', async () => {
-        for (const apply of [
-            () => { throw new Error('native object disappeared'); },
-            () => false,
-            () => ({ error: 'unsupported native operation' }),
-        ]) {
-            const h = await prime(harness());
-            h.onApply = apply;
-            h.planner.action('next');
-            await tick();
-            assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-            await tick();
-            assert.deepEqual(h.applied, [op('a', 'next')]);
-            assert.equal(h.sent.at(-1).action, undefined);
-            assert.match(h.planner.error, /native object disappeared|returned false|unsupported native/);
-            assert.equal(h.planner.ready, true);
-        }
-    });
-
-    test('failed native seek discards its queued final seek rather than assuming it can rebase', async () => {
-        const h = await prime(harness());
-        h.onApply = () => { throw new Error('native seek failed'); };
-        h.planner.action('seek', 'a', 20);
-        await tick();
-        h.planner.action('seek', 'a', 50);
-        assert.equal(h.planner.receive(response(h, { actions: [seek('a', 20)] })), false);
-        await tick();
-        assert.deepEqual(h.applied, [seek('a', 20)]);
-        assert.equal(h.sent.at(-1).action, undefined);
-        assert.match(h.planner.error, /pending actions were discarded, not retried/);
-    });
-
-    test('Promise send/apply and an explicit false send fail safely', async () => {
-        for (const send of [() => false, () => Promise.reject(new Error('async send failure'))]) {
-            const h = await prime(harness());
-            h.onSend = send;
-            h.planner.action('next');
-            await tick();
-            assert.equal(h.planner.ready, false);
-            assert.equal(h.applied.length, 0);
-            assert.match(h.planner.error, /send failed/);
-        }
-        const h = await prime(harness());
-        h.onApply = () => Promise.reject(new Error('async apply failure'));
-        h.planner.action('next');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), false);
-        await tick();
-        assert.match(h.planner.error, /apply\(\) must be synchronous/);
-        assert.equal(h.sent.at(-1).action, undefined);
-    });
-
-    test('seek apply must synchronously advance exactly its own seek dispatch revision', async () => {
-        const h = await prime(harness());
-        h.onApply = () => {};
-        h.planner.action('seek', 'a', 20);
-        await tick();
-        assert.equal(h.planner.receive(response(h, { actions: [seek('a', 20)] })), false);
-        assert.match(h.planner.error, /advance only its own seek dispatch revision once/);
-    });
-
-    test('synchronous send replies and callback refresh/action calls drain without recursive send', async () => {
-        const h = harness();
-        let depth = 0;
-        let maxDepth = 0;
-        let didAction = false;
-        h.onSend = request => {
-            depth++;
-            maxDepth = Math.max(depth, maxDepth);
-            const actions = request.action ? [op('a', 'next')] : [];
-            h.planner.receive(response(h, { actions }, request));
-            depth--;
-        };
-        h.onModel = () => {
-            if (!didAction) {
-                didAction = true;
-                h.planner.refresh();
-                h.planner.action('next');
-            }
-        };
-        h.planner.refresh();
-        await tick();
-        await tick();
-        assert.equal(h.sent.length, 2);
-        assert.equal(maxDepth, 1);
-        assert.deepEqual(h.applied, [op('a', 'next')]);
-    });
-
-    test('reset clears model/errors/selection/work and late replies cannot match restarted IDs', async () => {
-        const h = await prime(harness());
-        h.planner.action('next');
-        await tick();
-        const old = h.sent.at(-1);
-        h.planner.action('seek', 'a', 50);
-        h.planner.action('bad-kind');
-        h.planner.reset();
-        assert.equal(h.planner.ready, false);
-        assert.deepEqual(h.planner.groups, []);
-        assert.equal(h.planner.activePlayer, '');
-        assert.equal(h.planner.selectedPlayer, '');
-        assert.equal(h.planner.error, '');
-        assert.equal(h.errors.at(-1), '');
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] }, old)), false);
-        h.planner.setReady(true);
-        await tick();
-        assert.ok(h.sent.at(-1).requestId > old.requestId);
-        assert.equal(h.sent.at(-1).action, undefined);
-        assert.equal(h.planner.receive(response(h, {}, old)), false);
-        assert.equal(h.planner.receive(response(h)), true);
-        assert.equal(h.applied.length, 0);
-    });
-
-    test('reset during native apply cancels the rest of the plan and never republishes the old model', async () => {
-        const h = harness([player(), player('alias')]);
-        const groups = [group(h, 'a', ['a', 'alias'])];
-        await prime(h, groups);
-        h.onApply = () => h.planner.reset();
-        h.planner.action('toggle');
-        await tick();
-        assert.equal(h.planner.receive(response(h, { groups, actions: [op('a', 'pause'), op('alias', 'pause')] })), false);
-        assert.equal(h.applied.length, 1);
-        assert.deepEqual(h.planner.groups, []);
-        assert.equal(h.models.at(-1).active, '');
-    });
-
-    test('send failure disables worker, clears model, and never replays actions after restart', async () => {
-        const h = await prime(harness());
-        h.onSend = () => { throw new Error('worker stdin closed'); };
-        h.planner.action('next');
-        h.planner.action('seek', 'a', 40);
-        await tick();
-        assert.equal(h.planner.ready, false);
-        assert.deepEqual(h.planner.groups, []);
-        assert.match(h.planner.error, /stdin closed/);
-        assert.match(h.planner.error, /not retried/);
-        h.onSend = null;
-        h.planner.setReady(true);
-        await tick();
-        assert.equal(h.sent.at(-1).action, undefined);
-        assert.equal(h.applied.length, 0);
-    });
-
-    test('setReady(false) prevents capture/send, and actions are rejected instead of retained', async () => {
-        const h = harness();
-        h.planner.setReady(false);
-        assert.equal(h.planner.refresh(), false);
-        assert.equal(h.planner.action('next'), false);
-        assert.match(h.planner.error, /not ready/);
-        await tick();
-        assert.equal(h.sent.length, 0);
-    });
-
-    test('orphan, duplicate, and mismatched request responses cannot apply or clear the in-flight request', async () => {
-        const h = await prime(harness());
-        const duplicate = response(h);
-        h.planner.action('next');
-        await tick();
-        assert.equal(h.planner.receive(duplicate), false);
-        assert.equal(h.planner.receive(null), false);
-        assert.equal(h.planner.receive({ requestId: 0, error: 'Invalid request' }), false);
-        assert.equal(h.planner.receive(response(h, { actions: [op('a', 'next')] })), true);
-        assert.equal(h.applied.length, 1);
-    });
-
-    test('capture contract errors are reported before send; no unsafe serialization defaults', async () => {
-        for (const extra of [
-            { instance: undefined }, { trackId: undefined }, { seekRevision: -1 },
-            { positionSupported: undefined }, { rate: Infinity }, { position: NaN },
-        ]) {
-            const h = harness([player('a', extra)]);
-            assert.equal(h.planner.action('next'), false);
-            assert.match(h.planner.error, /Cannot capture/);
-            h.planner.refresh();
-            await tick();
-            assert.equal(h.sent.length, 0);
         }
     });
 });

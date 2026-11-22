@@ -1,8 +1,6 @@
 export const TABS = ['memo', 'text', 'file'];
 export const isDraft = item => item?.kind === 'memo' && !item.text;
 export const editable = item => item && ['memo', 'text'].includes(item.kind);
-export const localFilePath = item => item?.kind === 'file' && typeof item.name === 'string'
-    && item.name.startsWith('/') && !item.name.includes('\0') ? item.name : null;
 
 export function title(item, home = '') {
     if (!item) return 'No item selected';
@@ -34,16 +32,15 @@ export function visibleItems(items, tab, query) {
         .sort((a, b) => Number(isDraft(a)) - Number(isDraft(b)) || Number(b.pinned) - Number(a.pinned));
 }
 
-export function preferred(items, id) {
-    return items.find(item => item.id === id) || items.find(item => !item.pinned) || items[0] || null;
+export function preferred(items) {
+    return items.find(item => !item.pinned) || items[0] || null;
 }
 
 // One serialized user transaction at a time. File-watch refreshes never replace
 // dirty editor contents. Saves compare the original text under the Rust flock.
 export class ClipboardModel {
-    constructor({ request, publish, scheduleAutosave = null,
-        trashFile = async () => { throw new Error('Local file deletion is unavailable.'); }, onChange = () => {} }) {
-        Object.assign(this, { request, publish, trashFile, onChange, scheduleAutosave });
+    constructor({ request, publish, scheduleAutosave = null, onChange = () => {} }) {
+        Object.assign(this, { request, publish, onChange, scheduleAutosave });
         this.cancelScheduledSave = null;
         this.pendingAutosave = false;
         this.items = [];
@@ -230,27 +227,13 @@ export class ClipboardModel {
         return this.act(async () => {
             const item = this.requireItem(id);
             const selected = id === this.editor?.id;
-            const path = localFilePath(item);
-            let trashed = false;
-            if (path) {
-                // Recheck the persisted association before touching a local file.
-                const snapshot = await this.request({ command: 'snapshot' });
-                if (localFilePath(snapshot.items.find(item => item.id === id)) !== path)
-                    throw new Error('This file changed in clipboard history. Close and reopen the panel before deleting it.');
-                trashed = await this.trashFile(path);
-            }
             // Only deleting the selected row explicitly discards its draft.
             const rows = this.rows, index = rows.findIndex(item => item.id === id);
             const replacement = rows[index + 1] || rows[index - 1];
-            try {
-                const { items } = await this.request({ command: 'delete', id });
-                if (selected)
-                    this.setItems(items, { selectedId: replacement?.id, discardDraft: true });
-                else this.items = items;
-            } catch (error) {
-                if (trashed) throw new Error('The file was moved to Trash, but its clipboard entry could not be removed. Close and reopen the panel, then try again.');
-                throw error;
-            }
+            const { items } = await this.request({ command: 'delete', id, expected: item.delete_token });
+            if (selected)
+                this.setItems(items, { selectedId: replacement?.id, discardDraft: true });
+            else this.items = items;
         });
     }
 

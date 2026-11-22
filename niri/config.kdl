@@ -328,7 +328,7 @@ binds {
     Mod+Alt+Space hotkey-overlay-title="Toggle Transcription" {  spawn "pkill" "-USR2" "-n" "handy"; }
 
     // Toggle English/Chinese input (fcitx5)
-    Mod+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn-sh "current=$(/run/current-system/sw/bin/fcitx5-remote -n 2>/dev/null); if [ \"$current\" = 'pinyin' ]; then /run/current-system/sw/bin/fcitx5-remote -s keyboard-gb; else /run/current-system/sw/bin/fcitx5-remote -s pinyin; fi"; }
+    Mod+Space hotkey-overlay-title="Toggle CN/EN Input" { spawn "panel-launcher" "runtime" "input-toggle"; }
 
     Mod+Escape allow-inhibiting=false { toggle-keyboard-shortcuts-inhibit; }
 

@@ -1,4 +1,4 @@
-//! Supplemental policy for the Astal audio panel, not a native control backend.
+//! Audio/Bluetooth policy, queues, scheduling and transactions for the Astal UI.
 //!
 //! Canonical inventory and defaults arrive from Astal. Only missing SPA
 //! relationships and per-endpoint route state are read from `pw-dump -N`.

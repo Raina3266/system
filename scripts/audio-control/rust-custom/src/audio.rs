@@ -7,13 +7,14 @@ use std::{
 };
 
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use crate::{
     AppResult,
     devices::{Metadata, Profile, Route},
     model::{
-        AudioKind, Card, Choice, Identity, Node, Snapshot, hex_encode, short_device_name,
-        single_line,
+        AudioKind, Card, Choice, Identity, NativeSnapshot, Node, Snapshot, hex_encode,
+        short_device_name, single_line,
     },
 };
 
@@ -49,6 +50,158 @@ pub trait Backend {
 
 pub fn physical_key(card: &str, port: &str) -> String {
     format!("card-output:{}:port:{}", hex_encode(card), hex_encode(port))
+}
+
+pub fn routes_reliable(snapshot: &Snapshot, node: &Node) -> bool {
+    node.card_id.is_none()
+        || snapshot
+            .nodes
+            .iter()
+            .filter(|other| {
+                other.kind == node.kind
+                    && other.card_id == node.card_id
+                    && other.card_serial == node.card_serial
+            })
+            .count()
+            == 1
+}
+
+/// Reconcile supplemental rows against the current native inventory. A resolved
+/// omission is intentional (e.g. unplugged HDMI); a new endpoint remains usable
+/// even if the metadata provider is unavailable.
+pub fn choices(
+    native: &NativeSnapshot,
+    kind: AudioKind,
+    entries: &[Choice],
+    resolved: &[Identity],
+) -> AppResult<Vec<Value>> {
+    let snapshot = native.audio()?;
+    let mut result = Vec::new();
+    for node in snapshot.nodes.iter().filter(|node| node.kind == kind) {
+        let matching: Vec<_> = entries
+            .iter()
+            .filter(|row| {
+                row.node_id == Some(node.id)
+                    && row.node_serial == node.serial
+                    && row.name == node.name
+                    && row.card_id == node.card_id
+                    && row.card_serial == node.card_serial
+                    && (!row.port
+                        || node.routes.iter().any(|route| {
+                            Some(route.index) == row.route_id
+                                && route.name == row.port_name
+                                && route.available
+                        }))
+            })
+            .collect();
+        for row in &matching {
+            let mut value = serde_json::to_value(row)?;
+            value["default"] = json!(
+                snapshot.default_node(kind).map(Node::identity) == Some(node.identity())
+                    && (!row.port
+                        || if routes_reliable(&snapshot, node) {
+                            node.route_name == row.port_name
+                        } else {
+                            row.port_active
+                        })
+            );
+            result.push(value);
+        }
+        if matching.is_empty() && !resolved.contains(&node.identity()) {
+            let mut row = rows(
+                &State {
+                    snapshot: Snapshot {
+                        cards: snapshot.cards.clone(),
+                        nodes: vec![node.clone()],
+                        output_stamp: Default::default(),
+                        default_output: None,
+                        default_input: None,
+                    },
+                    metadata: Metadata::default(),
+                },
+                kind,
+            )?
+            .into_iter()
+            .next()
+            .ok_or("Missing native endpoint row")?;
+            row.key = format!(
+                "native:{}",
+                native.endpoint(&node.identity())?["key"]
+                    .as_str()
+                    .ok_or("Missing endpoint key")?
+            );
+            // Native fallback preserves the full description until metadata resolves it.
+            row.label = if node.description.is_empty() {
+                node.name.clone()
+            } else {
+                node.description.clone()
+            };
+            let mut value = serde_json::to_value(row)?;
+            value["default"] =
+                json!(snapshot.default_node(kind).map(Node::identity) == Some(node.identity()));
+            result.push(value);
+        }
+    }
+    for row in entries.iter().filter(|row| row.node_id.is_none()) {
+        if snapshot
+            .cards
+            .iter()
+            .any(|card| Some(card.id) == row.card_id && card.serial == row.card_serial)
+        {
+            let mut value = serde_json::to_value(row)?;
+            value["default"] = false.into();
+            result.push(value);
+        }
+    }
+    result.sort_by_key(|row| {
+        entries
+            .iter()
+            .position(|entry| row["key"] == entry.key)
+            .unwrap_or(entries.len())
+    });
+    Ok(result)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectionPlan {
+    Native { node: Identity, route: Option<i32> },
+    Policy,
+}
+
+pub fn selection_plan(snapshot: &Snapshot, target: &Choice) -> AppResult<SelectionPlan> {
+    let Some(id) = target.node_id else {
+        return if target.port && target.card_id.is_some() {
+            Ok(SelectionPlan::Policy)
+        } else {
+            Err("The selected audio device is no longer available".into())
+        };
+    };
+    let identity = Identity {
+        id,
+        serial: target.node_serial.clone(),
+    };
+    let node = snapshot.node(&identity)?;
+    if target.port
+        && node
+            .routes
+            .iter()
+            .filter(|route| {
+                Some(route.index) == target.route_id
+                    && route.name == target.port_name
+                    && route.available
+            })
+            .count()
+            != 1
+    {
+        return Err("The selected audio port is no longer available".into());
+    }
+    if target.port && !routes_reliable(snapshot, node) {
+        return Ok(SelectionPlan::Policy);
+    }
+    Ok(SelectionPlan::Native {
+        node: identity,
+        route: target.route_id,
+    })
 }
 
 fn node_key(snapshot: &Snapshot, node: &Node) -> String {
@@ -546,7 +699,7 @@ fn restore(
     backend: &mut impl Backend,
     original: &Card,
     selected: i32,
-    previous: Option<&Node>,
+    before: &Snapshot,
 ) -> AppResult<()> {
     let state = backend.observe()?;
     let current = state.snapshot.card(&original.identity())?;
@@ -568,6 +721,16 @@ fn restore(
     {
         return Err("Previous profile is no longer available".into());
     }
+    let previous = before.default_node(AudioKind::Output);
+    let stamp = &state.snapshot.output_stamp;
+    // Losing the endpoint with the switched profile is expected. A different
+    // live default (or a newer selection of the original key) is not ours.
+    let previous = previous.filter(|node| {
+        (state.snapshot.default_output == before.default_output && stamp == &before.output_stamp)
+            || (state.snapshot.default_output.is_none()
+                && node.card_id == Some(original.id)
+                && state.snapshot.node(&node.identity()).is_err())
+    });
     backend.action(Action::Profile {
         card: current.identity(),
         profile: original.active_profile,
@@ -579,7 +742,7 @@ fn restore(
             return Ok(None);
         }
         guard.check(state)?;
-        let Some(previous) = previous else {
+        let Some(previous) = previous.filter(|_| state.snapshot.output_stamp == *stamp) else {
             return Ok(Some(None));
         };
         let exact = state
@@ -613,6 +776,9 @@ fn restore(
     if let Some(node) = restored {
         let state = backend.observe()?;
         guard.check(&state)?;
+        if state.snapshot.output_stamp != *stamp {
+            return Ok(());
+        }
         state.snapshot.node(&node)?;
         backend.action(Action::Default { node })?;
     }
@@ -660,7 +826,6 @@ pub fn select(
     let profile = profile_for(&state, &original, route)
         .ok_or("No compatible profile for the selected output")?
         .index;
-    let previous = state.snapshot.default_node(AudioKind::Output).cloned();
     let switched = profile != original.active_profile;
     let result = (|| {
         if switched {
@@ -703,7 +868,7 @@ pub fn select(
             if card.active_profile == original.active_profile {
                 return Err(error);
             }
-            let recovery = match restore(backend, &original, profile, previous.as_ref()) {
+            let recovery = match restore(backend, &original, profile, &state.snapshot) {
                 Ok(()) => "Previous profile restored".to_owned(),
                 Err(restore) => format!("Could not restore: {restore}"),
             };

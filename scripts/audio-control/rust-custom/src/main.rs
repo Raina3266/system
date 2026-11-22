@@ -16,6 +16,7 @@ async fn run() -> AppResult<()> {
     let arguments: Vec<_> = env::args().skip(1).collect();
     match arguments.first().map(String::as_str) {
         Some("policy") if arguments.len() == 1 => policy::run(),
+        Some("panel") if arguments.len() == 1 => policy::panel::run(),
         Some("bluetooth-pair") if arguments.len() == 3 => {
             bluetooth::pair(&arguments[1], &arguments[2]).await
         }
@@ -25,15 +26,16 @@ async fn run() -> AppResult<()> {
         None | Some("help" | "--help" | "-h") if arguments.len() <= 1 => {
             print!(
                 "audio-control\n\nUsage:\n  \
+                audio-control panel (resident protocol v1: raw snapshots/intents, guarded native RPCs, models)\n  \
                 audio-control policy (one JSON request on stdin; JSON result/RPC lines on stdout)\n  \
                 audio-control bluetooth-pair <adapter> <address> (hciN and AA:BB:CC:DD:EE:FF)\n  \
                 audio-control battery-provider (bt-battery-provider.service)\n"
             );
             Ok(())
         }
-        Some("policy" | "bluetooth-pair" | "battery-provider" | "help" | "--help" | "-h") => {
-            Err(io::Error::other("invalid arguments; use audio-control --help").into())
-        }
+        Some(
+            "panel" | "policy" | "bluetooth-pair" | "battery-provider" | "help" | "--help" | "-h",
+        ) => Err(io::Error::other("invalid arguments; use audio-control --help").into()),
         Some(command) => Err(io::Error::other(format!("unknown command {command:?}")).into()),
         None => unreachable!(),
     }

@@ -1,19 +1,18 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gdk from 'gi://Gdk?version=4.0';
-import { localFilePath } from './logic.js';
 
-export function historyRoot() {
-    return GLib.getenv('CLIPBOARD_DATA_DIR')
-        || GLib.build_filenamev([GLib.get_user_data_dir(), 'clipboard']);
-}
+const helper = () => GLib.getenv('CLIPBOARD_CUSTOM_HELPER') || 'clipboard-custom';
 
+// Transport/cancellation and native clipboard ownership only. Rust owns history,
+// linked-source watches, deletion guards, Trash, and MIME/payload selection.
 export class ClipboardBackend {
     constructor({ onChange = () => {} } = {}) {
         this.onChange = onChange;
         this.processes = new Set();
-        this.fileWatches = new Map();
-        this.pruneMissing = false;
+        this.cancellables = new Set();
+        this.watching = false;
+        this.observer = null;
         this.disposed = false;
     }
     request(message) {
@@ -21,155 +20,108 @@ export class ClipboardBackend {
         return new Promise((resolve, reject) => {
             let process;
             try {
-                process = Gio.Subprocess.new([GLib.getenv('CLIPBOARD_CUSTOM_HELPER') || 'clipboard-custom'],
-                    Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+                process = Gio.Subprocess.new([helper()],
+                    Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
             } catch (error) { reject(error); return; }
+            const cancellable = new Gio.Cancellable();
             this.processes.add(process);
+            this.cancellables.add(cancellable);
+            let timedOut = false;
             let timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10000, () => {
                 timer = 0;
+                timedOut = true;
+                cancellable.cancel();
                 process.force_exit();
                 return GLib.SOURCE_REMOVE;
             });
-            process.communicate_utf8_async(JSON.stringify(message), null, (source, result) => {
+            process.communicate_utf8_async(JSON.stringify(message), cancellable, (source, result) => {
                 if (timer) GLib.source_remove(timer);
                 this.processes.delete(process);
+                this.cancellables.delete(cancellable);
                 try {
                     const [, stdout] = source.communicate_utf8_finish(result);
+                    if (this.disposed) throw new Error('Clipboard panel is shutting down.');
+                    if (timedOut) throw new Error('Clipboard history request timed out. Reopen the panel to check its result.');
                     if (!source.get_successful()) throw new Error('Clipboard history helper failed.');
                     const reply = JSON.parse(stdout);
                     if (reply.error) throw new Error(reply.error);
-                    if (this.disposed) throw new Error('Clipboard panel is shutting down.');
-                    // Helper discovery migrates/creates the directory first. Watch
-                    // before handing its snapshot to the model, closing the gap
-                    // between the first prepare request and frontend.watch().
-                    if (this.watch()) this.invalidate();
+                    // Optional observer setup must never reject a committed save.
+                    if (this.watching) this.watch();
                     resolve(reply);
-                } catch (error) { reject(error); }
+                } catch (error) {
+                    reject(this.disposed ? new Error('Clipboard panel is shutting down.')
+                        : timedOut ? new Error('Clipboard history request timed out. Reopen the panel to check its result.') : error);
+                }
             });
         });
     }
     watch() {
-        if (this.monitor || this.disposed) return;
-        let monitor;
-        try {
-            monitor = Gio.File.new_for_path(historyRoot()).monitor_directory(Gio.FileMonitorFlags.NONE, null);
-            monitor.connect('changed', (_, file, other) => {
-                if (this.monitor !== monitor || this.disposed) return;
-                if (![file, other].some(file => file?.get_basename() === 'history.json')) return;
-                this.invalidate();
-            });
-            this.monitor = monitor;
-            return true;
-        } catch {
-            // Monitoring is optional: a resource/setup failure must not turn a
-            // committed helper mutation into a failed save with a stale base.
-            monitor?.cancel();
-        }
-    }
-    invalidate(pruneMissing = false) {
         if (this.disposed) return;
-        this.pruneMissing ||= pruneMissing;
-        if (this.debounce) GLib.source_remove(this.debounce);
-        this.debounce = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            this.debounce = 0;
-            const pruneMissing = this.pruneMissing;
-            this.pruneMissing = false;
-            if (!this.disposed) this.onChange({ pruneMissing });
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-    watchFiles(items) {
-        if (this.disposed || this.watchedItems === items) return;
-        this.watchedItems = items;
-        const directories = new Map();
-        for (const item of items) {
-            const path = localFilePath(item);
-            if (!path) continue;
-            const file = Gio.File.new_for_path(path), parent = file.get_parent();
-            if (!parent) continue;
-            const directory = parent.get_path();
-            if (!directories.has(directory)) directories.set(directory, { parent, paths: new Set() });
-            directories.get(directory).paths.add(file.get_path());
-        }
-        for (const [directory, watch] of this.fileWatches) {
-            if (directories.has(directory)) continue;
-            this.fileWatches.delete(directory);
-            watch.monitor.cancel();
-        }
-        for (const [directory, { parent, paths }] of directories) {
-            const existing = this.fileWatches.get(directory);
-            if (existing) { existing.paths = paths; continue; }
-            const watch = { paths, monitor: null };
-            try {
-                watch.monitor = parent.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null);
-                watch.monitor.connect('changed', (_, file, other, event) => {
-                    if (this.fileWatches.get(directory) !== watch) return;
-                    const events = Gio.FileMonitorEvent;
-                    if ([events.PRE_UNMOUNT, events.UNMOUNTED].includes(event)) {
-                        this.invalidate(true);
-                        return;
-                    }
-                    if (![events.DELETED, events.MOVED, events.RENAMED, events.MOVED_OUT].includes(event)) return;
-                    if ([file, other].some(file => {
-                        const path = file?.get_path();
-                        return path === directory || watch.paths.has(path);
-                    })) this.invalidate(true);
-                });
-                this.fileWatches.set(directory, watch);
-            } catch {
-                // Missing or inaccessible parents must not prevent the panel from opening.
-                watch.monitor?.cancel();
-            }
-        }
-    }
-    unwatchFiles() {
-        this.watchedItems = null;
-        const watches = [...this.fileWatches.values()];
-        this.fileWatches.clear();
-        for (const watch of watches) watch.monitor.cancel();
-    }
-    async trashFile(path) {
-        if (this.disposed) throw new Error('Clipboard panel is shutting down.');
-        if (typeof path !== 'string' || !GLib.path_is_absolute(path) || path.includes('\0'))
-            throw new Error('Cannot delete an invalid local file path.');
-        const file = Gio.File.new_for_path(path);
+        this.watching = true;
+        if (this.observer) return;
+        const observer = { process: null, stream: null, cancellable: new Gio.Cancellable() };
         try {
-            const info = await new Promise((resolve, reject) => file.query_info_async('standard::type',
-                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                    try { resolve(source.query_info_finish(result)); } catch (error) { reject(error); }
-                }));
-            if (![Gio.FileType.REGULAR, Gio.FileType.SYMBOLIC_LINK].includes(info.get_file_type()))
-                throw new Error('Only files and symbolic links can be moved to Trash here. Use your file manager for folders.');
-            if (this.disposed) throw new Error('Clipboard panel is shutting down.');
-            await new Promise((resolve, reject) => file.trash_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                try { source.trash_finish(result); resolve(); } catch (error) { reject(error); }
-            }));
-            return true;
-        } catch (error) {
-            // A stale history entry can still be removed without touching disk.
-            if (error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) return false;
-            throw error;
+            observer.process = Gio.Subprocess.new([helper(), 'observe'],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            observer.stream = new Gio.DataInputStream({ base_stream: observer.process.get_stdout_pipe() });
+            this.observer = observer;
+            const read = () => observer.stream.read_line_async(GLib.PRIORITY_DEFAULT, observer.cancellable, (source, result) => {
+                try {
+                    const [line] = source.read_line_finish_utf8(result);
+                    if (this.observer !== observer || this.disposed) return;
+                    if (line === null) { this.stopObserver(observer); return; }
+                    const change = JSON.parse(line);
+                    if (typeof change.pruneMissing !== 'boolean') throw new Error('Invalid observer response.');
+                    this.onChange(change);
+                    if (this.observer === observer && !this.disposed) read();
+                } catch {
+                    // No polling/restart loop: retry on the next request or opening.
+                    this.stopObserver(observer);
+                }
+            });
+            read();
+        } catch {
+            this.stopObserver(observer);
         }
+    }
+    stopObserver(observer = this.observer) {
+        if (!observer || observer.stopped) return;
+        observer.stopped = true;
+        if (this.observer === observer) this.observer = null;
+        observer.cancellable.cancel();
+        observer.process?.force_exit();
+        try { observer.stream?.close(null); } catch { /* Native read may still be completing. */ }
+    }
+    unwatch() {
+        this.watching = false;
+        this.stopObserver();
     }
     async publish(payload) {
-        const bytes = payload.file ? await new Promise((resolve, reject) => {
-            Gio.File.new_for_path(payload.file).load_bytes_async(null, (file, result) => {
-                try { resolve(file.load_bytes_finish(result)[0]); } catch (error) { reject(error); }
-            });
-        }) : new GLib.Bytes(new TextEncoder().encode(payload.text || ''));
-        const provider = Gdk.ContentProvider.new_for_bytes(payload.mime, bytes);
-        if (!Gdk.Display.get_default().get_clipboard().set_content(provider))
-            throw new Error('The compositor rejected the clipboard content.');
-        // This resident application, not a short-lived Rust process, retains
-        // clipboard ownership after the window is hidden.
+        if (this.disposed) throw new Error('Clipboard panel is shutting down.');
+        const cancellable = new Gio.Cancellable();
+        this.cancellables.add(cancellable);
+        try {
+            // The exact file/MIME/text is selected and checked by Rust. Loading
+            // its cached image directly into GLib.Bytes avoids JSON byte copies.
+            const bytes = payload.file ? await new Promise((resolve, reject) => {
+                Gio.File.new_for_path(payload.file).load_bytes_async(cancellable, (file, result) => {
+                    try { resolve(file.load_bytes_finish(result)[0]); } catch (error) { reject(error); }
+                });
+            }) : new GLib.Bytes(new TextEncoder().encode(payload.text));
+            if (this.disposed || cancellable.is_cancelled()) throw new Error('Clipboard publication was cancelled.');
+            const provider = Gdk.ContentProvider.new_for_bytes(payload.mime, bytes);
+            if (!Gdk.Display.get_default().get_clipboard().set_content(provider))
+                throw new Error('The compositor rejected the clipboard content.');
+            // The resident native application retains ownership while hidden.
+        } finally {
+            this.cancellables.delete(cancellable);
+        }
     }
     dispose() {
         this.disposed = true;
-        if (this.debounce) GLib.source_remove(this.debounce);
-        this.debounce = 0;
-        this.pruneMissing = false;
-        this.monitor?.cancel();
-        this.unwatchFiles();
+        this.unwatch();
+        for (const cancellable of this.cancellables) cancellable.cancel();
+        this.cancellables.clear();
         for (const process of this.processes) process.force_exit();
         this.processes.clear();
     }

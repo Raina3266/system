@@ -10,11 +10,11 @@ import Battery from 'gi://AstalBattery';
 import PowerProfiles from 'gi://AstalPowerProfiles';
 import type Cairo from 'cairo';
 
-import { MetricBar, MetricsSampler, type Metrics } from './parameters.ts';
+import { MetricBar, emptyMetrics, type Metrics } from './parameters.ts';
 import {
-    NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
+    DashboardPipe, NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
     connectedMonitors, box, iconButton, invoke, label, loadTheme, scroll, style,
-    type Palette,
+    type Palette, type Transport, type EventFrame,
 } from './notification.ts';
 
 const BATTERY_ICONS = ['󰁺', '󰁻', '󰁼', '󰁽', '󰁾', '󰁿', '󰂀', '󰂁', '󰂂', '󰁹'];
@@ -29,95 +29,6 @@ export const SCREEN_TIMEOUT_CHOICES = [
     { id: '360', label: 'Sleep after: 6h' },
 ] as const;
 
-function validMinutes(minutes: unknown): minutes is number {
-    return typeof minutes === 'number' && SCREEN_TIMEOUT_CHOICES.some(choice => Number(choice.id) === minutes);
-}
-
-export class ScreenTimeoutController {
-    private currentMinutes = 0;
-    private child: Gio.Subprocess | null = null;
-    private disposed = false;
-    private readonly path: string;
-
-    constructor(private readonly onChange: () => void) {
-        // Retain the original preference path so the selected timeout carries over.
-        this.path = GLib.build_filenamev([GLib.getenv('XDG_STATE_HOME')
-            || GLib.build_filenamev([GLib.get_home_dir(), '.local', 'state']), 'dashboard', 'screen-timeout.json']);
-        try {
-            const file = Gio.File.new_for_path(this.path);
-            if (file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null).get_size() > 1024)
-                throw new Error('Sleep timer preference exceeds 1 KiB.');
-            const [ok, bytes] = file.load_contents(null);
-            if (!ok) throw new Error('Could not read sleep timer preference.');
-            const saved = JSON.parse(new TextDecoder().decode(bytes));
-            if (!saved || saved.version !== 1 || !validMinutes(saved.minutes))
-                throw new Error('Invalid sleep timer preference.');
-            this.child = saved.minutes ? this.start(saved.minutes) : null;
-            this.currentMinutes = saved.minutes;
-        } catch (error: any) {
-            if (!error.matches?.(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_FOUND))
-                console.warn(`Sleep timer: ${String(error)}`);
-        }
-    }
-
-    get minutes(): number { return this.currentMinutes; }
-
-    setMinutes(minutes: number): void {
-        if (this.disposed) return;
-        if (!validMinutes(minutes)) throw new Error(`Invalid sleep timer: ${minutes}`);
-        if (minutes === this.currentMinutes) return;
-        const next = minutes ? this.start(minutes) : null;
-        try {
-            const parent = GLib.path_get_dirname(this.path);
-            if (GLib.mkdir_with_parents(parent, 0o700) !== 0) throw new Error(`Could not create ${parent}`);
-            const [ok] = Gio.File.new_for_path(this.path).replace_contents(
-                new TextEncoder().encode(JSON.stringify({ version: 1, minutes })), null, false,
-                Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-            if (!ok) throw new Error('Could not save sleep timer preference.');
-        } catch (error) {
-            this.stop(next);
-            throw error;
-        }
-        const previous = this.child;
-        this.child = next;
-        this.currentMinutes = minutes;
-        this.stop(previous);
-        this.onChange();
-    }
-
-    private start(minutes: number): Gio.Subprocess {
-        const systemctl = GLib.shell_quote(GLib.getenv('SYSTEMCTL') || 'systemctl');
-        const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_SILENCE });
-        // Use compositor idle notifications, not a wall-clock timer; activity and
-        // Wayland idle inhibitors are handled by swayidle even while the panel is closed.
-        const child = launcher.spawnv([GLib.getenv('SWAYIDLE') || 'swayidle', '-w', '-C', '/dev/null',
-            'timeout', String(minutes * 60), `exec ${systemctl} suspend`]);
-        child.wait_async(null, (_process: Gio.Subprocess | null, result: Gio.AsyncResult) => {
-            try { child.wait_finish(result); }
-            catch (error) { console.warn(`Sleep timer wait: ${String(error)}`); }
-            if (this.disposed || child !== this.child) return;
-            this.child = null;
-            this.currentMinutes = 0;
-            console.warn('Sleep timer: swayidle exited; automatic sleep is disabled.');
-            this.onChange();
-        });
-        return child;
-    }
-
-    private stop(child: Gio.Subprocess | null): void {
-        // Stop the watcher gracefully; its uncancelled wait callback reaps it.
-        // No resume action is registered, so stopping cannot trigger a power action.
-        child?.send_signal(15);
-    }
-
-    dispose(): void {
-        if (this.disposed) return;
-        this.disposed = true;
-        this.stop(this.child);
-        this.child = null;
-    }
-}
-
 export class DashboardBackend {
     readonly notifications: NotificationCenter;
     battery = { ready: false, present: false, percentage: -1, status: 'READING BATTERY STATUS' };
@@ -126,18 +37,42 @@ export class DashboardBackend {
     private batteryDevice = Battery.get_default();
     private upower = new Battery.UPower();
     private power = PowerProfiles.get_default();
-    private screenTimeout: ScreenTimeoutController;
-    private sampler: MetricsSampler;
+    private pipe: Transport;
+    private generation = 0;
+    private active = false;
+    private minutes = 0;
+    private readings = emptyMetrics();
     private listeners = new Set<() => void>();
     private signals: [any, number][] = [];
     private unsubscribeNotifications: () => void;
     private disposed = false;
 
-    constructor() {
-        this.sampler = new MetricsSampler(() => this.emit());
-        this.screenTimeout = new ScreenTimeoutController(() => this.emit());
+    private failed = false;
+    get offline(): boolean { return this.failed; }
+
+    constructor(connect: (receive: (event: EventFrame) => void) => Transport = cb => new DashboardPipe(cb), onFatal?: () => void) {
         this.notifications = new NotificationCenter();
+        this.pipe = connect(e => {
+            if (this.disposed || this.failed) return;
+            if (e.event === 'offline') {
+                this.failed = true;
+                this.minutes = 0;
+                this.readings = emptyMetrics();
+                // EOF can arrive during connect/init, before the application owns this object.
+                if (onFatal) void Promise.resolve().then(() => { if (!this.disposed) onFatal(); });
+                this.notifications.receive(e);
+                return;
+            }
+            if (e.event === 'metrics' && this.active && e.generation === this.generation) { this.readings = e.data; this.emit(); }
+            else if (e.event === 'timeout') { this.minutes = e.minutes; this.emit(); }
+            else {
+
+                if (e.event === 'error') console.warn('Dashboard backend operation failed');
+                this.notifications.receive(e);
+            }
+        });
         this.unsubscribeNotifications = this.notifications.subscribe(() => this.emit());
+        this.notifications.start(this.pipe);
         const refresh = () => this.refresh();
         this.watch(this.batteryDevice, 'notify', refresh);
         this.watch(this.upower, 'notify', refresh);
@@ -146,7 +81,7 @@ export class DashboardBackend {
         this.refresh();
     }
 
-    get metrics(): Metrics { return this.sampler.data; }
+    get metrics(): Metrics { return this.readings; }
 
     subscribe(callback: () => void): () => void {
         if (this.disposed) return () => {};
@@ -185,13 +120,16 @@ export class DashboardBackend {
     }
 
     setActive(active: boolean) {
-        if (!this.disposed) this.sampler.setActive(Boolean(active));
+        if (this.disposed || this.failed || this.active === active) return;
+        this.active = active; this.readings = emptyMetrics();
+        this.pipe.send({ op: 'active', active, generation: ++this.generation });
+        this.emit();
     }
 
-    get screenTimeoutMinutes(): number { return this.screenTimeout.minutes; }
+    get screenTimeoutMinutes(): number { return this.minutes; }
 
     setScreenTimeout(minutes: number) {
-        if (!this.disposed) this.screenTimeout.setMinutes(minutes);
+        if (!this.disposed && !this.failed) this.pipe.send({ op: 'timeout', minutes });
     }
 
     setProfile(profile: string) {
@@ -223,8 +161,7 @@ export class DashboardBackend {
     dispose() {
         if (this.disposed) return;
         this.disposed = true;
-        this.sampler.dispose();
-        this.screenTimeout.dispose();
+        this.pipe.dispose();
         this.unsubscribeNotifications();
         this.notifications.dispose();
         for (const [object, signal] of this.signals) object.disconnect(signal);
@@ -629,10 +566,11 @@ export const DashboardApplication = GObject.registerClass({ GTypeName: 'Dashboar
             })]);
         }
 
-        startPanel(): void {
+        startPanel(onFatal: () => void): void {
             if (this.backend) return;
+            this.backend = new DashboardBackend(undefined, onFatal);
+            if (this.backend.offline) return;
             this.theme = loadTheme(GLib.getenv('DASHBOARD_PANEL_CONFIG'), GLib.getenv('DASHBOARD_PANEL_PALETTE'));
-            this.backend = new DashboardBackend();
             this.panel = new DashboardPanel({ app: this, backend: this.backend, palette: this.theme.palette });
             this.popups = new NotificationPopups({ app: this, backend: this.backend, palette: this.theme.palette });
             this.unsubscribe = this.backend.subscribe(() => this.render());
@@ -679,7 +617,11 @@ export async function main(): Promise<number> {
     const app = new DashboardApplication({ instance_name: 'dashboard-panel' });
     let exitCode = 0;
     app.connect('activate', () => {
-        try { app.startPanel(); }
+        try { app.startPanel(() => {
+            console.error('Dashboard helper disconnected; exiting notification owner.');
+            exitCode = 1;
+            app.quit();
+        }); }
         catch (error) {
             console.error(`Dashboard initialization: ${String(error)}`);
             exitCode = 1;

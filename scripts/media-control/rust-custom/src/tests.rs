@@ -2019,6 +2019,1772 @@ macro_rules! media_unit_tests {
             }
         }
     };
+    (resident) => {
+        mod resident_tests {
+            use super::*;
+            use serde_json::json;
+
+            fn native(bus: &str) -> Value {
+                json!({
+                    "bus": bus, "identity": format!("App {bus}"), "desktopEntry": format!("app-{bus}"),
+                    "title": format!("Track {bus}"), "artist": "Artist 雪", "album": "Album",
+                    "url": "file:///music/track.flac", "artUrl": "", "browserHint": null,
+                    "playing": true, "stopped": false, "position": 10.0, "length": 200.0,
+                    "lengthMicros": null, "rate": 1.0, "canPlay": true, "canPause": true,
+                    "canSeek": true, "canNext": true, "canPrevious": true,
+                    "instance": 1, "trackId": format!("/track/{bus}"), "seekRevision": 0,
+                    "positionRevision": 0, "positionSupported": true,
+                    "cover": "", "available": true, "volume": 0.5
+                })
+            }
+
+            fn audio(id: u32) -> Value {
+                json!({"id": id, "instance": id, "name": "App a", "nickname": "",
+                    "ready": true, "volume": 0.5, "muted": false,
+                    "properties": {"application.name": "App a", "media.name": "Track a"}})
+            }
+
+            struct Harness {
+                runtime: Runtime,
+                raw: Value,
+                now: f64,
+            }
+
+            impl Harness {
+                fn new(players: Vec<Value>, streams: Vec<Value>) -> Self {
+                    let raw = json!({"players": players, "streams": streams});
+                    let mut runtime = Runtime::new(100.0);
+                    assert!(runtime.snapshot(raw.clone(), 100.0));
+                    Self { runtime, raw, now: 100.0 }
+                }
+
+                fn one() -> Self { Self::new(vec![native("a")], vec![]) }
+
+                fn message(&mut self, value: Value) {
+                    self.runtime.handle(serde_json::from_value(value).unwrap(), self.now);
+                }
+
+                fn capture(&mut self) {
+                    assert!(self.runtime.snapshot(self.raw.clone(), self.now));
+                }
+
+                fn action(&mut self, kind: &str, bus: &str, position: f64) {
+                    self.message(json!({"type": "action", "action": {
+                        "kind": kind, "player": bus, "position": position
+                    }, "createdAt": self.now, "snapshot": self.raw}));
+                }
+
+                fn volume(&mut self, bus: &str, value: f64) {
+                    self.message(json!({"type": "volume", "player": bus, "value": value,
+                        "createdAt": self.now, "snapshot": self.raw}));
+                }
+
+                fn mute(&mut self, bus: &str, muted: bool) {
+                    self.message(json!({"type": "mute", "player": bus, "muted": muted,
+                        "createdAt": self.now, "snapshot": self.raw}));
+                }
+
+                fn apply(&mut self) -> ApplyMessage {
+                    self.runtime.advance(self.now).expect("one guarded dispatch")
+                }
+
+                fn ack(&mut self, apply: &ApplyMessage) {
+                    if apply.operation.operation == "seek" {
+                        let player = self.raw["players"].as_array_mut().unwrap().iter_mut()
+                            .find(|p| p["bus"] == apply.operation.player).unwrap();
+                        player["seekRevision"] = Value::from(player["seekRevision"].as_u64().unwrap() + 1);
+                    }
+                    if matches!(apply.operation.operation.as_str(), "volume" | "mute") {
+                        let target = if let Some(id) = apply.operation.stream_id {
+                            self.raw["streams"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == id).unwrap()
+                        } else {
+                            self.raw["players"].as_array_mut().unwrap().iter_mut().find(|p| p["bus"] == apply.operation.player).unwrap()
+                        };
+                        if let Some(value) = apply.operation.value { target["volume"] = json!(value); }
+                        if let Some(muted) = apply.operation.muted { target["muted"] = json!(muted); }
+                    }
+                    self.result(apply, true, None);
+                }
+
+                fn result(&mut self, apply: &ApplyMessage, ok: bool, error: Option<&str>) {
+                    self.message(json!({"type": "result", "id": apply.id,
+                        "ok": ok, "error": error, "snapshot": self.raw}));
+                }
+
+                fn state(&self) -> Value {
+                    serde_json::to_value(self.runtime.state(self.now)).unwrap()
+                }
+
+                fn progress(&self) -> Value { self.state()["progress"][0].clone() }
+
+                fn model_position(&self) -> f64 {
+                    self.runtime.request(Action::default(), self.now).players[0].position
+                }
+            }
+
+            fn grouped() -> Harness {
+                let a = native("a");
+                let mut alias = a.clone();
+                alias["bus"] = json!("alias");
+                alias["trackId"] = json!("/track/alias");
+                alias["instance"] = json!(2);
+                alias["playing"] = json!(false);
+                Harness::new(vec![a, alias], vec![])
+            }
+
+            #[test]
+            fn state_is_complete_ready_and_guarded_with_native_metadata() {
+                let mut h = Harness::new(vec![native("a")], vec![audio(42)]);
+                let state = h.state();
+                assert_eq!(state["type"], "state");
+                assert_eq!(state["ready"], true);
+                assert_eq!(state["activePlayer"], "a");
+                assert_eq!(state["groups"][0]["primary"], "a");
+                assert_eq!(state["groups"][0]["streamId"], 42);
+                assert_eq!(state["players"][0]["artist"], "Artist 雪");
+                assert_eq!(state["players"][0]["trackKey"], "/track/a");
+                assert_eq!(state["progress"][0]["samplePosition"], 10.0);
+                assert_eq!(state["transports"]["a"]["reason"], "Pause");
+                for key in ["position", "positionRevision", "trackKey", "samplePosition", "cover", "volume"] {
+                    assert!(state["guard"]["players"][0].get(key).is_none(), "{key}");
+                }
+                for key in ["volume", "muted"] {
+                    assert!(state["guard"]["streams"][0].get(key).is_none());
+                }
+                h.raw["players"] = json!([]);
+                h.capture();
+                assert_eq!(h.state()["groups"], json!([]));
+                assert_eq!(h.state()["ready"], true);
+                assert_eq!(h.state()["guard"]["players"], json!([]));
+            }
+
+            #[test]
+            fn native_normalization_preserves_raw_samples_and_numeric_length_fallback() {
+                for position in [json!(-1), Value::Null, json!(0), json!(250.25)] {
+                    let mut player = native("a");
+                    player["position"] = position.clone();
+                    player["rate"] = Value::Null;
+                    player["length"] = json!(-1);
+                    player["lengthMicros"] = json!(361929437.5);
+                    let mut h = Harness::new(vec![player], vec![]);
+                    let supported = position.as_f64().is_some_and(|p| p >= 0.0);
+                    assert_eq!(h.state()["players"][0]["positionSupported"], supported);
+                    assert_eq!(h.state()["players"][0]["position"], position.as_f64().filter(|p| *p >= 0.0).unwrap_or(0.0));
+                    assert_eq!(h.state()["players"][0]["rate"], 1.0);
+                    assert_eq!(h.state()["players"][0]["length"], 361.9294375);
+                    assert_eq!(h.state()["players"][0]["canSeek"], true);
+                    assert_eq!(h.raw["players"][0]["position"], position);
+                    h.raw["players"][0]["length"] = json!(120.0);
+                    h.capture();
+                    assert_eq!(h.state()["players"][0]["length"], 120.0);
+                }
+                for metadata in [json!("200000000"), json!(true), json!([]), json!({}), json!(0), json!(-1)] {
+                    let mut raw = native("a");
+                    raw["length"] = Value::Null;
+                    raw["lengthMicros"] = metadata.clone();
+                    let h = Harness::new(vec![raw], vec![]);
+                    assert_eq!(h.state()["players"][0]["length"], Value::Null);
+                    assert_eq!(h.state()["guard"]["players"][0]["lengthMicros"], metadata);
+                }
+            }
+
+            #[test]
+            fn native_track_keys_use_dbus_path_syntax_and_metadata_only_as_freshness() {
+                for id in ["", "not/a/path", "/invalid-dash", "/trailing/", NO_TRACK] {
+                    let mut raw = native("a");
+                    raw["trackId"] = json!(id);
+                    let mut h = Harness::new(vec![raw], vec![]);
+                    let before = h.state()["players"][0]["trackKey"].clone();
+                    assert_ne!(before, id);
+                    h.raw["players"][0]["title"] = json!("Different metadata");
+                    h.capture();
+                    assert_ne!(before, h.state()["players"][0]["trackKey"]);
+                    h.action("seek", "a", 80.0);
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("unavailable"));
+                    assert_eq!(h.raw["players"][0]["seekRevision"], 0);
+                }
+                for id in ["/", "/valid_123/path", "/track/a"] {
+                    let mut raw = native("a");
+                    raw["trackId"] = json!(id);
+                    let h = Harness::new(vec![raw], vec![]);
+                    assert_eq!(h.state()["players"][0]["trackKey"], id);
+                }
+            }
+
+            #[test]
+            fn display_estimates_never_overwrite_confirmed_or_raw_model_samples() {
+                let mut h = Harness::one();
+                h.now += 1.5;
+                assert_eq!(h.progress()["position"], 11.5);
+                assert_eq!(h.progress()["samplePosition"], 10.0);
+                assert_eq!(h.state()["players"][0]["position"], 10.0);
+                assert_eq!(h.model_position(), 10.0);
+                let guard = h.runtime.guard();
+                h.raw["players"][0]["position"] = json!(20);
+                h.capture();
+                h.now += 0.5;
+                assert_eq!(h.progress()["position"], 20.5);
+                h.raw["players"][0]["position"] = json!(5);
+                h.capture();
+                h.now += 1.0;
+                assert_eq!(h.progress()["position"], 6.0);
+                h.raw["players"][0]["length"] = json!(5.5);
+                h.capture();
+                assert_eq!(h.progress()["position"], 5.5);
+                assert_eq!(h.state()["players"][0]["position"], 5.0);
+                assert_eq!(guard.native.players[0]["length"], 200.0);
+                assert_eq!(h.raw["players"][0]["position"], 5);
+            }
+
+            #[test]
+            fn pause_resume_and_rate_reanchor_without_counting_paused_time() {
+                let mut h = Harness::one();
+                h.now += 1.0;
+                h.raw["players"][0]["rate"] = json!(2);
+                h.capture();
+                h.now += 1.0;
+                assert_eq!(h.progress()["position"], 13.0);
+                h.raw["players"][0]["playing"] = json!(false);
+                h.capture();
+                h.now += 38.0;
+                assert_eq!(h.progress()["position"], 13.0);
+                assert_eq!(h.progress()["samplePosition"], 10.0);
+                h.raw["players"][0]["playing"] = json!(true);
+                h.capture();
+                h.now += 1.0;
+                assert_eq!(h.progress()["position"], 15.0);
+                h.raw["players"][0]["stopped"] = json!(true);
+                h.capture();
+                assert_eq!(h.progress()["positionSupported"], false);
+            }
+
+            #[test]
+            fn frozen_nonzero_samples_expire_after_five_seconds_for_matching_only() {
+                let mut h = Harness::one();
+                let guard = h.runtime.guard();
+                h.now += 5.0;
+                assert_eq!(h.progress()["positionSupported"], true);
+                h.now += 0.01;
+                h.raw["players"][0]["cover"] = json!("/cover.png");
+                h.raw["players"][0]["volume"] = json!(0.9);
+                h.capture();
+                assert_eq!(h.progress()["positionSupported"], false);
+                assert_eq!(h.model_position(), 0.0);
+                assert_eq!(h.state()["players"][0]["position"], 10.0);
+                assert_eq!(h.state()["players"][0]["positionSupported"], true);
+                assert_eq!(h.runtime.guard(), guard);
+                h.raw["players"][0]["playing"] = json!(false);
+                h.capture();
+                assert_eq!(h.progress()["positionSupported"], false, "pause cannot revive stale timing");
+                h.raw["players"][0]["position"] = json!(15);
+                h.capture();
+                h.now += 100.0;
+                assert_eq!(h.progress()["position"], 15.0);
+                assert_eq!(h.model_position(), 15.0);
+            }
+
+            #[test]
+            fn equal_value_position_revisions_confirm_samples_but_capture_ticks_do_not() {
+                let mut h = Harness::one();
+                h.now += 4.0;
+                h.capture();
+                h.now += 2.0;
+                assert_eq!(h.progress()["positionSupported"], false);
+                h.raw["players"][0]["positionRevision"] = json!(1);
+                h.capture();
+                assert_eq!(h.progress()["position"], 10.0);
+                h.now += 4.0;
+                assert_eq!(h.progress()["position"], 14.0);
+            }
+
+            #[test]
+            fn playing_zero_is_unknown_even_with_seek_support_but_paused_zero_is_real() {
+                for can_seek in [false, true] {
+                    for position in [json!(0), json!(-1), Value::Null] {
+                        let mut raw = native("a");
+                        raw["position"] = position;
+                        raw["canSeek"] = json!(can_seek);
+                        let mut h = Harness::new(vec![raw], vec![]);
+                        h.now += 2.0;
+                        h.raw["players"][0]["positionRevision"] = json!(1);
+                        h.capture();
+                        assert_eq!(h.progress()["positionSupported"], false);
+                        assert_eq!(h.model_position(), 0.0);
+                        assert_eq!(h.state()["players"][0]["canSeek"], can_seek);
+                    }
+                }
+                let mut raw = native("a");
+                raw["position"] = json!(0);
+                raw["playing"] = json!(false);
+                let mut h = Harness::new(vec![raw], vec![]);
+                assert_eq!(h.progress()["positionSupported"], true);
+                assert_eq!(h.progress()["position"], 0.0);
+                h.raw["players"][0]["playing"] = json!(true);
+                h.capture();
+                assert_eq!(h.progress()["positionSupported"], false);
+            }
+
+            #[test]
+            fn confirmed_position_reads_do_not_fabricate_native_support_or_replace_getters() {
+                let mut raw = native("a");
+                raw["position"] = json!(-1);
+                let mut h = Harness::new(vec![raw], vec![]);
+                let request = h.runtime.reads.pop_front().unwrap();
+                h.runtime.position_result(PositionResult { request, position: Some(25.5) }, h.now);
+                h.now += 1.0;
+                assert_eq!(h.progress()["position"], 26.5);
+                assert_eq!(h.progress()["samplePosition"], 25.5);
+                assert_eq!(h.state()["players"][0]["positionSupported"], false);
+                assert_eq!(h.state()["players"][0]["position"], 0.0);
+                assert_eq!(h.model_position(), 25.5);
+                assert_eq!(h.raw["players"][0]["position"], -1);
+                h.raw["players"][0]["playing"] = json!(false);
+                h.capture();
+                h.now += 100.0;
+                assert_eq!(h.progress()["position"], 26.5);
+            }
+
+            #[test]
+            fn track_changes_invalidate_timing_and_guard_against_late_or_replaced_reads() {
+                let mut h = Harness::one();
+                let old = h.runtime.reads.pop_front().unwrap();
+                h.raw["players"][0]["title"] = json!("Another track");
+                h.raw["players"][0]["url"] = json!("file:///music/another.flac");
+                h.capture();
+                assert_eq!(h.progress()["positionSupported"], false);
+                let fresh = h.runtime.reads.pop_front().unwrap();
+                h.runtime.position_result(PositionResult { request: old, position: Some(99.0) }, h.now);
+                assert_eq!(h.progress()["positionSupported"], false);
+                h.runtime.position_result(PositionResult { request: fresh.clone(), position: Some(20.0) }, h.now);
+                assert_eq!(h.model_position(), 20.0);
+                h.raw["players"][0]["instance"] = json!(2);
+                h.raw["players"][0]["position"] = json!(40);
+                h.capture();
+                h.runtime.position_result(PositionResult { request: fresh, position: Some(99.0) }, h.now);
+                assert_eq!(h.progress()["position"], 40.0);
+                assert_eq!(h.state()["players"][0]["trackKey"], "/track/a");
+            }
+
+            #[test]
+            fn paused_track_and_rate_changes_renew_recovery_without_accepting_cancelled_reads() {
+                let mut h = Harness::one();
+                h.raw["players"][0]["trackId"] = json!("/track/two");
+                h.capture();
+                let playing = h.runtime.reads.pop_front().unwrap();
+                h.raw["players"][0]["playing"] = json!(false);
+                h.capture();
+                let paused = h.runtime.reads.pop_front().unwrap();
+                h.raw["players"][0]["rate"] = json!(2);
+                h.capture();
+                let rate = h.runtime.reads.pop_front().unwrap();
+                for request in [playing, paused] {
+                    h.runtime.position_result(PositionResult { request, position: Some(99.0) }, h.now);
+                }
+                assert_eq!(h.progress()["positionSupported"], false);
+                h.runtime.position_result(PositionResult { request: rate, position: Some(20.0) }, h.now);
+                h.now += 100.0;
+                assert_eq!(h.progress()["position"], 20.0);
+                assert_eq!(h.model_position(), 20.0);
+                assert_eq!(h.state()["players"][0]["position"], 10.0);
+            }
+
+            #[test]
+            fn queue_is_bounded_at_eight_and_coalesces_only_adjacent_same_target_seeks() {
+                let mut h = Harness::one();
+                h.action("next", "a", 0.0);
+                let _first = h.apply();
+                for _ in 0..8 { h.action("next", "a", 0.0); }
+                assert_eq!(h.runtime.queue.len(), 8);
+                h.action("next", "a", 0.0);
+                assert_eq!(h.runtime.queue.len(), 8);
+                assert!(h.runtime.failure.contains("queue is full"));
+                let mut h = Harness::one();
+                for value in 0..100 { h.action("seek", "", value as f64); }
+                assert_eq!(h.runtime.queue.len(), 1);
+                assert_eq!(h.apply().operation.value, Some(99.0));
+                h.action("seek", "a", 2.0);
+                h.action("next", "a", 0.0);
+                h.action("seek", "a", 3.0);
+                h.action("seek", "b", 4.0);
+                assert_eq!(h.runtime.queue.len(), 4);
+            }
+
+            #[test]
+            fn apply_fences_raw_sampling_and_the_next_freshness_boundary_not_display_projection() {
+                let mut h = Harness::one();
+                h.now += 4.9;
+                h.action("next", "a", 0.0);
+                let apply = h.apply();
+                assert_eq!(apply.expires_at, 105.0, "source freshness expires before this young intent");
+                assert_eq!(apply.guard.players[0]["position"], 10.0);
+                assert_eq!(apply.guard.players[0]["positionRevision"], 0);
+                assert!(h.state()["guard"]["players"][0].get("position").is_none());
+                assert!(h.progress()["position"].as_f64().unwrap() > 14.8);
+
+                let mut h = Harness::new(vec![], vec![]);
+                h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                h.now += 4.9;
+                h.action("jump", ":1.220", 15.0);
+                let apply = h.apply();
+                assert_eq!(apply.expires_at, 105.0);
+                h.now += 0.2;
+                let result = h.runtime.validate_recovered_apply(apply.id, vec![recovered(1, 1)], h.now);
+                assert!(result.unwrap_err().contains("expired"));
+            }
+
+            #[test]
+            fn exact_binary64_seek_values_survive_input_plan_and_output_without_clamping() {
+                for position in [0.0, 2.0022300000000002e-7, 1.2345678901234567, 361.9294375, 9999.000000000002] {
+                    let mut h = Harness::one();
+                    h.action("seek", "a", position);
+                    let apply = h.apply();
+                    assert_eq!(apply.operation.value.unwrap().to_bits(), position.to_bits());
+                    let encoded = service_bytes(&apply).unwrap();
+                    let decoded: Value = serde_json::from_slice(&encoded).unwrap();
+                    assert_eq!(decoded["operation"]["value"].as_f64().unwrap().to_bits(), position.to_bits());
+                    assert_eq!(decoded["type"], "apply");
+                    assert_eq!(decoded["expiresAt"], 105.0);
+                    assert_eq!(decoded["guard"]["players"][0]["seekRevision"], 0);
+                }
+            }
+
+            #[test]
+            fn native_seek_ack_requires_exactly_own_revision_and_does_not_confirm_position() {
+                for supported in [false, true] {
+                    let mut h = Harness::one();
+                    h.raw["players"][0]["playing"] = json!(false);
+                    h.raw["players"][0]["position"] = if supported { json!(10) } else { json!(-1) };
+                    h.capture();
+                    h.action("seek", "a", 80.0);
+                    let apply = h.apply();
+                    let before = h.state()["players"][0].clone();
+                    let old_read = h.runtime.reads.pop_front().unwrap();
+                    h.ack(&apply);
+                    assert!(h.runtime.failure.is_empty());
+                    assert_eq!(h.state()["players"][0]["seekRevision"], 1);
+                    assert_eq!(h.state()["players"][0]["position"], before["position"]);
+                    assert_eq!(h.state()["players"][0]["positionSupported"], supported);
+                    assert_eq!(h.progress()["positionSupported"], false);
+                    h.runtime.position_result(PositionResult { request: old_read, position: Some(100.0) }, h.now);
+                    assert_eq!(h.progress()["positionSupported"], false);
+                    h.raw["players"][0]["position"] = json!(79.5);
+                    h.raw["players"][0]["positionRevision"] = json!(1);
+                    h.capture();
+                    assert_eq!(h.progress()["position"], 79.5);
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+                for increment in [0, 2] {
+                    let mut h = Harness::one();
+                    h.action("seek", "a", 20.0);
+                    let apply = h.apply();
+                    h.action("seek", "a", 50.0);
+                    h.raw["players"][0]["seekRevision"] = json!(increment);
+                    h.result(&apply, true, None);
+                    assert!(h.runtime.failure.contains("advance only its own"));
+                    assert!(h.runtime.queue.is_empty());
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+            }
+
+            #[test]
+            fn grouped_seek_rebases_the_sole_final_seek_by_each_own_exact_revision() {
+                let mut h = grouped();
+                assert_eq!(h.runtime.groups.len(), 1);
+                h.action("seek", "alias", 20.0);
+                let first = h.apply();
+                for value in [30.0, 40.0, 50.0] { h.action("seek", "alias", value); }
+                h.ack(&first);
+                let second = h.apply();
+                assert_eq!(second.operation.player, "alias");
+                assert_eq!(second.operation.value, Some(20.0));
+                h.ack(&second);
+                let last_a = h.apply();
+                assert_eq!(last_a.operation.value, Some(50.0));
+                assert_eq!(last_a.guard.players[0]["seekRevision"], 1);
+                assert_eq!(last_a.guard.players[1]["seekRevision"], 1);
+                h.ack(&last_a);
+                let last_alias = h.apply();
+                h.ack(&last_alias);
+                assert_eq!(h.raw["players"][0]["seekRevision"], 2);
+                assert_eq!(h.raw["players"][1]["seekRevision"], 2);
+                assert_eq!(h.raw["players"][0]["position"], 10.0);
+                assert!(h.runtime.failure.is_empty());
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn seek_rebase_cannot_cross_a_target_barrier_or_external_change() {
+                for barrier in ["other", "next", "external"] {
+                    let mut h = Harness::new(vec![native("a"), native("b")], vec![]);
+                    h.action("seek", "a", 20.0);
+                    let first = h.apply();
+                    if barrier == "other" { h.action("seek", "b", 30.0); }
+                    else {
+                        if barrier == "next" { h.action("next", "a", 0.0); }
+                        h.action("seek", "a", 30.0);
+                    }
+                    h.ack(&first);
+                    if barrier == "external" {
+                        h.raw["players"][0]["trackId"] = json!("/track/other");
+                        h.capture();
+                    }
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("stale queued"));
+                    assert!(h.runtime.failure.contains("not retried"));
+                }
+            }
+
+            #[test]
+            fn actions_expire_before_dispatch_and_at_ack_even_with_no_incoming_events() {
+                for in_flight in [false, true] {
+                    let mut h = Harness::one();
+                    h.action("next", "a", 0.0);
+                    let apply = in_flight.then(|| h.apply());
+                    h.now += 5.01;
+                    if let Some(apply) = &apply { h.result(apply, true, None); }
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("expired"));
+                    assert!(h.runtime.failure.contains("not retried"));
+                }
+                let mut h = Harness::one();
+                h.action("seek", "a", 10.0);
+                let apply = h.apply();
+                h.action("seek", "a", 20.0);
+                h.now += 5.01;
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.queue.is_empty());
+                h.result(&apply, true, None);
+                assert!(h.runtime.advance(h.now).is_none(), "late ack cannot revive an expired transaction");
+                h.runtime.enqueue(Action { kind: "next".into(), player: "a".into(), position: 0.0 }, h.now + 1.0, h.now);
+                assert!(h.runtime.queue.is_empty(), "future timestamps are not accepted");
+            }
+
+            #[test]
+            fn guards_ignore_position_volume_cover_mute_and_property_insertion_order() {
+                let mut h = Harness::new(vec![native("a")], vec![audio(42)]);
+                h.action("next", "a", 0.0);
+                let first_guard = h.runtime.guard();
+                h.raw["players"][0]["position"] = json!(11);
+                h.raw["players"][0]["positionRevision"] = json!(10);
+                h.raw["players"][0]["volume"] = json!(0.9);
+                h.raw["players"][0]["cover"] = json!("/cover.png");
+                h.raw["streams"][0]["volume"] = json!(0.1);
+                h.raw["streams"][0]["muted"] = json!(true);
+                h.raw["streams"][0]["properties"] = json!({"media.name": "Track a", "application.name": "App a"});
+                h.capture();
+                assert_eq!(h.runtime.guard(), first_guard);
+                let apply = h.apply();
+                h.raw["players"][0]["position"] = json!(12);
+                h.ack(&apply);
+                assert!(h.runtime.failure.is_empty());
+                assert_eq!(h.state()["players"][0]["position"], 12.0);
+            }
+
+            #[test]
+            fn position_driven_regrouping_invalidates_intents_and_latches_pending_changes() {
+                for from_read in [false, true] {
+                    for pending in [false, true] {
+                        let mut h = grouped();
+                        h.action("seek", "alias", 30.0);
+                        let apply = pending.then(|| h.apply());
+                        if from_read {
+                            let request = h.runtime.reads.iter().find(|r| r.bus == "alias").unwrap().clone();
+                            h.runtime.position_result(PositionResult { request, position: Some(80.0) }, h.now);
+                        } else {
+                            h.raw["players"][1]["position"] = json!(80.0);
+                            h.capture();
+                        }
+                        assert_eq!(h.runtime.groups.len(), 2);
+                        if let Some(apply) = &apply {
+                            h.action("next", "a", 0.0);
+                            h.raw["players"][1]["position"] = json!(80.0);
+                            h.ack(apply);
+                            assert!(h.runtime.queue.is_empty());
+                        }
+                        assert!(h.runtime.advance(h.now).is_none(), "from_read={from_read}, pending={pending}");
+                        assert!(h.runtime.failure.contains("not retried"));
+                    }
+                }
+                let mut h = grouped();
+                h.action("seek", "alias", 30.0);
+                let apply = h.apply();
+                let request = h.runtime.reads.iter().find(|r| r.bus == "alias").unwrap().clone();
+                h.runtime.position_result(PositionResult { request, position: Some(80.0) }, h.now);
+                h.raw["players"][1]["position"] = json!(11.0);
+                h.capture();
+                assert_eq!(h.runtime.groups.len(), 1);
+                h.ack(&apply);
+                assert!(h.runtime.advance(h.now).is_none(), "regrouping away and back cannot revive a pending transaction");
+                assert!(h.runtime.failure.contains("not retried"));
+            }
+
+            #[test]
+            fn timing_expiry_invalidates_intents_even_before_the_action_deadline() {
+                for pending in [false, true] {
+                    let mut h = grouped();
+                    h.raw["players"][1]["position"] = json!(80.0);
+                    h.capture();
+                    assert_eq!(h.runtime.groups.len(), 2);
+                    h.now += 4.9;
+                    h.action("seek", "alias", 30.0);
+                    let apply = pending.then(|| h.apply());
+                    h.now += 0.2;
+                    h.message(json!({"type": "tick"}));
+                    assert_eq!(h.runtime.groups.len(), 1, "the playing sample became unknown for matching");
+                    if let Some(apply) = &apply { h.ack(apply); }
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("not retried"));
+                    assert!(!h.runtime.failure.contains("expired"), "the intent itself is only 0.2 seconds old");
+                }
+            }
+
+            #[test]
+            fn every_raw_ownership_and_action_field_invalidates_queued_and_pending_work() {
+                let changes = [
+                    ("bus", json!("replacement")), ("identity", json!("Replacement")),
+                    ("desktopEntry", json!("other.desktop")), ("title", json!("Other track")),
+                    ("artist", json!("Other artist")), ("album", json!("Other album")),
+                    ("url", json!("file:///other")), ("artUrl", json!("file:///other-art")),
+                    ("browserHint", json!("firefox")), ("playing", json!(false)),
+                    ("stopped", json!(true)), ("length", json!(201)), ("lengthMicros", json!(200000000)),
+                    ("canPlay", json!(false)), ("canPause", json!(false)), ("canSeek", json!(false)),
+                    ("canNext", json!(false)), ("canPrevious", json!(false)), ("trackId", json!("/track/other")),
+                    ("instance", json!(2)), ("seekRevision", json!(1)), ("rate", json!(2)),
+                    ("positionSupported", json!(false)), ("available", json!(false)),
+                ];
+                for (field, value) in changes {
+                    for pending in [false, true] {
+                        let mut h = Harness::one();
+                        h.action("next", "a", 0.0);
+                        let apply = pending.then(|| h.apply());
+                        h.raw["players"][0][field] = value.clone();
+                        if let Some(apply) = &apply { h.result(apply, true, None); }
+                        else { h.capture(); }
+                        assert!(h.runtime.advance(h.now).is_none(), "{field}, pending={pending}");
+                        assert!(h.runtime.failure.contains("not retried"), "{field}: {}", h.runtime.failure);
+                    }
+                }
+                for (field, value) in [
+                    ("id", json!(43)), ("name", json!("Other")), ("nickname", json!("Other")),
+                    ("ready", json!(false)), ("properties", json!({"application.process.id": "5678"})),
+                    ("instance", json!(100)),
+                ] {
+                    for pending in [false, true] {
+                        let mut h = Harness::new(vec![native("a")], vec![audio(42)]);
+                        h.action("next", "a", 0.0);
+                        let apply = pending.then(|| h.apply());
+                        h.raw["streams"][0][field] = value.clone();
+                        if let Some(apply) = &apply { h.result(apply, true, None); }
+                        else { h.capture(); }
+                        assert!(h.runtime.advance(h.now).is_none(), "stream {field}");
+                        assert!(h.runtime.failure.contains("ownership changed"));
+                    }
+                }
+            }
+
+            #[test]
+            fn list_addition_removal_and_order_changes_interrupt_transactions() {
+                for change in 0..6 {
+                    let mut h = Harness::new(vec![native("a"), native("b")], vec![audio(42), audio(43)]);
+                    h.action("next", "a", 0.0);
+                    let apply = h.apply();
+                    match change {
+                        0 => h.raw["players"].as_array_mut().unwrap().push(native("c")),
+                        1 => { h.raw["players"] = json!([]); }
+                        2 => h.raw["players"].as_array_mut().unwrap().reverse(),
+                        3 => h.raw["streams"].as_array_mut().unwrap().push(audio(44)),
+                        4 => { h.raw["streams"] = json!([]); }
+                        _ => h.raw["streams"].as_array_mut().unwrap().reverse(),
+                    }
+                    h.result(&apply, true, None);
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("not retried"));
+                }
+            }
+
+            #[test]
+            fn selection_is_retained_cycles_groups_and_detects_a_b_a_races() {
+                for pending in [false, true] {
+                    let mut h = Harness::new(vec![native("a"), native("b"), native("c")], vec![]);
+                    h.action("next", "", 0.0);
+                    let apply = pending.then(|| h.apply());
+                    h.runtime.select("b".into(), h.now);
+                    h.runtime.select("a".into(), h.now);
+                    if let Some(apply) = &apply { h.result(apply, true, None); }
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("selection changed"));
+                    h.runtime.select("b".into(), h.now);
+                    h.message(json!({"type": "cycle", "snapshot": h.raw}));
+                    assert_eq!(h.runtime.selected, "c");
+                    h.message(json!({"type": "cycle", "snapshot": h.raw}));
+                    assert_eq!(h.runtime.selected, "a");
+                }
+                let mut h = grouped();
+                h.runtime.select("alias".into(), h.now);
+                assert_eq!(h.runtime.selected, "alias");
+                assert_eq!(h.runtime.active, "a");
+                h.capture();
+                assert_eq!(h.runtime.selected, "alias");
+                h.runtime.select("gone".into(), h.now);
+                assert!(h.runtime.failure.contains("no longer available"));
+            }
+
+            #[test]
+            fn native_events_while_awaiting_ack_latch_external_changes_even_if_reverted() {
+                let mut h = grouped();
+                h.action("toggle", "a", 0.0);
+                let apply = h.apply();
+                h.action("next", "a", 0.0);
+                h.raw["players"][1]["instance"] = json!(3);
+                h.capture();
+                assert!(h.runtime.queue.is_empty());
+                h.raw["players"][1]["instance"] = json!(2);
+                h.result(&apply, true, None);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("remaining actions"));
+                assert!(h.runtime.failure.contains("not retried"));
+            }
+
+            #[test]
+            fn seek_revision_can_arrive_in_a_snapshot_before_the_matching_ack() {
+                let mut h = Harness::one();
+                h.action("seek", "a", 20.0);
+                let apply = h.apply();
+                h.action("seek", "a", 50.0);
+                h.raw["players"][0]["seekRevision"] = json!(1);
+                h.capture();
+                assert!(h.runtime.transaction.as_ref().unwrap().interrupted.is_none());
+                h.result(&apply, true, None);
+                assert_eq!(h.apply().operation.value, Some(50.0));
+            }
+
+            #[test]
+            fn pause_all_fans_out_even_to_filtered_players_with_bad_can_pause() {
+                let mut browser = native("browser");
+                browser["identity"] = json!("Chromium");
+                browser["url"] = json!("https://example.test/not-allowed");
+                browser["canPause"] = json!(false);
+                let mut a = native("a");
+                a["canPause"] = json!(false);
+                let mut h = Harness::new(vec![a, browser], vec![]);
+                assert_eq!(h.runtime.groups.len(), 1);
+                h.action("pauseAll", "", 0.0);
+                let first = h.apply();
+                assert_eq!(first.operation.operation, "pause");
+                h.ack(&first);
+                let second = h.apply();
+                assert_eq!(second.operation.player, "browser");
+                assert_eq!(second.operation.operation, "pause");
+                h.ack(&second);
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn next_and_previous_only_address_the_ranked_primary_of_a_selected_alias() {
+                for kind in ["next", "previous"] {
+                    let mut h = grouped();
+                    h.action(kind, "alias", 0.0);
+                    let apply = h.apply();
+                    assert_eq!(apply.operation.player, "a");
+                    assert_eq!(apply.operation.operation, kind);
+                    h.ack(&apply);
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+                let mut h = grouped();
+                h.raw["players"][0]["canNext"] = json!(false);
+                h.capture();
+                h.action("next", "alias", 0.0);
+                assert!(h.runtime.advance(h.now).is_none(), "alias capability cannot override primary");
+            }
+
+            #[test]
+            fn toggle_pause_all_resumes_only_the_current_selected_group_when_idle() {
+                let mut h = Harness::new(vec![native("a"), native("b")], vec![]);
+                for player in h.raw["players"].as_array_mut().unwrap() { player["playing"] = json!(false); }
+                h.capture();
+                h.runtime.select("b".into(), h.now);
+                h.action("togglePauseAll", "a", 0.0);
+                let apply = h.apply();
+                assert_eq!(apply.operation.player, "b");
+                assert_eq!(apply.operation.operation, "play");
+                h.ack(&apply);
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn preflight_validates_every_target_before_the_first_native_dispatch() {
+                let mut h = grouped();
+                h.raw["players"][1]["trackId"] = json!("not/a/path");
+                h.capture();
+                h.action("seek", "a", 20.0);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("Seeking is unavailable"));
+                assert_eq!(h.raw["players"][0]["seekRevision"], 0);
+                let mut h = grouped();
+                h.raw["players"][1]["available"] = json!(false);
+                h.capture();
+                h.action("toggle", "a", 0.0);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("disappeared"));
+            }
+
+            #[test]
+            fn failure_discards_the_entire_queue_and_never_retries_native_calls() {
+                for error in [None, Some("native seek failed")] {
+                    let mut h = Harness::one();
+                    h.action("seek", "a", 20.0);
+                    let apply = h.apply();
+                    h.action("seek", "a", 50.0);
+                    h.result(&apply, false, error);
+                    assert!(h.runtime.queue.is_empty());
+                    assert!(h.runtime.transaction.is_none());
+                    assert!(h.runtime.failure.contains("not retried"));
+                    assert!(h.runtime.advance(h.now).is_none());
+                    h.capture();
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+            }
+
+            #[test]
+            fn orphan_duplicate_and_restart_results_never_mutate_current_snapshots() {
+                let mut h = Harness::one();
+                h.action("next", "a", 0.0);
+                let apply = h.apply();
+                let mut stale = h.raw.clone();
+                stale["players"][0]["title"] = json!("Old snapshot");
+                h.message(json!({"type": "result", "id": apply.id - 1, "ok": true, "snapshot": stale}));
+                assert_eq!(h.state()["players"][0]["title"], "Track a");
+                assert!(h.runtime.transaction.is_some());
+                h.ack(&apply);
+                h.message(json!({"type": "result", "id": apply.id, "ok": true, "snapshot": stale}));
+                assert_eq!(h.state()["players"][0]["title"], "Track a");
+                h.runtime = Runtime::new(h.now + 1.0);
+                h.message(json!({"type": "result", "id": apply.id, "ok": true, "snapshot": stale}));
+                assert!(h.runtime.queue.is_empty());
+                assert!(h.runtime.native.players.is_empty());
+                assert!(h.runtime.advance(h.now + 1.0).is_none());
+            }
+
+            #[test]
+            fn ui_reported_errors_survive_snapshots_ticks_and_selection_until_success() {
+                let mut h = Harness::one();
+                h.message(json!({"type": "report", "error": "Source changed. Try again."}));
+                h.capture();
+                h.message(json!({"type": "tick", "snapshot": h.raw}));
+                h.runtime.select("a".into(), h.now);
+                assert_eq!(h.state()["failure"], "Source changed. Try again.");
+                h.action("next", "a", 0.0);
+                let apply = h.apply();
+                assert_eq!(h.state()["failure"], "Source changed. Try again.");
+                h.ack(&apply);
+                assert_eq!(h.state()["failure"], "");
+            }
+
+            #[test]
+            fn invalid_actions_and_routing_never_reach_native_dispatch() {
+                for (kind, bus, position) in [("move", "a", 0.0), ("seek", "a", -1.0), ("jump", "a", 20.0)] {
+                    let mut h = Harness::one();
+                    h.action(kind, bus, position);
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("Invalid media action"));
+                }
+                let mut h = Harness::one();
+                h.action("next", "gone", 0.0);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("no longer available"));
+                assert!(serde_json::from_value::<ServiceMessage>(json!({"type": "action",
+                    "action": {"kind": "next", "target": "speaker"},
+                    "createdAt": 100, "snapshot": h.raw})).is_err());
+            }
+
+            #[test]
+            fn jumps_use_latest_confirmed_samples_not_display_estimates_and_clamp() {
+                for (sample, delta, target) in [(10.0_f64, 15.0, 25.0), (3.0, -15.0, 0.0), (195.0, 15.0, 200.0)] {
+                    let mut h = Harness::one();
+                    h.now += 2.0;
+                    h.raw["players"][0]["position"] = json!(sample);
+                    h.raw["players"][0]["positionRevision"] = json!(1);
+                    h.capture();
+                    h.now += 1.0;
+                    assert_eq!(h.progress()["position"], (sample + 1.0).min(200.0));
+                    h.action("jump", "a", delta);
+                    assert_eq!(h.apply().operation.value, Some(target));
+                }
+                let mut h = Harness::one();
+                h.now += 5.01;
+                h.action("jump", "a", 15.0);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("fresh native position"));
+                let mut h = Harness::one();
+                h.raw["players"][0]["length"] = Value::Null;
+                h.capture();
+                h.action("jump", "a", 15.0);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("duration"));
+            }
+
+            #[test]
+            fn transport_preserves_browser_bridge_and_all_member_capability_reasons() {
+                let mut h = grouped();
+                let bus = "org.mpris.MediaPlayer2.mprisence_web.generic.pmetadata";
+                h.raw["players"][0]["bus"] = json!(bus);
+                for player in h.raw["players"].as_array_mut().unwrap() {
+                    player["canPlay"] = json!(false);
+                    player["canPause"] = json!(false);
+                }
+                h.capture();
+                let state = h.state();
+                assert_eq!(state["transports"][bus]["enabled"], false);
+                assert!(state["transports"][bus]["reason"].as_str().unwrap().contains("browser bridge does not expose pause"));
+                h.raw["players"][1]["canPause"] = json!(true);
+                h.capture();
+                assert_eq!(h.state()["transports"][bus]["reason"], "Pause");
+                h.raw["players"][1]["available"] = json!(false);
+                h.capture();
+                assert!(h.state()["transports"][bus]["reason"].as_str().unwrap().contains("member is unavailable"));
+                h.raw["players"][1]["available"] = json!(true);
+                for player in h.raw["players"].as_array_mut().unwrap() { player["playing"] = json!(false); }
+                h.capture();
+                let primary = h.runtime.active.clone();
+                assert_eq!(primary, "alias", "paused representative ranking still favors transport support");
+                assert!(h.state()["transports"][&primary]["reason"].as_str().unwrap().contains("does not advertise play"));
+            }
+
+            fn recovered(instance: u64, position_revision: u64) -> crate::playback::RecoveredPlayer {
+                crate::playback::RecoveredPlayer {
+                    player: Player {
+                        bus: ":1.220".into(), identity: "Haruna".into(), title: "Recovered track".into(),
+                        artist: "Artist".into(), album: "Album".into(), playing: true, position: 10.0,
+                        length: Some(200.0), can_play: true, can_pause: false, can_seek: true,
+                        can_next: true, can_previous: true, ..Player::default()
+                    }, instance, track_id: "/track/one".into(), rate: 1.0,
+                    position_supported: true, position_revision, cover: String::new(),
+                }
+            }
+
+            #[test]
+            fn recovered_effects_stay_in_rust_and_preserve_own_seek_revisions() {
+                let mut h = Harness::new(vec![], vec![]);
+                h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                assert_eq!(h.state()["players"][0]["bus"], ":1.220");
+                assert!(h.runtime.reads.is_empty(), "Recovery exclusively owns private position reads");
+                assert_eq!(h.state()["guard"]["players"], json!([]), "private owners never enter the frontend native guard");
+                h.action("seek", ":1.220", 80.0);
+                let apply = h.apply();
+                assert!(apply.recovered);
+                h.runtime.finish_recovered(apply.id, Ok(()), vec![recovered(1, 1)], h.now);
+                assert!(h.runtime.failure.is_empty());
+                assert_eq!(h.state()["players"][0]["seekRevision"], 1);
+                assert_eq!(h.state()["players"][0]["position"], 10.0);
+                assert_eq!(h.progress()["positionSupported"], false);
+                assert!(h.runtime.reads.is_empty(), "private seek refreshes must use Recovery's reader");
+                h.runtime.update_recovered(vec![recovered(1, 2)], h.now);
+                assert_eq!(h.progress()["position"], 10.0);
+                h.action("pauseAll", "", 0.0);
+                let pause = h.apply();
+                assert_eq!(pause.operation.operation, "pause");
+                assert!(pause.recovered, "bad CanPause does not gate private-owner pause-all");
+            }
+
+            #[test]
+            fn recovered_dispatch_revalidates_latest_policy_and_deadline_before_sending() {
+                for change in ["track", "instance", "playback", "capability", "rate", "disappear", "deadline"] {
+                    let mut h = Harness::new(vec![], vec![]);
+                    h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                    h.action("seek", ":1.220", 80.0);
+                    let apply = h.apply();
+                    h.action("next", ":1.220", 0.0);
+                    let mut latest = recovered(1, 1);
+                    match change {
+                        "track" => latest.track_id = "/track/two".into(),
+                        "instance" => latest.instance = 2,
+                        "playback" => latest.player.playing = false,
+                        "capability" => latest.player.can_seek = false,
+                        "rate" => latest.rate = 1.5,
+                        "deadline" => h.now += 5.01,
+                        _ => {}
+                    }
+                    let players = if change == "disappear" { vec![] } else { vec![latest] };
+                    let result = h.runtime.validate_recovered_apply(apply.id, players.clone(), h.now);
+                    assert!(result.is_err(), "{change}");
+                    h.runtime.finish_recovered(apply.id, result, players, h.now);
+                    assert!(h.runtime.queue.is_empty());
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("not retried"));
+                }
+                let mut h = Harness::new(vec![], vec![]);
+                h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                h.action("seek", ":1.220", 80.0);
+                let apply = h.apply();
+                let mut latest = recovered(1, 2);
+                latest.player.position = 11.0;
+                assert!(h.runtime.validate_recovered_apply(apply.id, vec![latest.clone()], h.now).is_ok(), "ordinary samples do not invalidate unchanged grouping");
+                h.runtime.finish_recovered(apply.id, Ok(()), vec![latest], h.now);
+                assert!(h.runtime.failure.is_empty());
+                assert_eq!(h.state()["players"][0]["seekRevision"], 1);
+            }
+
+            #[test]
+            fn recovered_replacement_or_disappearance_interrupts_without_retry() {
+                for replacement in [true, false] {
+                    let mut h = Harness::new(vec![], vec![]);
+                    h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                    h.action("next", ":1.220", 0.0);
+                    let apply = h.apply();
+                    let players = if replacement { vec![recovered(2, 1)] } else { vec![] };
+                    h.runtime.finish_recovered(apply.id, Ok(()), players, h.now);
+                    assert!(h.runtime.failure.contains("not retried"));
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+            }
+
+            #[test]
+            fn capture_requests_are_bounded_and_native_updates_reset_the_silence_clock() {
+                let mut h = Harness::one();
+                assert!(!h.runtime.capture_due(104.99));
+                assert!(h.runtime.capture_due(105.0));
+                assert!(!h.runtime.capture_due(105.5));
+                assert!(!h.runtime.capture_due(109.99));
+                assert!(h.runtime.capture_due(110.0));
+                h.now = 111.0;
+                h.capture();
+                assert!(!h.runtime.capture_due(115.0));
+                assert!(h.runtime.capture_due(116.0));
+            }
+
+            #[test]
+            fn wire_snapshot_needs_no_available_extension_and_guards_compare_raw_fields() {
+                let mut raw = native("a");
+                raw.as_object_mut().unwrap().remove("available");
+                raw["length"] = json!(-1);
+                raw["lengthMicros"] = json!(361929437.5);
+                raw["positionRevision"] = json!(24);
+                let mut h = Harness::new(vec![raw], vec![audio(42)]);
+                let state = h.state();
+                assert_eq!(state["players"][0]["length"], 361.9294375);
+                assert_eq!(state["players"][0]["lengthMicros"], 361929437.5);
+                assert_eq!(state["players"][0]["positionRevision"], 24);
+                assert_eq!(state["players"][0]["volume"], 0.5);
+                assert_eq!(state["transports"]["a"]["enabled"], true);
+                assert!(state["guard"]["players"][0].get("available").is_none());
+                for collection in ["players", "streams"] {
+                    let expected = state["guard"][collection].as_array().unwrap();
+                    let current = h.raw[collection].as_array().unwrap();
+                    assert_eq!(expected.len(), current.len());
+                    for (expected, current) in expected.iter().zip(current) {
+                        for (field, value) in expected.as_object().unwrap() {
+                            assert_eq!(current.get(field), Some(value), "opaque guard field {field}");
+                        }
+                    }
+                }
+                assert_eq!(state["guard"]["players"][0]["length"], -1);
+                h.action("next", "a", 0.0);
+                let apply = h.apply();
+                h.ack(&apply);
+                assert!(h.runtime.failure.is_empty());
+            }
+
+            #[test]
+            fn explicit_unsupported_positions_cannot_become_confirmed_positive_samples() {
+                let mut raw = native("a");
+                raw["positionSupported"] = json!(false);
+                let mut h = Harness::new(vec![raw], vec![]);
+                assert_eq!(h.state()["players"][0]["positionSupported"], false);
+                assert_eq!(h.progress()["positionSupported"], false);
+                assert_eq!(h.model_position(), 0.0);
+                h.now += 1.0;
+                h.raw["players"][0]["positionRevision"] = json!(1);
+                h.capture();
+                assert_eq!(h.model_position(), 0.0);
+                h.raw["players"][0]["positionSupported"] = json!(true);
+                h.capture();
+                assert_eq!(h.model_position(), 10.0);
+                assert_eq!(h.raw["players"][0]["position"], 10.0);
+            }
+
+            #[test]
+            fn frozen_bridge_position_cannot_keep_an_advancing_url_less_chrome_hidden() {
+                let mut bridge = native("bridge");
+                bridge["identity"] = json!("YouTube Music");
+                bridge["browserHint"] = json!("chromium");
+                bridge["url"] = json!("https://music.youtube.com/watch?v=track");
+                bridge["position"] = json!(0.208);
+                let mut chrome = bridge.clone();
+                chrome["bus"] = json!("chrome");
+                chrome["identity"] = json!("Chromium");
+                chrome["browserHint"] = Value::Null;
+                chrome["url"] = json!("");
+                chrome["instance"] = json!(2);
+                chrome["position"] = json!(80.0);
+                let mut h = Harness::new(vec![bridge, chrome], vec![]);
+                assert_eq!(h.runtime.groups[0].players, ["bridge"]);
+                h.now += 5.01;
+                h.raw["players"][1]["position"] = json!(85.0);
+                h.raw["players"][1]["positionRevision"] = json!(1);
+                h.capture();
+                assert_eq!(h.runtime.groups.len(), 1);
+                assert_eq!(h.runtime.groups[0].players, ["bridge", "chrome"]);
+                let model = h.runtime.request(Action::default(), h.now);
+                assert_eq!(model.players[0].position, 0.0);
+                assert_eq!(model.players[1].position, 85.0);
+                assert_eq!(h.raw["players"][0]["position"], 0.208);
+                assert_eq!(h.state()["progress"][0]["samplePosition"], Value::Null);
+            }
+
+            #[test]
+            fn snapshot_free_ticks_emit_only_progress_until_structural_state_changes() {
+                let mut h = Harness::new(vec![native("a"), native("b")], vec![]);
+                let mut output = ServiceOutput::default();
+                let first: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, false).unwrap().unwrap()).unwrap();
+                assert_eq!(first["type"], "state");
+                assert!(output.update(&h.runtime, h.now, false).unwrap().is_none());
+                h.now += 1.25;
+                h.message(json!({"type": "tick"}));
+                let progress: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, true).unwrap().unwrap()).unwrap();
+                assert_eq!(progress["type"], "progress");
+                assert!(progress.get("groups").is_none());
+                assert_eq!(progress["progress"][0]["position"], 11.25);
+                assert_eq!(progress["progress"][0]["samplePosition"], 10.0);
+                assert_eq!(h.state()["players"][0]["position"], 10.0);
+                h.now += 4.0;
+                h.message(json!({"type": "tick"}));
+                let progress: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, true).unwrap().unwrap()).unwrap();
+                assert_eq!(progress["type"], "progress");
+                assert_eq!(progress["progress"][0]["positionSupported"], false);
+                h.runtime.select("b".into(), h.now);
+                let state: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, true).unwrap().unwrap()).unwrap();
+                assert_eq!(state["type"], "state");
+                assert_eq!(state["activePlayer"], "b");
+                for _ in 0..10 {
+                    assert!(output.update(&h.runtime, h.now, false).unwrap().is_none(), "map order must not generate false refreshes");
+                }
+            }
+
+            #[test]
+            fn hidden_timeout_polls_are_silent_until_sample_quality_changes_once() {
+                let mut h = Harness::one();
+                let mut output = ServiceOutput::default();
+                output.update(&h.runtime, h.now, false).unwrap().unwrap();
+                for _ in 0..10 {
+                    h.now += 0.5;
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(output.update(&h.runtime, h.now, false).unwrap().is_none(), "projection alone is not an observation");
+                }
+                h.now += 0.01;
+                h.runtime.advance(h.now);
+                let expired: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, false).unwrap().unwrap()).unwrap();
+                assert_eq!(expired["type"], "progress");
+                assert_eq!(expired["progress"][0]["positionSupported"], false);
+                for _ in 0..10 {
+                    h.now += 0.5;
+                    h.runtime.advance(h.now);
+                    assert!(output.update(&h.runtime, h.now, false).unwrap().is_none());
+                }
+                let tick: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, true).unwrap().unwrap()).unwrap();
+                assert_eq!(tick["type"], "progress");
+            }
+
+            #[test]
+            fn confirmed_reads_publish_corrections_even_at_equal_values_without_ui_ticks() {
+                let mut h = Harness::one();
+                let mut output = ServiceOutput::default();
+                output.update(&h.runtime, h.now, false).unwrap();
+                let request = h.runtime.reads.pop_front().unwrap();
+                h.now += 1.0;
+                assert!(output.update(&h.runtime, h.now, false).unwrap().is_none());
+                h.runtime.position_result(PositionResult { request, position: Some(10.0) }, h.now);
+                let progress: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, false).unwrap().unwrap()).unwrap();
+                assert_eq!(progress["type"], "progress");
+                assert_eq!(progress["progress"][0]["position"], 10.0);
+                assert_eq!(progress["progress"][0]["samplePosition"], 10.0);
+                h.now += 0.5;
+                assert!(output.update(&h.runtime, h.now, false).unwrap().is_none());
+                h.raw["players"][0]["positionRevision"] = json!(1);
+                h.capture();
+                let state: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, false).unwrap().unwrap()).unwrap();
+                assert_eq!(state["type"], "state");
+                assert_eq!(state["progress"][0]["samplePosition"], 10.0);
+            }
+
+            #[test]
+            fn recovery_observations_publish_while_hidden_but_projection_does_not() {
+                let mut h = Harness::new(vec![], vec![]);
+                h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                let mut output = ServiceOutput::default();
+                output.update(&h.runtime, h.now, false).unwrap();
+                h.now += 0.5;
+                assert!(output.update(&h.runtime, h.now, false).unwrap().is_none());
+                h.runtime.update_recovered(vec![recovered(1, 2)], h.now);
+                let state: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, false).unwrap().unwrap()).unwrap();
+                assert_eq!(state["type"], "state");
+                assert_eq!(state["players"][0]["positionRevision"], 2);
+            }
+
+            fn stream_volume_harness() -> Harness {
+                let mut player = native("a");
+                player["volume"] = json!(-1);
+                let mut stream = audio(42);
+                stream["volume"] = json!(0.73);
+                stream["muted"] = json!(true);
+                Harness::new(vec![player], vec![stream])
+            }
+
+            #[test]
+            fn native_volume_descriptor_and_stream_mute_are_independent() {
+                let mut h = Harness::new(vec![native("a")], vec![audio(42)]);
+                h.raw["streams"][0]["muted"] = json!(true);
+                h.raw["streams"][0]["volume"] = json!(0.8);
+                h.capture();
+                assert_eq!(h.state()["volumes"]["a"], json!({
+                    "enabled": true, "value": 0.5, "key": "player:1", "reason": "Media volume (0–100%)",
+                    "muteEnabled": true, "muted": true, "muteReason": "Application stream mute"
+                }));
+                h.volume("a", 0.38);
+                let volume = h.apply();
+                assert_eq!(serde_json::to_value(&volume.operation).unwrap(), json!({"player": "a", "operation": "volume", "value": 0.38}));
+                assert_eq!(volume.guard.players[0]["volume"], h.raw["players"][0]["volume"]);
+                assert!(h.state()["guard"]["players"][0].get("volume").is_none());
+                assert_eq!(h.state()["volumes"]["a"]["value"], 0.5, "dispatch is not an optimistic update");
+                h.ack(&volume);
+                assert_eq!(h.state()["volumes"]["a"]["value"], 0.38);
+                assert_eq!(h.raw["streams"][0]["muted"], true);
+                h.mute("a", false);
+                let mute = h.apply();
+                assert_eq!(serde_json::to_value(&mute.operation).unwrap(), json!({"player": "a", "operation": "mute", "streamId": 42, "muted": false}));
+                h.ack(&mute);
+                assert!(h.runtime.failure.is_empty());
+                assert_eq!(h.raw["players"][0]["volume"], 0.38);
+                assert_eq!(h.raw["streams"][0]["volume"], 0.8);
+                assert_eq!(h.state()["volumes"]["a"]["muted"], false);
+            }
+
+            #[test]
+            fn native_volume_without_an_owned_stream_never_gains_mute() {
+                let mut h = Harness::one();
+                let descriptor = h.state()["volumes"]["a"].clone();
+                assert_eq!(descriptor["enabled"], true);
+                assert_eq!(descriptor["key"], "player:1");
+                assert_eq!(descriptor["muteEnabled"], false);
+                assert_eq!(descriptor["muted"], false);
+                assert!(descriptor["muteReason"].as_str().unwrap().contains("ready, uniquely owned"));
+                h.mute("a", true);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert_eq!(h.raw["players"][0]["volume"], 0.5);
+                h.volume("a", 1.7);
+                let apply = h.apply();
+                assert_eq!(apply.operation.value, Some(1.0));
+                h.ack(&apply);
+                assert_eq!(h.state()["volumes"]["a"]["value"], 1.0);
+            }
+
+            #[test]
+            fn stream_volume_clamps_and_unmutes_only_on_positive_requests() {
+                for (value, expected, unmute) in [(-0.5, 0.0, false), (0.0, 0.0, false), (0.3845678901234567, 0.3845678901234567, true), (1.5, 1.0, true)] {
+                    let mut h = stream_volume_harness();
+                    assert_eq!(h.state()["volumes"]["a"]["key"], "stream:42");
+                    assert_eq!(h.state()["volumes"]["a"]["value"], 0.73);
+                    assert_eq!(h.state()["volumes"]["a"]["reason"], "Application stream volume (0–100%)");
+                    h.volume("a", value);
+                    let apply = h.apply();
+                    assert!(!apply.recovered);
+                    assert_eq!(apply.operation.stream_id, Some(42));
+                    assert_eq!(apply.operation.value, Some(expected));
+                    assert_eq!(apply.operation.muted, unmute.then_some(false));
+                    assert_eq!(apply.guard.streams[0]["volume"], h.raw["streams"][0]["volume"]);
+                    assert_eq!(apply.guard.players[0]["volume"], -1);
+                    assert!(h.state()["guard"]["streams"][0].get("volume").is_none());
+                    h.ack(&apply);
+                    assert!(h.runtime.failure.is_empty());
+                    assert_eq!(h.raw["streams"][0]["volume"], expected);
+                    assert_eq!(h.raw["streams"][0]["muted"], !unmute);
+                    assert_eq!(h.raw["players"][0]["volume"], -1);
+                    assert_eq!(h.raw["players"][0]["seekRevision"], 0);
+                }
+            }
+
+            #[test]
+            fn web_bridge_constant_volume_never_masquerades_as_a_tab_slider() {
+                let bus = "org.mpris.MediaPlayer2.mprisence_web.generic.ptest";
+                for owned_stream in [false, true] {
+                    let mut player = native("a");
+                    player["bus"] = json!(bus);
+                    player["volume"] = json!(1);
+                    let mut h = Harness::new(vec![player], if owned_stream { vec![audio(42)] } else { vec![] });
+                    let descriptor = h.state()["volumes"][bus].clone();
+                    assert_eq!(descriptor["enabled"], owned_stream);
+                    assert_eq!(descriptor["muteEnabled"], owned_stream);
+                    if owned_stream {
+                        assert_eq!(descriptor["key"], "stream:42");
+                        h.volume(bus, 0.4);
+                        let apply = h.apply();
+                        assert_eq!(apply.operation.stream_id, Some(42));
+                        h.ack(&apply);
+                        assert_eq!(h.raw["players"][0]["volume"], 1);
+                    } else {
+                        assert_eq!(descriptor["key"], "");
+                        assert!(descriptor["reason"].as_str().unwrap().starts_with("This browser bridge does not support tab volume. "));
+                        h.volume(bus, 0.4);
+                        assert!(h.runtime.advance(h.now).is_none());
+                    }
+                }
+            }
+
+            #[test]
+            fn private_players_use_owned_native_streams_without_exposing_private_controls_to_js() {
+                let mut stream = audio(42);
+                stream["name"] = json!("Haruna");
+                stream["properties"] = json!({"application.name": "Haruna", "media.name": "Recovered track"});
+                let mut h = Harness::new(vec![], vec![stream]);
+                h.runtime.update_recovered(vec![recovered(1, 1)], h.now);
+                assert_eq!(h.state()["volumes"][":1.220"]["key"], "stream:42");
+                h.volume(":1.220", 0.4);
+                let apply = h.apply();
+                assert!(!apply.recovered, "this is a PipeWire setter, not a private MPRIS call");
+                assert_eq!(apply.operation.player, ":1.220");
+                assert_eq!(apply.operation.stream_id, Some(42));
+                assert_eq!(apply.guard.players, Vec::<Value>::new());
+                h.ack(&apply);
+                assert!(h.runtime.failure.is_empty());
+                h.mute(":1.220", true);
+                let mute = h.apply();
+                h.ack(&mute);
+                assert_eq!(h.state()["volumes"][":1.220"]["muted"], true);
+                assert_eq!(h.raw["streams"][0]["volume"], 0.4);
+                h.raw["streams"] = json!([]);
+                h.capture();
+                assert_eq!(h.state()["players"][0]["bus"], ":1.220", "stream removal cannot hide a live recovered player");
+                assert_eq!(h.state()["volumes"][":1.220"]["enabled"], false);
+            }
+
+            #[test]
+            fn shared_or_unready_streams_are_never_inferred_as_mute_or_fallback_targets() {
+                let mut a = native("a");
+                a["volume"] = json!(-1);
+                let mut b = native("b");
+                b["identity"] = a["identity"].clone();
+                b["desktopEntry"] = a["desktopEntry"].clone();
+                b["volume"] = json!(-1);
+                let mut stream = audio(42);
+                stream["properties"] = json!({"application.name": "App a"});
+                let mut h = Harness::new(vec![a, b], vec![stream]);
+                for bus in ["a", "b"] {
+                    assert_eq!(h.state()["volumes"][bus]["enabled"], false);
+                    assert_eq!(h.state()["volumes"][bus]["muteEnabled"], false);
+                    h.mute(bus, true);
+                    assert!(h.runtime.advance(h.now).is_none());
+                }
+                for (field, value) in [("ready", json!(false)), ("volume", json!(-1)), ("volume", Value::Null)] {
+                    let mut h = stream_volume_harness();
+                    h.raw["streams"][0][field] = value;
+                    h.capture();
+                    assert_eq!(h.state()["volumes"]["a"]["enabled"], false);
+                    assert_eq!(h.state()["volumes"]["a"]["muteEnabled"], false);
+                }
+            }
+
+            #[test]
+            fn unavailable_sources_disable_both_volume_and_mute_with_liveness_feedback() {
+                let mut h = stream_volume_harness();
+                h.raw["players"][0]["available"] = json!(false);
+                h.capture();
+                let descriptor = h.state()["volumes"]["a"].clone();
+                assert_eq!(descriptor["enabled"], false);
+                assert_eq!(descriptor["muteEnabled"], false);
+                assert_eq!(descriptor["muted"], false);
+                assert_eq!(descriptor["muteReason"], "Media source or audio stream ownership is no longer current.");
+                h.volume("a", 0.3);
+                assert!(h.runtime.advance(h.now).is_none());
+                h.mute("a", true);
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn fallback_volume_never_reroutes_to_new_mpris_support_but_mute_still_owns_the_stream() {
+                for mute in [false, true] {
+                    let mut h = stream_volume_harness();
+                    if mute { h.mute("a", false); } else { h.volume("a", 0.4); }
+                    h.raw["players"][0]["volume"] = json!(0.8);
+                    h.capture();
+                    if mute {
+                        let apply = h.apply();
+                        assert_eq!(apply.operation.operation, "mute");
+                        assert_eq!(apply.operation.stream_id, Some(42));
+                        h.ack(&apply);
+                        assert!(h.runtime.failure.is_empty());
+                    } else {
+                        assert!(h.runtime.advance(h.now).is_none());
+                        assert!(h.runtime.failure.contains("not retried"));
+                        assert_eq!(h.raw["streams"][0]["volume"], 0.73);
+                    }
+                }
+                let mut h = Harness::new(vec![native("a")], vec![audio(42)]);
+                h.volume("a", 0.2);
+                h.raw["players"][0]["volume"] = json!(-1);
+                h.capture();
+                assert!(h.runtime.advance(h.now).is_none(), "MPRIS loss must not redirect an old setter to the stream");
+            }
+
+            #[test]
+            fn volume_and_mute_share_queue_bounds_deadlines_and_failure_cancellation() {
+                let mut h = stream_volume_harness();
+                h.action("next", "a", 0.0);
+                let first = h.apply();
+                for _ in 0..8 { h.volume("a", 0.4); }
+                h.mute("a", true);
+                assert_eq!(h.runtime.queue.len(), 8);
+                assert!(h.runtime.failure.contains("queue is full"));
+                h.ack(&first);
+                let volume = h.apply();
+                h.result(&volume, false, Some("native stream setter failed"));
+                assert!(h.runtime.queue.is_empty());
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("not retried"));
+                for pending in [false, true] {
+                    let mut h = stream_volume_harness();
+                    h.mute("a", false);
+                    let apply = pending.then(|| h.apply());
+                    h.volume("a", 0.4);
+                    h.now += 5.01;
+                    if let Some(apply) = apply { h.result(&apply, true, None); }
+                    assert!(h.runtime.advance(h.now).is_none());
+                    assert!(h.runtime.failure.contains("expired"));
+                    assert!(h.runtime.queue.is_empty());
+                }
+            }
+
+            #[test]
+            fn volume_mutations_reject_replacement_and_ownership_changes_before_and_after_dispatch() {
+                for mute in [false, true] {
+                    for pending in [false, true] {
+                        for change in 0..5 {
+                            let mut h = stream_volume_harness();
+                            if mute { h.mute("a", false); } else { h.volume("a", 0.4); }
+                            let apply = pending.then(|| h.apply());
+                            match change {
+                                0 => h.raw["players"][0]["instance"] = json!(99),
+                                1 => h.raw["streams"][0]["instance"] = json!(99),
+                                2 => h.raw["streams"][0]["properties"] = json!({"application.name": "Other owner"}),
+                                3 => h.raw["streams"][0]["ready"] = json!(false),
+                                _ => h.raw["streams"][0]["volume"] = json!(-1),
+                            }
+                            if let Some(apply) = apply { h.result(&apply, true, None); } else { h.capture(); }
+                            assert!(h.runtime.advance(h.now).is_none(), "mute={mute}, pending={pending}, change={change}");
+                            assert!(h.runtime.failure.contains("not retried"));
+                            assert!(h.runtime.queue.is_empty());
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn pending_volume_readiness_aba_cannot_revive_a_setter_or_its_queue() {
+                let mut h = stream_volume_harness();
+                h.volume("a", 0.4);
+                let apply = h.apply();
+                h.mute("a", false);
+                h.raw["players"][0]["volume"] = json!(0.8);
+                h.capture();
+                h.raw["players"][0]["volume"] = json!(-1);
+                h.capture();
+                h.result(&apply, true, None);
+                assert!(h.runtime.failure.contains("not retried"));
+                assert!(h.runtime.queue.is_empty());
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn invalid_volume_input_never_becomes_a_native_operation() {
+                let mut h = stream_volume_harness();
+                for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                    h.runtime.enqueue_volume("a".into(), VolumeMutation::Volume(value), h.now, h.now);
+                    assert!(h.runtime.queue.is_empty());
+                }
+                for value in [json!("0.5"), json!(true), Value::Null] {
+                    assert!(serde_json::from_value::<ServiceMessage>(json!({"type": "volume", "player": "a", "value": value, "snapshot": h.raw, "createdAt": h.now})).is_err());
+                }
+                for muted in [json!("true"), json!(0), Value::Null] {
+                    assert!(serde_json::from_value::<ServiceMessage>(json!({"type": "mute", "player": "a", "muted": muted, "snapshot": h.raw, "createdAt": h.now})).is_err());
+                }
+                h.volume("gone", 0.4);
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("no longer available"));
+                h.message(json!({"type": "volume", "player": "a", "value": 0.4, "createdAt": h.now - 5.01, "snapshot": h.raw}));
+                assert!(h.runtime.advance(h.now).is_none());
+                assert!(h.runtime.failure.contains("expired"));
+            }
+
+            #[test]
+            fn expiry_that_changes_browser_grouping_emits_full_state_not_just_progress() {
+                let mut browser = native("chrome");
+                browser["identity"] = json!("Chromium");
+                browser["url"] = json!("");
+                browser["position"] = json!(40.0);
+                let mut peer = browser.clone();
+                peer["bus"] = json!("bridge");
+                peer["url"] = json!("https://music.youtube.com/watch?v=track");
+                peer["position"] = json!(0.208);
+                let mut h = Harness::new(vec![browser, peer], vec![]);
+                let mut output = ServiceOutput::default();
+                output.update(&h.runtime, h.now, false).unwrap();
+                assert_eq!(h.runtime.groups[0].players, ["bridge"]);
+                h.now += 5.01;
+                h.message(json!({"type": "tick"}));
+                let state: Value = serde_json::from_slice(&output.update(&h.runtime, h.now, true).unwrap().unwrap()).unwrap();
+                assert_eq!(state["type"], "state");
+                assert_eq!(state["groups"][0]["players"], json!(["chrome", "bridge"]));
+            }
+
+            #[test]
+            fn seek_revision_cannot_revert_after_its_expected_post_dispatch_snapshot() {
+                let mut h = Harness::one();
+                h.action("seek", "a", 80.0);
+                let apply = h.apply();
+                h.action("seek", "a", 90.0);
+                h.raw["players"][0]["seekRevision"] = json!(1);
+                h.capture();
+                h.raw["players"][0]["seekRevision"] = json!(0);
+                h.capture();
+                h.raw["players"][0]["seekRevision"] = json!(1);
+                h.result(&apply, true, None);
+                assert!(h.runtime.queue.is_empty());
+                assert!(h.runtime.failure.contains("not retried"));
+                assert!(h.runtime.advance(h.now).is_none());
+            }
+
+            #[test]
+            fn grouped_partial_apply_failure_discards_remaining_members_and_trailing_intents() {
+                let mut h = grouped();
+                h.action("seek", "alias", 80.0);
+                let first = h.apply();
+                h.action("seek", "alias", 90.0);
+                h.ack(&first);
+                let second = h.apply();
+                h.result(&second, false, Some("native setter refused"));
+                assert!(h.runtime.queue.is_empty());
+                assert!(h.runtime.advance(h.now).is_none());
+                assert_eq!(h.raw["players"][0]["seekRevision"], 1);
+                assert_eq!(h.raw["players"][1]["seekRevision"], 0);
+                h.result(&second, true, None);
+                assert!(h.runtime.advance(h.now).is_none(), "a duplicate result is never a retry");
+            }
+
+            #[test]
+            fn capture_ids_share_the_non_reused_apply_id_sequence() {
+                let mut h = Harness::one();
+                let first = h.runtime.capture_id(105.0).unwrap();
+                assert!(h.runtime.capture_id(105.1).is_none());
+                h.action("next", "a", 0.0);
+                let apply = h.apply();
+                assert!(apply.id > first);
+                let next = h.runtime.capture_id(110.0).unwrap();
+                assert!(next > apply.id);
+            }
+
+            struct ServiceDriver {
+                input: std::os::unix::net::UnixStream,
+                output: std::io::BufReader<std::os::unix::net::UnixStream>,
+                done: std::sync::mpsc::Receiver<crate::AppResult<()>>,
+                worker: Option<std::thread::JoinHandle<()>>,
+            }
+
+            impl ServiceDriver {
+                fn start() -> Self {
+                    use std::os::unix::net::UnixStream;
+                    use std::time::Duration;
+                    let (input, service_input) = UnixStream::pair().unwrap();
+                    let (service_output, output) = UnixStream::pair().unwrap();
+                    input.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+                    output.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                    let (sender, done) = std::sync::mpsc::channel();
+                    let worker = std::thread::spawn(move || {
+                        let result = serve_service_io(std::io::BufReader::new(service_input), service_output, None, None);
+                        let _ = sender.send(result);
+                    });
+                    let mut service = Self { input, output: std::io::BufReader::new(output), done, worker: Some(worker) };
+                    assert_eq!(service.line()["type"], "ready");
+                    service
+                }
+
+                fn send(&mut self, value: Value) {
+                    serde_json::to_writer(&mut self.input, &value).unwrap();
+                    self.input.write_all(b"\n").unwrap();
+                    self.input.flush().unwrap();
+                }
+
+                fn line(&mut self) -> Value {
+                    let mut line = String::new();
+                    assert!(self.output.read_line(&mut line).unwrap() > 0, "unexpected service EOF");
+                    assert!(line.len() <= MAX_REQUEST_BYTES);
+                    serde_json::from_str(&line).unwrap()
+                }
+
+                fn until(&mut self, predicate: impl Fn(&Value) -> bool) -> Value {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                    loop {
+                        let value = self.line();
+                        if predicate(&value) { return value; }
+                        assert!(std::time::Instant::now() < deadline, "service response deadline expired");
+                    }
+                }
+
+                fn stop(&mut self) {
+                    self.input.shutdown(std::net::Shutdown::Write).unwrap();
+                    self.done.recv_timeout(std::time::Duration::from_secs(3)).expect("EOF must close without awaiting apply results").unwrap();
+                    self.worker.take().unwrap().join().unwrap();
+                }
+            }
+
+            impl Drop for ServiceDriver {
+                fn drop(&mut self) {
+                    let _ = self.input.shutdown(std::net::Shutdown::Write);
+                    if let Some(worker) = self.worker.take() {
+                        // Closing the read end also releases a writer after a failed assertion.
+                        let _ = self.output.get_ref().shutdown(std::net::Shutdown::Read);
+                        let _ = worker.join();
+                    }
+                }
+            }
+
+            #[test]
+            fn unchanged_snapshots_receive_liveness_acknowledgements_without_ui_updates() {
+                let mut service = ServiceDriver::start();
+                let mut player = native("a");
+                player["playing"] = json!(false);
+                let raw = json!({"players": [player], "streams": []});
+                service.send(json!({"type": "snapshot", "snapshot": raw}));
+                assert_eq!(service.line()["type"], "state");
+                for _ in 0..3 {
+                    service.send(json!({"type": "snapshot", "snapshot": raw}));
+                    assert_eq!(service.line(), json!({"type": "ack"}));
+                }
+                service.send(json!({"type": "report", "error": ""}));
+                assert_eq!(service.line(), json!({"type": "ack"}));
+                service.send(json!({"type": "tick"}));
+                assert_eq!(service.line()["type"], "progress");
+                service.stop();
+            }
+
+            #[test]
+            fn jsonl_service_roundtrips_state_seek_ack_and_snapshot_free_progress() {
+                let mut service = ServiceDriver::start();
+                let mut raw = json!({"players": [native("a")], "streams": [audio(42)]});
+                raw["players"][0].as_object_mut().unwrap().remove("available");
+                service.send(json!({"type": "snapshot", "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state");
+                assert_eq!(state["players"][0]["trackKey"], "/track/a");
+                assert_eq!(state["groups"][0]["streamId"], 42);
+                let created = crate::playback::monotonic_seconds();
+                let target = 237.60851756361546_f64;
+                service.send(json!({"type": "action", "action": {"kind": "seek", "player": "a", "position": target}, "snapshot": raw, "createdAt": created}));
+                let apply = service.until(|v| v["type"] == "apply");
+                assert_eq!(apply["operation"]["value"].as_f64().unwrap().to_bits(), target.to_bits());
+                let expires_at = apply["expiresAt"].as_f64().unwrap();
+                assert!(expires_at > created && expires_at <= created + 5.0, "source freshness can impose an earlier deadline");
+                assert_eq!(apply["guard"]["players"][0]["seekRevision"], 0);
+                raw["players"][0]["seekRevision"] = json!(1);
+                service.send(json!({"type": "result", "id": apply["id"], "ok": true, "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state" && v["players"][0]["seekRevision"] == 1);
+                assert_eq!(state["players"][0]["position"], 10.0, "dispatch cannot optimistically modify a sample");
+                assert_eq!(state["progress"][0]["positionSupported"], false);
+                service.send(json!({"type": "tick"}));
+                let progress = service.until(|v| v["type"] == "progress");
+                assert_eq!(progress["progress"][0]["samplePosition"], Value::Null);
+                raw["players"][0]["position"] = json!(target);
+                raw["players"][0]["positionRevision"] = json!(1);
+                service.send(json!({"type": "snapshot", "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state" && v["players"][0]["positionRevision"] == 1);
+                assert_eq!(state["progress"][0]["samplePosition"].as_f64().unwrap().to_bits(), target.to_bits());
+                service.stop();
+            }
+
+            #[test]
+            fn jsonl_service_roundtrips_owned_stream_volume_and_mute_with_helper_alive() {
+                let mut service = ServiceDriver::start();
+                let h = stream_volume_harness();
+                let mut raw = h.raw;
+                service.send(json!({"type": "snapshot", "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state");
+                assert_eq!(state["volumes"]["a"]["key"], "stream:42");
+                service.send(json!({"type": "volume", "player": "a", "value": 0.47,
+                    "createdAt": crate::playback::monotonic_seconds(), "snapshot": raw}));
+                let apply = service.until(|v| v["type"] == "apply");
+                assert_eq!(apply["operation"], json!({"player": "a", "operation": "volume", "streamId": 42, "value": 0.47, "muted": false}));
+                raw["streams"][0]["volume"] = json!(0.47);
+                raw["streams"][0]["muted"] = json!(false);
+                service.send(json!({"type": "result", "id": apply["id"], "ok": true, "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state" && v["volumes"]["a"]["value"] == 0.47);
+                assert_eq!(state["volumes"]["a"]["muted"], false);
+                assert_eq!(state["players"][0]["seekRevision"], 0);
+                service.send(json!({"type": "mute", "player": "a", "muted": true,
+                    "createdAt": crate::playback::monotonic_seconds(), "snapshot": raw}));
+                let apply = service.until(|v| v["type"] == "apply");
+                assert_eq!(apply["operation"], json!({"player": "a", "operation": "mute", "streamId": 42, "muted": true}));
+                raw["streams"][0]["muted"] = json!(true);
+                service.send(json!({"type": "result", "id": apply["id"], "ok": true, "snapshot": raw}));
+                let state = service.until(|v| v["type"] == "state" && v["volumes"]["a"]["muted"] == true);
+                assert_eq!(state["volumes"]["a"]["value"], 0.47);
+                assert_eq!(state["players"][0]["volume"].as_f64(), Some(-1.0));
+                assert_eq!(state["failure"], "");
+                service.stop();
+            }
+
+            #[test]
+            fn jsonl_service_keeps_serving_invalid_utf8_json_and_oversized_lines_without_leaking_input() {
+                let mut service = ServiceDriver::start();
+                for invalid in [b"{\"private-secret-\\u001b\":\n".as_slice(), b"\xff\n".as_slice()] {
+                    service.input.write_all(invalid).unwrap();
+                    let state = service.until(|v| v["type"] == "state" && v["failure"].as_str().is_some_and(|s| s.contains("Invalid media service JSON")));
+                    assert!(!state.to_string().contains("private-secret"));
+                    assert_eq!(state["groups"], json!([]));
+                }
+                service.input.write_all(&vec![b'x'; MAX_REQUEST_BYTES + 1]).unwrap();
+                service.input.write_all(b"\n").unwrap();
+                let state = service.until(|v| v["type"] == "state" && v["failure"].as_str().is_some_and(|s| s.contains("1 MiB")));
+                assert_eq!(state["ready"], true);
+                service.send(json!({"type": "snapshot", "snapshot": {"players": [native("a")], "streams": []}}));
+                let state = service.until(|v| v["type"] == "state" && v["activePlayer"] == "a");
+                assert_eq!(state["players"][0]["title"], "Track a");
+                service.stop();
+            }
+
+            #[test]
+            fn jsonl_service_eof_closes_with_an_outstanding_apply_and_queued_mutations() {
+                let mut service = ServiceDriver::start();
+                let raw = json!({"players": [native("a")], "streams": []});
+                let action = |position| json!({"type": "action", "action": {"kind": "seek", "player": "a", "position": position}, "createdAt": crate::playback::monotonic_seconds(), "snapshot": raw});
+                service.send(action(20.0));
+                let first = service.until(|v| v["type"] == "apply");
+                assert_eq!(first["operation"]["value"], 20.0);
+                service.send(action(30.0));
+                service.send(action(40.0));
+                service.stop();
+                let mut line = String::new();
+                while service.output.read_line(&mut line).unwrap() != 0 {
+                    let value: Value = serde_json::from_str(&line).unwrap();
+                    assert_ne!(value["type"], "apply", "no pending intent may dispatch after EOF");
+                    line.clear();
+                }
+            }
+
+            #[test]
+            fn bounded_serialization_never_emits_oversized_partial_states_or_private_errors() {
+                let mut h = Harness::one();
+                let bytes = service_bytes(&h.runtime.state(h.now)).unwrap();
+                assert!(bytes.len() <= MAX_REQUEST_BYTES);
+                assert_eq!(bytes.last(), Some(&b'\n'));
+                h.raw["players"][0]["title"] = json!("x".repeat(MAX_REQUEST_BYTES / 3));
+                h.capture();
+                assert!(service_bytes(&h.runtime.state(h.now)).is_err());
+                h.runtime.protocol_failure("Media service state exceeds the 1 MiB limit.");
+                let safe: Value = serde_json::from_slice(&service_bytes(&h.runtime.state(h.now)).unwrap()).unwrap();
+                assert_eq!(safe["groups"], json!([]));
+                assert_eq!(safe["guard"]["players"], json!([]));
+                assert!(safe["failure"].as_str().unwrap().contains("1 MiB"));
+                assert_eq!(failure_text("Bad\n\u{001b}native error"), "Badnative error");
+            }
+        }
+    };
     (playback) => {
         mod tests {
             use super::*;

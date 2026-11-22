@@ -112,6 +112,7 @@ name = "clipboard-custom"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "serde",
  "serde_json",
 ]
@@ -474,6 +475,8 @@ checksum = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8"
 name = "media-control"
 version = "0.1.0"
 dependencies = [
+ "dbus",
+ "libc",
  "lofty",
  "serde",
  "serde_json",
@@ -580,6 +583,8 @@ dependencies = [
 name = "panel-launcher"
 version = "0.1.0"
 dependencies = [
+ "dbus",
+ "libc",
  "serde",
  "serde_json",
 ]

@@ -251,7 +251,10 @@ export class NetworkPanel {
             this.setPasswordVisible(!this.password.visibility), ['password-reveal']);
         this.setPasswordVisible(false);
         this.submit = button('Connect', () => this.submitPassword());
-        this.password.connect('changed', () => { this.submit.sensitive = this.password.get_text().length > 0; });
+        this.password.connect('changed', () => {
+            const row = this.controller.credentialRow;
+            this.submit.sensitive = Boolean(this.password.get_text().length > 0 && row?.canActivate && row.acceptsPassword);
+        });
         this.password.connect('activate', () => this.submitPassword());
         const cancel = button('Cancel', () => { this.clearPassword(); this.controller.cancelCredentials(); });
         this.credentials = prompt(palette, [this.credentialName,
@@ -484,10 +487,11 @@ export class NetworkPanel {
                     : dataRow.wireless ? 'network-wireless-symbolic' : 'network-wired-symbolic';
                 row.connect.update_property([Gtk.AccessibleProperty.LABEL],
                     [`${dataRow.connected ? 'Disconnect' : 'Connect'} ${dataRow.name}`]);
-                row.connect.sensitive = !dataRow.changing && (!dataRow.wireless || (c.wifiEnabled && c.wifiHardwareEnabled));
+                row.connect.sensitive = Boolean(dataRow.connected ? dataRow.canDisconnect : dataRow.canActivate);
+                row.profile.sensitive = dataRow.canActivate === true;
 
                 row.remove.visible = undetected;
-                row.remove.sensitive = Boolean(dataRow.known && !dataRow.changing);
+                row.remove.sensitive = dataRow.canForget === true;
                 row.remove.update_property([Gtk.AccessibleProperty.LABEL], [`Forget saved network ${dataRow.name}`]);
                 row.info.visible = Boolean(!undetected && (dataRow.connected || dataRow.known));
                 row.secondary.visible = row.metadata.visible;
@@ -568,7 +572,8 @@ export class NetworkPanel {
         this.renderRows();
         this.credentials.visible = Boolean(shown && c.page === 'list' && c.credentialRow);
         this.credentialName.set_label(this.credentials.visible ? `Password · ${c.credentialRow.name}` : '');
-        this.submit.sensitive = this.password.get_text().length > 0;
+        this.submit.sensitive = Boolean(this.password.get_text().length > 0
+            && c.credentialRow?.canActivate && c.credentialRow.acceptsPassword);
         this.forget.visible = Boolean(shown && c.page === 'list' && c.forgetKey);
         const forgetting = c.rows.find(row => row.key === c.forgetKey);
         this.forgetMessage.set_label(forgetting
@@ -632,15 +637,17 @@ export class NetworkPanel {
         }
         this.addressGroup.visible = this.linkGroup.visible = Boolean(row.connected);
         this.linkHeading.set_label(row.wireless ? 'Wireless link' : 'Wired link');
+        // Open/OWE has no password line; visibility is presentation, not authorization.
         const hasPassword = Boolean(row.wireless && !['open', 'owe'].includes(row.securityType)
-                    && (row.connected || row.known));
+            && (row.connected || row.known));
         const requested = Boolean(hasPassword && c.secretRequested);
         const revealed = Boolean(requested && !c.secretLoading && c.secret);
         this.reveal.get_child().icon_name = requested ? 'view-conceal-symbolic' : 'view-reveal-symbolic';
         this.reveal.update_property([Gtk.AccessibleProperty.LABEL], [requested ? 'Hide password' : 'Reveal password']);
         this.passwordCaption.visible = this.passwordLine.visible = this.reveal.visible = hasPassword;
         // Keep Hide usable while authorization is pending, so it can cancel the read.
-        this.reveal.sensitive = Boolean(requested || (hasPassword && !row.changing));
+        this.reveal.sensitive = Boolean(requested || (hasPassword && row.canShare
+            && (!c.selectedProfileUuid || profiles.some(profile => profile.uuid === c.selectedProfileUuid && profile.canShare))));
         this.secretLoading.visible = Boolean(hasPassword && c.secretLoading);
         this.secret.set_label(revealed ? c.secret : '*******');
         this.secret.selectable = revealed;
@@ -754,40 +761,46 @@ export const NetworkApplication = GObject.registerClass({ GTypeName: 'NetworkPan
             case 'status': return this.controller.status();
             case 'toggle': this.panel.toggle(command.monitor || ''); break;
             case 'close': this.panel.close(); break;
-            case 'toggleWifi':
-                this.controller.toggleWifi();
+            case 'toggleWifi': {
+                const result = this.controller.toggleWifi();
+                if (result?.then) return result.then(error => {
+                    if (error) throw new Error(error);
+                    return 'ok';
+                });
                 if (this.controller.error) throw new Error(this.controller.error);
                 break;
+            }
             default: throw new Error('Unknown network panel command.');
             }
             return 'ok';
         }
 
         vfunc_request(request, connection) {
-            let response;
-            try { response = this.handleRequest(request); }
-            catch (error) { response = JSON.stringify({ error: error.message || String(error) }); }
             const close = () => connection.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
                 try { source.close_finish(result); }
                 catch (error) { console.warn(`Network request close: ${error.message}`); }
             });
-            try {
-                AstalIO.write_sock(connection, response, (_, result) => {
-                    try { AstalIO.write_sock_finish(result); }
-                    catch (error) { console.warn(`Network request reply: ${error.message}`); }
-                    finally { close(); }
-                });
-            } catch (error) {
-                console.warn(`Network request reply: ${error.message}`);
-                close();
-            }
+            const reply = response => {
+                try {
+                    AstalIO.write_sock(connection, response, (_, result) => {
+                        try { AstalIO.write_sock_finish(result); }
+                        catch (error) { console.warn(`Network request reply: ${error.message}`); }
+                        finally { close(); }
+                    });
+                } catch (error) {
+                    console.warn(`Network request reply: ${error.message}`);
+                    close();
+                }
+            };
+            Promise.resolve().then(() => this.handleRequest(request)).then(reply,
+                error => reply(JSON.stringify({ error: error.message || String(error) })));
         }
 
         startPanel() {
             if (this.started) return;
             this.started = true;
             const palette = loadTheme(GLib.getenv('NETWORK_PANEL_CONFIG'), GLib.getenv('NETWORK_PANEL_PALETTE'));
-            const backend = new NetworkBackend({ onChange: () => this.panel?.render() });
+            const backend = new NetworkBackend();
             this.controller = new NetworkController({ backend, onChange: () => this.panel?.render(), ...controllerRuntime() });
             this.panel = new NetworkPanel({ app: this, controller: this.controller, palette });
             this.controller.start();

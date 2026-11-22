@@ -7,7 +7,7 @@ import AstalIO from 'gi://AstalIO';
 import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { ClipboardBackend } from './backend.js';
-import { ClipboardModel, TABS, editable, localFilePath, title } from './logic.js';
+import { ClipboardModel, TABS, editable, title } from './logic.js';
 import { loadPanelStyle } from '../../live-style.js';
 
 const PANEL_WIDTH = 450;
@@ -186,7 +186,7 @@ export class ClipboardPanel {
             badge.visible = pinned;
             pin.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
                 [pinned ? 'Unpin item' : 'Pin item', pinned ? 'Unpin this item' : 'Pin this item to the top']);
-            const localFile = Boolean(localFilePath(entry));
+            const localFile = Boolean(entry?.can_trash);
             remove.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
                 [localFile ? 'Move file to Trash' : 'Delete item',
                     localFile ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry']);
@@ -262,7 +262,6 @@ export class ClipboardPanel {
         this.rendering = true;
         try {
             const model = this.model, item = model.editor;
-            if (this.opened) this.backend.watchFiles(model.items);
             const rows = model.rows;
             this.renderRows(rows);
             const index = rows.findIndex(row => row.id === item?.id);
@@ -359,7 +358,7 @@ export class ClipboardPanel {
     }
     hide() {
         this.opened = false;
-        this.backend.unwatchFiles();
+        this.backend.unwatch();
         this.window.keymode = Astal.Keymode.NONE;
         this.revealer.reveal_child = false;
     }
@@ -428,8 +427,7 @@ export function main() {
             app.backend = new ClipboardBackend({ onChange: options => { if (app.panel.opened) void app.model.refresh(options); } });
             app.model = new ClipboardModel({ request: message => app.backend.request(message),
                 publish: payload => app.backend.publish(payload), scheduleAutosave,
-
-                trashFile: path => app.backend.trashFile(path), onChange: () => app.panel?.render() });
+                onChange: () => app.panel?.render() });
             app.panel = new ClipboardPanel({ app, model: app.model, backend: app.backend, palette });
             app.connect('notify::monitors', () => {
                 if (app.panel.monitor && !app.get_monitors().includes(app.panel.monitor)) void app.panel.close();

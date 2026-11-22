@@ -1,8 +1,9 @@
-//! Custom media policy for the native media frontend.
+//! Media backend for the Astal frontend.
 //!
-//! The frontend supplies MPRIS/audio snapshots and executes native operations.
-//! This helper owns grouping, browser filtering, stream ownership, and metadata
-//! that those native services do not provide. It has no GUI or D-Bus backend.
+//! Astal supplies native MPRIS/audio snapshots and executes guarded native calls.
+//! Rust owns grouping, selection, timing, action transactions, private-player
+//! discovery and D-Bus recovery, stream ownership, artwork, and credit lookups.
+//! The resident service has no GUI; the pure model command remains available.
 
 // The explicit integration target owns all tests; keep library test builds valid.
 #[cfg(test)]

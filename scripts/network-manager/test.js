@@ -1,6 +1,6 @@
 // One cross-runtime entry point; runtime-specific imports stay inside their modes.
 // Node: node --test test.js; node test.js --ui --ags PATH --palette FILE
-// GJS: panel-gjs -m test.js native|runtime|ui|application
+// GJS: panel-gjs -m test.js adapter|runtime|ui|application (native aliases adapter)
 // ui/application require --ui's authenticated Xvfb and service-free private bus.
 
 async function isolatedUI(argv) {
@@ -211,7 +211,7 @@ async function isolatedUI(argv) {
         fs.writeFileSync(guard, `#!${process.execPath}\nconst fs = require('node:fs');\n`
             + `fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.argv) + '\\n');\nprocess.exit(125);\n`,
             { mode: 0o700 });
-        for (const name of ['DASHBOARD_PANEL', 'MEDIA_PANEL']) env[name] = guard;
+        for (const name of ['DASHBOARD_PANEL', 'MEDIA_PANEL', 'PANEL_BACKEND']) env[name] = guard;
         const config = join(root, 'bus.conf');
         const socket = join(env.XDG_RUNTIME_DIR, 'bus').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         // Omit all service directories: nothing, including desktop portals, can autoactivate.
@@ -272,6 +272,442 @@ async function isolatedUI(argv) {
 }
 
 // Consolidated suites follow. Each owns its original fixture/helper namespace.
+
+// Test-only Rust snapshots: these stamps/permissions are fixtures, not a second
+// backend. Overrides let UI tests prove the descriptors outrank presentation.
+function mockNetworkRow(row, radios = true) {
+    const allowed = row.authorization || {};
+    const password = ['wep', 'psk', 'sae'].includes(row.securityType);
+    Object.assign(row, {
+        canActivate: !row.changing && (!row.wireless || radios)
+            && (row.known || ['open', 'owe'].includes(row.securityType) || password),
+        canDisconnect: !row.changing && row.connected && (!row.wireless || radios),
+        canForget: !row.changing && row.known,
+        canShare: row.wireless && (row.connected || row.known) && !row.changing
+            && ['open', 'wep', 'psk', 'sae'].includes(row.securityType),
+        acceptsPassword: password && row.profiles.length <= 1,
+        ...allowed,
+    });
+    row.requiresPassword = allowed.requiresPassword ?? (!row.known && row.acceptsPassword);
+    row.selectionStamp ??= 'mock-selection';
+    row.profiles.forEach(profile => { profile.canShare = profile.authorization?.canShare ?? row.canShare; });
+    const profiles = row.profiles.map(profile => profile.uuid).sort();
+    if (!row.profileStamp || row.profileStamp.startsWith('mock-profiles:'))
+        row.profileStamp = 'mock-profiles:' + JSON.stringify(profiles);
+    if (!row.savedIdentity || row.savedIdentity.startsWith('mock-saved:'))
+        row.savedIdentity = 'mock-saved:' + JSON.stringify([row.key, row.interface, profiles]);
+    if (!row.savedInfoStamp || row.savedInfoStamp.startsWith('mock-info:'))
+        row.savedInfoStamp = row.known && !row.connected ? 'mock-info:' + JSON.stringify([row.key, row.interface, row.ssid,
+            row.securityType, row.savedIdentity, row.profileStamp, row.changing]) : '';
+    if (!row.credentialStamp || row.credentialStamp.startsWith('mock-credential:'))
+        row.credentialStamp = 'mock-credential:' + JSON.stringify([row.key, row.savedIdentity, row.profileStamp, row.acceptsPassword]);
+    return row;
+}
+
+// Bounded byte pipes and a virtual clock. Neither Node nor GJS adapter tests
+// spawn a helper, import NM, or send requests to a live network service.
+function networkProtocolMock() {
+    const timers = new Map(), children = [];
+    let timerSerial = 0;
+    class Cancellable {
+        constructor() { this.cancelled = false; this.handlers = new Map(); this.serial = 0; }
+        connect(callback) { const id = ++this.serial; this.handlers.set(id, callback); return id; }
+        disconnect(id) { this.handlers.delete(id); }
+        is_cancelled() { return this.cancelled; }
+        cancel() {
+            if (this.cancelled) return;
+            this.cancelled = true;
+            for (const callback of [...this.handlers.values()]) callback();
+        }
+    }
+    class Bytes {
+        constructor(bytes) { this.bytes = new Uint8Array(bytes); }
+        toArray() { return this.bytes; }
+    }
+    class Child {
+        constructor(argv, flags) {
+            this.argv = [...argv]; this.flags = flags; this.messages = [];
+            this.reads = []; this.writes = []; this.incoming = [];
+            this.autoWrite = true; this.killed = this.readFinishes = this.writeFinishes = this.waitFinishes = 0;
+            this.sent = [];
+            this.input = {
+                write_bytes_async: (bytes, _priority, _io, callback) => {
+                    this.writes.push({ bytes: bytes.toArray(), callback });
+                    if (this.autoWrite) Promise.resolve().then(() => this.write());
+                },
+                write_bytes_finish: result => {
+                    this.writeFinishes++;
+                    if (result.error) throw result.error;
+                    return result.written;
+                },
+            };
+            this.output = {
+                read_bytes_async: (size, _priority, _io, callback) => { this.reads.push({ size, callback }); this.pump(); },
+                read_bytes_finish: result => {
+                    this.readFinishes++;
+                    if (result.error) throw result.error;
+                    return new Bytes(result.bytes);
+                },
+            };
+        }
+        get_stdin_pipe() { return this.input; }
+        get_stdout_pipe() { return this.output; }
+        wait_async(_io, callback) { this.wait = callback; }
+        wait_finish() { this.waitFinishes++; }
+        force_exit() { this.killed++; Promise.resolve().then(() => this.exit()); }
+        exit() { const callback = this.wait; this.wait = null; callback?.(this, {}); }
+        write(count = this.writes[0]?.bytes.length, error = null) {
+            const pending = this.writes.shift();
+            if (!pending) return;
+            if (!error && count > 0) {
+                this.sent.push(...pending.bytes.slice(0, count));
+                let end;
+                while ((end = this.sent.indexOf(10)) !== -1) {
+                    const message = JSON.parse(new TextDecoder().decode(new Uint8Array(this.sent.splice(0, end + 1))));
+                    this.messages.push(message);
+                    this.onMessage?.(message);
+                }
+            }
+            pending.callback(this.input, { written: count, error });
+        }
+        feed(value) { this.feedBytes(new TextEncoder().encode(JSON.stringify(value) + '\n')); }
+        feedBytes(bytes) { this.incoming.push({ bytes }); this.pump(); }
+        eof() { this.feedBytes(new Uint8Array()); }
+        pump() {
+            while (this.incoming.length && this.reads.length) {
+                const { size, callback } = this.reads.shift();
+                const next = this.incoming.shift();
+                const bytes = next.bytes.slice(0, size);
+                if (next.bytes.length > size) this.incoming.unshift({ bytes: next.bytes.slice(size) });
+                callback(this.output, { bytes });
+            }
+        }
+    }
+    const launch = (argv, flags) => { const child = new Child(argv, flags); children.push(child); return child; };
+    const GLib = {
+        PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false, Bytes,
+        getenv: () => null,
+        timeout_add: (_priority, delay, callback) => { const id = ++timerSerial; timers.set(id, { delay, callback }); return id; },
+        source_remove: id => timers.delete(id),
+    };
+    const Gio = { Cancellable, Subprocess: { new: launch },
+        SubprocessFlags: { STDIN_PIPE: 1, STDOUT_PIPE: 2, STDERR_SILENCE: 4, STDOUT_SILENCE: 8 } };
+    function fire(delay) {
+        for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.callback(); }
+    }
+    return { GLib, Gio, launch, children, timers, fire };
+}
+
+function protocolState(rows = []) {
+    return { type: 'state', rows, available: true, wifiAvailable: true, wifiEnabled: true, wifiHardwareEnabled: true,
+        identities: Object.fromEntries(rows.map(row => [row.key, row.connected ? {
+            interface: row.interface, ssid: row.ssid, profileUuid: row.profiles[0]?.uuid || '',
+            bssid: '02:00:00:00:00:01', activePath: '/active/test',
+        } : null])),
+        details: Object.fromEntries(rows.map(row => [row.key, { ssid: row.ssid, interface: row.interface,
+            profileId: row.profiles[0]?.id || '', profileUuid: row.profiles[0]?.uuid || '', ipv4: ['192.0.2.10/24'] }])),
+    };
+}
+
+async function nodeAdapterTests() {
+    const { test } = await import('node:test');
+    const { default: assert } = await import('node:assert/strict');
+    const { readFileSync } = await import('node:fs');
+    const { default: vm } = await import('node:vm');
+    const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
+        .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+    async function flush() { for (let index = 0; index < 12; index++) await Promise.resolve(); }
+    const row = (overrides = {}) => mockNetworkRow({ key: 'wifi:raw-ff', name: 'Cafe', ssid: 'Cafe', interface: 'wlan0',
+        wireless: true, known: true, connected: true, changing: false, securityType: 'psk',
+        profiles: [{ id: 'Cafe', uuid: 'profile-a' }], ...overrides });
+    function fixture(t, { opened = false, override = null, start = true } = {}) {
+        const mock = networkProtocolMock();
+        mock.GLib.getenv = () => override;
+        const NetworkBackend = vm.runInNewContext(source + '\nNetworkBackend;', { ...mock, TextEncoder, TextDecoder, console });
+        let changes = 0;
+        const backend = new NetworkBackend({ onChange: () => changes++ });
+        t.after(() => backend.dispose());
+        backend.setOpened(opened);
+        if (start) backend.start();
+        return { backend, mock, child: mock.children[0], changes: () => changes };
+    }
+    const plain = value => JSON.parse(JSON.stringify(value));
+
+    test('network adapter imports no NM/AstalNetwork and launches the exact backend argv once', async t => {
+        assert.doesNotMatch(source, /AstalNetwork|gi:\/\/NM|NM\./);
+        const { backend, child, mock } = fixture(t);
+        backend.start(); await flush();
+        assert.deepEqual(child.argv, ['panel-launcher', 'backend', 'network']);
+        assert.deepEqual(child.messages, [{ method: 'setOpened', args: [false] }]);
+        assert.equal(child.flags, 7); assert.equal(mock.children.length, 1);
+    });
+    test('network adapter passes PANEL_BACKEND as a literal executable and remembers pre-start visibility', async t => {
+        const { backend, child } = fixture(t, { override: '/offline/path with spaces/backend', opened: true });
+        await flush(); backend.setOpened(false); await flush();
+        assert.equal(child.argv[0], '/offline/path with spaces/backend');
+        assert.deepEqual(child.messages, [{ method: 'setOpened', args: [true] }, { method: 'setOpened', args: [false] }]);
+    });
+    test('network adapter starts with safe empty synchronous caches, without implicit requests', t => {
+        const { backend, mock } = fixture(t, { start: false });
+        assert.deepEqual(plain(backend.rows), []); assert.equal(backend.available, false);
+        assert.equal(backend.wifiAvailable, false); assert.equal(backend.wifiEnabled, false);
+        assert.equal(backend.wifiHardwareEnabled, false); assert.equal(backend.getIdentity('missing'), null);
+        assert.throws(() => backend.details('missing'), /not available/);
+        assert.equal(mock.children.length, 0);
+    });
+    test('network adapter applies full state atomically and returns independent plain cached snapshots', t => {
+        const { backend, child, changes } = fixture(t);
+        const state = protocolState([row()]);
+        backend.onChange = () => {
+            assert.equal(backend.rows[0].key, state.rows[0].key);
+            assert.equal(backend.getIdentity(state.rows[0].key).activePath, '/active/test');
+            assert.equal(backend.details(state.rows[0].key).ipv4[0], '192.0.2.10/24');
+        };
+        child.feed(state);
+        const rows = backend.rows, identity = backend.getIdentity(state.rows[0].key), details = backend.details(state.rows[0].key);
+        rows[0].profiles[0].uuid = 'changed'; rows[0].canActivate = false;
+        identity.ssid = 'changed'; details.ipv4.push('198.51.100.1/24');
+        assert.equal(backend.rows[0].profiles[0].uuid, 'profile-a'); assert.equal(backend.rows[0].canActivate, true);
+        assert.equal(backend.getIdentity(state.rows[0].key).ssid, 'Cafe'); assert.equal(backend.details(state.rows[0].key).ipv4.length, 1);
+        assert.equal(changes(), 0);
+        backend.onChange = () => {};
+        child.feed({ ...protocolState(), available: false, wifiAvailable: false, wifiEnabled: false, wifiHardwareEnabled: false });
+        assert.deepEqual(plain(backend.rows), []); assert.equal(backend.available, false); assert.equal(backend.getIdentity(state.rows[0].key), null);
+        assert.throws(() => backend.details(state.rows[0].key), /not available/);
+    });
+    test('network adapter preserves opaque raw-SSID keys, stamps, descriptors and non-finite detection as JSON null', t => {
+        const { backend, child, changes } = fixture(t);
+        child.feed(protocolState([row({ key: 'wlan0:ff:psk', ssid: '\ufffd', strength: null }),
+            row({ key: 'wlan0:fe:psk', ssid: '\ufffd', strength: 0, authorization: { canActivate: false } })]));
+        const rows = backend.rows;
+        assert.notEqual(rows[0].key, rows[1].key); assert.notEqual(rows[0].savedIdentity, rows[1].savedIdentity);
+                assert.equal(rows[1].canActivate, false);
+        assert.equal(rows[0].strength, null); assert.equal(rows[1].strength, 0); assert.equal(changes(), 1);
+    });
+    test('network adapter decodes split UTF-8 and multiple JSONL frames without reading secrets into its state', async t => {
+        const { backend, child } = fixture(t);
+        const bytes = new TextEncoder().encode(JSON.stringify(protocolState([row({ name: 'Caf\u00e9 \ud83c\udf10' })])) + '\n' + JSON.stringify(protocolState()) + '\n');
+        const split = bytes.indexOf(0xc3) + 1;
+        child.feedBytes(bytes.slice(0, split)); assert.equal(backend.rows.length, 0);
+        child.feedBytes(bytes.slice(split)); assert.equal(backend.rows.length, 0); assert.equal(backend.available, true);
+        const work = backend.readSavedSecret('wifi:raw-ff', 'profile-a'); await flush();
+        child.feed({ id: child.messages.at(-1).id, result: { password: 'offline-only-secret', authentication: 'WPA', hidden: false } });
+        assert.ok((await work).password === 'offline-only-secret', 'request-local secret returned without printing');
+        assert.ok(!JSON.stringify([backend.rows, backend._identities, backend._details]).includes('offline-only-secret'));
+    });
+    for (const method of ['toggleWifi', 'readSecret', 'readSavedSecret', 'activate', 'disconnect', 'forget']) {
+        test(`network adapter forwards ${method} with exact serializable args and no cancellable`, async t => {
+            const { backend, child, mock } = fixture(t); await flush();
+            const io = new mock.Gio.Cancellable();
+            const identity = { ...protocolState([row()]).identities['wifi:raw-ff'] };
+            const args = method === 'toggleWifi' ? [] : method === 'readSecret' ? ['wifi:raw-ff', identity, io]
+                : method === 'readSavedSecret' ? ['wifi:raw-ff', 'profile-a', io]
+                : method === 'activate' ? ['wifi:raw-ff', { profileUuid: 'profile-a', password: 'offline-fixture', cancellable: io }]
+                : ['wifi:raw-ff', io];
+            const guarded = ['activate', 'forget', 'readSecret', 'readSavedSecret'].includes(method);
+            if (method === 'activate') args[1].expectedStamp = 'opaque';
+            else if (guarded) args.push({ expectedStamp: 'opaque' });
+            const work = backend[method](...args);
+            identity.ssid = 'caller mutation';
+            await flush();
+            const request = child.messages.at(-1);
+            assert.equal(request.expectedStamp, guarded ? 'opaque' : undefined);
+            assert.equal(request.method, method); assert.ok(Number.isSafeInteger(request.id));
+            assert.equal(JSON.stringify(request).includes('cancellable'), false);
+            const expected = method === 'toggleWifi' ? [] : method === 'readSecret'
+                ? ['wifi:raw-ff', protocolState([row()]).identities['wifi:raw-ff']]
+                : method === 'readSavedSecret' ? ['wifi:raw-ff', 'profile-a']
+                : method === 'activate' ? ['wifi:raw-ff', { profileUuid: 'profile-a', password: 'offline-fixture' }] : ['wifi:raw-ff'];
+            assert.ok(JSON.stringify(request.args) === JSON.stringify(expected), 'wire arguments match without disclosing credentials');
+            child.feed({ id: request.id, result: { ok: true } });
+            assert.deepEqual(plain(await work), { ok: true }); assert.equal(io.handlers.size, 0);
+            assert.equal(backend._pending.size, 0);
+        });
+    }
+    test('network adapter uses activation defaults and never infers authorization from cached rows', async t => {
+        const { backend, child } = fixture(t); await flush();
+        const work = backend.activate('opaque-unknown-key'); await flush();
+        const request = child.messages.at(-1);
+        assert.deepEqual(request.args, ['opaque-unknown-key', { profileUuid: '', password: null }]);
+        child.feed({ id: request.id, error: { message: 'Not authorized.', code: 'permission' } });
+        await assert.rejects(work, error => error.message === 'Not authorized.' && error.code === 'permission' && !error.authentication);
+    });
+    test('network adapter routes out-of-order replies and recognizes the authentication code', async t => {
+        const { backend, child } = fixture(t); await flush();
+        const first = backend.activate('a'), second = backend.disconnect('b'); await flush();
+        const [a, b] = child.messages.slice(-2);
+        child.feed({ id: b.id, result: 2 }); child.feed({ id: a.id, error: { message: 'Password rejected.', code: 'AUTHENTICATION' } });
+        assert.equal(await second, 2);
+        await assert.rejects(first, error => error.message === 'Password rejected.' && error.authentication === true);
+    });
+    test('network adapter cancels sent requests by id and ignores late results/errors', async t => {
+        const { backend, child, mock } = fixture(t); await flush();
+        const io = new mock.Gio.Cancellable(), work = backend.readSavedSecret('key', 'uuid', io);
+        await flush(); const id = child.messages.at(-1).id;
+        io.cancel(); await flush();
+        await assert.rejects(work, /cancelled/);
+        assert.deepEqual(child.messages.at(-1), { method: 'cancel', args: [id] });
+        child.feed({ id, result: { password: 'stale-secret' } }); child.feed({ id, error: { message: 'stale', code: 'permission' } });
+        assert.equal(backend._pending.size, 0); assert.equal(backend._failure, null); assert.equal(io.handlers.size, 0);
+    });
+    test('network adapter checks cancellation even when a reply beats its deferred cancellation handler', async t => {
+        const { backend, child, mock } = fixture(t); await flush();
+        const io = new mock.Gio.Cancellable(), work = backend.readSecret('key', {}, io); await flush();
+        const id = child.messages.at(-1).id;
+        io.cancel(); child.feed({ id, result: { password: 'stale-secret' } });
+        await assert.rejects(work, /cancelled/); await flush();
+        assert.equal(child.messages.filter(message => message.method === 'cancel').length, 1);
+    });
+    test('network adapter drops queued credentials on cancellation and never sends pre-cancelled requests', async t => {
+        const { backend, child, mock } = fixture(t); await flush(); child.autoWrite = false;
+        backend.setOpened(true);
+        const io = new mock.Gio.Cancellable(), work = backend.activate('key', { password: 'unsent-secret', cancellable: io });
+        const data = backend._queue[0].data;
+        io.cancel(); await flush(); await assert.rejects(work, /cancelled/);
+        assert.ok(data.every(byte => byte === 0)); assert.equal(backend._queue.length, 0);
+        await assert.rejects(backend.readSecret('key', {}, io), /cancelled/);
+        child.write(); assert.equal(child.messages.some(message => message.method === 'activate'), false);
+    });
+    test('network adapter serializes partial writes and finishes a started frame before cancel', async t => {
+        const { backend, child, mock } = fixture(t); await flush(); child.autoWrite = false;
+        const io = new mock.Gio.Cancellable(), work = backend.activate('key', { password: 'in-flight-secret', cancellable: io });
+        child.write(7); io.cancel(); await flush(); await assert.rejects(work, /cancelled/);
+        child.write(); child.write();
+        assert.deepEqual(child.messages.slice(-2).map(message => message.method), ['activate', 'cancel']);
+        assert.equal(backend._queuedBytes, 0); assert.equal(backend._writing, null);
+    });
+    test('network adapter bounds the whole write frame even when a worker makes tiny partial progress', async t => {
+        const { backend, child, mock } = fixture(t); await flush(); child.autoWrite = false;
+        const work = backend.activate('key', { password: 'offline-fixture' });
+        const timer = backend._writeTimer;
+        child.write(1); child.write(1);
+        assert.equal(backend._writeTimer, timer);
+        mock.fire(5000);
+        await assert.rejects(work, error => error.code === 'timeout');
+        assert.equal(backend._child, null); assert.equal(backend._queuedBytes, 0);
+    });
+    test('network adapter times out a request, sends cancellation and removes timers/handlers', async t => {
+        const { backend, child, mock } = fixture(t); await flush(); child.feed(protocolState());
+        const io = new mock.Gio.Cancellable(), work = backend.forget('key', io); await flush();
+        const id = child.messages.at(-1).id; mock.fire(30000); await flush();
+        await assert.rejects(work, error => error.code === 'timeout');
+        assert.deepEqual(child.messages.at(-1), { method: 'cancel', args: [id] });
+        assert.equal(io.handlers.size, 0); assert.equal(mock.timers.size, 0);
+    });
+    test('network adapter bounds in-flight requests without starting extra workers', async t => {
+        const { backend, child, mock } = fixture(t); await flush();
+        const requests = Array.from({ length: 64 }, () => backend.disconnect('key'));
+        const results = Promise.allSettled(requests);
+        await assert.rejects(backend.disconnect('overflow'), /Too many/);
+        backend.dispose(); assert.equal((await results).length, 64); await flush();
+        assert.equal(mock.children.length, 1); assert.equal(child.killed, 1);
+    });
+    for (const kind of ['line', 'bytes', 'frames']) {
+        test(`network adapter bounds queued input ${kind} and wipes it on failure`, async t => {
+            const { backend, child } = fixture(t); await flush(); child.autoWrite = false;
+            const work = backend.activate('key', { password: 'x'.repeat(kind === 'line' ? 1024 * 1024 : 600000) });
+            const result = assert.rejects(work, /input queue is full/);
+            if (kind === 'bytes') {
+                const second = backend.activate('key', { password: 'y'.repeat(600000) });
+                await assert.rejects(second, /input queue is full/);
+            } else if (kind === 'frames') for (let index = 0; index < 130; index++) backend.setOpened(index % 2 === 0);
+            await result; assert.equal(backend._queuedBytes, 0); assert.equal(backend._child, null);
+        });
+    }
+    test('network adapter safely rejects unserializable arguments without leaking them or poisoning the next request', async t => {
+        const { backend, child } = fixture(t); await flush();
+        const circular = {}; circular.self = circular;
+        await assert.rejects(backend.readSecret('key', circular), /Could not send/);
+        assert.equal(backend._pending.size, 0);
+        const work = backend.toggleWifi(); await flush(); child.feed({ id: child.messages.at(-1).id, result: null }); await work;
+    });
+    for (const bad of ['{not-json}\n', 'null\n', '{"id":1,"result":null,"error":{"message":"bad","code":"bad"}}\n',
+        '{"id":1,"error":{"message":"bad"}}\n', '{"type":"state","rows":[]}\n', 'x'.repeat(1024 * 1024 + 1),
+        new Uint8Array([0xff, 10])]) {
+        test('network adapter fails closed on malformed, oversized, or invalid UTF-8 output without reflecting payloads', async t => {
+            const { backend, child, mock } = fixture(t); await flush();
+            child.feed(protocolState([row()]));
+            const work = backend.readSecret('key', {});
+            child.feedBytes(typeof bad === 'string' ? new TextEncoder().encode(bad) : bad);
+            await assert.rejects(work, error => error.message === 'The network backend returned an invalid or incomplete response.');
+            assert.equal(backend.available, false); assert.equal(backend.rows.length, 0); assert.equal(mock.timers.size, 0);
+        });
+    }
+    for (const trigger of ['exit', 'eof', 'startup timeout', 'write timeout', 'write error', 'zero write']) {
+        test(`network adapter rejects pending work and clears state on ${trigger} without restart/replay`, async t => {
+            const { backend, child, mock } = fixture(t); await flush();
+            if (trigger !== 'startup timeout') child.feed(protocolState([row()]));
+            if (trigger.startsWith('write') || trigger === 'zero write') child.autoWrite = false;
+            const work = backend.readSecret('key', {});
+            if (trigger === 'exit') child.exit();
+            else if (trigger === 'eof') child.eof();
+            else if (trigger === 'startup timeout') mock.fire(10000);
+            else if (trigger === 'write timeout') mock.fire(5000);
+            else child.write(0, trigger === 'write error' ? new Error('untrusted secret diagnostic') : null);
+            await assert.rejects(work, error => !error.message.includes('untrusted secret diagnostic'));
+            backend.start(); await flush();
+            assert.equal(mock.children.length, 1); assert.equal(backend.rows.length, 0); assert.equal(backend._pending.size, 0);
+            assert.equal(mock.timers.size, 0);
+            await assert.rejects(backend.toggleWifi());
+        });
+    }
+    test('network adapter reports spawn failure without raw diagnostics or fallback', async t => {
+        const { backend, mock } = fixture(t, { start: false });
+        backend._launch = () => { throw new Error('untrusted executable/secret'); };
+        backend.start();
+        await assert.rejects(backend.toggleWifi(), /Could not start the network backend\./);
+        assert.equal(mock.children.length, 0); assert.equal(mock.timers.size, 0);
+    });
+    test('network adapter accepts null Rust details for unsaved idle rows without manufacturing metadata', async t => {
+        const { backend, child } = fixture(t); await flush();
+        const state = protocolState([row({ connected: false, known: false, profiles: [] })]);
+        state.details['wifi:raw-ff'] = null;
+        child.feed(state);
+        assert.equal(backend._failure, null); assert.equal(backend.rows.length, 1);
+        assert.equal(backend.getIdentity('wifi:raw-ff'), null);
+        assert.throws(() => backend.details('wifi:raw-ff'), /not available/);
+        assert.equal(child.messages.length, 1);
+    });
+    test('network adapter requires initial state even if an unrelated reply arrives', async t => {
+        const { backend, child, mock } = fixture(t); await flush();
+        child.feed({ id: 999, result: null }); mock.fire(10000);
+        assert.equal(backend._failure.code, 'timeout'); assert.equal(backend._child, null);
+    });
+    test('network controller preserves an authentication retry when Rust reply precedes the idle state frame', async t => {
+        const { NetworkController } = await import('./logic.js');
+        const { backend, child, mock } = fixture(t); await flush();
+        const controller = new NetworkController({ backend, createCancellable: () => new mock.Gio.Cancellable() });
+        t.after(() => controller.dispose()); controller.start(); controller.toggle('DP-1');
+        child.feed(protocolState([row({ connected: false })]));
+        const work = controller.connectNetwork('wifi:raw-ff'); await flush();
+        const id = child.messages.at(-1).id;
+        child.feed(protocolState([row({ connected: false, changing: true, authorization: { canActivate: false } })]));
+        child.feed({ id, error: { message: 'Password was not accepted.', code: 'AUTHENTICATION' } });
+        await work;
+        assert.equal(controller.credentialKey, 'wifi:raw-ff');
+        await controller.submitPassword('offline-only-fixture');
+        assert.equal(controller.credentialKey, 'wifi:raw-ff', 'A temporarily disabled action does not retarget or discard the retry');
+        child.feed(protocolState([row({ connected: false })]));
+        const retry = controller.submitPassword('offline-only-fixture'); await flush();
+        const request = child.messages.at(-1);
+        assert.equal(request.method, 'activate');
+        assert.ok(request.args[1].password === 'offline-only-fixture', 'only the explicit retry sends a password');
+        child.feed({ id: request.id, result: null }); await retry;
+        assert.equal(controller.credentialKey, ''); assert.equal(controller.secret, '');
+    });
+    test('network adapter disposal is idempotent and still finishes stale read/write/wait callbacks', async t => {
+        const { backend, child, mock, changes } = fixture(t); await flush(); child.feed(protocolState([row()])); child.autoWrite = false;
+        const work = backend.readSecret('key', {});
+        const notifications = changes();
+        backend.dispose(); backend.dispose();
+        await assert.rejects(work, /closed/);
+        child.write(); child.feed(protocolState([row()])); await flush();
+        assert.equal(child.killed, 1); assert.equal(child.waitFinishes, 1); assert.equal(changes(), notifications);
+        assert.ok(child.readFinishes >= 2 && child.writeFinishes >= 2);
+        assert.equal(mock.timers.size, 0); assert.equal(backend.getIdentity('key'), null);
+        assert.throws(() => backend.details('key'), /closed/); await assert.rejects(backend.disconnect('key'), /closed/);
+    });
+}
 
 async function nodeControllerTests() {
     const { default: assert } = await import('node:assert/strict');
@@ -355,14 +791,16 @@ async function nodeControllerTests() {
         assert.match(frontend, /box\(false, 8, \[this\.password, this\.passwordReveal\]\)/);
     });
 
-    it('hides the password row for open and enhanced-open Wi-Fi details', () => {
+    it('keeps open and enhanced-open password lines hidden independently of sharing authorization', () => {
         const expression = frontend.match(/const hasPassword = ([\s\S]*?);/)?.[1];
         assert.ok(expression, 'The real details password visibility condition is available');
         for (const securityType of ['open', 'owe', 'wep', 'psk', 'sae', 'enterprise']) {
             for (const connected of [false, true]) {
-                const row = { wireless: true, known: !connected, connected, securityType };
-                assert.equal(vm.runInNewContext(expression, { row }), !['open', 'owe'].includes(securityType),
-                    `${securityType}, connected=${connected}`);
+                for (const canShare of [false, true]) {
+                    const row = { wireless: true, known: !connected, connected, securityType, canShare };
+                    assert.equal(vm.runInNewContext(expression, { row }), !['open', 'owe'].includes(securityType),
+                        `${securityType}, connected=${connected}, canShare=${canShare}`);
+                }
             }
         }
         assert.match(frontend, /this\.passwordCaption\.visible = this\.passwordLine\.visible = this\.reveal\.visible = hasPassword/);
@@ -718,7 +1156,7 @@ async function nodeControllerTests() {
 
     class FakeBackend {
         constructor(rows) {
-            this.rows = rows;
+            this._rows = rows;
             this.available = true;
             this.wifiAvailable = true;
             this.wifiEnabled = true;
@@ -739,6 +1177,11 @@ async function nodeControllerTests() {
             }]));
         }
 
+        get rows() {
+            this._rows.forEach(row => mockNetworkRow(row, this.wifiEnabled && this.wifiHardwareEnabled));
+            return this._rows;
+        }
+        set rows(rows) { this._rows = rows; }
         start() { this.calls.start++; }
         dispose() { this.calls.dispose++; this.opened = false; }
         notify() { this.onChange?.(); }
@@ -820,6 +1263,172 @@ async function nodeControllerTests() {
             disconnect: backend.calls.disconnect.length, forget: backend.calls.forget.length,
         };
     }
+
+    describe('Rust authorization descriptors and opaque request stamps', () => {
+        it('honors canActivate even when security labels suggest the opposite', async t => {
+            const denied = fixture(t, [wifi({ securityType: 'open', authorization: { canActivate: false } })]);
+            await denied.controller.connectNetwork('wifi');
+            assert.equal(denied.backend.calls.activate.length, 0);
+            const allowed = fixture(t, [wifi({ securityType: 'enterprise', authorization: { canActivate: true, acceptsPassword: false } })]);
+            const work = allowed.controller.connectNetwork('wifi');
+            assert.equal(allowed.backend.calls.activate.length, 1);
+            assert.equal(allowed.controller.credentialKey, '');
+            allowed.backend.calls.activate[0].resolve(); await work;
+        });
+        it('uses acceptsPassword rather than security classification or a reconstructed profile-count policy', async t => {
+            const { controller, backend } = fixture(t, [saved({ profiles: [{ uuid: 'a', id: 'Same' }, { uuid: 'b', id: 'Same' }],
+                securityType: 'enterprise', authorization: { canActivate: true, acceptsPassword: true } })]);
+            const work = controller.connectNetwork('wifi', 'b');
+            backend.calls.activate[0].reject(authenticationFailure()); await work;
+            assert.equal(controller.credentialKey, 'wifi');
+            const retry = controller.submitPassword(password);
+            assert.equal(backend.calls.activate.length, 2);
+            assertSecret(backend.calls.activate[1].options.password, password);
+            backend.calls.activate[1].resolve(); await retry;
+        });
+        it('does not disconnect, forget, or share when Rust denies otherwise plausible rows', async t => {
+            const { controller, backend } = fixture(t, [active({ authorization: { canDisconnect: false, canForget: false, canShare: false } })]);
+            await controller.disconnectNetwork('wifi'); controller.requestForget('wifi'); await controller.confirmForget();
+            controller.info('wifi'); await controller.revealSecret();
+            assert.deepEqual(backend.calls.disconnect, []); assert.deepEqual(backend.calls.forget, []);
+            assert.equal(backend.calls.readSecret.length, 0); assertSecret(controller.secret, '');
+        });
+        it('cancels and clears a secret when only its selected profile descriptor is revoked', async t => {
+            const profiles = [{ uuid: 'profile-a', id: 'Same', authorization: { canShare: false } },
+                { uuid: 'profile-b', id: 'Same', authorization: { canShare: true } }];
+            const { controller, backend } = fixture(t, [saved({ profiles, authorization: { canShare: true } })]);
+            controller.info('wifi'); await controller.revealSecret();
+            assert.equal(backend.calls.readSavedSecret.length, 0);
+            controller.selectSavedProfile('profile-b');
+            const work = controller.revealSecret(), request = backend.calls.readSavedSecret[0];
+            profiles[1].authorization.canShare = false; backend.notify();
+            assert.equal(request.io.cancelled, true); assertCleared(controller);
+            request.resolve(credentials); await work; assertSecret(controller.secret, '');
+        });
+        for (const change of ['replacement', 'addition']) {
+            it(`rejects forget after profile ${change} between dialog and confirmation`, async t => {
+                const { controller, backend } = fixture(t, [saved()]);
+                controller.requestForget('wifi');
+                const row = backend.rows[0];
+                if (change === 'addition') row.profiles.push({ uuid: 'extra' });
+                row.selectionStamp = 'different-native-set'; backend.notify();
+                await controller.confirmForget(); assert.equal(backend.calls.forget.length, 0);
+            });
+        }
+        for (const method of ['disconnect', 'forget']) {
+            it(`cancels pending ${method} on back`, async t => {
+                const { controller, backend } = fixture(t, [active()]);
+                const pending = deferred(); let io;
+                backend[method] = (_key, cancellable) => { io = cancellable; return pending.promise; };
+                controller.requestForget('wifi');
+                const work = method === 'forget' ? controller.confirmForget() : controller.disconnectNetwork('wifi');
+                controller.back(); assert.equal(io.cancelled, true); pending.resolve(); await work;
+            });
+        }
+        it('uses requiresPassword even when the displayed network appears saved', async t => {
+            const { controller, backend } = fixture(t, [saved({ authorization: { requiresPassword: true } })]);
+            await controller.connectNetwork('wifi'); assert.equal(controller.credentialKey, 'wifi');
+            assert.equal(backend.calls.activate.length, 0);
+            backend.rows[0].selectionStamp = 'changed-authentication'; backend.notify();
+            assert.equal(controller.credentialKey, '');
+        });
+        for (const connected of [false, true]) {
+            it(`clears revealed ${connected ? 'active' : 'saved'} credentials on an in-place authentication change`, async t => {
+                const { controller, backend } = fixture(t, [connected ? active() : saved()]);
+                controller.info('wifi'); const work = controller.revealSecret();
+                (connected ? backend.calls.readSecret : backend.calls.readSavedSecret)[0].resolve(credentials);
+                await work; assertSecret(controller.secret, credentials.password);
+                backend.rows[0].selectionStamp = 'changed-authentication'; backend.notify(); assertCleared(controller);
+            });
+        }
+        it('invalidates a password prompt on an opaque native replacement with the same UUID', async t => {
+            const { controller, backend } = fixture(t, [saved()]);
+            const work = controller.connectNetwork('wifi'); backend.calls.activate[0].reject(authenticationFailure()); await work;
+            const before = backend.rows[0].profileStamp;
+            backend.rows[0].savedIdentity = 'opaque-replacement'; backend.notify();
+            assert.equal(backend.rows[0].profileStamp, before); assert.equal(controller.credentialKey, '');
+            await controller.submitPassword(password); assert.equal(backend.calls.activate.length, 1);
+        });
+        for (const connected of [false, true]) {
+            it(`never retargets a ${connected ? 'connected' : 'saved'} raw-SSID selection through identical display text`, async t => {
+                const make = connected ? active : saved;
+                const first = make({ key: 'wlan0:ff:psk', name: '\ufffd', ssid: '\ufffd' });
+                const second = make({ key: 'wlan0:fe:psk', name: '\ufffd', ssid: '\ufffd' });
+                const { controller, backend } = fixture(t, [first, second]);
+                controller.info(first.key);
+                const work = controller.revealSecret();
+                const requests = connected ? backend.calls.readSecret : backend.calls.readSavedSecret;
+                const request = requests[0]; assert.equal(request.key, first.key);
+                backend.rows = [second]; backend.notify(); assert.equal(request.io.cancelled, true);
+                request.resolve(credentials); await work; assertCleared(controller);
+                controller.info(second.key); const next = controller.revealSecret();
+                assert.equal(requests[1].key, second.key); requests[1].resolve(credentials); await next;
+                controller.hideSecret(); assertSecret(controller.secret, '');
+            });
+        }
+        it('uses Rust descriptors for connect/disconnect/remove and selected-profile reveal widget sensitivity', () => {
+            const connect = frontend.match(/row\.connect\.sensitive = ([^;]+);/)?.[1];
+            const remove = frontend.match(/row\.remove\.sensitive = ([^;]+);/)?.[1];
+            const reveal = frontend.match(/this\.reveal\.sensitive = ([\s\S]*?);/g)?.at(-1)
+                ?.replace('this.reveal.sensitive = ', '').slice(0, -1);
+            assert.ok(connect && remove && reveal);
+            for (const enabled of [false, true]) {
+                for (const connected of [false, true]) {
+                    const dataRow = { connected, wireless: true, changing: !enabled, canActivate: enabled, canDisconnect: enabled, canForget: enabled };
+                    assert.equal(vm.runInNewContext(connect, { dataRow }), enabled);
+                    assert.equal(vm.runInNewContext(remove, { dataRow }), enabled);
+                }
+                assert.equal(vm.runInNewContext(reveal, { requested: false, hasPassword: true, row: { canShare: enabled },
+                    c: { selectedProfileUuid: 'b' }, profiles: [{ uuid: 'b', canShare: enabled }] }), enabled);
+            }
+            assert.equal(vm.runInNewContext(reveal, { requested: false, hasPassword: true, row: { canShare: true },
+                c: { selectedProfileUuid: 'b' }, profiles: [{ uuid: 'b', canShare: false }] }), false);
+        });
+    });
+
+    describe('asynchronous radio and socket request lifetime', () => {
+        for (const rejected of [false, true]) {
+            it(`waits for an asynchronous radio ${rejected ? 'error' : 'result'} before replying to panel IPC`, async t => {
+                const { controller, backend } = fixture(t, undefined, { opened: false });
+                const work = deferred(); backend.toggleWifi = () => work.promise;
+                let settled = false;
+                const request = handleRequest.call({ controller, panel: {} }, '{"command":"toggleWifi"}');
+                request.then(() => { settled = true; }, () => { settled = true; });
+                await flush(); assert.equal(settled, false);
+                if (rejected) {
+                    work.reject(new Error('Offline radio permission denied.'));
+                    await assert.rejects(request, /Offline radio permission denied/);
+                    assert.equal(controller.error, 'Offline radio permission denied.');
+                } else { work.resolve(null); assert.equal(await request, 'ok'); assert.equal(controller.error, ''); }
+                assert.equal(controller.opened, false); assert.equal(backend.opened, false);
+            });
+        }
+        it('does not let a late radio error overwrite a newer interaction, but still rejects that IPC request', async t => {
+            const { controller, backend } = fixture(t);
+            const work = deferred(); backend.toggleWifi = () => work.promise;
+            const request = handleRequest.call({ controller, panel: {} }, '{"command":"toggleWifi"}');
+            controller.back(); controller.error = 'Newer error.';
+            work.reject(new Error('Older radio error.')); await assert.rejects(request, /Older radio error/);
+            assert.equal(controller.error, 'Newer error.');
+        });
+        for (const rejected of [false, true]) {
+            it(`socket writer waits for a ${rejected ? 'rejected' : 'resolved'} asynchronous handler and closes once`, async () => {
+                const method = frontend.match(/        vfunc_request\(request, connection\) \{([\s\S]*?)\n        \}/)?.[1];
+                assert.ok(method);
+                const writes = [], work = deferred(); let closes = 0;
+                const connection = { close_async(_priority, _io, callback) { closes++; callback({ close_finish() {} }, {}); } };
+                const handler = vm.runInNewContext(`({ run(request, connection) { ${method} } }).run`, {
+                    GLib: { PRIORITY_DEFAULT: 0 }, console,
+                    AstalIO: { write_sock(_connection, response, callback) { writes.push(response); callback(null, {}); }, write_sock_finish() {} },
+                });
+                handler.call({ handleRequest: () => work.promise }, '{}', connection);
+                await flush(); assert.deepEqual(writes, []); assert.equal(closes, 0);
+                if (rejected) work.reject(new Error('Offline request failed.')); else work.resolve('ok');
+                await flush();
+                assert.deepEqual(writes, [rejected ? '{"error":"Offline request failed."}' : 'ok']); assert.equal(closes, 1);
+            });
+        }
+    });
 
     it('dismisses only the error without resetting the current network interaction', t => {
         const { controller, backend, hooks } = fixture(t, [saved()]);
@@ -2136,7 +2745,7 @@ async function nodeLogicTests() {
     const { default: assert } = await import('node:assert/strict');
     const { describe, it } = await import('node:test');
     const {
-        escapeMarkup, identityEqual, isUndetectedSaved, parseRequest, primary, profileStamp,
+        escapeMarkup, identityEqual, isUndetectedSaved, parseRequest, primary,
         signalBars, signalIcon, signalLabel, sortRows, waybarStatus,
     } = await import('./logic.js');
 
@@ -2315,7 +2924,7 @@ async function nodeLogicTests() {
         });
     });
 
-    describe('credential identity and profile stamps', () => {
+    describe('credential identity', () => {
         it('compares the complete native identity, not object references or cosmetic metadata', () => {
             assert.equal(identityEqual(identity, { ...identity }), true);
             assert.equal(identityEqual(identity, { ...identity, profileId: 'Renamed profile', strength: 99 }), true);
@@ -2333,15 +2942,6 @@ async function nodeLogicTests() {
             });
         }
 
-        it('stamps saved profile UUIDs independent of their order or display names', () => {
-            const first = { profiles: [{ uuid: 'uuid-b', id: 'Duplicate' }, { uuid: 'uuid-a', id: 'Duplicate' }] };
-            const second = { profiles: [{ uuid: 'uuid-a', id: 'Renamed' }, { uuid: 'uuid-b', id: 'Other' }] };
-            assert.equal(profileStamp(first), profileStamp(second));
-            assert.deepEqual(first.profiles.map(profile => profile.uuid), ['uuid-b', 'uuid-a']);
-            assert.notEqual(profileStamp(first), profileStamp({ profiles: [{ uuid: 'uuid-a' }] }));
-            assert.notEqual(profileStamp(first), profileStamp({ profiles: [{ uuid: 'uuid-a' }, { uuid: 'uuid-c' }] }));
-            assert.equal(profileStamp(null), profileStamp({ profiles: [] }));
-        });
     });
 
     describe('markup and Waybar JSON fields', () => {
@@ -2766,959 +3366,87 @@ async function nodeStartupTests() {
     });
 }
 
-async function gjsNativeTests() {
-    // GJS-only, offline tests: real libnm settings and Gio cancellation, simulated
-    // devices/remote replies. No NM.Client is created and no live mutation is called.
-    const { default: GLib } = await import('gi://GLib');
-    const { default: Gio } = await import('gi://Gio');
-    const { default: GObject } = await import('gi://GObject');
-    const { default: NM } = await import('gi://NM?version=1.0');
-    const { default: System } = await import('system');
-    const { NetworkBackend } = await import('./backend.js');
-    const { NetworkController } = await import('./logic.js');
-
-    const S = NM['80211ApSecurityFlags'];
-    const bytes = value => new GLib.Bytes(new TextEncoder().encode(value));
-    const assert = (condition, message) => { if (!condition) throw new Error(message); };
-    const equal = (actual, expected, message) => assert(JSON.stringify(actual) === JSON.stringify(expected), message);
-    const later = (callback, milliseconds = 0) => GLib.timeout_add(GLib.PRIORITY_DEFAULT, milliseconds, () => { callback(); return GLib.SOURCE_REMOVE; });
-    const delay = (milliseconds = 1) => new Promise(resolve => later(resolve, milliseconds));
-    async function rejects(promise, expression, authentication = false) {
-        let error;
-        try { await promise; } catch (caught) { error = caught; }
-        assert(error && expression.test(error.message), `Expected a safe native rejection matching ${expression}`);
-        if (authentication) assert(error.authentication === true, 'Authentication error flag');
-        return error;
-    }
-
-    class Signals {
-        constructor() { this.handlers = new Map(); this.serial = 0; }
-        connect(signal, callback) { const id = ++this.serial; this.handlers.set(id, { signal, callback }); return id; }
-        disconnect(id) { assert(this.handlers.delete(id), 'Signal disconnected exactly once'); }
-        emit(signal, ...args) { for (const handler of [...this.handlers.values()]) if (handler.signal === signal) handler.callback(this, ...args); }
-    }
-
-    class AP extends Signals {
-        constructor(ssid, security, strength, suffix) {
-            super(); Object.assign(this, { ssid: bytes(ssid), security, strength, suffix });
-        }
-        get_path() { return `/offline/ap/${this.suffix}`; }
-        get_ssid() { return this.ssid; }
-        get_strength() { return this.strength; }
-        get_bssid() { return `02:00:00:00:00:${String(this.suffix).padStart(2, '0')}`; }
-        get_frequency() { return 6115; }
-        get_mode() { return NM['80211Mode'].INFRA; }
-        get_flags() { return this.security === 'open' ? 0 : NM['80211ApFlags'].PRIVACY; }
-        get_wpa_flags() { return this.wpa ?? 0; }
-        get_rsn_flags() {
-            return this.rsn ?? { open: 0, wep: 0, psk: S.KEY_MGMT_PSK, sae: S.KEY_MGMT_SAE,
-                transition: S.KEY_MGMT_PSK | S.KEY_MGMT_SAE, owe: S.KEY_MGMT_OWE,
-                enterprise: S.KEY_MGMT_802_1X, unknown: S.PAIR_CCMP }[this.security];
-        }
-        connection_valid(profile) {
-            const wireless = profile.get_setting_wireless();
-            const security = profile.get_setting_wireless_security();
-            // libnm's GI annotation disallows null here even though open networks
-            // have no security setting. The real NM.AccessPoint handles that case.
-            const securityMatches = security
-                ? wireless?.ap_security_compatible(security, this.get_flags(), this.get_wpa_flags(), this.get_rsn_flags(), this.get_mode())
-                : this.get_flags() === 0 && this.get_wpa_flags() === 0 && this.get_rsn_flags() === 0;
-            return Boolean(wireless && NM.utils_same_ssid(wireless.get_ssid().get_data(), this.ssid.get_data(), false)
-                && (!wireless.get_bssid() || wireless.get_bssid() === this.get_bssid()) && securityMatches);
-        }
-    }
-
-    class Device extends Signals {
-        constructor(iface, wireless = true) {
-            super(); Object.assign(this, { iface, wireless, aps: [], active: null, activeAP: null,
-                state: NM.DeviceState.DISCONNECTED, reason: NM.DeviceStateReason.NONE, scans: 0, scanFinishes: 0, disconnects: 0,
-                                holdScans: false, pendingScans: [] });
-        }
-        get_path() { return `/offline/device/${this.iface}`; }
-        get_iface() { return this.iface; }
-        get_device_type() { return this.wireless ? NM.DeviceType.WIFI : NM.DeviceType.ETHERNET; }
-        get_access_points() { return this.aps; }
-        get_active_access_point() { return this.activeAP; }
-        get_active_connection() { return this.active; }
-        get_state() { return this.state; }
-        get_state_reason() { return this.reason; }
-        get_ip4_config() { return null; }
-        get_ip6_config() { return null; }
-        get_hw_address() { return '02:00:00:00:00:ff'; }
-        get_bitrate() { return 866700; }
-        get_speed() { return 1000; }
-        connection_valid(profile) {
-            return profile.get_connection_type() === (this.wireless ? NM.SETTING_WIRELESS_SETTING_NAME : NM.SETTING_WIRED_SETTING_NAME)
-                && (!profile.get_interface_name() || profile.get_interface_name() === this.iface);
-        }
-        request_scan_async(io, callback) {
-            this.scans++;
-            const scan = { io, finish: () => callback(this, { cancelled: io.is_cancelled() }) };
-            if (this.holdScans) this.pendingScans.push(scan);
-            else later(scan.finish, 5);
-        }
-        finishScans() { for (const scan of this.pendingScans.splice(0)) scan.finish(); }
-        request_scan_finish(result) { this.scanFinishes++; if (result.cancelled) throw new Error('cancelled'); return true; }
-        disconnect_async(io, callback) {
-            this.disconnects++;
-            this.state = NM.DeviceState.DISCONNECTED; this.active = null; this.activeAP = null;
-            this.emit('notify'); later(() => callback(this, {}));
-        }
-        disconnect_finish() { return true; }
-    }
-
-    class Active extends Signals {
-        constructor(profile, suffix) {
-            super(); this.profile = profile; this.suffix = suffix;
-            this.state = NM.ActiveConnectionState.ACTIVATING; this.reason = NM.ActiveConnectionStateReason.NONE;
-        }
-        get_path() { return `/offline/active/${this.suffix}`; }
-        get_uuid() { return this.profile.get_uuid(); }
-        get_id() { return this.profile.get_id(); }
-        get_connection() { return this.profile; }
-        get_connection_type() { return this.profile.get_connection_type(); }
-        get_state() { return this.state; }
-        get_state_reason() { return this.reason; }
-    }
-
-    class Client extends Signals {
-        constructor() {
-            super(); this.devices = []; this.profiles = []; this.running = true; this.enabled = true; this.hardware = true;
-            this.calls = []; this.radioWrites = []; this.finishes = 0; this.accepted = null; this.automatic = true; this.replyDelay = 0;
-        }
-        get_devices() { return this.devices; }
-        get_connections() { return this.profiles; }
-        get_nm_running() { return this.running; }
-        wireless_get_enabled() { return this.enabled; }
-        wireless_hardware_get_enabled() { return this.hardware; }
-        wireless_set_enabled(enabled) { this.radioWrites.push(enabled); this.enabled = enabled; this.emit('notify'); }
-        activate_connection_async(profile, device, specific, io, callback) {
-            this.calls.push({ profile, device, specific, saved: true }); this.accept(profile, device, specific, io, callback);
-        }
-        add_and_activate_connection_async(profile, device, specific, io, callback) {
-            this.calls.push({ profile, device, specific, saved: false }); this.profiles.push(profile);
-            this.accept(profile, device, specific, io, callback);
-        }
-        accept(profile, device, specific, io, callback) {
-            const active = new Active(profile, this.calls.length);
-            if (!this.deferBinding) {
-                device.active = active; device.activeAP = device.aps.find(ap => ap.get_path() === specific) ?? null;
-                device.state = NM.DeviceState.PREPARE;
-            }
-            this.accepted = { device, active, specific };
-            device.emit('notify');
-            later(() => {
-                callback(this, { active, cancelled: io.is_cancelled() });
-                if (this.automatic && !io.is_cancelled()) later(() => this.complete(active, device), 2);
-            }, this.replyDelay);
-        }
-        activate_connection_finish(result) { this.finishes++; if (result.cancelled) throw new Error('cancelled with sensitive test value'); return result.active; }
-        add_and_activate_connection_finish(result) { return this.activate_connection_finish(result); }
-        complete(active = this.accepted.active, device = this.accepted.device) {
-            active.state = NM.ActiveConnectionState.ACTIVATED; device.state = NM.DeviceState.ACTIVATED;
-            active.emit('notify'); device.emit('notify');
-        }
-    }
-
-    let profileSerial = 0;
-    function profile(ssid, type, iface = null) {
-        const connection = NM.SimpleConnection.new();
-        const serial = ++profileSerial;
-        connection.add_setting(new NM.SettingConnection({ id: `${ssid} ${serial}`, uuid: GLib.uuid_string_random(),
-            type: NM.SETTING_WIRELESS_SETTING_NAME, interface_name: iface }));
-        connection.add_setting(new NM.SettingWireless({ ssid: bytes(ssid), mode: 'infrastructure', hidden: true }));
-        if (type !== 'open') {
-            const key = { wep: 'none', psk: 'wpa-psk', sae: 'sae', owe: 'owe', enterprise: 'wpa-eap', unknown: 'unsupported' }[type];
-            connection.add_setting(new NM.SettingWirelessSecurity({ key_mgmt: key }));
-        }
-        connection.set_path(`/offline/settings/${serial}`);
-        connection.settingsVersion = 1;
-        connection.get_version_id = () => connection.settingsVersion;
-        connection.holdSecrets = false;
-        connection.pendingSecrets = [];
-        connection.secretCalls = 0;
-        connection.secretFinishes = 0;
-        connection.get_secrets_async = (setting, io, callback) => {
-            connection.secretCalls++;
-            assert(setting === NM.SETTING_WIRELESS_SECURITY_SETTING_NAME, 'Native secret setting name');
-            const finish = () => callback(connection, { cancelled: io.is_cancelled() });
-            if (connection.holdSecrets) connection.pendingSecrets.push({ io, finish });
-            else later(finish, 5);
-        };
-        connection.get_secrets_finish = result => {
-            connection.secretFinishes++;
-            if (result.cancelled) throw new Error('sensitive cancelled password');
-            if (connection.secretError) throw connection.secretError;
-            // NM refreshes the profile cache/revision on successful GetSecrets,
-            // even when the selected UUID and credential context are unchanged.
-            connection.settingsVersion++;
-            if (connection.secretReply) return connection.secretReply;
-            return new GLib.Variant('a{sa{sv}}', { '802-11-wireless-security': {
-                psk: new GLib.Variant('s', 'offline-secret'), 'wep-key0': new GLib.Variant('s', 'abcde'),
-                'wep-key2': new GLib.Variant('s', 'fghij'),
-            } });
-        };
-        connection.update2 = (settings, flags, args, io, callback) => {
-            assert(flags === NM.SettingsUpdate2Flags.TO_DISK, 'Native profile update flags');
-            assert(args.lookup_value('version-id', null).get_uint64() === connection.settingsVersion, 'Versioned profile update');
-            connection.updated = NM.SimpleConnection.new_from_dbus(settings);
-            later(() => callback(connection, {}));
-        };
-        connection.update2_finish = () => true;
-        return connection;
-    }
-
-    function fixture() {
-        const client = new Client();
-        const wifi = new Device('wlan-test');
-        client.devices.push(wifi);
-        const backend = new NetworkBackend({ network: { client } });
-        backend.start();
-        return { client, wifi, backend };
-    }
-    function row(backend, ssid, security = null, iface = 'wlan-test') {
-        backend._sync(false);
-        const result = backend.rows.find(item => item.ssid === ssid && (!security || item.securityType === security) && item.interface === iface);
-        assert(result, `Missing row ${ssid}/${security}/${iface}`);
-        return result;
-    }
-
-    function securityLabels() {
-        const { client, wifi, backend } = fixture();
-        try {
-            const cases = [
-                ['open', 0, 0, 'open', 'Open'],
-                ['wep', 0, 0, 'wep', 'WEP'],
-                ['psk', S.KEY_MGMT_PSK, 0, 'psk', 'WPA'],
-                ['psk', 0, S.KEY_MGMT_PSK, 'psk', 'WPA2'],
-                ['psk', S.KEY_MGMT_PSK, S.KEY_MGMT_PSK, 'psk', 'WPA2'],
-                ['sae', 0, S.KEY_MGMT_PSK | S.KEY_MGMT_SAE, 'sae', 'WPA3'],
-                ['enterprise', S.KEY_MGMT_802_1X, 0, 'enterprise', 'WPA Enterprise'],
-                ['enterprise', 0, S.KEY_MGMT_802_1X, 'enterprise', 'WPA2 Enterprise'],
-                ['enterprise', S.KEY_MGMT_802_1X, S.KEY_MGMT_802_1X, 'enterprise', 'WPA2 Enterprise'],
-                ['enterprise', 0, S.KEY_MGMT_EAP_SUITE_B_192, 'enterprise', 'WPA3 Enterprise'],
-                ['owe', 0, S.KEY_MGMT_OWE, 'owe', 'Enhanced Open (OWE)'],
-                ['owe', 0, S.KEY_MGMT_OWE_TM, 'owe', 'Enhanced Open (OWE)'],
-                ['unknown', 0, S.PAIR_CCMP, 'unknown', 'Unknown'],
-            ];
-            for (const [type, wpa, rsn, grouping, label] of cases) {
-                const ap = new AP('labels', type, 65, 1); ap.wpa = wpa; ap.rsn = rsn;
-                wifi.aps = [ap];
-                const selected = row(backend, 'labels');
-                assert(selected.securityType === grouping && selected.security === label, `AP display ${label} preserves coarse ${grouping}`);
-            }
-            const wpa = new AP('roam', 'psk', 30, 1); wpa.wpa = S.KEY_MGMT_PSK; wpa.rsn = 0;
-            const wpa2 = new AP('roam', 'psk', 90, 2);
-            wifi.aps = [wpa, wpa2];
-            const saved = profile('roam', 'psk'); client.profiles = [saved];
-            const key = row(backend, 'roam').key;
-            assert(row(backend, 'roam').security === 'WPA2', 'Strongest AP determines disconnected display');
-            wifi.active = new Active(saved, 1); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
-            wifi.activeAP = wpa; wifi.state = NM.DeviceState.ACTIVATED;
-            const connected = row(backend, 'roam');
-            assert(connected.key === key && connected.security === 'WPA', 'Active AP changes display without regrouping');
-            wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            const legacy = profile('legacy', 'enterprise');
-            const security = legacy.get_setting_wireless_security(); security.key_mgmt = 'ieee8021x';
-            const legacyAP = new AP('legacy', 'wep', 60, 3); wifi.aps = [legacyAP]; client.profiles = [legacy];
-            assert(row(backend, 'legacy').security === 'Dynamic WEP' && row(backend, 'legacy').securityType === 'wep', 'Native saved profile distinguishes Dynamic WEP without regrouping');
-            security.auth_alg = 'leap';
-            assert(row(backend, 'legacy').security === 'LEAP', 'Native auth-alg distinguishes LEAP');
-            client.profiles = [];
-            assert(row(backend, 'legacy').security === 'WEP', 'Privacy flags alone do not claim Dynamic WEP or LEAP');
-            wifi.aps = [];
-            const cached = [
-                ['psk', 'wpa-psk', ['wpa'], 'WPA'], ['psk', 'wpa-psk', ['rsn'], 'WPA2'],
-                ['psk', 'wpa-psk', [], 'WPA/WPA2'], ['psk', 'wpa-psk', ['wpa', 'rsn'], 'WPA/WPA2'],
-                ['enterprise', 'wpa-eap', ['wpa'], 'WPA Enterprise'],
-                ['enterprise', 'wpa-eap', ['rsn'], 'WPA2 Enterprise'],
-                ['enterprise', 'wpa-eap', [], 'WPA/WPA2 Enterprise'],
-                ['enterprise', 'wpa-eap-suite-b-192', ['rsn'], 'WPA3 Enterprise'],
-                ['enterprise', 'ieee8021x', [], 'Dynamic WEP'],
-            ];
-            for (const [type, keyMgmt, protocols, label] of cached) {
-                const remote = profile('cached', type); const setting = remote.get_setting_wireless_security();
-                setting.key_mgmt = keyMgmt; for (const protocol of protocols) setting.add_proto(protocol);
-                client.profiles = [remote];
-                assert(row(backend, 'cached').security === label, `Cached profile display ${label}`);
-            }
-            const pmf = profile('pmf', 'enterprise');
-            pmf.get_setting_wireless_security().set_property('pmf', NM.SettingWirelessSecurityPmf.REQUIRED);
-            client.profiles = [pmf]; wifi.aps = [new AP('pmf', 'enterprise', 60, 4)];
-            assert(row(backend, 'pmf').security === 'WPA2 Enterprise', 'PMF alone is not WPA3 Enterprise detection');
-        } finally { backend.dispose(); }
-    }
-
-    async function activationCacheOrdering() {
-        const { client, wifi, backend } = fixture();
-        client.automatic = false; client.deferBinding = true;
-        wifi.aps = [new AP('new', 'open', 75, 1)];
-        wifi.active = new Active(profile('old', 'open'), 'old');
-        wifi.state = NM.DeviceState.FAILED;
-        try {
-            const key = row(backend, 'new').key;
-            let resolved = false; let error = null;
-            const activation = backend.activate(key).then(() => { resolved = true; }, caught => { error = caught; });
-            await delay(10);
-            assert(!resolved && !error, 'An accepted target must not fail on the previous device FAILED state');
-            const { active } = client.accepted;
-            active.state = NM.ActiveConnectionState.ACTIVATED; active.emit('notify');
-            await delay();
-            assert(!resolved && !error, 'ActiveConnection cache may update before device association');
-            wifi.state = NM.DeviceState.ACTIVATED; wifi.emit('notify'); await delay();
-            assert(!resolved && !error, 'Both ACTIVATED flags still require the exact target device association');
-            wifi.active = active; wifi.activeAP = wifi.aps[0]; wifi.emit('notify');
-            await activation;
-            assert(resolved && !error, 'Correct target association finally resolves activation');
-        } finally { backend.dispose(); }
-    }
-
-    async function grouping() {
-        const { client, wifi, backend } = fixture();
-        const second = new Device('wlan-other'); const wired = new Device('en-test', false);
-        client.devices.push(second, wired);
-        wifi.aps = [new AP('same', 'psk', 20, 1), new AP('same', 'psk', 95, 2), new AP('same', 'open', 70, 3)];
-        second.aps = [new AP('same', 'psk', 80, 4)];
-        const saved = profile('same', 'psk', 'wlan-test');
-        const cached = profile('out of range', 'wep', 'wlan-test');
-        client.profiles = [saved, cached];
-        const active = new Active(saved, 1); active.state = NM.ActiveConnectionState.ACTIVATED;
-        wifi.active = active; wifi.activeAP = wifi.aps[0]; wifi.state = NM.DeviceState.ACTIVATED;
-        try {
-            let selected = row(backend, 'same', 'psk');
-            assert(selected.connected && selected.strength === 20 && selected.profiles.length === 1, 'Active AP is preferred to stronger AP');
-            const key = selected.key;
-            assert(!row(backend, 'same', 'psk', 'wlan-other').known, 'Profiles restricted per device');
-            assert(row(backend, 'out of range').known, 'Cached profiles remain visible');
-            assert(backend.rows.some(item => item.kind === 'WIRED'), 'Ethernet row present');
-            assert(backend.available && backend.wifiAvailable, 'Native device availability');
-            const stamp = backend.getIdentity(key);
-            equal(Object.keys(stamp).sort(), ['activePath', 'bssid', 'interface', 'profileUuid', 'ssid'].sort(), 'Plain identity contract');
-            const details = backend.details(key);
-            assert(details.frequency === '6115 MHz' && details.band === '6 GHz' && details.channel === '33' && details.rate === '866.7 Mbit/s', 'Native detail units');
-            assert(JSON.parse(JSON.stringify(details)).identity.profileUuid === saved.get_uuid(), 'Details contain only plain data');
-            wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            selected = row(backend, 'same', 'psk');
-            assert(selected.key === key && selected.strength === 95 && !backend.getIdentity(key), 'Stable grouping and best AP selection');
-            await delay(12); assert(wifi.scans === 0, 'No closed-panel scans');
-            assert(typeof backend.refresh === 'undefined', 'Native scanning has no public manual-refresh path');
-            backend.setOpened(true); await delay(12); assert(wifi.scans === 1 && second.scans === 1, 'All Wi-Fi devices scan while open');
-            backend.setOpened(false); assert(!backend._scanTimer, 'Closing removes periodic scan');
-            client.hardware = false;
-            let error; try { backend.toggleWifi(); } catch (caught) { error = caught; }
-            assert(/hardware/.test(error?.message), 'Hardware block error');
-            client.devices = [wired]; client.emit('device-removed', wifi); await delay();
-            assert(!backend.wifiAvailable && backend.rows.length === 1 && wifi.handlers.size === 0, 'Removed device signals released');
-            client.running = false; client.emit('notify'); await delay();
-            assert(!backend.available && backend.rows.length === 0, 'NM lifecycle reflected');
-        } finally { backend.dispose(); }
-        assert(client.handlers.size === 0 && wired.handlers.size === 0, 'Signal teardown');
-    }
-
-    async function savedSignalStrength() {
-        const { client, wifi, backend } = fixture();
-        const wired = new Device('en-test', false);
-        const saved = profile('saved signal', 'psk'), alternate = profile('saved signal', 'psk');
-        client.devices.push(wired); client.profiles = [saved, alternate];
-        wifi.aps = [new AP('unrelated', 'open', 90, 1)];
-        try {
-            const initial = row(backend, 'saved signal', 'psk');
-            const { key, profiles } = initial;
-            equal(profiles.map(item => item.uuid).sort(), [saved.get_uuid(), alternate.get_uuid()].sort(),
-                'Both saved UUIDs remain available without a matching AP');
-            function check(strength, transition) {
-                const matches = backend.rows.filter(item => item.ssid === 'saved signal');
-                assert(matches.length === 1 && matches[0].key === key, `${transition}: saved row key is stable without duplicates`);
-                assert(matches[0].strength === strength, `${transition}: expected strength ${String(strength)}`);
-                assert(matches[0].known && !matches[0].connected, `${transition}: detection does not change saved or connection state`);
-                equal(matches[0].profiles, profiles, `${transition}: saved profiles are unchanged`);
-                assert(backend.rows.find(item => item.interface === 'en-test')?.strength === 0,
-                    `${transition}: wired strength remains numeric zero`);
-            }
-            check(null, 'No matching AP');
-            const ap = new AP('saved signal', 'psk', 64, 2);
-            wifi.aps.push(ap); wifi.emit('access-point-added', ap); await delay(12);
-            check(64, 'Matching AP appears');
-            ap.strength = 0; ap.emit('notify'); await delay(12);
-            check(0, 'Detected AP reports a genuine zero');
-            wifi.aps = wifi.aps.filter(item => item !== ap);
-            wifi.emit('access-point-removed', ap); await delay(12);
-            check(null, 'Matching AP disappears');
-            assert(client.calls.length === 0 && client.radioWrites.length === 0 && wifi.scans === 0,
-                'Detection updates do not activate profiles, toggle the radio or scan a closed panel');
-        } finally { backend.dispose(); }
-    }
-
-    async function offlineDetails() {
-        const { client, wifi, backend } = fixture();
-        const first = profile('offline saved', 'psk'), second = profile('offline saved', 'psk');
-        const live = profile('different active network', 'psk');
-        client.profiles = [first, second, live];
-        wifi.activeAP = new AP('different active network', 'psk', 88, 8);
-        wifi.aps = [wifi.activeAP];
-        wifi.active = new Active(live, 'different'); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
-        wifi.state = NM.DeviceState.ACTIVATED;
-        const ip4 = Object.assign(new Signals(), {
-            get_addresses: () => [{ get_address: () => '192.0.2.77', get_prefix: () => 24 }],
-            get_gateway: () => '192.0.2.1', get_nameservers: () => ['192.0.2.53'],
-        });
-        wifi.get_ip4_config = () => ip4;
-        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
-        try {
-            controller.start(); controller.toggle('offline-monitor');
-            const selected = row(backend, 'offline saved'), key = selected.key;
-            assert(selected.known && !selected.connected && selected.strength === null, 'Saved row is offline beside a different active connection');
-            assert(backend.getIdentity(key) === null, 'Offline details never manufacture an active credential identity');
-            function checkDetails() {
-                const details = backend.details(key);
-                assert(details.identity === null && details.ssid === 'offline saved' && details.interface === 'wlan-test',
-                    'Offline metadata identifies the saved network and interface, not the device active network');
-                const matching = [first, second].find(item => item.get_uuid() === details.profileUuid);
-                assert(matching && details.profileId === matching.get_id(), 'Offline profile ID and UUID describe the same matching saved profile');
-                for (const field of ['ipv4', 'ipv6', 'prefix', 'gateway4', 'gateway6', 'dns', 'mac', 'bssid',
-                    'frequency', 'band', 'channel', 'mode', 'rate', 'activePath']) {
-                    const value = details[field];
-                    assert(value == null || value === '' || (Array.isArray(value) && value.length === 0),
-                        `Offline ${field} does not leak live device/connection data`);
-                }
-                equal(JSON.parse(JSON.stringify(details)), details, 'Offline metadata is plain serializable data');
-            }
-            checkDetails();
-            controller.info(key);
-            assert(controller.page === 'info' && controller.details.identity === null, 'Real controller accepts native offline details');
-            await rejects(backend.readSecret(key, controller.details.identity), /active connection changed/);
-            assert([first, second, live].every(item => item.secretCalls === 0), 'Opening offline Info never authorizes secrets');
-            controller.selectSavedProfile(second.get_uuid());
-            assert(second.secretCalls === 0 && controller.selectedProfileUuid === second.get_uuid(), 'Selecting a saved UUID only updates metadata');
-            await controller.revealSecret();
-            assert(controller.page === 'info' && controller.secretRequested && !controller.secretLoading,
-                'Explicit offline reveal stays on Info');
-            assert(controller.secret === 'offline-secret' && second.secretCalls === 1 && second.secretFinishes === 1
-                && first.secretCalls === 0 && live.secretCalls === 0, 'Only the explicitly selected offline profile supplies credentials');
-            controller.hideSecret();
-            assert(!controller.secret && !controller.secretRequested, 'Hiding drops the saved credential');
-            const detected = new AP('offline saved', 'psk', 0, 9);
-            wifi.aps.push(detected); wifi.emit('access-point-added', detected); await delay(12);
-            assert(controller.page === 'info' && controller.selectedRow.strength === 0, 'A detected real zero does not invalidate offline Info');
-            checkDetails();
-            wifi.aps = wifi.aps.filter(ap => ap !== detected); wifi.emit('access-point-removed', detected); await delay(12);
-            assert(controller.page === 'info' && controller.selectedRow.strength === null, 'Losing signal preserves offline Info');
-            checkDetails();
-            const activeRow = row(backend, 'different active network');
-            const identity = backend.getIdentity(activeRow.key), details = backend.details(activeRow.key);
-            equal(details.identity, identity, 'Active details retain the existing complete identity contract');
-            equal(details.ipv4, ['192.0.2.77/24'], 'Active details retain live IPv4');
-            equal(details.dns, ['192.0.2.53'], 'Active details retain live DNS');
-            assert(details.profileUuid === live.get_uuid() && details.bssid === wifi.activeAP.get_bssid()
-                && details.rate === '866.7 Mbit/s', 'Active profile, BSSID and link rate remain unchanged');
-            assert(first.secretCalls === 0 && live.secretCalls === 0 && second.secretCalls === 1 && second.secretFinishes === 1
-                && client.calls.length === 0 && client.radioWrites.length === 0 && wifi.disconnects === 0,
-            'Offline Info and detection changes never automatically reread credentials or mutate network state');
-        } finally { controller.dispose(); }
-    }
-
-    async function automaticScanning() {
-        const { client, wifi, backend } = fixture();
-        const second = new Device('wlan-other');
-        client.devices.push(second);
-        const saved = profile('scan', 'psk');
-        client.profiles = [saved]; wifi.aps = [new AP('scan', 'psk', 70, 1)];
-        wifi.active = new Active(saved, 'scan'); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
-        wifi.activeAP = wifi.aps[0]; wifi.state = NM.DeviceState.ACTIVATED;
-        wifi.holdScans = second.holdScans = true;
-        const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
-        async function finishScans() { wifi.finishScans(); second.finishScans(); await delay(); }
-        async function tick() {
-            const source = GLib.MainContext.default().find_source_by_id(backend._scanTimer);
-            assert(source, 'An open panel owns a native periodic scan source');
-            // Advance only this source, not the system clock or the native adapter.
-            source.set_ready_time(0);
-            await delay(2);
-        }
-        try {
-            controller.start();
-            const key = row(backend, 'scan').key;
-            assert(wifi.scans === 0 && second.scans === 0 && !backend._scanTimer, 'Startup stays scan-free while hidden');
-            controller.toggle('offline-test');
-            assert(wifi.scans === 1 && second.scans === 1, 'Opening immediately scans every native Wi-Fi device');
-            const source = GLib.MainContext.default().find_source_by_id(backend._scanTimer);
-            const interval = source.get_ready_time() - GLib.get_monotonic_time();
-            assert(interval > 13e6 && interval < 17e6, 'Native periodic scan deadline is fifteen seconds, allowing GLib coalescing');
-            controller.info(key);
-            await tick();
-            assert(controller.page === 'info' && wifi.scans === 1 && second.scans === 1,
-                'Periodic ticks on info do not overlap in-flight scans');
-            await finishScans();
-            await tick();
-            assert(wifi.scans === 2 && second.scans === 2, 'Periodic native scans continue on the info page');
-            await finishScans();
-            await tick();
-            assert(controller.page === 'info' && wifi.scans === 3 && second.scans === 3, 'Periodic native scans continue across repeated Info ticks');
-            controller.close();
-            assert(!backend._scanTimer && !backend._scanMembers.size, 'Closing removes the periodic source and scan members');
-            assert([...wifi.pendingScans, ...second.pendingScans].every(scan => scan.io.is_cancelled()), 'Closing cancels every in-flight native scan');
-            await finishScans();
-            assert(!backend._scans.size, 'Cancelled scan callbacks are drained');
-            await delay(12);
-            assert(wifi.scans === 3 && second.scans === 3, 'No scans resume while hidden');
-            controller.toggle('offline-test');
-            assert(wifi.scans === 4 && second.scans === 4, 'Reopening starts an immediate scan again');
-            await finishScans();
-            client.enabled = false; client.emit('notify'); await delay(12);
-            assert(!backend._scanTimer && !backend._scanMembers.size && wifi.scans === 4 && second.scans === 4, 'Radio-off removes the timer and stops scans while open');
-            client.enabled = true; client.emit('notify'); await delay(12);
-            assert(backend._scanTimer && wifi.scans === 5 && second.scans === 5, 'Radio-on resumes immediate and periodic scans while open');
-            client.hardware = false; client.emit('notify'); await delay(12);
-            assert(!backend._scanTimer && !backend._scanMembers.size && wifi.scans === 5 && second.scans === 5, 'Hardware-off stops scans while open');
-            assert([...wifi.pendingScans, ...second.pendingScans].every(scan => scan.io.is_cancelled()), 'Hardware-off cancels in-flight scans');
-            await finishScans();
-            client.hardware = true; client.emit('notify'); await delay(12);
-            assert(backend._scanTimer && wifi.scans === 6 && second.scans === 6, 'Hardware recovery resumes automatic scans');
-            await finishScans();
-        } finally {
-            controller.dispose();
-            await finishScans();
-        }
-        assert(!backend._scanTimer && !backend._scans.size, 'Disposal releases every automatic scan');
-    }
-
-    async function nativeRadioToggle() {
-        const { client, wifi, backend } = fixture();
-        try {
-            backend.toggleWifi(); backend.toggleWifi();
-            equal(client.radioWrites, [false, true], 'Global toggles delegate exact radio state changes to the stubbed native client');
-            assert(!backend._opened && !backend._scanTimer && wifi.scans === 0, 'A native radio toggle never opens or scans a hidden panel');
-            client.hardware = false;
-            let error; try { backend.toggleWifi(); } catch (caught) { error = caught; }
-            assert(/hardware/.test(error?.message) && client.radioWrites.length === 2, 'Hardware blocking fails before a native radio write');
-        } finally { backend.dispose(); }
-    }
-
-    async function nativeSettings() {
-        for (const type of ['open', 'wep', 'psk', 'sae', 'owe']) {
-            const { client, wifi, backend } = fixture();
-            wifi.aps = [new AP('offline', type, 65, 1)];
-            try {
-                const selected = row(backend, 'offline', type);
-                await backend.activate(selected.key, { password: type === 'wep' ? 'abcde' : ['psk', 'sae'].includes(type) ? 'offline-test' : null });
-                const created = client.calls[0].profile;
-                assert(created.verify() && created.verify_secrets(), `Real libnm ${type} settings verify`);
-                assert(wifi.aps[0].connection_valid(created), `Native ${type} settings match the selected AP`);
-                assert(client.calls[0].device === wifi && client.calls[0].specific === wifi.aps[0].get_path(), 'Explicit native device and AP');
-                assert(!created.get_setting_wireless().get_bssid(), 'New profiles do not pin a BSSID');
-                assert(backend.getIdentity(selected.key), 'Activation resolves on actual activated state');
-            } finally { backend.dispose(); }
-        }
-        for (const type of ['enterprise', 'unknown']) {
-            const { client, wifi, backend } = fixture(); wifi.aps = [new AP('advanced', type, 65, 1)];
-            try {
-                await rejects(backend.activate(row(backend, 'advanced').key), /./);
-                assert(client.calls.length === 0, 'Unsupported inline setup does not invoke activation');
-            } finally { backend.dispose(); }
-        }
-    }
-
-    async function profilesAndSecrets() {
-        const { client, wifi, backend } = fixture(); wifi.aps = [new AP('saved', 'psk', 80, 1)];
-        const first = profile('saved', 'psk'); const second = profile('saved', 'psk');
-        client.profiles = [first, second];
-        try {
-            let selected = row(backend, 'saved');
-            await rejects(backend.activate(selected.key, { profileUuid: first.get_uuid(), password: 'offline-test' }), /Multiple saved/);
-            await rejects(backend.activate(selected.key, { profileUuid: GLib.uuid_string_random() }), /no longer available/);
-            assert(client.calls.length === 0, 'Ambiguous updates and stale UUIDs are rejected before native activation');
-            await backend.activate(selected.key, { profileUuid: second.get_uuid() });
-            assert(client.calls[0].profile === second, 'Exact explicitly selected saved profile');
-            const stamp = backend.getIdentity(selected.key);
-            equal(await backend.readSecret(selected.key, stamp), { password: 'offline-secret', authentication: 'WPA', hidden: true }, 'Native secret variant unpacking');
-            const reading = backend.readSecret(selected.key, stamp); await delay();
-            wifi.activeAP = new AP('saved', 'psk', 50, 7); wifi.aps.push(wifi.activeAP);
-            await rejects(reading, /active connection changed/);
-            assert(second.secretFinishes === 2, 'Finish called even when identity changed');
-            wifi.activeAP = wifi.aps[0];
-            const io = new Gio.Cancellable();
-            const cancelled = backend.readSecret(selected.key, stamp, io); await delay(); io.cancel();
-            await rejects(cancelled, /cancelled/); await delay(10);
-            assert(second.secretFinishes === 3, 'Cancelled secret request is still finished');
-            client.profiles = [first]; wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            selected = row(backend, 'saved');
-            await backend.activate(selected.key, { password: 'updated-offline-password' });
-            assert(first.updated.get_setting_wireless_security().get_psk() === 'updated-offline-password', 'Saved profile update uses native settings');
-            assert(!first.get_setting_wireless_security().get_psk(), 'No mutation of live profile settings before remote update');
-            let deleted = 0;
-            for (const saved of [first, second]) {
-                saved.delete_async = (io, callback) => {
-                    client.profiles = client.profiles.filter(item => item !== saved); deleted++;
-                    later(() => callback(saved, {}));
-                };
-                saved.delete_finish = () => true;
-            }
-            client.profiles = [first, second];
-            await backend.forget(selected.key);
-            assert(deleted === 2 && wifi.disconnects === 1, 'Forget disconnects and deletes every matching profile');
-        } finally { backend.dispose(); }
-    }
-
-    async function savedPasswords() {
-        for (const type of ['wep', 'psk', 'sae', 'open']) {
-            const { client, wifi, backend } = fixture();
-            const first = profile('saved password', type), second = profile('saved password', type);
-            first.get_setting_connection().id = second.get_setting_connection().id = 'Duplicate saved ID';
-            if (type === 'wep') second.get_setting_wireless_security().wep_tx_keyidx = 2;
-            client.profiles = [first, second];
-            try {
-                const selected = row(backend, 'saved password');
-                backend.details(selected.key); backend.rows; backend.getIdentity(selected.key);
-                assert(first.secretCalls === 0 && second.secretCalls === 0, 'Saved snapshots never automatically authorize secrets');
-                client.profiles.reverse();
-                const uuid = second.get_uuid(), version = second.get_version_id();
-                const result = await backend.readSavedSecret(selected.key, uuid);
-                assert(second.get_uuid() === uuid && row(backend, 'saved password').profiles.some(profile => profile.uuid === uuid),
-                    'Successful retrieval keeps the exact selected saved UUID');
-                assert(second.get_version_id() === version + (type === 'open' ? 0 : 1),
-                    'A successful native retrieval may bump the cached profile revision without invalidating the result');
-                assert(result.password === (type === 'open' ? '' : type === 'wep' ? 'fghij' : 'offline-secret'),
-                    'Native saved credential uses the exact UUID and selected WEP transmit key without diagnostic disclosure');
-                equal([result.authentication, result.hidden], [type === 'open' ? 'nopass' : type === 'wep' ? 'WEP' : 'WPA', true],
-                    'Saved WEP, PSK, SAE and open authentication metadata');
-                assert(first.secretCalls === 0 && second.secretCalls === (type === 'open' ? 0 : 1),
-                    'Duplicate display IDs and reordering cannot redirect native authorization; open needs no GetSecrets');
-                for (const uuid of ['', null, 7, GLib.uuid_string_random()])
-                    await rejects(backend.readSavedSecret(selected.key, uuid), /selected saved profile is no longer available/);
-                assert(client.calls.length === 0 && client.radioWrites.length === 0 && wifi.disconnects === 0,
-                    'Saved reads never activate, disconnect or toggle a radio');
-                const snapshots = JSON.stringify([backend.rows, backend.details(selected.key)]);
-                assert(!['offline-secret', 'abcde', 'fghij'].some(value => snapshots.includes(value)),
-                    'Native rows and details stay credential-free after saved reads');
-            } finally { backend.dispose(); }
-        }
-        for (const type of ['owe', 'enterprise', 'unknown']) {
-            const { client, backend } = fixture();
-            const remote = profile('unsupported saved password', type); client.profiles = [remote];
-            try {
-                await rejects(backend.readSavedSecret(row(backend, 'unsupported saved password').key, remote.get_uuid()), /not supported/);
-                assert(remote.secretCalls === 0 && client.calls.length === 0, 'Unsupported saved security never asks libnm for a password');
-            } finally { backend.dispose(); }
-        }
-    }
-
-    async function savedPasswordContext() {
-        {
-            const { client, backend } = fixture();
-            const remote = profile('saved revision', 'psk'), alternate = profile('saved revision', 'psk');
-            client.profiles = [alternate, remote]; remote.holdSecrets = true;
-            remote.get_setting_connection().id = alternate.get_setting_connection().id = 'Duplicate saved ID';
-            try {
-                const key = row(backend, 'saved revision').key, uuid = remote.get_uuid(), version = remote.get_version_id();
-                const reading = backend.readSavedSecret(key, uuid); await delay();
-                assert(remote.pendingSecrets.length === 1 && remote.get_version_id() === version,
-                    'The exact saved-profile request waits for its fake native response before the cache revision changes');
-                remote.pendingSecrets.shift().finish();
-                const result = await reading;
-                assert(remote.get_version_id() === version + 1 && remote.get_uuid() === uuid,
-                    'Successful fake GetSecrets bumps VersionId but preserves the requested saved UUID');
-                assert(result.password === 'offline-secret' && result.authentication === 'WPA' && result.hidden,
-                    'Revision-only cache refresh accepts the request-local saved credential without diagnostic disclosure');
-                assert(remote.secretCalls === 1 && remote.secretFinishes === 1 && alternate.secretCalls === 0,
-                    'A revision bump never redirects authorization to a duplicate display ID');
-                assert(client.calls.length === 0, 'Accepting the revision refresh never activates a connection');
-            } finally { backend.dispose(); }
-        }
-        const changes = {
-            'removed saved profile': ({ client }) => { client.profiles = []; },
-            'same-UUID replacement': ({ client, remote }) => {
-                const replacement = profile('saved context', 'psk');
-                replacement.get_setting_connection().uuid = remote.get_uuid();
-                client.profiles = [replacement];
-            },
-            'ambiguous duplicate UUID': ({ client, remote }) => {
-                const duplicate = profile('saved context', 'psk');
-                duplicate.get_setting_connection().uuid = remote.get_uuid(); client.profiles.push(duplicate);
-            },
-
-            'UUID change': ({ remote }) => { remote.get_setting_connection().uuid = GLib.uuid_string_random(); },
-            'SSID change': ({ remote }) => { remote.get_setting_wireless().ssid = bytes('different saved SSID'); },
-            'security change': ({ remote }) => { remote.get_setting_wireless_security().key_mgmt = 'sae'; },
-            'hidden setting change': ({ remote }) => { remote.get_setting_wireless().hidden = false; },
-            'profile device binding': ({ remote }) => { remote.get_setting_connection().interface_name = 'other-wlan'; },
-            'device replacement': ({ client }) => { client.devices = [new Device('wlan-test')]; },
-            'device removal': ({ client }) => { client.devices = []; },
-            'device interface change': ({ wifi }) => { wifi.iface = 'renamed-wlan'; },
-            'device type change': ({ wifi }) => { wifi.wireless = false; },
-            'connection': ({ wifi, remote }) => {
-                wifi.active = new Active(remote, 'saved-connected'); wifi.active.state = NM.ActiveConnectionState.ACTIVATED;
-                wifi.state = NM.DeviceState.ACTIVATED;
-            },
-            'activation': ({ wifi, remote }) => { wifi.active = new Active(remote, 'saved-activating'); wifi.state = NM.DeviceState.PREPARE; },
-            'software radio': ({ client }) => { client.enabled = false; },
-            'hardware radio': ({ client }) => { client.hardware = false; },
-        };
-        for (const [change, apply] of Object.entries(changes)) {
-            const context = fixture(), remote = profile('saved context', 'psk');
-            Object.assign(context, { remote }); context.client.profiles = [remote]; remote.holdSecrets = true;
-            const { backend } = context;
-            try {
-                const key = row(backend, 'saved context').key;
-                const reading = backend.readSavedSecret(key, remote.get_uuid());
-                await delay();
-                assert(remote.pendingSecrets.length === 1, `Saved request waits for native authorization before ${change}`);
-                apply(context);
-                remote.pendingSecrets.shift().finish();
-                await rejects(reading, /changed|no longer available/);
-                assert(remote.secretFinishes === 1, `Native saved callback is finished after ${change}`);
-                assert(context.client.calls.length === 0, `Rejecting ${change} never activates a profile`);
-            } finally { backend.dispose(); }
-        }
-        {
-            const { client, backend } = fixture();
-            const remote = profile('WEP context', 'wep'); client.profiles = [remote]; remote.holdSecrets = true;
-            try {
-                const key = row(backend, 'WEP context').key;
-                const reading = backend.readSavedSecret(key, remote.get_uuid()); await delay();
-                remote.get_setting_wireless_security().wep_tx_keyidx = 2;
-                remote.pendingSecrets.shift().finish();
-                await rejects(reading, /changed/);
-            } finally { backend.dispose(); }
-        }
-        for (const change of ['same-UUID replacement', 'SSID change', 'security change', 'hidden setting change']) {
-            const context = fixture(), remote = profile('saved context', 'psk');
-            Object.assign(context, { remote }); context.client.profiles = [remote];
-            try {
-                const key = row(context.backend, 'saved context').key;
-                const reading = context.backend.readSavedSecret(key, remote.get_uuid());
-                changes[change](context);
-                await rejects(reading, /changed|no longer available/);
-                assert(remote.secretCalls === 0, 'A real profile/context change before the first async turn cannot retarget authorization');
-            } finally { context.backend.dispose(); }
-        }
-        for (const action of ['cancel', 'dispose']) {
-            const { client, backend } = fixture();
-            const remote = profile('cancel saved', 'psk'); client.profiles = [remote]; remote.holdSecrets = true;
-            const io = new Gio.Cancellable();
-            try {
-                const reading = backend.readSavedSecret(row(backend, 'cancel saved').key, remote.get_uuid(), io); await delay();
-                const reply = remote.pendingSecrets.shift();
-                if (action === 'cancel') io.cancel(); else backend.dispose();
-                await rejects(reading, /cancelled|closed/);
-                assert(reply.io.is_cancelled(), 'Saved native authorization receives cancellation');
-                reply.finish(); await delay();
-                assert(remote.secretFinishes === 1, 'Late saved callbacks are still finished after cancellation/close');
-            } finally { backend.dispose(); }
-        }
-        {
-            const { client, backend } = fixture();
-            const remote = profile('saved failure', 'psk'); client.profiles = [remote];
-            try {
-                const key = row(backend, 'saved failure').key;
-                remote.secretReply = new GLib.Variant('a{sa{sv}}', { '802-11-wireless-security': {} });
-                await rejects(backend.readSavedSecret(key, remote.get_uuid()), /saved password is not available/);
-                remote.secretReply = null; remote.secretError = new Error('offline-secret');
-                const error = await rejects(backend.readSavedSecret(key, remote.get_uuid()), /network operation failed/);
-                assert(!error.message.includes('offline-secret'), 'Untrusted native secret errors are sanitized without printing them');
-            } finally { backend.dispose(); }
-        }
-    }
-
-    async function savedControllerContext() {
-        for (const change of ['retrieval revision', 'same-UUID replacement', 'device replacement']) {
-            const { client, backend } = fixture();
-            const remote = profile('controller saved', 'psk'); client.profiles = [remote]; remote.holdSecrets = true;
-            const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
-            try {
-                controller.start(); controller.toggle('offline-monitor');
-                const key = row(backend, 'controller saved').key;
-                controller.info(key);
-                const reading = controller.revealSecret(); await delay();
-                const reply = remote.pendingSecrets.shift();
-                const version = remote.get_version_id(), uuid = remote.get_uuid();
-                if (change === 'same-UUID replacement') {
-                    const replacement = profile('controller saved', 'psk');
-                    replacement.get_setting_connection().uuid = remote.get_uuid(); client.profiles = [replacement];
-                } else if (change === 'device replacement') client.devices = [new Device('wlan-test')];
-                backend._sync();
-                reply.finish(); await reading;
-                if (change === 'retrieval revision') {
-                    assert(remote.get_version_id() === version + 1 && controller.selectedProfileUuid === uuid
-                        && controller.details.profileUuid === uuid, 'Controller accepts the retrieval revision for the same saved UUID');
-                    assert(controller.page === 'info' && controller.secretRequested && controller.secret === 'offline-secret'
-                        && !controller.secretLoading && !controller.error, 'Cache hydration reveals the requested fake password without leaving Info');
-                } else assert(!controller.secret && !controller.secretLoading && remote.secretFinishes === 1,
-                    `The real controller drops a native saved response after ${change}`);
-                assert(remote.secretCalls === 1 && client.calls.length === 0, 'Native context changes do not reread secrets or activate');
-            } finally { controller.dispose(); }
-        }
-        {
-            const { client, backend } = fixture();
-            const remote = profile('retry saved', 'psk'); client.profiles = [remote];
-            const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
-            try {
-                controller.start(); controller.toggle('offline-monitor');
-                controller.info(row(backend, 'retry saved').key);
-                const uuid = controller.selectedProfileUuid;
-                remote.secretReply = new GLib.Variant('a{sa{sv}}', { '802-11-wireless-security': {} });
-                await controller.revealSecret();
-                assert(controller.page === 'info' && controller.selectedProfileUuid === uuid && controller.error
-                    && !controller.secret && !controller.secretRequested && !controller.secretLoading,
-                    'An accepted native saved-password failure keeps Info and restores the explicit Reveal action');
-                assert(remote.secretCalls === 1, 'Native failure never automatically retries a secret request');
-                remote.secretReply = null;
-                await controller.revealSecret();
-                assert(controller.page === 'info' && controller.selectedProfileUuid === uuid && !controller.error
-                    && controller.secretRequested && controller.secret === 'offline-secret' && !controller.secretLoading,
-                    'The next explicit Reveal directly retries the same saved UUID and displays its fake credential');
-                assert(remote.secretCalls === 2 && client.calls.length === 0, 'Retry makes one native secret request, never an activation');
-            } finally { controller.dispose(); }
-        }
-        {
-            const { client, backend } = fixture();
-            const remote = profile('displayed saved', 'psk'); client.profiles = [remote];
-            const controller = new NetworkController({ backend, createCancellable: () => new Gio.Cancellable() });
-            try {
-                controller.start(); controller.toggle('offline-monitor'); controller.info(row(backend, 'displayed saved').key);
-                await controller.revealSecret();
-                assert(controller.secret === 'offline-secret', 'Native saved password is displayed only after explicit reveal');
-                const replacement = profile('displayed saved', 'psk');
-                replacement.get_setting_connection().uuid = remote.get_uuid(); client.profiles = [replacement]; backend._sync();
-                assert(controller.page === 'list' && !controller.secret && !controller.selectedProfileUuid,
-                    'Replacing the native profile object clears a displayed password even when UUID is reused');
-                assert(replacement.secretCalls === 0, 'Replacement profile never inherits authorization');
-            } finally { controller.dispose(); }
-        }
-    }
-
-    async function nativeSettingsEdges() {
-        for (const [type, password, keyType] of [
-            ['wep', '0123456789', NM.WepKeyType.KEY],
-            ['wep', 'offline-wep-passphrase', NM.WepKeyType.PASSPHRASE],
-            ['sae', 'x', null], ['sae', 'x'.repeat(100), null],
-        ]) {
-            const { client, wifi, backend } = fixture(); wifi.aps = [new AP('edge', type, 70, 1)];
-            try {
-                await backend.activate(row(backend, 'edge').key, { password });
-                const settings = client.calls[0].profile.get_setting_wireless_security();
-                if (type === 'wep') assert(settings.get_wep_key_type() === keyType && settings.get_wep_key(0) === password, 'Native WEP key/passphrase settings');
-                else assert(settings.get_psk() === password, 'SAE keeps native password rules instead of WPA-PSK length rules');
-            } finally { backend.dispose(); }
-        }
-        const { client, wifi, backend } = fixture(); wifi.aps = [new AP('saved-wep', 'wep', 70, 1)];
-        const remote = profile('saved-wep', 'wep'); remote.get_setting_wireless_security().wep_tx_keyidx = 2;
-        client.profiles = [remote];
-        try {
-            await backend.activate(row(backend, 'saved-wep').key, { password: 'abcde' });
-            const settings = remote.updated.get_setting_wireless_security();
-            assert(settings.get_wep_tx_keyidx() === 2 && settings.get_wep_key(2) === 'abcde', 'Updating WEP preserves the selected native transmit key index');
-        } finally { backend.dispose(); }
-    }
-
-    async function activationIdentityAndCancellation() {
-        {
-            const { client, wifi, backend } = fixture(); wifi.aps = [new AP('exact', 'psk', 70, 1)];
-            const wanted = profile('exact', 'psk'); const other = profile('exact', 'psk'); client.profiles = [wanted, other];
-            client.activate_connection_finish = result => { client.finishes++; result.active.profile = other; return result.active; };
-            try {
-                await rejects(backend.activate(row(backend, 'exact').key, { profileUuid: wanted.get_uuid() }), /profile changed/);
-            } finally { backend.dispose(); }
-        }
-        for (const dispose of [false, true]) {
-            const { client, wifi, backend } = fixture(); wifi.aps = [new AP('cancel-update', 'psk', 70, 1)];
-            const remote = profile('cancel-update', 'psk'); client.profiles = [remote];
-            let finishes = 0;
-            remote.update2 = (settings, flags, args, io, callback) => later(() => callback(remote, {}), 12);
-            remote.update2_finish = () => { finishes++; return new GLib.Variant('a{sv}', {}); };
-            const io = new Gio.Cancellable();
-            try {
-                const updating = backend.activate(row(backend, 'cancel-update').key, { password: 'offline-test', cancellable: io });
-                await delay();
-                if (dispose) backend.dispose(); else io.cancel();
-                await rejects(updating, /cancelled/); await delay(20);
-                assert(finishes === 1 && client.calls.length === 0, 'Cancelled/disposed profile update finishes without a late activation');
-            } finally { backend.dispose(); }
-        }
-        {
-            const { client, wifi, backend } = fixture(); wifi.aps = [new AP('cancel-wait', 'open', 70, 1)]; client.automatic = false;
-            try {
-                const io = new Gio.Cancellable(); io.cancel();
-                await rejects(backend.activate(row(backend, 'cancel-wait').key, { cancellable: io }), /cancelled/);
-                assert(client.calls.length === 0, 'Already-cancelled request does not mutate native state');
-                const waitingIo = new Gio.Cancellable();
-                const waiting = backend.activate(row(backend, 'cancel-wait').key, { cancellable: waitingIo });
-                await delay(10); waitingIo.cancel();
-                await rejects(waiting, /cancelled/); await delay();
-                const { active } = client.accepted;
-                backend.dispose();
-                assert(active.handlers.size === 0 && wifi.handlers.size === 0 && client.handlers.size === 0, 'Cancellation during activation releases temporary and lifecycle signals');
-            } finally { backend.dispose(); }
-        }
-    }
-
-    async function activationLifecycle() {
-        const { client, wifi, backend } = fixture(); wifi.aps = [new AP('wait', 'open', 80, 1)]; client.automatic = false;
-        try {
-            const key = row(backend, 'wait').key;
-            let resolved = false;
-            const activation = backend.activate(key).then(() => { resolved = true; });
-            await delay(10); assert(!resolved, 'Accepted request is not activation success');
-            client.complete(); await activation; assert(resolved, 'Actual activated transition resolves');
-            wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            const failed = backend.activate(key); await delay(10);
-            client.accepted.active.state = NM.ActiveConnectionState.DEACTIVATED;
-            client.accepted.active.reason = NM.ActiveConnectionStateReason.NO_SECRETS;
-            client.accepted.active.emit('notify');
-            await rejects(failed, /connection failed/, true);
-            wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            const gone = backend.activate(key); await delay(10);
-            client.devices = []; client.emit('device-removed', wifi);
-            await rejects(gone, /no longer available/);
-            client.devices = [wifi]; wifi.active = null; wifi.activeAP = null; wifi.state = NM.DeviceState.DISCONNECTED;
-            client.replyDelay = 15;
-            const io = new Gio.Cancellable();
-            const cancelled = backend.activate(key, { cancellable: io }); await delay(); io.cancel();
-            await rejects(cancelled, /cancelled/); await delay(25);
-            assert(client.finishes === 4, 'All activation callbacks finish, including cancellation');
-            const timeout = backend._run(null, 5, async operation => {
-                await delay(12); backend._check(operation); throw new Error('must not reach');
-            });
-            await rejects(timeout, /timed out/);
-            const secret = 'never-display-this-credential';
-            const sanitized = await rejects(backend._run(null, 0, () => { throw new Error(secret); }), /network operation failed/);
-            assert(!sanitized.message.includes(secret), 'Raw NM errors never escape');
-            const nativeError = new GLib.Error(NM.secret_agent_error_quark(), NM.SecretAgentError.NOSECRETS, secret);
-            const auth = await rejects(backend._run(null, 0, () => { throw nativeError; }), /network operation failed/, true);
-            assert(!auth.message.includes(secret), 'Native NoSecrets error preserves authentication flag without its message');
-        } finally { backend.dispose(); }
-        await delay(15);
-        assert(wifi.handlers.size === 0 && client.handlers.size === 0 && backend._operations.size === 0, 'Pending operation teardown');
-    }
-
-    function nativeSignalTeardown() {
-        const { backend } = fixture();
-        const device = new NM.DeviceWifi();
-        backend._watch(new Map([[device, ['notify']]]));
-        const [first] = backend._watches.get(device);
-        assert(GObject.signal_handler_is_connected(device, first), 'Real NM.Device notify connected');
-        backend._watch(new Map());
-        assert(!GObject.signal_handler_is_connected(device, first), 'Removed NM.Device signals disconnected without a network operation');
-        backend._watch(new Map([[device, ['notify']]]));
-        const [second] = backend._watches.get(device);
-        backend.dispose();
-        assert(!GObject.signal_handler_is_connected(device, second), 'Disposed NM.Device signals disconnected without a network operation');
-    }
-
-    async function main() {
-        nativeSignalTeardown();
-        securityLabels();
-        await activationCacheOrdering();
-        await grouping(); await savedSignalStrength(); await offlineDetails();
-        await automaticScanning(); await nativeRadioToggle();
-        await nativeSettings(); await nativeSettingsEdges(); await profilesAndSecrets();
-        await savedPasswords(); await savedPasswordContext(); await savedControllerContext();
-        await activationIdentityAndCancellation(); await activationLifecycle();
-        print('Native network tests passed: security labels, libnm settings, grouping, signal detection, safe offline Info, exact saved UUID passwords, retrieval revision refresh, devices, scans, profiles, secrets, exact ACTIVATED state, cancellation and teardown. No live NM mutations.');
-    }
-    let failed = false;
-    try { await main(); }
-    catch (error) { failed = true; logError(error); }
-    System.exit(failed ? 1 : 0);
+// Rust migration checklist for the retired LibNM fixtures (not JS coverage):
+//  1. nativeSignalTeardown: disconnect every native signal without Device.disconnect.
+//  2. securityLabels: WPA/WPA2/SAE/OWE, enterprise Suite-B, dynamic WEP/LEAP,
+//     mixed-profile ambiguity, active/saved precedence and revision-only refresh.
+//  3. activationCacheOrdering: publish the activated snapshot before resolving.
+//  4. grouping: raw SSID bytes + security + device, strongest/active AP, multiple
+//     radios, wired rows, duplicate display IDs and incompatible saved profiles.
+//  5. savedSignalStrength: null for undetected (not 0), stable key/profile/stamp
+//     through AP appearance/disappearance and real zero-strength detection.
+//  6. offlineDetails: matching saved UUID metadata only; no different active
+//     network IP/DNS/MAC/BSSID/link data; snapshots never authorize credentials.
+//  7. automaticScanning: immediate + 15s per-radio scan only while open/radios on;
+//     Info stays open, no overlapping scans, cancel/drain on close/off/dispose.
+//  8. nativeRadioToggle: absent service/device and hardware-block failures.
+//  9. nativeSettings/nativeSettingsEdges: open/WEP/PSK/SAE/OWE construction,
+//     hidden/raw SSID, interface binding, IP defaults, PMF, valid key/index/flags,
+//     never synthesize enterprise/unknown credentials; WPA-none/legacy handling.
+// 10. profilesAndSecrets: exact UUID selection, clone/update only that profile,
+//     preserve unrelated settings, reject ambiguous generic retries, forget all
+//     matching profiles (disconnect first) without deleting replacements.
+// 11. savedPasswords: exact UUID despite reorder/duplicate IDs; WEP transmit key,
+//     PSK/SAE/open authentication + hidden metadata, unsupported types rejected,
+//     missing UUID/password rejected, no mutation, no secrets in state/details.
+// 12. savedPasswordContext/savedControllerContext: pin before the first yield;
+//     allow GetSecrets VersionId-only refresh; reject removed/same-UUID replaced
+//     or duplicate UUID profiles, raw SSID/security/hidden/WEP-index/binding changes,
+//     device replacement/removal/interface/type, active identity, activation and
+//     either radio change, both before authorization and after its callback.
+// 13. activationIdentityAndCancellation/activationLifecycle: resolve only exact
+//     target ACTIVATED, not accepted/other activation; progress, device removal,
+//     failure reasons, auth flag, cancellation while updating/activating/waiting,
+//     timeout, always finish native callbacks, release timers/handlers/busy gates.
+// 14. Every path must sanitize NM/DBus diagnostics (including secret values),
+//     bound requests, implement cancel ids, and emit authoritative descriptors
+//     plus savedIdentity/profileStamp/savedInfoStamp/credentialStamp (raw SSID
+//     and native replacement sensitive; opaque to the JavaScript adapter).
+async function gjsAdapterTests() {
+    const { default: Gio } = await import("gi://Gio");
+    const { default: System } = await import("system");
+    const { NetworkBackend } = await import("./backend.js");
+    const mock = networkProtocolMock();
+    const backend = new NetworkBackend({ launch: mock.launch });
+    let checks = 0;
+    const assert = (condition, message) => { if (!condition) throw new Error(message); checks++; };
+    const flush = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
+    let exitCode = 0;
+    try {
+        backend.start(); await flush();
+        const child = mock.children[0];
+        assert(child.argv.slice(1).join(" ") === "backend network", "Exact backend subcommand");
+        assert(child.messages[0].method === "setOpened" && child.messages[0].args[0] === false, "Initial closed notification");
+        const row = mockNetworkRow({ key: "wlan-test:ff:psk", name: "Offline", ssid: "Offline", interface: "wlan-test",
+            wireless: true, known: true, connected: true, changing: false, securityType: "psk",
+            profiles: [{ id: "Saved", uuid: "uuid-a" }] });
+        child.feed(protocolState([row]));
+        assert(backend.rows[0].key === row.key && backend.rows[0].canShare, "Rust snapshot cached");
+        assert(backend.getIdentity(row.key).profileUuid === "uuid-a", "Identity is synchronous");
+        assert(backend.details(row.key).profileUuid === "uuid-a", "Details are synchronous");
+        const io = new Gio.Cancellable();
+        const work = backend.readSecret(row.key, backend.getIdentity(row.key), io); await flush();
+        const id = child.messages.at(-1).id;
+        io.cancel();
+        let cancelled = false;
+        try { await work; } catch (error) { cancelled = error.code === "cancelled"; }
+        await flush();
+        assert(cancelled, "Real Gio cancellation rejects promptly");
+        assert(child.messages.at(-1).method === "cancel" && child.messages.at(-1).args[0] === id, "Cancellation forwards exact id");
+        child.feed({ id, result: { password: "late-offline-secret" } });
+        assert(backend._pending.size === 0, "Late secrets cannot revive requests");
+        const activating = backend.activate(row.key, { profileUuid: "uuid-a" }); await flush();
+        const request = child.messages.at(-1);
+        assert(request.method === "activate" && request.args[1].profileUuid === "uuid-a", "Exact activation UUID");
+        child.feed({ id: request.id, result: null }); await activating;
+        assert(backend._pending.size === 0, "Reply releases request");
+        backend.dispose(); backend.dispose(); await flush();
+        assert(!backend.available && backend.rows.length === 0 && !backend._child, "Disposal clears cache/worker");
+        assert(child.waitFinishes === 1 && child.killed === 1, "Worker reaped once");
+        print(`PASS network GJS adapter: ${checks} assertions; protocol mocks, real Gio cancellation, no live service`);
+    } catch (error) { console.error(error); exitCode = 1; }
+    finally { backend.dispose(); }
+    System.exit(exitCode);
 }
 
 async function gjsRuntimeTests() {
@@ -4065,11 +3793,11 @@ async function gjsUITests() {
         for (const data of controller.rows) assertRowPresentation(view, data);
     }
     function network(key, properties = {}) {
-        return { key, name: '<b>Literal SSID</b> ' + 'Long network name '.repeat(8), ssid: 'test', interface: 'wlan0',
+        return mockNetworkRow({ key, name: '<b>Literal SSID</b> ' + 'Long network name '.repeat(8), ssid: 'test', interface: 'wlan0',
             kind: 'WI-FI', wireless: true, connected: true, changing: false, known: true,
             strength: 87, security: 'WPA2', securityType: 'psk',
             profiles: [{ id: '<i>Duplicate profile</i>', uuid: 'uuid-a' }, { id: '<i>Duplicate profile</i>', uuid: 'uuid-b' }],
-            ...properties };
+            ...properties });
     }
     class FakeController {
         constructor() {
@@ -4079,7 +3807,10 @@ async function gjsUITests() {
                 selectedRow: null, selectedProfileUuid: '', forgetKey: '', pendingKey: '', details: {}, secret: '',
                 secretLoading: false, secretRequested: false, calls: [] });
         }
-        emit() { this.onChange?.(); }
+        emit() {
+            this.rows.forEach(row => mockNetworkRow(row, this.wifiEnabled && this.wifiHardwareEnabled));
+            this.onChange?.();
+        }
         record(...args) { this.calls.push(args); }
         toggle(monitor = '') { this.record('toggle', monitor); this.opened = !this.opened || monitor !== this.monitor; this.monitor = monitor; this.emit(); }
         reset() {
@@ -4183,7 +3914,10 @@ async function gjsUITests() {
             rows: freshRows(), available: true, wifiAvailable: true, wifiEnabled: true, wifiHardwareEnabled: true,
             requests: [], mutations: [],
             start() {}, dispose() {}, setOpened() {},
-            notify() { this.onChange?.(); },
+            notify() {
+                this.rows.forEach(row => mockNetworkRow(row, this.wifiEnabled && this.wifiHardwareEnabled));
+                this.onChange?.();
+            },
             getIdentity(key) {
                 const row = this.rows.find(row => row.key === key);
                 return row?.connected ? { interface: row.interface, ssid: row.ssid, profileUuid: row.profiles[0].uuid,
@@ -4809,8 +4543,8 @@ async function gjsUITests() {
                     'Detection transitions preserve the row widget, profile model and selected UUID');
                 const undetected = strength === null;
                 assert(wifi.info.visible === !undetected, 'Only detected saved rows retain heading Info in Nearby, without secondary actions');
-                equal([wifi.connect.visible, wifi.profile.visible, wifi.forget.visible, wifi.remove.visible],
-                    undetected ? [false, false, false, true] : [true, true, true, false],
+                equal([wifi.connect.visible, wifi.profile.visible, wifi.remove.visible],
+                    undetected ? [false, false, true] : [true, true, false],
                     'Undetected rows use heading Remove and hide Connect/profile; detected rows use Nearby actions');
                 assertListPartition(undetected ? ['wired'] : ['wired', 'wifi'], undetected ? ['wifi'] : [],
                     'Signal appearance/disappearance migrates the existing row between tabs; genuine zero stays Nearby');
@@ -4860,7 +4594,7 @@ async function gjsUITests() {
             }
             assert(!wifi.remove.visible && wifi.connect.visible && wifi.info.visible,
                 'A connected Wi-Fi row without signal retains connected actions in Nearby');
-            assert(!nearbyZero.remove.visible && nearbyZero.connect.visible && nearbyZero.forget.visible && nearbyZero.info.visible,
+            assert(!nearbyZero.remove.visible && nearbyZero.connect.visible && nearbyZero.info.visible,
                 'A real zero remains a detected saved Nearby row');
             assert(!joining.remove.visible && joining.connect.visible && !joining.connect.sensitive && joining.info.visible,
                 'A changing no-signal saved row stays Nearby with Connect disabled');
@@ -5134,12 +4868,15 @@ async function gjsUITests() {
         c.wifiAvailable = false; c.emit();
         equal(panel.wifiNotice.label, 'No Wi-Fi adapter', 'Missing Wi-Fi adapter is reflected');
         c.wifiAvailable = c.wifiHardwareEnabled = c.wifiEnabled = true; c.emit();
-        wifi.forget.emit('clicked');
-        assert(panel.forget.visible && c.forgetKey === 'wifi', 'Forget opens explicit forget-all confirmation');
+        panel.savedTab.emit('clicked');
+        const savedWifi = [...panel.rows.values()].find(row => row.key === 'wifi' && row.widget.get_parent() === panel.savedRows);
+        savedWifi.remove.emit('clicked');
+        assert(panel.forget.visible && c.forgetKey === 'wifi', 'Saved removal opens explicit forget-all confirmation');
         panel.forgetCancel.emit('clicked');
         assert(!c.forgetKey, 'Forget confirmation can be canceled');
-        wifi.forget.emit('clicked'); panel.forgetConfirm.emit('clicked');
+        savedWifi.remove.emit('clicked'); panel.forgetConfirm.emit('clicked');
         assert(c.calls.some(call => call[0] === 'confirmForget'), 'Forget confirmation delegates the operation');
+        panel.nearbyTab.emit('clicked');
 
         c.credentialRow = c.rows.find(row => row.key === 'wifi'); c.credentialKey = 'credential:4'; c.emit();
         panel.password.set_text('clear-on-page-change');
@@ -5300,7 +5037,7 @@ async function gjsApplicationTests() {
     const { default: Gio } = await import('gi://Gio');
     const { default: Gtk } = await import('gi://Gtk?version=4.0');
     const { default: Astal } = await import('gi://Astal?version=4.0');
-    const { default: NM } = await import('gi://NM?version=1.0');
+
     const { default: System } = await import('system');
 
     const address = GLib.getenv('DBUS_SESSION_BUS_ADDRESS');
@@ -5317,6 +5054,20 @@ async function gjsApplicationTests() {
     const source = GLib.path_get_dirname(entry);
     const { NetworkApplication } = await import(GLib.filename_to_uri(entry, null));
     const { NetworkBackend } = await import(GLib.filename_to_uri(GLib.build_filenamev([source, 'backend.js']), null));
+    const mock = networkProtocolMock();
+    const backendStart = NetworkBackend.prototype.start;
+    // Keep real application/controller/adapter bootstrapping, replacing only process IO.
+    NetworkBackend.prototype.start = function () {
+        this._launch = (argv, flags) => {
+            const child = mock.launch(argv, flags);
+            child.onMessage = message => {
+                if (message.method === 'setOpened') child.feed({ ...protocolState(), available: false, wifiAvailable: false,
+                    wifiEnabled: false, wifiHardwareEnabled: false });
+            };
+            return child;
+        };
+        return backendStart.call(this);
+    };
     const { NetworkController } = await import(GLib.filename_to_uri(GLib.build_filenamev([source, 'logic.js']), null));
     const instance = 'network-panel-bootstrap';
     let app, checks = 0;
@@ -5364,15 +5115,15 @@ async function gjsApplicationTests() {
         assert(!controller.opened && !backend._opened && !panel.window.visible && !panel.window.get_mapped()
             && panel.window.keymode === Astal.Keymode.NONE, `${phase}: panel stays hidden without a keyboard grab`);
         assert(!controller.available && !controller.wifiAvailable && !backend.available && !backend.wifiAvailable
-            && !controller.rows.length && !backend.rows.length && !backend.client.get_devices().length,
-        `${phase}: real native backend has no service or network devices`);
+            && !controller.rows.length && !backend.rows.length,
+        `${phase}: Rust protocol mock reports no service or network devices`);
         assert(controller.secret === '' && !controller.secretRequested && !controller.credentialKey && !controller.credentialRow
             && panel.password.get_text() === '' && panel.secret.label === '*******'
             && !panel.secret.selectable,
         `${phase}: credentials remain empty, with the password label masked and non-selectable`);
-        assert(backend._scanTimer === 0 && backend._scans.size === 0 && backend._scanMembers.size === 0
-            && backend._operations.size === 0 && controller.read === null && controller.mutation === null,
-        `${phase}: no scans, scan timer or native mutations are pending`);
+        assert(backend._pending.size === 0 && backend._queue.length === 0 && backend._writing === null
+            && controller.read === null && controller.mutation === null,
+        `${phase}: no transport requests, queued writes or UI mutations are pending`);
         assert(serviceFree(), `${phase}: private bus has no other well-known service owners`);
     }
 
@@ -5389,7 +5140,7 @@ async function gjsApplicationTests() {
         app.startPanel();
         const controller = app.controller, panel = app.panel, backend = controller.backend;
         assert(controller instanceof NetworkController && backend instanceof NetworkBackend, 'startPanel constructs the real controller and backend');
-        assert(backend.client instanceof NM.Client && backend.network !== null, 'Real Astal network singleton exposes a native libnm client');
+        assert(mock.children.length === 1 && backend._child === mock.children[0], 'Real adapter starts only the injected protocol worker');
         assert(app.started && backend._started, 'Application bootstrap starts the real backend');
         app.startPanel();
         assert(app.controller === controller && app.panel === panel && controller.backend === backend,
@@ -5404,7 +5155,7 @@ async function gjsApplicationTests() {
         equal(await request('{"command":"close"}'), 'ok', 'Real socket close succeeds while already closed');
         const nativeToggleWifi = backend.toggleWifi;
         let radioCalls = 0, radioError = null;
-        // Exercise real IPC/controller routing, but never write to the real NM.Client.
+        // Exercise real panel IPC/controller routing without any native network operation.
         backend.toggleWifi = () => { radioCalls++; if (radioError) throw radioError; };
         try {
             equal(await request('{"command":"toggleWifi"}'), 'ok', 'Real socket radio command reaches the stubbed native boundary');
@@ -5426,24 +5177,25 @@ async function gjsApplicationTests() {
         equal(await request('{"command":"status"}'), status, 'Socket close and error leave offline status unchanged');
         await pause();
         closedState(controller, backend, panel, 'After socket requests');
-        print('PASS real application startPanel, native offline backend and closed-only socket status/close/stubbed-radio/error roundtrips');
+        print('PASS real application startPanel, protocol-mocked backend and closed-only socket status/close/stubbed-radio/error roundtrips');
 
         app.disposePanel();
         assert(app.panel === null && app.controller === null && app.get_windows().length === 0, 'Application disposal removes panel references and windows');
         assert(panel.disposed && controller.disposed && backend._disposed, 'Application disposal reaches real panel, controller and backend');
         await pause();
-        assert(backend._idle === 0 && backend._scanTimer === 0 && backend._scans.size === 0
-            && backend._scanMembers.size === 0 && backend._operations.size === 0 && backend._watches.size === 0
-            && backend._entries.size === 0, 'Disposed backend retains no idle source, scan, operation or signal watch');
+        assert(backend._startupTimer === 0 && backend._writeTimer === 0 && backend._pending.size === 0
+            && backend._queue.length === 0 && backend._writing === null && backend._child === null,
+            'Disposed backend retains no timer, request, queued write or worker');
         assert(controller.secret === '' && controller.credentialKey === '', 'Disposed controller retains no credential state');
         assert(serviceFree(), 'Private bus remains service-free after native backend disposal');
-        print(`PASS network application bootstrap: ${checks} assertions; real backend, closed only, no native network mutations`);
+        print(`PASS network application bootstrap: ${checks} assertions; real adapter with protocol mock, closed only, no native network mutations`);
     }
 
     let exitCode = 0;
     try { await bootstrap(); }
     catch (error) { console.error(error); exitCode = 1; }
     finally {
+        NetworkBackend.prototype.start = backendStart;
         try { app?.disposePanel(); app?.quit(); }
         catch (error) { console.error(error); exitCode = 1; }
     }
@@ -5461,6 +5213,7 @@ if (typeof process !== 'undefined' && process.versions?.node) {
         }
     } else {
         if (args.length) throw new Error('Use node --test test.js or node test.js --ui --help');
+        await nodeAdapterTests();
         await nodeControllerTests();
         await nodeLogicTests();
         await nodeLauncherTests();
@@ -5468,9 +5221,9 @@ if (typeof process !== 'undefined' && process.versions?.node) {
     }
 } else {
     const args = typeof ARGV === 'undefined' ? [] : ARGV;
-    if (args.length !== 1) throw new Error('Use panel-gjs -m test.js native|runtime|ui|application');
+    if (args.length !== 1) throw new Error('Use panel-gjs -m test.js adapter|runtime|ui|application');
     switch (args[0]) {
-    case 'native': await gjsNativeTests(); break;
+    case 'native': case 'adapter': await gjsAdapterTests(); break;
     case 'runtime': await gjsRuntimeTests(); break;
     case 'ui': await gjsUITests(); break;
     case 'application': await gjsApplicationTests(); break;

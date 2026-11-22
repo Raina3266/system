@@ -449,7 +449,7 @@ export class AudioPanel {
         const pairing = Boolean(model.pairing), notice = model.pairingMessage;
         const hasPrompt = Boolean(pairing && notice?.prompt);
         // Display-only codes are entered on the device, not in this panel.
-        const needsAnswer = hasPrompt && !/^Type .+ on the device(?: and press Enter)? to finish pairing\.$/.test(notice.prompt);
+        const needsAnswer = hasPrompt && notice.needsAnswer === true;
         if (pairing !== this.pairing || (!needsAnswer && this.answer.text)) this.answer.set_text('');
         this.pairing = pairing;
         this.answer.visible = this.send.visible = needsAnswer;

@@ -43,6 +43,7 @@ let
     let
       unit = "rclone-bisync-${name}";
       stateDir = "${config.xdg.stateHome}/${unit}";
+      runtime = "${lib.getExe repoPackages.panelLauncher} runtime";
       rclone = "${pkgs.rclone}/bin/rclone";
       mkdir = "${pkgs.coreutils}/bin/mkdir -p";
 
@@ -61,14 +62,7 @@ let
       ++ lib.optional (excludes != [ ]) "--excludei '${excludeRegex}'";
 
       syncScript = pkgs.writeShellScript "${unit}.sh" ''
-        set -euo pipefail
-        if [ -n "$(${pkgs.findutils}/bin/find '${stateDir}' -maxdepth 1 -name '*.lst' -print -quit 2>/dev/null)" ]; then
-          resync=""
-        else
-          resync="--resync"
-        fi
-
-        exec ${rclone} bisync '${localDir}' '${remote}' \
+        exec ${runtime} bisync '${stateDir}' ${rclone} bisync '${localDir}' '${remote}' \
           --workdir '${stateDir}' \
           ${lib.concatStringsSep " " flags} \
           --conflict-resolve newer \
@@ -80,20 +74,12 @@ let
           --checkers 4 \
           --retries 3 --low-level-retries 10 \
           --timeout 30s --contimeout 30s \
-          --tpslimit 10 --tpslimit-burst 20 \
-          $resync
+          --tpslimit 10 --tpslimit-burst 20
       '';
 
       watchScript = pkgs.writeShellScript "${unit}-watch.sh" ''
-        set -euo pipefail
-
-        ${pkgs.inotify-tools}/bin/inotifywait \
-          ${lib.concatStringsSep " " watchFlags} \
-          '${localDir}' \
-        | while read -r _changed; do
-            while read -r -t ${toString debounce} _more; do :; done
-            ${pkgs.systemd}/bin/systemctl --user start --no-block '${unit}.service'
-          done
+        exec ${runtime} watch ${toString debounce} ${pkgs.systemd}/bin/systemctl '${unit}.service' \
+          ${pkgs.inotify-tools}/bin/inotifywait ${lib.concatStringsSep " " watchFlags} '${localDir}'
       '';
 
       baseService = {
@@ -190,6 +176,7 @@ in
   # the setuid wrapper NixOS provides, never an unwrapped copy from PATH.
   home.packages = [
     pkgs.rclone
+    repoPackages.panelLauncher
     dolphinGdriveActions
   ];
 

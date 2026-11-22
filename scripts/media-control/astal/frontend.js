@@ -359,10 +359,8 @@ class MediaPanel {
         if (!this.group || !this.modelCurrent()) return false;
         const player = this.backend.progress(this.group.primary.bus);
         if (!this.canSeekBy(player)) return false;
-        // Use the last confirmed position, never the interpolated display value.
-        const position = Math.min(player.length, Math.max(0, player.samplePosition + seconds));
         this.finishSeek(false);
-        const queued = this.backend.action('seek', player.bus, position);
+        const queued = this.backend.action('jump', player.bus, seconds);
         if (!queued) this.reportFailure(this.backend.failure || 'The media seek was not queued. Try again.');
         return queued;
     }
@@ -527,6 +525,7 @@ class MediaPanel {
         this.backend.refresh();
         this.revealer.reveal_child = true;
         if (!this.positionTimer) this.positionTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            this.backend.tick();
             this.position();
             return GLib.SOURCE_CONTINUE;
         });
@@ -646,7 +645,8 @@ App.connect('activate', () => {
     if (initialized) return;
     try {
         const { palette } = loadTheme(GLib.getenv('MEDIA_PANEL_CONFIG'), GLib.getenv('MEDIA_PANEL_PALETTE'));
-        backend = new MediaBackend({ onChange: render });
+        backend = new MediaBackend({ onChange: render,
+            onProgress: () => { if (panel?.opened) panel.position(); } });
         panel = new MediaPanel({ app: App, backend, palette });
         backend.start();
         monitorSignal = App.connect('notify::monitors', () => {

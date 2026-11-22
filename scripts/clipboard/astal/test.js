@@ -144,9 +144,9 @@ async function isolatedUI() {
 async function unitTests() {
     const { default: test } = await import('node:test');
     const { default: assert } = await import('node:assert/strict');
-    const { ClipboardModel, localFilePath, visibleItems, title, preferred } = await import('./logic.js');
+    const { ClipboardModel, visibleItems, title, preferred } = await import('./logic.js');
     const item = (id, kind = 'memo', text = `item ${id}`, pinned = false) =>
-        ({ id, kind, text, pinned, mime: 'text/plain;charset=utf-8' });
+        ({ id, kind, text, pinned, mime: 'text/plain;charset=utf-8', delete_token: `delete:${id}` });
     function fixture(items = [item(1), item(2), item(3, 'text')], options = {}) {
         const messages = [], publications = [];
         let next = 10;
@@ -560,7 +560,7 @@ async function unitTests() {
             assert.equal(model.pendingAutosave, false);
             assert.equal(model.dirty, false);
             assert.deepEqual(messages, action === 'remove'
-                ? [{ command: 'delete', id: 1 }]
+                ? [{ command: 'delete', id: 1, expected: 'delete:1' }]
                 : [{ command: 'save', id: 1, base: 'item 1', text: 'pending draft' }]);
             if (action === 'remove') assert.equal(items.some(item => item.id === 1), false);
             else assert.equal(items[0].text, 'pending draft');
@@ -653,7 +653,13 @@ async function unitTests() {
         assert.deepEqual(visibleItems(items, 'memo', '你好 WORLD').map(item => item.id), [2, 3]);
         assert.equal(title(item(1, 'file', '/home/test/a b'), '/home/test'), '~/a b');
         assert.equal(title(item(1, 'text', '<b>not markup</b>')), '<b>not markup</b>');
-        assert.equal(preferred(items, 2).id, 2);
+    });
+    test('preferred selects the first unpinned item, falls back to the first pinned item, or returns null', () => {
+        const pinned = item(1, 'memo', 'pinned', true), first = item(2), second = item(3);
+        assert.equal(preferred([pinned, first, second]), first);
+        assert.equal(preferred([first, pinned, second]), first);
+        assert.equal(preferred([pinned]), pinned);
+        assert.equal(preferred([]), null);
     });
     test('opening leaves pinned and unpinned history unselected, including after refresh', async () => {
         for (const entries of [[item(1), item(2, 'memo', 'pinned', true)],
@@ -796,102 +802,85 @@ async function unitTests() {
         assert.equal(model.editor.id, 2);
         assert.equal(messages.some(message => message.command === 'save'), false);
     });
-    test('local deletion targets only explicit absolute file names, including named images', () => {
-        const entry = { ...item(1, 'file'), name: '/tmp/source file.png', image_path: '/cache/1.png' };
-        assert.equal(localFilePath(entry), '/tmp/source file.png');
-        for (const candidate of [null, item(1, 'file', '/tmp/not-a-file-reference'),
-            { ...entry, kind: 'text' }, { ...entry, name: 'relative.txt' },
-            { ...entry, name: 'file:///tmp/source.png' }, { ...entry, name: '/tmp/a\0b' }])
-            assert.equal(localFilePath(candidate), null);
-    });
-
-    test('file deletion immediately trashes the source before removing history without confirmation', async () => {
+    test('file deletion sends the displayed opaque guard in one Rust transaction without confirmation', async () => {
         const { model, items, messages } = fixture([{ ...item(1, 'file'), name: '/tmp/file.txt' }, item(2, 'file')]);
         await model.open();
         await model.select(1);
         await model.changeTab('file');
-        const order = [], request = model.request;
-        model.request = async message => { order.push(message.command); return request(message); };
-
-        model.trashFile = async path => { order.push('trash'); assert.equal(path, '/tmp/file.txt'); return true; };
+        model.items.find(item => item.id === 1).delete_token = 'opaque Rust association';
         messages.length = 0;
         assert.equal(await model.remove(), true);
-        assert.deepEqual(order, ['snapshot', 'trash', 'delete']);
+        assert.deepEqual(messages, [{ command: 'delete', id: 1, expected: 'opaque Rust association' }]);
         assert.equal(items.some(item => item.id === 1), false);
         assert.equal(model.editor.id, 2);
-        assert.equal(messages.some(message => message.command === 'save'), false);
     });
-    test('Trash failures preserve the file entry and expose the error', async () => {
-        const { model, items, messages } = fixture([{ ...item(1, 'file'), name: '/tmp/file.txt' }]);
-        await model.open();
-        await model.select(1);
-        await model.changeTab('file');
-        model.trashFile = async () => { throw new Error('Trash is unavailable'); };
-        assert.equal(await model.remove(), false);
-        assert.match(model.failure, /Trash is unavailable/);
-        assert.equal(model.editor.id, 1);
-        assert.equal(items.some(item => item.id === 1), true);
-        assert.equal(messages.some(message => message.command === 'delete'), false);
-    });
-    test('a stale file path is not deleted', async () => {
-        const { model, items, messages } = fixture([{ ...item(1, 'file'), name: '/tmp/old.txt' }]);
-        await model.open();
-        await model.select(1);
-        await model.changeTab('file');
-        items[0].name = '/tmp/replacement.txt';
-        model.trashFile = async () => assert.fail('A changed file reference must not touch disk');
-        assert.equal(await model.remove(), false);
-        assert.match(model.failure, /changed in clipboard history/);
-        assert.equal(messages.some(message => message.command === 'delete'), false);
-    });
+    for (const failure of ['Trash is unavailable', 'This file changed in clipboard history. Close and reopen the panel before deleting it.']) {
+        test(`Rust deletion errors keep the file selection and history: ${failure}`, async () => {
+            const { model, items, messages } = fixture([{ ...item(1, 'file'), name: '/tmp/file.txt' }]);
+            await model.open();
+            await model.select(1);
+            await model.changeTab('file');
+            const request = model.request;
+            model.request = async message => {
+                if (message.command === 'delete') { messages.push(message); throw new Error(failure); }
+                return request(message);
+            };
+            messages.length = 0;
+            assert.equal(await model.remove(), false);
+            assert.equal(model.failure, failure);
+            assert.equal(model.editor.id, 1);
+            assert.equal(items.some(item => item.id === 1), true);
+            assert.deepEqual(messages, [{ command: 'delete', id: 1, expected: 'delete:1' }]);
+        });
+    }
     test('file deletion serializes selection, repeated Delete and background refresh', async () => {
         const { model, messages } = fixture([{ ...item(1, 'file'), name: '/tmp/file.txt' }, item(2, 'file')]);
         await model.open();
         await model.select(1);
         await model.changeTab('file');
-        let finishTrash;
-        model.trashFile = () => new Promise(resolve => { finishTrash = () => resolve(true); });
+        let finishDelete;
+        const request = model.request;
+        model.request = message => message.command === 'delete'
+            ? new Promise(resolve => { finishDelete = () => resolve(request(message)); }) : request(message);
         const removing = model.remove();
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(await model.select(2), false);
         assert.equal(await model.remove(), false);
         assert.equal(await model.refresh(), false);
-        finishTrash();
+        finishDelete();
         assert.equal(await removing, true);
         assert.equal(messages.filter(message => message.command === 'delete').length, 1);
         assert.equal(model.editor.id, 2);
         assert.equal(model.pendingRefresh, false);
     });
-    test('history failure after trashing reports partial success and supports retrying a missing file', async () => {
+    test('Rust partial-success errors are shown verbatim and leave the entry available for retry', async () => {
         const { model, items } = fixture([{ ...item(1, 'file'), name: '/tmp/file.txt' }]);
         await model.open();
         await model.select(1);
         await model.changeTab('file');
-        model.trashFile = async () => true;
         const request = model.request;
         model.request = async message => {
-            if (message.command === 'delete') throw new Error('History is read-only');
+            if (message.command === 'delete') throw new Error('The file was moved to Trash, but its clipboard entry could not be removed. Close and reopen the panel, then try again.');
             return request(message);
         };
         assert.equal(await model.remove(), false);
         assert.match(model.failure, /moved to Trash, but its clipboard entry could not be removed/);
         assert.equal(items.some(item => item.id === 1), true);
         model.request = request;
-        model.trashFile = async () => false;
         assert.equal(await model.remove(), true);
         assert.equal(items.some(item => item.id === 1), false);
     });
-    test('cached-only images and text entries never invoke local file deletion', async () => {
-        const { model } = fixture([item(1, 'text', '/tmp/not-a-file-reference'),
+    test('cached-only images and text use the same ID-and-guard deletion contract', async () => {
+        const { model, messages } = fixture([item(1, 'text', '/tmp/not-a-file-reference'),
             { ...item(2, 'file'), image_path: '/cache/2.png' }]);
         await model.open();
         await model.select(1);
-
-        model.trashFile = async () => assert.fail('No source file means no filesystem mutation');
+        messages.length = 0;
         for (const tab of ['text', 'file']) {
             assert.equal(await model.changeTab(tab), true);
             assert.equal(await model.remove(), true);
         }
+        assert.deepEqual(messages, [1, 2].map(id => ({ command: 'delete', id, expected: `delete:${id}` })));
     });
     test('busy transactions reject duplicate mutations and defer file-watch refresh', async () => {
         const { model, messages } = fixture();
@@ -1116,7 +1105,7 @@ async function unitTests() {
 
 async function viewTests(test, assert) {
     const { readFile } = await import('node:fs/promises');
-    const { TABS, editable, localFilePath, title } = await import('./logic.js');
+    const { TABS, editable, title } = await import('./logic.js');
     const source = await readFile(new URL('./frontend.js', import.meta.url), 'utf8');
     test('clipboard tabs use the network panel’s flat cyan/red underline styling', async () => {
         const css = await readFile(new URL('./style.css', import.meta.url), 'utf8');
@@ -1235,10 +1224,10 @@ async function viewTests(test, assert) {
             INVALID_LIST_POSITION: 0xffffffff, ListScrollFlags: { NONE: 0 },
             StringList: { new(values) { return { values, get_string(index) { return this.values[index]; },
                 splice(start, count, additions) { this.values.splice(start, count, ...additions); this.changed?.(); } }; } } };
-        const ClipboardPanel = new Function('Gtk', 'Pango', 'TABS', 'editable', 'localFilePath', 'title',
+        const ClipboardPanel = new Function('Gtk', 'Pango', 'TABS', 'editable', 'title',
             source.slice(source.indexOf('function box('), source.indexOf('function frame('))
             + source.slice(source.indexOf('export class ClipboardPanel'), source.indexOf('export function createApplication(')).replace('export ', '')
-            + '\nreturn ClipboardPanel;')(Gtk, { EllipsizeMode: { END: 0 } }, TABS, editable, localFilePath, title);
+            + '\nreturn ClipboardPanel;')(Gtk, { EllipsizeMode: { END: 0 } }, TABS, editable, title);
         const actions = [];
         const model = { rows: [], editor: null, query: '', tab: 'memo', failure: '', busy: false,
             pin: id => actions.push(['pin', id]), remove: id => actions.push(['remove', id]),
@@ -1263,7 +1252,7 @@ async function viewTests(test, assert) {
         let recycledRow;
         for (const [id, kind, pinned, name] of [[1, 'memo', false, ''], [2, 'file', true, '/fixture/local.txt'],
             [3, 'file', false, 'https://example.invalid/remote'], [4, 'text', true, ''], [5, 'memo', false, '']]) {
-            model.rows = [{ id, kind, pinned, name, text: `Fixture ${id}` }];
+            model.rows = [{ id, kind, pinned, name, text: `Fixture ${id}`, can_trash: id === 2 }];
             model.query = id % 2 ? 'fixture' : '';
             for (const busy of [false, true]) {
                 model.busy = busy;
@@ -1280,8 +1269,8 @@ async function viewTests(test, assert) {
             assert.equal(badge.a11y.description, 'Pinned — kept at the top of history');
             assert.equal(pin.a11y.label, pinned ? 'Unpin item' : 'Pin item');
             assert.equal(pin.a11y.description, pinned ? 'Unpin this item' : 'Pin this item to the top');
-            assert.equal(remove.a11y.label, localFilePath(model.rows[0]) ? 'Move file to Trash' : 'Delete item');
-            assert.equal(remove.a11y.description, localFilePath(model.rows[0])
+            assert.equal(remove.a11y.label, model.rows[0].can_trash ? 'Move file to Trash' : 'Delete item');
+            assert.equal(remove.a11y.description, model.rows[0].can_trash
                 ? 'Move the local file to Trash and remove this entry' : 'Delete this history entry');
             pin.emit('clicked');
             remove.emit('clicked');
@@ -1301,7 +1290,7 @@ async function viewTests(test, assert) {
 
 function rowActionTests(test, assert, ClipboardModel) {
     const item = (id, kind = 'memo', text = `item ${id}`, extra = {}) =>
-        ({ id, kind, text, pinned: false, mime: 'text/plain;charset=utf-8', ...extra });
+        ({ id, kind, text, pinned: false, mime: 'text/plain;charset=utf-8', delete_token: `delete:${id}`, ...extra });
 
     async function fixture(entries = [item(1), item(2), item(3, 'memo', 'pinned', { pinned: true })]) {
         const items = structuredClone(entries), messages = [], publications = [], events = [];
@@ -1329,7 +1318,7 @@ function rowActionTests(test, assert, ClipboardModel) {
                 }
             },
             publish: async payload => { events.push('publish'); publications.push(payload); },
-            trashFile: async () => assert.fail('Unexpected source file deletion'),
+
         });
         await model.open();
         messages.length = 0;
@@ -1351,7 +1340,8 @@ function rowActionTests(test, assert, ClipboardModel) {
             messages.length = 0;
 
             assert.equal(await model[action](id), true);
-            assert.deepEqual(messages, [{ command: { pin: 'pin', remove: 'delete', copy: 'payload' }[action], id }]);
+            assert.deepEqual(messages, [{ command: { pin: 'pin', remove: 'delete', copy: 'payload' }[action], id,
+                ...(action === 'remove' ? { expected: `delete:${id}` } : {}) }]);
             assert.equal(model.editor?.id ?? null, action === 'copy' ? id : null);
             assert.equal(items.find(entry => entry.id === 1).text, 'item 1');
             if (action === 'pin') assert.equal(items.find(entry => entry.id === id).pinned, true);
@@ -1407,7 +1397,7 @@ function rowActionTests(test, assert, ClipboardModel) {
             assert.equal(model.dirty, dirty);
             assert.equal(items.find(entry => entry.id === 1).text, 'item 1');
             assert.equal(items.some(entry => entry.id === 2), false);
-            assert.deepEqual(messages, [{ command: 'delete', id: 2 }]);
+            assert.deepEqual(messages, [{ command: 'delete', id: 2, expected: 'delete:2' }]);
         });
     }
 
@@ -1420,7 +1410,7 @@ function rowActionTests(test, assert, ClipboardModel) {
         assert.equal(model.editor.id, 2);
         assert.equal(model.dirty, false);
         assert.equal(items.some(entry => entry.id === 1), false);
-        assert.deepEqual(messages, [{ command: 'delete', id: 1 }]);
+        assert.deepEqual(messages, [{ command: 'delete', id: 1, expected: 'delete:1' }]);
     });
 
     test('explicit copy saves the previous dirty item, then selects and publishes the exact row in one act', async () => {
@@ -1527,7 +1517,7 @@ function rowActionTests(test, assert, ClipboardModel) {
             assert.deepEqual(messages, []);
             release();
             assert.equal(await operation, true);
-            assert.deepEqual(messages, [{ command, id: 2 }, { command: 'snapshot' }]);
+            assert.deepEqual(messages, [{ command, id: 2, ...(action === 'remove' ? { expected: 'delete:2' } : {}) }, { command: 'snapshot' }]);
             assert.equal(model.pendingRefresh, false);
             assert.equal(model.busy, false);
             assert.equal(model.editor?.id ?? null, action === 'copy' ? 2 : null);
@@ -1551,57 +1541,42 @@ function rowActionTests(test, assert, ClipboardModel) {
         assert.deepEqual(messages, [{ command: 'payload', id: 2 }]);
     });
 
-    test('unselected file deletion immediately revalidates and trashes only the target source', async () => {
+    test('unselected file deletion targets only its ID and opaque Rust association', async () => {
         const { model, items, messages, events } = await fixture([
             item(1, 'file', '', { name: '/tmp/other.txt' }),
-            item(2, 'file', '', { name: '/tmp/target.png', image_path: '/cache/2.png' }),
+            item(2, 'file', '', { name: '/tmp/target.png', image_path: '/cache/2.png', delete_token: 'opaque target' }),
         ]);
-        model.trashFile = async path => {
-            assert.equal(model.busy, true);
-            assert.equal(path, '/tmp/target.png');
-            events.push('trash');
-            return true;
-        };
         assert.equal(await model.remove(2), true);
-        assert.deepEqual(events, ['snapshot', 'trash', 'delete']);
-        assert.deepEqual(messages, [{ command: 'snapshot' }, { command: 'delete', id: 2 }]);
+        assert.deepEqual(events, ['delete']);
+        assert.deepEqual(messages, [{ command: 'delete', id: 2, expected: 'opaque target' }]);
         assert.equal(items.some(entry => entry.id === 1), true);
         assert.equal(items.some(entry => entry.id === 2), false);
         assert.equal(model.editor, null);
     });
 
-    test('row file deletion rejects a changed snapshot path without saving the dirty editor', async () => {
-        const { model, items, messages } = await fixture([
-            item(1), item(2, 'file', '', { name: '/tmp/old.txt' }),
-        ]);
-        await model.select(1);
-        model.edit('keep dirty');
-        const editor = model.editor;
-        items.find(entry => entry.id === 2).name = '/tmp/replacement.txt';
-        assert.equal(await model.remove(2), false);
-        assert.match(model.failure, /changed in clipboard history/);
-        assert.equal(model.editor, editor);
-        assert.equal(model.dirty, true);
-        assert.deepEqual(messages, [{ command: 'snapshot' }]);
-    });
+    for (const failure of ['This file changed in clipboard history.', 'Trash unavailable']) {
+        test(`row deletion failure preserves the target and another dirty editor: ${failure}`, async () => {
+            const { model, items, messages } = await fixture([
+                item(1), item(2, 'file', '', { name: '/tmp/target.txt' }),
+            ]);
+            await model.select(1);
+            model.edit('keep dirty');
+            const editor = model.editor;
+            const request = model.request;
+            model.request = async message => {
+                if (message.command === 'delete') { messages.push(message); throw new Error(failure); }
+                return request(message);
+            };
+            assert.equal(await model.remove(2), false);
+            assert.equal(model.failure, failure);
+            assert.equal(model.editor, editor);
+            assert.equal(model.dirty, true);
+            assert.equal(items.some(entry => entry.id === 2), true);
+            assert.deepEqual(messages, [{ command: 'delete', id: 2, expected: 'delete:2' }]);
+        });
+    }
 
-    test('row trash failures preserve both the target and another dirty editor', async () => {
-        const { model, items, messages } = await fixture([
-            item(1), item(2, 'file', '', { name: '/tmp/target.txt' }),
-        ]);
-        await model.select(1);
-        model.edit('unsaved');
-        const editor = model.editor;
-        model.trashFile = async () => { throw new Error('Trash unavailable'); };
-        assert.equal(await model.remove(2), false);
-        assert.match(model.failure, /Trash unavailable/);
-        assert.equal(model.editor, editor);
-        assert.equal(model.dirty, true);
-        assert.equal(items.some(entry => entry.id === 2), true);
-        assert.deepEqual(messages, [{ command: 'snapshot' }]);
-    });
-
-    test('text rows and cached-only images never delete source files', async () => {
+    test('text rows and cached-only images also delegate deletion without interpreting paths', async () => {
         const { model, messages } = await fixture([
             item(1, 'text', '/tmp/text-is-not-a-source.txt', { name: '/tmp/not-a-source.txt' }),
             item(2, 'file', '', { image_path: '/cache/2.png' }),
@@ -1611,83 +1586,81 @@ function rowActionTests(test, assert, ClipboardModel) {
             assert.equal(await model.remove(id), true);
             assert.equal(model.editor, null);
         }
-        assert.deepEqual(messages, [1, 2, 3].map(id => ({ command: 'delete', id })));
+        assert.deepEqual(messages, [1, 2, 3].map(id => ({ command: 'delete', id, expected: `delete:${id}` })));
     });
 }
 
 async function backendTests(test, assert) {
-    const { registerHooks } = await import("node:module");
-    const { default: path } = await import("node:path/posix");
-
+    const { registerHooks } = await import('node:module');
     let state;
-    const events = Object.fromEntries(['CHANGED', 'CHANGES_DONE_HINT', 'DELETED', 'CREATED',
-        'ATTRIBUTE_CHANGED', 'PRE_UNMOUNT', 'UNMOUNTED', 'MOVED', 'RENAMED', 'MOVED_IN', 'MOVED_OUT']
-        .map((name, index) => [name, index]));
-    const flags = { NONE: 0, WATCH_MOVES: 8 };
-
-    class MockFile {
-        constructor(name) { this.path = path.resolve(name); }
-        get_path() { return this.path; }
-        get_basename() { return path.basename(this.path); }
-        get_parent() { return this.path === '/' ? null : new MockFile(path.dirname(this.path)); }
-        monitor_directory(flag, cancellable) {
-            state.attempts.push({ path: this.path, flag, cancellable });
-            if (state.failures.has(this.path)) throw new Error('Private path must not be logged');
-            const monitor = {
-                path: this.path,
-                cancellations: 0,
-                connect(signal, callback) {
-                    assert.equal(signal, 'changed');
-                    this.callback = callback;
-                    if (state.connectFailures.has(this.path)) throw new Error('Monitor connection failed');
-                },
-                cancel() { this.cancellations++; },
-                // Also allow queued callbacks after cancel to exercise the lifecycle guard.
-                emit(event, file = null, other = null) {
-                    this.callback(this, file === null ? null : new MockFile(file),
-                        other === null ? null : new MockFile(other), events[event]);
-                },
-            };
-            state.monitors.push(monitor);
-            return monitor;
-        }
+    class Cancellable {
+        cancel() { this.cancelled = true; }
+        is_cancelled() { return Boolean(this.cancelled); }
     }
-
     const gi = {
         'gi://Gio': {
-            SubprocessFlags: { STDIN_PIPE: 1, STDOUT_PIPE: 2, STDERR_PIPE: 4 },
-            Subprocess: { new: args => {
+            Cancellable,
+            SubprocessFlags: { STDIN_PIPE: 1, STDOUT_PIPE: 2, STDERR_SILENCE: 4 },
+            Subprocess: { new: (args, flags) => {
+                if (state.failSpawn) throw new Error('Cannot start helper');
                 const child = {
+                    args, flags, exits: 0,
                     communicate_utf8_async(input, cancellable, callback) {
-                        state.requests.push({ args, input: JSON.parse(input),
-                            finish: () => callback(child, {}) });
+                        state.requests.push({ args, input: JSON.parse(input), cancellable, child,
+                            finish: (reply = { items: [] }, error = null) => callback(child, { reply, error }) });
                     },
-                    communicate_utf8_finish() { return [true, JSON.stringify(state.reply)]; },
+                    communicate_utf8_finish(result) {
+                        if (result.error) throw result.error;
+                        return [true, JSON.stringify(result.reply)];
+                    },
                     get_successful() { return true; },
-                    force_exit() {},
+                    get_stdout_pipe() { return this; },
+                    force_exit() { this.exits++; },
                 };
+                state.spawns.push(child);
                 return child;
             } },
-            File: { new_for_path: name => { state.fileObjects++; return new MockFile(name); } },
-            FileMonitorFlags: flags,
-            FileMonitorEvent: events,
+            DataInputStream: class {
+                constructor({ base_stream }) { this.child = base_stream; this.closed = 0; }
+                read_line_async(priority, cancellable, callback) {
+                    state.reads.push({ stream: this, cancellable,
+                        finish: (line, error = null) => callback(this, { line, error }) });
+                }
+                read_line_finish_utf8(result) {
+                    if (result.error) throw result.error;
+                    return [result.line, result.line?.length || 0];
+                }
+                close() { this.closed++; }
+            },
+            File: { new_for_path: path => ({
+                load_bytes_async(cancellable, callback) {
+                    const file = this;
+                    state.loads.push({ path, cancellable,
+                        finish: bytes => callback(file, { bytes }) });
+                },
+                load_bytes_finish(result) { return [result.bytes]; },
+            }) },
         },
         'gi://GLib': {
-            PRIORITY_DEFAULT: 0,
-            SOURCE_REMOVE: false,
+            PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
             getenv: name => state.env[name] || null,
-                        get_user_data_dir: () => '/data',
-                        build_filenamev: parts => path.join(...parts),
             timeout_add(priority, delay, callback) {
                 assert.equal(priority, 0);
-                assert.ok([100, 10000].includes(delay));
+                assert.equal(delay, 10000, 'only finite IPC requests need a JS timeout');
                 const id = ++state.nextTimer;
-                state.timers.set(id, { due: state.now + delay, callback });
+                state.timers.set(id, callback);
                 return id;
             },
             source_remove(id) { assert.equal(state.timers.delete(id), true); },
+            Bytes: class { constructor(bytes) { this.bytes = bytes; } },
         },
-        'gi://Gdk?version=4.0': {},
+        'gi://Gdk?version=4.0': {
+            ContentProvider: { new_for_bytes: (mime, bytes) => ({ mime, bytes }) },
+            Display: { get_default: () => ({ get_clipboard: () => ({ set_content(provider) {
+                state.publications.push(provider);
+                return state.accept;
+            } }) }) },
+        },
     };
     const key = Symbol.for('clipboard.backend.test.GI');
     globalThis[key] = gi;
@@ -1703,292 +1676,157 @@ async function backendTests(test, assert) {
             } : nextLoad(url, context);
         },
     });
-    let ClipboardBackend, historyRoot;
-    try {
-        ({ ClipboardBackend, historyRoot } = await import('./backend.js'));
-    } finally {
-        hooks.deregister();
-        delete globalThis[key];
-    }
+    let ClipboardBackend;
+    try { ({ ClipboardBackend } = await import('./backend.js')); }
+    finally { hooks.deregister(); delete globalThis[key]; }
 
-    const linked = name => ({ kind: 'file', name });
     function fixture(t) {
-        state = { attempts: [], monitors: [], failures: new Set(), connectFailures: new Set(),
-            fileObjects: 0, timers: new Map(), nextTimer: 0, now: 0,
-            env: { CLIPBOARD_DATA_DIR: '/history' }, requests: [], reply: { items: [] } };
+        state = { spawns: [], requests: [], reads: [], loads: [], publications: [], accept: true,
+            timers: new Map(), nextTimer: 0, env: {} };
         const changes = [];
         const backend = new ClipboardBackend({ onChange: change => changes.push(change) });
         t.after(() => backend.dispose());
-        const monitor = directory => state.monitors.findLast(entry => entry.path === directory);
-        const advance = milliseconds => {
-            const until = state.now + milliseconds;
-            while (true) {
-                const next = [...state.timers].sort((a, b) => a[1].due - b[1].due)[0];
-                if (!next || next[1].due > until) break;
-                state.now = next[1].due;
-                state.timers.delete(next[0]);
-                assert.equal(next[1].callback(), false);
-            }
-            state.now = until;
-        };
-        return { backend, changes, monitor, advance };
+        return { backend, changes };
     }
 
-    test('history paths use the new environment or XDG clipboard directory', t => {
-        fixture(t);
-        assert.equal(historyRoot(), '/history');
-        state.env = {};
-        assert.equal(historyRoot(), '/data/clipboard');
-        state.env.CLIPBOARD_DATA_DIR = '';
-        assert.equal(historyRoot(), '/data/clipboard');
-    });
-
-    test('helper discovery finishes before monitoring; the initial snapshot gap is reconciled once', async t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        const pending = backend.request({ command: 'prepare' });
-        assert.equal(state.attempts.length, 0);
-        assert.deepEqual(state.requests[0].args, ['clipboard-custom']);
-        state.requests[0].finish();
-        assert.deepEqual(await pending, { items: [] });
-        assert.ok(monitor('/history'));
-        assert.equal(state.timers.size, 1);
-        advance(100);
-        assert.deepEqual(changes, [{ pruneMissing: false }]);
-        const snapshot = backend.request({ command: 'snapshot' });
-        state.requests[1].finish();
-        await snapshot;
-        advance(100);
-        assert.equal(state.attempts.length, 1);
-        assert.equal(changes.length, 1);
-    });
-
-    test('failed helper discovery never attaches a monitor to an unmigrated path', async t => {
+    test('finite requests send exact JSON and return the committed snapshot without extra reads', async t => {
         const { backend } = fixture(t);
-        state.reply = { error: 'Migration failed' };
+        state.env.CLIPBOARD_CUSTOM_HELPER = '/packaged/clipboard-custom';
+        const message = { command: 'delete', id: 2, expected: 'opaque Rust guard' };
+        const pending = backend.request(message);
+        assert.deepEqual(state.requests[0].args, ['/packaged/clipboard-custom']);
+        assert.deepEqual(state.requests[0].input, message);
+        const committed = { id: 2, items: [{ id: 1, text: 'saved text' }] };
+        state.requests[0].finish(committed);
+        assert.deepEqual(await pending, committed);
+        assert.equal(state.spawns.length, 1);
+        assert.equal(state.timers.size, 0);
+        assert.equal(backend.cancellables.size, 0);
+        assert.equal(backend.processes.size, 0);
+    });
+    test('helper errors are propagated without starting an observer or changing UI history', async t => {
+        const { backend } = fixture(t);
         const pending = backend.request({ command: 'prepare' });
-        state.requests[0].finish();
+        state.requests[0].finish({ error: 'Migration failed' });
         await assert.rejects(pending, /Migration failed/);
-        assert.equal(state.attempts.length, 0);
+        assert.equal(state.spawns.length, 1);
+        assert.equal(backend.observer, null);
     });
-
-    test('a failed history monitor connection is canceled and can be retried', t => {
-        const { backend, monitor } = fixture(t);
-        state.connectFailures.add('/history');
+    test('Rust observation has one asynchronous stream and no JS polling or filesystem monitors', t => {
+        const { backend, changes } = fixture(t);
+        backend.watch();
+        backend.watch();
+        assert.deepEqual(state.spawns.map(child => child.args), [['clipboard-custom', 'observe']]);
+        assert.equal(state.timers.size, 0);
+        assert.equal(state.loads.length, 0);
+        state.reads.shift().finish('{"pruneMissing":true}');
+        state.reads.shift().finish('{"pruneMissing":false}');
+        assert.deepEqual(changes, [{ pruneMissing: true }, { pruneMissing: false }]);
+        assert.equal(state.reads.length, 1);
+    });
+    test('observer setup failure cannot reject a committed save and retries on the next request', async t => {
+        const { backend } = fixture(t);
+        state.failSpawn = true;
         assert.doesNotThrow(() => backend.watch());
-        assert.equal(monitor('/history').cancellations, 1);
-        assert.equal(backend.monitor, undefined);
-        state.connectFailures.clear();
-        backend.watch();
-        assert.ok(backend.monitor);
+        assert.equal(backend.observer, null);
+        state.failSpawn = false;
+        const pending = backend.request({ command: 'save', id: 1, base: '', text: 'saved text' });
+        state.failSpawn = true;
+        const committed = { id: 1, items: [{ id: 1, text: 'saved text' }] };
+        state.requests[0].finish(committed);
+        assert.deepEqual(await pending, committed);
+        assert.equal(backend.observer, null);
+        state.failSpawn = false;
+        const snapshot = backend.request({ command: 'snapshot' });
+        state.requests[1].finish(committed);
+        assert.deepEqual(await snapshot, committed);
+        assert.ok(backend.observer);
     });
-
-    for (const failure of ['failures', 'connectFailures']) {
-        test(`monitor ${failure} cannot reject a committed save and discovery is retried`, async t => {
-            const { backend, changes, advance } = fixture(t);
-            state[failure].add('/history');
-            const committed = { id: 1, items: [{ id: 1, kind: 'memo', text: 'saved text' }] };
-            state.reply = committed;
-            const save = backend.request({ command: 'save', id: 1, base: '', text: 'saved text' });
-            state.requests[0].finish();
-            assert.deepEqual(await save, committed);
-            assert.equal(backend.monitor, undefined);
+    for (const line of [null, '{"wrong":true}', 'not JSON']) {
+        test(`observer EOF/invalid replies stop without a restart loop: ${line}`, t => {
+            const { backend, changes } = fixture(t);
+            backend.watch();
+            const observer = backend.observer;
+            state.reads.shift().finish(line);
+            assert.equal(backend.observer, null);
+            assert.equal(observer.process.exits, 1);
+            assert.ok(observer.cancellable.cancelled);
             assert.equal(state.timers.size, 0);
-            state[failure].clear();
-            const snapshot = backend.request({ command: 'snapshot' });
-            state.requests[1].finish();
-            assert.deepEqual(await snapshot, committed);
-            assert.ok(backend.monitor);
-            advance(100);
-            assert.deepEqual(changes, [{ pruneMissing: false }]);
-        });
-    }
-
-    test('groups canonical linked paths by parent and deduplicates files', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        backend.watchFiles([
-            linked('/files/one'), linked('/files/one'), linked('/files/nested/../one'),
-            linked('/files//two'), linked('/elsewhere/three'),
-            { kind: 'text', name: '/text/not-linked' }, { kind: 'memo', name: '/memo/not-linked' },
-            { kind: 'file', image_path: '/cache/thumbnail.png' }, linked('relative/file'),
-            linked('file:///remote/file'), linked('/invalid\0file'), linked('/'),
-        ]);
-        assert.deepEqual(state.attempts, ['/files', '/elsewhere'].map(path =>
-            ({ path, flag: flags.WATCH_MOVES, cancellable: null })));
-        assert.deepEqual([...backend.fileWatches.get('/files').paths].sort(), ['/files/one', '/files/two']);
-        assert.deepEqual(changes, []);
-        assert.equal(state.timers.size, 0);
-        monitor('/files').emit('DELETED', '/files/./one');
-        advance(100);
-        assert.deepEqual(changes, [{ pruneMissing: true }]);
-    });
-
-    test('same immutable array skips all path work; new snapshots reuse and synchronize monitors', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        const items = Object.freeze([linked('/kept/old'), linked('/removed/file')]);
-        backend.watchFiles(items);
-        const kept = monitor('/kept'), removed = monitor('/removed');
-        const fileObjects = state.fileObjects;
-        for (let i = 0; i < 10; i++) backend.watchFiles(items);
-        assert.equal(state.fileObjects, fileObjects);
-        assert.equal(state.attempts.length, 2);
-        backend.watchFiles([linked('/kept/new'), linked('/added/file')]);
-        assert.equal(monitor('/kept'), kept);
-        assert.equal(kept.cancellations, 0);
-        assert.equal(removed.cancellations, 1);
-        assert.deepEqual(state.attempts.map(entry => entry.path), ['/kept', '/removed', '/added']);
-        kept.emit('DELETED', '/kept/old');
-        removed.emit('DELETED', '/removed/file');
-        advance(100);
-        assert.deepEqual(changes, []);
-        kept.emit('DELETED', '/kept/new');
-        advance(100);
-        assert.deepEqual(changes, [{ pruneMissing: true }]);
-        backend.watchFiles([]);
-        assert.equal(kept.cancellations, 1);
-        assert.equal(monitor('/added').cancellations, 1);
-        assert.equal(backend.fileWatches.size, 0);
-    });
-
-    for (const event of ['DELETED', 'MOVED', 'RENAMED', 'MOVED_OUT']) {
-        test(`${event} invalidates tracked files or the monitored parent, not unrelated paths`, t => {
-            const { backend, monitor, changes, advance } = fixture(t);
-            backend.watchFiles([linked('/files/linked')]);
-            const watch = monitor('/files');
-            watch.emit(event, '/files/unrelated', '/files/also-unrelated');
-            watch.emit(event, '/elsewhere/linked');
-            watch.emit(event);
-            advance(100);
+            assert.equal(state.spawns.length, 1);
             assert.deepEqual(changes, []);
-            watch.emit(event, '/files/linked', '/elsewhere/new-name');
-            advance(100);
-            watch.emit(event, '/files/unrelated', '/files/./linked');
-            advance(100);
-            watch.emit(event, '/files/.', '/renamed-parent');
-            advance(100);
-            assert.deepEqual(changes, Array.from({ length: 3 }, () => ({ pruneMissing: true })));
         });
     }
-
-    for (const event of ['PRE_UNMOUNT', 'UNMOUNTED']) {
-        test(`${event} invalidates the entire directory watch even without an event file`, t => {
-            const { backend, monitor, changes, advance } = fixture(t);
-            backend.watchFiles([linked('/files/linked')]);
-            monitor('/files').emit(event);
-            advance(100);
-            assert.deepEqual(changes, [{ pruneMissing: true }]);
-        });
-    }
-
-    test('content, creation, attribute, and incoming move events do not request pruning', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        backend.watchFiles([linked('/files/linked')]);
-        for (const event of ['CHANGED', 'CHANGES_DONE_HINT', 'CREATED', 'ATTRIBUTE_CHANGED', 'MOVED_IN'])
-            monitor('/files').emit(event, '/files/linked');
-        advance(1000);
-        assert.deepEqual(changes, []);
-        assert.equal(state.timers.size, 0);
-    });
-
-    test('history-only delivery has pruneMissing false and ignores unrelated history events', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
+    test('hiding cancels the observer and ignores queued events even after reopening', t => {
+        const { backend, changes } = fixture(t);
         backend.watch();
+        const old = backend.observer, read = state.reads.shift();
+        backend.unwatch();
+        backend.unwatch();
+        assert.ok(old.cancellable.cancelled);
+        assert.equal(old.process.exits, 1);
+        assert.equal(old.stream.closed, 1);
         backend.watch();
-        assert.deepEqual(state.attempts, [{ path: '/history', flag: flags.NONE, cancellable: null }]);
-        monitor('/history').emit('CREATED', '/history/other.json');
-        advance(100);
+        const current = backend.observer;
+        read.finish('{"pruneMissing":true}');
+        assert.equal(backend.observer, current);
         assert.deepEqual(changes, []);
-        monitor('/history').emit('RENAMED', '/history/temporary', '/history/history.json');
-        advance(99);
-        assert.deepEqual(changes, []);
-        advance(1);
+        state.reads.shift().finish('{"pruneMissing":false}');
         assert.deepEqual(changes, [{ pruneMissing: false }]);
     });
-
-    for (const fileFirst of [true, false]) {
-        test(`file and history invalidations share a resetting debounce (file first: ${fileFirst})`, t => {
-            const { backend, monitor, changes, advance } = fixture(t);
-            backend.watch();
-            backend.watchFiles([linked('/files/linked')]);
-            const fileEvent = () => monitor('/files').emit('DELETED', '/files/linked');
-            const historyEvent = () => monitor('/history').emit('CHANGED', '/history/history.json');
-            (fileFirst ? fileEvent : historyEvent)();
-            advance(50);
-            (fileFirst ? historyEvent : fileEvent)();
-            assert.equal(state.timers.size, 1);
-            advance(99);
-            assert.deepEqual(changes, []);
-            advance(1);
-            assert.deepEqual(changes, [{ pruneMissing: true }]);
-            historyEvent();
-            advance(100);
-            assert.deepEqual(changes, [{ pruneMissing: true }, { pruneMissing: false }]);
-        });
-    }
-
-    test('failed directory setup is isolated and retried only with a new snapshot', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        state.failures.add('/missing');
-        state.connectFailures.add('/broken');
-        const items = [linked('/missing/file'), linked('/working/file'), linked('/broken/file')];
-        assert.doesNotThrow(() => backend.watchFiles(items));
-        assert.deepEqual([...backend.fileWatches.keys()], ['/working']);
-        assert.equal(monitor('/broken').cancellations, 1);
-        backend.watchFiles(items);
-        assert.equal(state.attempts.length, 3);
-        assert.deepEqual(changes, []);
-        state.failures.clear();
-        state.connectFailures.clear();
-        backend.watchFiles([...items]);
-        assert.equal(state.attempts.length, 5);
-        assert.equal(backend.fileWatches.size, 3);
-        monitor('/working').emit('DELETED', '/working/file');
-        advance(100);
-        assert.deepEqual(changes, [{ pruneMissing: true }]);
-    });
-
-    test('unwatchFiles cancels all file monitors, ignores stale signals, and permits the same array again', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        const items = [linked('/files/linked'), linked('/other/linked')];
-        backend.watch();
-        backend.watchFiles(items);
-        const old = monitor('/files');
-        backend.unwatchFiles();
-        backend.unwatchFiles();
-        assert.equal(backend.fileWatches.size, 0);
-        assert.equal(old.cancellations, 1);
-        assert.equal(monitor('/other').cancellations, 1);
-        assert.equal(monitor('/history').cancellations, 0);
-        old.emit('DELETED', '/files/linked');
-        advance(100);
-        assert.deepEqual(changes, []);
-        backend.watchFiles(items);
-        assert.notEqual(monitor('/files'), old);
-        assert.equal(state.attempts.length, 5);
-    });
-
-    test('dispose cancels pending delivery, monitors, and processes and prevents new work', t => {
-        const { backend, monitor, changes, advance } = fixture(t);
-        backend.watch();
-        backend.watchFiles([linked('/files/linked')]);
-        let exits = 0;
-        backend.processes.add({ force_exit: () => exits++ });
-        monitor('/files').emit('DELETED', '/files/linked');
-        monitor('/history').emit('CHANGED', '/history/history.json');
-        assert.equal(state.timers.size, 1);
-        backend.dispose();
+    test('request timeout cancels I/O and kills the helper, reporting an uncertain mutation result', async t => {
+        const { backend } = fixture(t);
+        const pending = backend.request({ command: 'delete', id: 2, expected: 'guard' });
+        const [id, timeout] = [...state.timers][0];
+        state.timers.delete(id);
+        assert.equal(timeout(), false);
+        const request = state.requests[0];
+        assert.ok(request.cancellable.cancelled);
+        assert.equal(request.child.exits, 1);
+        request.finish(null, new Error('Operation cancelled'));
+        await assert.rejects(pending, /timed out.*check its result/);
         assert.equal(state.timers.size, 0);
-        assert.equal(backend.fileWatches.size, 0);
-        assert.equal(backend.processes.size, 0);
-        assert.equal(exits, 1);
-        assert.equal(backend.pruneMissing, false);
-        assert.ok(state.monitors.every(entry => entry.cancellations === 1));
-        monitor('/files').emit('UNMOUNTED');
-        monitor('/history').emit('DELETED', '/history/history.json');
+    });
+    test('dispose cancels processes and reads, rejects late replies and prevents new work', async t => {
+        const { backend, changes } = fixture(t);
         backend.watch();
-        backend.watchFiles([linked('/new/file')]);
-        advance(1000);
+        const observer = backend.observer, read = state.reads.shift();
+        const pending = backend.request({ command: 'snapshot' });
+        backend.dispose();
+        assert.ok(state.requests[0].cancellable.cancelled);
+        assert.equal(state.requests[0].child.exits, 1);
+        assert.equal(observer.process.exits, 1);
+        state.requests[0].finish({ items: [] });
+        read.finish('{"pruneMissing":true}');
+        await assert.rejects(pending, /shutting down/);
+        await assert.rejects(backend.request({ command: 'snapshot' }), /shutting down/);
+        backend.watch();
+        assert.equal(state.spawns.length, 2);
+        assert.equal(state.timers.size, 0);
         assert.deepEqual(changes, []);
-        assert.equal(state.attempts.length, 2);
+    });
+    test('native publication uses the Rust MIME and exact text or cached bytes without policy fallbacks', async t => {
+        const { backend } = fixture(t);
+        const text = '  native 你好\n\n';
+        await backend.publish({ mime: 'text/plain;charset=utf-8', text });
+        assert.equal(new TextDecoder().decode(state.publications[0].bytes.bytes), text);
+        const pending = backend.publish({ mime: 'image/png', file: '/rust-selected/cache.png' });
+        assert.equal(state.loads[0].path, '/rust-selected/cache.png');
+        const bytes = { native: 'GLib.Bytes' };
+        state.loads[0].finish(bytes);
+        await pending;
+        assert.deepEqual(state.publications[1], { mime: 'image/png', bytes });
+        state.accept = false;
+        await assert.rejects(backend.publish({ mime: 'text/plain', text: '' }), /compositor rejected/);
+    });
+    test('shutdown cancels native image loading and never claims late clipboard ownership', async t => {
+        const { backend } = fixture(t);
+        const pending = backend.publish({ mime: 'image/png', file: '/rust-selected/cache.png' });
+        backend.dispose();
+        assert.ok(state.loads[0].cancellable.cancelled);
+        state.loads[0].finish({ native: 'late bytes' });
+        await assert.rejects(pending, /cancelled/);
+        await assert.rejects(backend.publish({ mime: 'text/plain', text: 'late' }), /shutting down/);
+        assert.deepEqual(state.publications, []);
     });
 }
 
@@ -2055,7 +1893,7 @@ async function nativeTests() {
     const backend = new ClipboardBackend({ onChange: options => { if (panel?.opened) void model.refresh(options); } });
     const model = new ClipboardModel({ request: message => { requests++; return backend.request(message); },
         publish: payload => { publications++; return backend.publish(payload); },
-        trashFile: path => backend.trashFile(path), onChange: () => panel?.render() });
+        onChange: () => panel?.render() });
     panel = new ClipboardPanel({ app, model, backend, palette });
     const historyItems = () => {
         const items = [];
@@ -2305,7 +2143,7 @@ async function nativeTests() {
         };
         await wait(150);
         await idle();
-        assert(backend.fileWatches.size === 1, 'Linked files in one directory must share one native monitor');
+        assert(backend.observer, 'The visible panel must have a Rust filesystem observer');
         assert(await model.select(5), model.failure);
         Gio.File.new_for_path(`${root}/external source.png`).delete(null);
         await until(() => !model.items.some(item => item.id === 5), 'External deletion must remove even a pinned named image while open');
@@ -2331,7 +2169,7 @@ async function nativeTests() {
         await idle();
         assert(model.items.some(item => item.id === 7), 'Atomic file replacement at the same path must not remove the entry');
         assert(await panel.close(), model.failure);
-        assert(backend.fileWatches.size === 0, 'Hiding the panel must release local directory monitors');
+        assert(backend.observer === null, 'Hiding the panel must stop the Rust filesystem observer');
         Gio.File.new_for_path(`${root}/replace me.txt`).delete(null);
         assert(await panel.toggle(monitor), model.failure);
         await idle();
@@ -2375,15 +2213,31 @@ async function nativeTests() {
         assert(await model.select(3), model.failure);
         assert(await model.remove(), model.failure);
         assert(!GLib.file_test(`${root}/images/3.png`, GLib.FileTest.EXISTS), 'Cached-only images must delete without file confirmation');
-        assert(await backend.trashFile(`${root}/already missing.txt`) === false, 'Missing files must not block stale entry removal');
+        // Test the real Rust delete contract without an observer pruning the
+        // deliberately missing fixture before the explicit deletion request.
+        backend.unwatch();
+        const deleteSource = async path => {
+            const capture = Gio.Subprocess.new([GLib.getenv('CLIPBOARD_CUSTOM_HELPER'), 'store', '--mime', 'text/uri-list'],
+                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+            await new Promise((resolve, reject) => capture.communicate_utf8_async(
+                `${Gio.File.new_for_path(path).get_uri()}\n`, null, (source, result) => {
+                    try { source.communicate_utf8_finish(result); assert(source.get_successful(), 'Source fixture capture failed'); resolve(); }
+                    catch (error) { reject(error); }
+                }));
+            const item = (await backend.request({ command: 'snapshot' })).items.find(item => item.name === path);
+            assert(item, 'Rust source fixture was not captured');
+            return backend.request({ command: 'delete', id: item.id, expected: item.delete_token });
+        };
+        await deleteSource(`${root}/already missing.txt`);
         let refusedFolder = false;
-        try { await backend.trashFile(`${root}/images`); } catch (error) { refusedFolder = error.message.includes('Only files'); }
+        try { await deleteSource(`${root}/images`); } catch (error) { refusedFolder = error.message.includes('Only files'); }
         assert(refusedFolder && GLib.file_test(`${root}/images`, GLib.FileTest.IS_DIR), 'Folders must never be trashed by the panel');
         GLib.file_set_contents(`${root}/link target.txt`, 'keep the symlink target');
         Gio.File.new_for_path(`${root}/linked.txt`).make_symbolic_link(`${root}/link target.txt`, null);
-        assert(await backend.trashFile(`${root}/linked.txt`), 'A symbolic link must be movable to Trash');
+        await deleteSource(`${root}/linked.txt`);
         assert(GLib.file_test(`${root}/link target.txt`, GLib.FileTest.EXISTS)
             && !GLib.file_test(`${root}/linked.txt`, GLib.FileTest.IS_SYMLINK), 'Trashing a symlink must keep its target');
+        backend.watch();
         assert(await model.changeTab('memo'), model.failure);
         await idle();
         // Keep timer-driven writes after the row-action and file fixtures, and

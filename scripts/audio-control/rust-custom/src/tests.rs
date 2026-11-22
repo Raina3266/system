@@ -14,6 +14,1476 @@ pub mod model;
 #[path = "policy.rs"]
 pub mod policy;
 
+// Policy previously exercised by the JS backend/logic suites now runs against
+// the production Rust coordinator and raw-native transaction boundary.
+mod resident_policy {
+    use super::fixtures;
+    use crate::{
+        AppResult,
+        audio::{self, SelectionPlan},
+        model::{AudioKind, Choice, NativeSnapshot, Snapshot, object_key},
+        policy::panel::{self, Native},
+    };
+    use serde_json::{Value, json};
+    use std::collections::HashSet;
+
+    pub fn native(snapshot: Snapshot) -> NativeSnapshot {
+        let mut objects = Vec::new();
+        for card in snapshot.cards {
+            let mut value = serde_json::to_value(card).unwrap();
+            value["key"] = format!("card:{}", value["id"]).into();
+            value["type"] = "card".into();
+            objects.push(value);
+        }
+        for node in snapshot.nodes {
+            let mut value = serde_json::to_value(node).unwrap();
+            value["key"] =
+                format!("node:{}:{}", value["id"], value["serial"].as_str().unwrap()).into();
+            value["type"] = "node".into();
+            value["volume"] = 0.4.into();
+            value["muted"] = false.into();
+            value["nick"] = "".into();
+            objects.push(value);
+        }
+        let output = snapshot
+            .default_output
+            .map(|id| format!("node:{}:{}", id.id, id.serial))
+            .unwrap_or_default();
+        let input = snapshot
+            .default_input
+            .map(|id| format!("node:{}:{}", id.id, id.serial))
+            .unwrap_or_default();
+        for object in &mut objects {
+            if object["type"] == "node" {
+                object["isDefault"] = (object["key"] == output || object["key"] == input).into();
+            }
+        }
+        NativeSnapshot {
+            objects,
+            output_epoch: format!("epoch:{output}"),
+            input_epoch: format!("epoch:{input}"),
+            default_output: output,
+            default_input: input,
+            ..Default::default()
+        }
+    }
+    pub fn simple(kind: AudioKind) -> NativeSnapshot {
+        let mut snapshot = fixtures::offline();
+        snapshot.nodes[0].kind = kind;
+        let id = Some(snapshot.nodes[0].identity());
+        match kind {
+            AudioKind::Output => snapshot.default_output = id,
+            AudioKind::Input => snapshot.default_input = id,
+        }
+        native(snapshot)
+    }
+    fn row(native: &NativeSnapshot, kind: AudioKind) -> Choice {
+        let mut value = audio::choices(native, kind, &[], &[]).unwrap().remove(0);
+        value.as_object_mut().unwrap().remove("default");
+        serde_json::from_value(value).unwrap()
+    }
+    fn stream(key: &str, target: i32) -> Value {
+        json!({"key":key,"type":"stream","id":40,"serial":"400","name":key,"targetSerial":target})
+    }
+    pub type Hook = Box<dyn FnMut(&mut Fake, &str)>;
+    pub struct Fake {
+        pub state: NativeSnapshot,
+        pub actions: Vec<(String, String, Value)>,
+        pub polls: usize,
+        ignore: String,
+        pub fail: String,
+        pub hook: Option<Hook>,
+    }
+    impl Fake {
+        pub fn new(state: NativeSnapshot) -> Self {
+            Self {
+                state,
+                actions: Vec::new(),
+                polls: 0,
+                ignore: String::new(),
+                fail: String::new(),
+                hook: None,
+            }
+        }
+        fn object_mut(&mut self, key: &str) -> &mut Value {
+            self.state
+                .objects
+                .iter_mut()
+                .find(|object| object["key"] == key)
+                .unwrap()
+        }
+        fn fire(&mut self, operation: &str) {
+            if let Some(mut hook) = self.hook.take() {
+                hook(self, operation);
+                self.hook = Some(hook);
+            }
+        }
+    }
+    impl Native for Fake {
+        fn snapshot(&mut self) -> AppResult<NativeSnapshot> {
+            self.fire("snapshot");
+            Ok(self.state.clone())
+        }
+        fn execute(
+            &mut self,
+            operation: &str,
+            target: &str,
+            args: Value,
+            guards: Vec<Value>,
+            _: bool,
+        ) -> AppResult<NativeSnapshot> {
+            let root = serde_json::to_value(&self.state)?;
+            for guard in guards {
+                let actual = if guard["key"].is_null() {
+                    &root
+                } else {
+                    self.state.object(guard["key"].as_str().unwrap())?
+                };
+                if guard["expect"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .any(|(key, value)| actual[key] != *value)
+                {
+                    return Err("Native object changed before the guarded operation".into());
+                }
+            }
+            self.actions
+                .push((operation.into(), target.into(), args.clone()));
+            if self.fail == operation || self.fail == target {
+                return Err(format!("Native {operation} rejected for {target}").into());
+            }
+            if self.ignore != operation {
+                match operation {
+                    "route" => {
+                        let node = self.object_mut(target);
+                        let name = node["routes"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|route| route["index"] == args["route"])
+                            .unwrap()["name"]
+                            .clone();
+                        node["routeName"] = name;
+                    }
+                    "default" => {
+                        let kind = self.state.object(target)?["kind"].clone();
+                        for object in &mut self.state.objects {
+                            if object["type"] == "node" && object["kind"] == kind {
+                                object["isDefault"] = (object["key"] == target).into();
+                            }
+                        }
+                        if self.state.object(target)?["kind"] == "output" {
+                            self.state.default_output = target.into();
+                            self.state.output_epoch.push('x');
+                        } else {
+                            self.state.default_input = target.into();
+                            self.state.input_epoch.push('x');
+                        }
+                    }
+                    "follow" => self.object_mut(target)["targetSerial"] = (-1).into(),
+                    "volume" => self.object_mut(target)["volume"] = args["volume"].clone(),
+                    "mute" => self.object_mut(target)["muted"] = args["muted"].clone(),
+                    "trust" => self.object_mut(target)["trusted"] = args["trusted"].clone(),
+                    "power" => self.object_mut(target)["powered"] = args["powered"].clone(),
+                    "connect" => self.object_mut(target)["connected"] = true.into(),
+                    _ => {}
+                }
+            }
+            self.fire(operation);
+            Ok(self.state.clone())
+        }
+        fn pause(&mut self) {
+            self.polls += 1;
+            self.fire("pause");
+        }
+    }
+
+    #[test]
+    fn reliability_counts_only_same_kind_and_exact_card_binding() {
+        let mut snapshot = fixtures::snapshot();
+        assert!(audio::routes_reliable(&snapshot, &snapshot.nodes[0]));
+        let mut second = snapshot.nodes[0].clone();
+        second.id = 99;
+        second.serial = "999".into();
+        snapshot.nodes.push(second);
+        assert!(!audio::routes_reliable(&snapshot, &snapshot.nodes[0]));
+        assert!(audio::routes_reliable(&snapshot, &snapshot.nodes[1]));
+        assert!(audio::routes_reliable(&snapshot, &snapshot.nodes[2]));
+        snapshot.nodes.last_mut().unwrap().card_serial = "replaced".into();
+        assert!(audio::routes_reliable(&snapshot, &snapshot.nodes[0]));
+    }
+
+    #[test]
+    fn selection_plan_preserves_zero_and_rejects_stale_ambiguous_or_unavailable_native_routes() {
+        let mut initial = simple(AudioKind::Output);
+        let mut target = row(&initial, AudioKind::Output);
+        let route =
+            json!({"index":0,"name":"headphones","description":"Headphones","available":true});
+        initial.objects[0]["routes"] = json!([route]);
+        target.port = true;
+        target.port_name = "headphones".into();
+        target.route_id = Some(0);
+        assert!(matches!(
+            audio::selection_plan(&initial.audio().unwrap(), &target).unwrap(),
+            SelectionPlan::Native { route: Some(0), .. }
+        ));
+        for mode in [
+            "removed",
+            "serial",
+            "index",
+            "name",
+            "unavailable",
+            "duplicate",
+        ] {
+            let mut state = initial.clone();
+            match mode {
+                "removed" => state.objects.clear(),
+                "serial" => state.objects[0]["serial"] = "999".into(),
+                "index" => state.objects[0]["routes"][0]["index"] = 2.into(),
+                "name" => state.objects[0]["routes"][0]["name"] = "other".into(),
+                "unavailable" => state.objects[0]["routes"][0]["available"] = false.into(),
+                _ => state.objects[0]["routes"] = json!([route, route]),
+            }
+            assert!(
+                audio::selection_plan(&state.audio().unwrap(), &target).is_err(),
+                "{mode}"
+            );
+        }
+        let mut snapshot = initial.audio().unwrap();
+        snapshot.nodes[0].card_id = Some(7);
+        snapshot.nodes[0].card_serial = "70".into();
+        let mut duplicate = snapshot.nodes[0].clone();
+        duplicate.id = 21;
+        snapshot.nodes.push(duplicate);
+        assert_eq!(
+            audio::selection_plan(&snapshot, &target).unwrap(),
+            SelectionPlan::Policy
+        );
+        target.port = false;
+        target.route_id = None;
+        assert!(matches!(
+            audio::selection_plan(&snapshot, &target).unwrap(),
+            SelectionPlan::Native { route: None, .. }
+        ));
+        target.node_id = None;
+        target.port = true;
+        target.card_id = Some(7);
+        assert_eq!(
+            audio::selection_plan(&snapshot, &target).unwrap(),
+            SelectionPlan::Policy
+        );
+    }
+
+    #[test]
+    fn choice_reconciliation_keeps_order_native_defaults_and_intentional_omissions() {
+        let mut state = fixtures::initial();
+        state.snapshot.nodes[0].route_name = fixtures::SPEAKER.into();
+        let native = native(state.snapshot.clone());
+        let entries = audio::rows(&state, AudioKind::Output).unwrap();
+        let rows = audio::choices(&native, AudioKind::Output, &entries, &[]).unwrap();
+        assert!(
+            rows.iter()
+                .any(|row| row["nodeId"] == 10 && row["default"] == true)
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row["nodeId"] == 10 || row["default"] == false)
+        );
+        let keys: Vec<_> = rows.iter().map(|row| &row["key"]).collect();
+        assert_eq!(
+            keys,
+            entries
+                .iter()
+                .map(|row| &row.key)
+                .map(|key| rows.iter().find(|row| row["key"] == *key).unwrap())
+                .map(|row| &row["key"])
+                .collect::<Vec<_>>()
+        );
+        let resolved = native
+            .audio()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|node| node.kind == AudioKind::Output)
+            .map(|node| node.identity())
+            .collect::<Vec<_>>();
+        assert!(
+            audio::choices(&native, AudioKind::Output, &[], &resolved)
+                .unwrap()
+                .is_empty()
+        );
+        let fallback = audio::choices(&native, AudioKind::Output, &[], &[]).unwrap();
+        assert_eq!(fallback.len(), 2);
+        assert!(
+            fallback
+                .iter()
+                .all(|row| row["key"].as_str().unwrap().starts_with("native:"))
+        );
+        let mut ghosts = entries.clone();
+        for row in &mut ghosts {
+            row.node_serial = "999".into();
+            row.card_serial = "999".into();
+        }
+        assert_eq!(
+            audio::choices(&native, AudioKind::Output, &ghosts, &[]).unwrap(),
+            fallback
+        );
+        let mut absent = native.clone();
+        absent
+            .objects
+            .retain(|object| object["type"] != "card" && object["cardId"].is_null());
+        assert!(
+            audio::choices(&absent, AudioKind::Output, &entries, &[])
+                .unwrap()
+                .iter()
+                .all(|row| !row["nodeId"].is_null())
+        );
+    }
+
+    #[test]
+    fn ambiguous_card_getter_uses_only_endpoint_port_active_but_never_selects_a_non_native_default()
+    {
+        let mut state = fixtures::initial();
+        let mut second = state.snapshot.nodes[0].clone();
+        second.id = 11;
+        second.serial = "110".into();
+        second.name = "second".into();
+        state.snapshot.nodes.push(second);
+        let mut entries = audio::rows(&state, AudioKind::Output).unwrap();
+        for row in &mut entries {
+            row.port_active = row.node_id == Some(11);
+        }
+        let native = native(state.snapshot.clone());
+        assert!(
+            audio::choices(&native, AudioKind::Output, &entries, &[])
+                .unwrap()
+                .iter()
+                .all(|row| row["default"] == false)
+        );
+        entries
+            .iter_mut()
+            .filter(|row| row.node_id == Some(10))
+            .for_each(|row| row.port_active = true);
+        assert!(
+            audio::choices(&native, AudioKind::Output, &entries, &[])
+                .unwrap()
+                .iter()
+                .any(|row| row["nodeId"] == 10 && row["default"] == true)
+        );
+    }
+
+    #[test]
+    fn volumes_are_finite_unquantized_clamped_per_kind_and_guard_the_default_epoch() {
+        for kind in [AudioKind::Output, AudioKind::Input] {
+            let initial = simple(kind);
+            let key = initial.epoch(kind);
+            for (value, expected) in [
+                (-5.0, 0.0),
+                (10.0, if kind == AudioKind::Output { 1.5 } else { 1.0 }),
+                (0.12345, 0.12345),
+            ] {
+                let (action, guards) =
+                    panel::volume_action(&initial, kind, key, Some(value)).unwrap();
+                assert_eq!(action["args"]["volume"], expected);
+                assert_eq!(guards.len(), 1);
+            }
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(panel::volume_action(&initial, kind, key, Some(value)).is_err());
+            }
+            for stale in ["", "old", "other-kind"] {
+                assert!(panel::volume_action(&initial, kind, stale, None).is_err());
+            }
+            let (action, guards) = panel::volume_action(&initial, kind, key, None).unwrap();
+            assert_eq!(action["args"]["muted"], true);
+            let mut fake = Fake::new(initial.clone());
+            if kind == AudioKind::Output {
+                fake.state.output_epoch.push('x');
+            } else {
+                fake.state.input_epoch.push('x');
+            }
+            assert!(
+                fake.execute(
+                    "mute",
+                    object_key(&action["node"]),
+                    action["args"].clone(),
+                    guards,
+                    false
+                )
+                .is_err()
+            );
+            assert!(fake.actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn native_route_and_default_transactions_wait_preserve_index_zero_and_never_switch_profiles() {
+        for kind in [AudioKind::Output, AudioKind::Input] {
+            for routed in [false, true] {
+                let mut initial = simple(kind);
+                let mut target = row(&initial, kind);
+                if routed {
+                    initial.objects[0]["routes"] =
+                        json!([{"index":0,"name":"port","description":"Port","available":true}]);
+                    target.port = true;
+                    target.port_name = "port".into();
+                    target.route_id = Some(0);
+                }
+                let mut fake = Fake::new(initial.clone());
+                panel::native_select(&mut fake, &initial, kind, &target).unwrap();
+                assert_eq!(
+                    fake.actions
+                        .iter()
+                        .map(|action| action.0.as_str())
+                        .collect::<Vec<_>>(),
+                    if routed {
+                        vec!["route", "default"]
+                    } else {
+                        vec!["default"]
+                    }
+                );
+                assert_eq!(fake.polls, if routed { 2 } else { 1 });
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_or_unacknowledged_native_changes_never_default_or_clear_stream_pins() {
+        for mode in [
+            "route-error",
+            "route-timeout",
+            "default-error",
+            "default-timeout",
+            "replacement",
+        ] {
+            let mut initial = simple(AudioKind::Output);
+            let mut target = row(&initial, AudioKind::Output);
+            initial.objects[0]["routes"] =
+                json!([{"index":0,"name":"port","description":"Port","available":true}]);
+            target.port = true;
+            target.port_name = "port".into();
+            target.route_id = Some(0);
+            initial.objects.push(stream("Chrome", 100));
+            initial.default_output.clear();
+            let mut fake = Fake::new(initial.clone());
+            if mode.ends_with("error") {
+                fake.fail = mode.split('-').next().unwrap().into();
+            } else if mode.ends_with("timeout") {
+                fake.ignore = mode.split('-').next().unwrap().into();
+            }
+            if mode == "replacement" {
+                fake.hook = Some(Box::new(|fake, operation| {
+                    if operation == "pause" {
+                        fake.state.objects[0]["key"] = "replacement".into();
+                    }
+                }));
+            }
+            assert!(
+                panel::native_select(&mut fake, &initial, AudioKind::Output, &target).is_err(),
+                "{mode}"
+            );
+            assert!(!fake.actions.iter().any(|action| action.0 == "follow"));
+            if mode.starts_with("route") || mode == "replacement" {
+                assert!(!fake.actions.iter().any(|action| action.0 == "default"));
+            }
+            assert!(fake.polls <= 32);
+        }
+    }
+
+    #[test]
+    fn follow_default_resets_every_playback_pin_to_null_never_capture_and_only_after_selection_success()
+     {
+        let mut initial = simple(AudioKind::Output);
+        initial.objects.extend([
+            stream("Chrome", 100),
+            stream("Elisa", 999),
+            json!({"key":"capture","type":"device","targetSerial":200}),
+        ]);
+        let endpoint = initial.objects[0].clone();
+        let mut fake = Fake::new(initial.clone());
+        panel::follow_output(&mut fake, &endpoint).unwrap();
+        assert_eq!(
+            fake.actions
+                .iter()
+                .map(|action| action.1.as_str())
+                .collect::<Vec<_>>(),
+            ["Chrome", "Elisa"]
+        );
+        assert!(
+            fake.actions
+                .iter()
+                .all(|action| action.0 == "follow" && action.2 == json!({}))
+        );
+        assert_eq!(fake.state.object("capture").unwrap()["targetSerial"], 200);
+        fake.state.objects.push(stream("New playback", 444));
+        panel::follow_output(&mut fake, &endpoint).unwrap();
+        assert_eq!(
+            fake.state.object("New playback").unwrap()["targetSerial"],
+            -1
+        );
+    }
+
+    #[test]
+    fn playback_reset_guards_default_and_lifetime_before_each_write_and_during_convergence() {
+        for cause in ["default", "removed", "replacement", "serial"] {
+            for during in [false, true] {
+                let mut initial = simple(AudioKind::Output);
+                initial
+                    .objects
+                    .extend([stream("first", 100), stream("later", 100)]);
+                let endpoint = initial.objects[0].clone();
+                let mut fake = Fake::new(initial);
+                fake.ignore = if during {
+                    "follow".into()
+                } else {
+                    String::new()
+                };
+                fake.hook = Some(Box::new(move |fake, operation| {
+                    if operation == if during { "pause" } else { "follow" } {
+                        match cause {
+                            "default" => fake.state.default_output = "elsewhere".into(),
+                            "removed" => {
+                                fake.state.objects.retain(|object| object["type"] != "node")
+                            }
+                            "replacement" => fake.state.objects[0]["key"] = "new-object".into(),
+                            _ => fake.state.objects[0]["serial"] = "999".into(),
+                        }
+                    }
+                }));
+                assert!(
+                    panel::follow_output(&mut fake, &endpoint).is_err(),
+                    "{cause}/{during}"
+                );
+                if !during {
+                    assert_eq!(fake.actions.len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn removed_streams_are_skipped_and_no_longer_block_pending_follow_default() {
+        for during in [false, true] {
+            let mut initial = simple(AudioKind::Output);
+            initial
+                .objects
+                .extend([stream("first", 100), stream("removed", 100)]);
+            let endpoint = initial.objects[0].clone();
+            let mut fake = Fake::new(initial);
+            fake.hook = Some(Box::new(move |fake, operation| {
+                if operation == if during { "pause" } else { "follow" } {
+                    fake.state
+                        .objects
+                        .retain(|object| object["key"] != "removed");
+                }
+            }));
+            panel::follow_output(&mut fake, &endpoint).unwrap();
+            if !during {
+                assert_eq!(fake.actions.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn partial_playback_failures_do_not_abandon_other_setters_or_native_convergence() {
+        let mut initial = simple(AudioKind::Output);
+        initial.objects.extend([
+            stream("Chrome", 100),
+            stream("Elisa", 200),
+            stream("Other", 333),
+        ]);
+        let endpoint = initial.objects[0].clone();
+        let mut fake = Fake::new(initial);
+        fake.fail = "Chrome".into();
+        fake.ignore = "follow".into();
+        fake.hook = Some(Box::new(|fake, operation| {
+            if operation == "pause" && fake.polls == 3 {
+                fake.object_mut("Elisa")["targetSerial"] = (-1).into();
+                fake.object_mut("Other")["targetSerial"] = (-1).into();
+            }
+        }));
+        let error = panel::follow_output(&mut fake, &endpoint)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Chrome") && error.contains("rejected"));
+        assert_eq!(fake.actions.len(), 3);
+        assert_eq!(fake.polls, 3);
+        let mut fake = Fake::new(fake.state);
+        fake.ignore = "follow".into();
+        fake.object_mut("Elisa")["targetSerial"] = 200.into();
+        assert!(
+            panel::follow_output(&mut fake, &endpoint)
+                .unwrap_err()
+                .to_string()
+                .contains("playback")
+        );
+        assert_eq!(fake.polls, 30);
+    }
+
+    fn bluetooth_native() -> NativeSnapshot {
+        NativeSnapshot {
+            objects: vec![
+                json!({"key":"adapter","type":"adapter","path":"/org/bluez/hci12","powered":true}),
+                json!({"key":"buds","type":"device","address":"AA:BB:CC:DD:EE:01","adapter":"/org/bluez/hci12","name":"Desk buds","alias":"","connected":false,"paired":true,"trusted":false,"battery":1.4}),
+            ],
+            adapter: "adapter".into(),
+            opened: true,
+            tab: 0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn automatic_trust_connect_is_rust_ordered_and_cancelled_on_native_or_ui_replacement() {
+        let initial = bluetooth_native();
+        let device = initial.object("buds").unwrap().clone();
+        let mut fake = Fake::new(initial.clone());
+        panel::paired_setup(&mut fake, &initial, &device).unwrap();
+        assert_eq!(
+            fake.actions
+                .iter()
+                .map(|action| action.0.as_str())
+                .collect::<Vec<_>>(),
+            ["trust", "connect"]
+        );
+        for cause in [
+            "close",
+            "tab",
+            "power",
+            "adapter",
+            "device",
+            "cancel",
+            "trust-error",
+            "connect-error",
+        ] {
+            let mut fake = Fake::new(initial.clone());
+            if cause.ends_with("error") {
+                fake.fail = cause.split('-').next().unwrap().into();
+            } else {
+                fake.hook = Some(Box::new(move |fake, operation| {
+                    if operation == "trust" {
+                        match cause {
+                            "close" => fake.state.opened = false,
+                            "tab" => fake.state.tab = 1,
+                            "power" => fake.object_mut("adapter")["powered"] = false.into(),
+                            "adapter" => fake.state.adapter = "replacement".into(),
+                            "device" => fake.object_mut("buds")["key"] = "replacement".into(),
+                            _ => fake.state.pairing_epoch += 1,
+                        }
+                    }
+                }));
+            }
+            assert!(
+                panel::paired_setup(&mut fake, &initial, &device).is_err(),
+                "{cause}"
+            );
+            if cause != "connect-error" {
+                assert_eq!(fake.actions.len(), 1, "{cause}");
+            }
+        }
+    }
+
+    #[test]
+    fn pairing_notices_keep_one_named_status_and_latest_typed_prompt_without_reviving_dismissed_completion()
+     {
+        use crate::bluetooth::PairingNotice;
+        let native = bluetooth_native();
+        let device = native.object("buds").unwrap();
+        let mut notice = PairingNotice::new(device);
+        assert_eq!(notice.text, "Pairing with Desk buds (AA:BB:CC:DD:EE:01)…");
+        assert!(notice.prompt.is_empty());
+        notice.dismiss(true);
+        assert!(notice.dismissed);
+        notice.set_prompt("Does passkey 000007 match? Type yes or no.".into(), true);
+        assert!(!notice.dismissed);
+        assert!(notice.needs_answer);
+        notice.dismiss(true);
+        assert!(!notice.dismissed, "an unanswered prompt remains reachable");
+        notice.set_prompt("Enter PIN:".into(), true);
+        assert_eq!(notice.prompt, "Enter PIN:");
+        assert!(!notice.prompt.contains("000007"));
+        notice.clear_prompt();
+        notice.dismiss(true);
+        notice.paired(device);
+        assert!(notice.dismissed);
+        assert_eq!(notice.state, "paired");
+        assert!(notice.prompt.is_empty());
+        notice.set_prompt("Type 042311 on the device to finish pairing.".into(), false);
+        assert!(!notice.dismissed);
+        assert!(!notice.needs_answer);
+        notice.fail(
+            device,
+            "progress\naudio-control: Incorrect pairing code for AA:BB:CC:DD:EE:01.\n",
+            false,
+        );
+        assert_eq!(
+            notice.text,
+            "Pairing failed: Incorrect pairing code for Desk buds (AA:BB:CC:DD:EE:01)."
+        );
+        assert_eq!(notice.state, "failed");
+        assert!(!notice.text.contains('\n'));
+        assert!(notice.prompt.is_empty());
+        notice.dismiss(false);
+        notice.fail(device, "connect failed", true);
+        assert!(notice.dismissed);
+        assert!(notice.text.contains("but setup failed: connect failed"));
+        let mut unnamed = device.clone();
+        unnamed["name"] = "".into();
+        unnamed["alias"] = "Alias".into();
+        assert_eq!(
+            PairingNotice::new(&unnamed).text,
+            "Pairing with Alias (AA:BB:CC:DD:EE:01)…"
+        );
+        unnamed["alias"] = "".into();
+        assert_eq!(
+            PairingNotice::new(&unnamed).text,
+            "Pairing with AA:BB:CC:DD:EE:01…"
+        );
+    }
+
+    #[test]
+    fn bluetooth_names_batteries_and_answers_preserve_aliases_leading_zeroes_and_injection_guards()
+    {
+        let mut native = bluetooth_native();
+        let mut device = native.object("buds").unwrap().clone();
+        device["name"] = device["address"].clone();
+        device["alias"] = " Desk buds ".into();
+        assert_eq!(crate::bluetooth::display_name(&device), "Desk buds");
+        device["alias"] = "00-11-22-33-44-55".into();
+        assert_eq!(crate::bluetooth::display_name(&device), "AA:BB:CC:DD:EE:01");
+        let rows = crate::bluetooth::device_rows(&native, &HashSet::from(["buds".into()]));
+        assert_eq!(rows[0]["battery"], 1.0);
+        assert_eq!(rows[0]["busy"], true);
+        native.objects[1]["battery"] = (-1).into();
+        assert!(crate::bluetooth::device_rows(&native, &HashSet::new())[0]["battery"].is_null());
+        native.objects[1]["adapter"] = "/org/bluez/hci0".into();
+        assert!(crate::bluetooth::device_rows(&native, &HashSet::new()).is_empty());
+        for answer in ["000007", "  PIN with spaces  ", "yes", "no"] {
+            assert_eq!(crate::bluetooth::pairing_answer(answer).unwrap(), answer);
+        }
+        assert_eq!(
+            crate::bluetooth::pairing_answer(&"🎧".repeat(256))
+                .unwrap()
+                .encode_utf16()
+                .count(),
+            512
+        );
+        assert!(crate::bluetooth::pairing_answer(&"🎧".repeat(257)).is_err());
+        for answer in ["", " ", "a\nb", "a\rb", "a\0b", &"x".repeat(513)] {
+            assert!(crate::bluetooth::pairing_answer(answer).is_err());
+        }
+    }
+}
+
+mod resident_protocol {
+    use super::resident_policy::{Fake, simple};
+    use crate::{model::AudioKind, policy::panel::Native};
+    use serde_json::{Value, json};
+    use std::{
+        collections::HashMap,
+        io::{BufRead, BufReader, Write},
+        process::{Child, ChildStdin, Command, Stdio},
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    struct Resident {
+        child: Child,
+        input: ChildStdin,
+        output: mpsc::Receiver<Value>,
+        fake: Fake,
+        held: HashMap<String, Value>,
+        id: u64,
+        model: Value,
+    }
+    impl Resident {
+        fn new(fake: Fake) -> Self {
+            Self::with_dump(fake, std::path::Path::new("/nonexistent/pw-dump"))
+        }
+        fn with_dump(fake: Fake, dump: &std::path::Path) -> Self {
+            let mut child = Command::new(env!("CARGO_BIN_EXE_audio-control"))
+                .arg("panel")
+                .env("DBUS_SYSTEM_BUS_ADDRESS", "disabled:")
+                .env("AUDIO_CONTROL_PW_DUMP", dump)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let input = child.stdin.take().unwrap();
+            let stdout = child.stdout.take().unwrap();
+            let (sender, output) = mpsc::channel();
+            thread::spawn(move || {
+                for line in BufReader::new(stdout).lines() {
+                    if sender
+                        .send(serde_json::from_str(&line.unwrap()).unwrap())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            let mut resident = Self {
+                child,
+                input,
+                output,
+                fake,
+                held: HashMap::new(),
+                id: 0,
+                model: Value::Null,
+            };
+            resident.snapshot();
+            resident
+        }
+        fn send(&mut self, value: Value) {
+            writeln!(self.input, "{value}").unwrap();
+            self.input.flush().unwrap();
+        }
+        fn snapshot(&mut self) {
+            self.send(json!({"type":"snapshot","snapshot":self.fake.state}));
+        }
+        fn intent(&mut self, command: &str, fields: Value) {
+            let mut value = json!({"type":"intent","command":command});
+            for (key, item) in fields.as_object().unwrap() {
+                value[key] = item.clone();
+            }
+            self.send(value);
+        }
+        fn step(&mut self, event: Value) {
+            match event["type"].as_str().unwrap() {
+                "model" => self.model = event["model"].clone(),
+                "snapshot" | "action" => {
+                    assert_eq!(event["id"], self.id + 1);
+                    self.id += 1;
+                    let result = if event["type"] == "snapshot" {
+                        Ok(self.fake.state.clone())
+                    } else {
+                        let key = event["target"].as_str().unwrap();
+                        let operation = event["operation"].as_str().unwrap();
+                        let absent = self.fake.state.object(key).is_err();
+                        if absent && let Some(object) = self.held.get(key) {
+                            self.fake.state.objects.push(object.clone());
+                        }
+                        let result = self.fake.execute(
+                            operation,
+                            key,
+                            event["args"].clone(),
+                            serde_json::from_value(event["guards"].clone()).unwrap(),
+                            event["cleanup"] == true,
+                        );
+                        if result.is_ok() {
+                            if operation == "retain" {
+                                self.held.insert(
+                                    key.into(),
+                                    self.fake.state.object(key).unwrap().clone(),
+                                );
+                            } else if operation == "release" {
+                                self.held.remove(key);
+                            }
+                        }
+                        if absent {
+                            self.fake
+                                .state
+                                .objects
+                                .retain(|object| object["key"] != key);
+                        }
+                        result
+                    };
+                    self.send(match result {Ok(_)=>json!({"type":"reply","id":event["id"],"ok":true,"snapshot":self.fake.state}),Err(error)=>json!({"type":"reply","id":event["id"],"ok":false,"error":error.to_string(),"snapshot":self.fake.state})});
+                }
+                other => panic!("unexpected event {other}: {event}"),
+            }
+        }
+        fn until(&mut self, check: impl Fn(&Self) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(6);
+            while !check(self) {
+                let event = self
+                    .output
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("resident progress timed out");
+                self.step(event);
+            }
+        }
+        fn quiet(&mut self, milliseconds: u64) {
+            let deadline = Instant::now() + Duration::from_millis(milliseconds);
+            while let Ok(event) = self
+                .output
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                self.step(event);
+                if Instant::now() >= deadline {
+                    break;
+                }
+            }
+        }
+        fn ready(&mut self) {
+            self.until(|r| {
+                r.model["output"]["loading"] == false && r.model["input"]["loading"] == false
+            });
+        }
+        fn actions(&self, operation: &str) -> usize {
+            self.fake
+                .actions
+                .iter()
+                .filter(|action| action.0 == operation)
+                .count()
+        }
+        fn close(&mut self) {
+            self.send(json!({"type":"shutdown"}));
+            loop {
+                let event = self.output.recv_timeout(Duration::from_secs(7)).unwrap();
+                if event["type"] == "closed" {
+                    break;
+                }
+                self.step(event);
+            }
+            assert!(self.child.wait().unwrap().success());
+        }
+    }
+    impl Drop for Resident {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+    fn bluetooth() -> Fake {
+        let mut state = simple(AudioKind::Output);
+        state.objects.extend([json!({"key":"adapter","type":"adapter","path":"/org/bluez/hci0","powered":true,"discovering":true}),json!({"key":"buds","type":"device","address":"AA:BB:CC:DD:EE:01","adapter":"/org/bluez/hci0","name":"Headset","alias":"","connected":false,"paired":true,"trusted":false,"battery":0.5})]);
+        state.adapter = "adapter".into();
+        Fake::new(state)
+    }
+
+    #[test]
+    fn resident_native_selection_is_end_to_end_and_clears_playback_only_after_default_ack() {
+        let mut native = simple(AudioKind::Output);
+        native.objects.push(json!({"key":"Chrome","type":"stream","id":40,"serial":"400","targetSerial":100,"name":"Chrome"}));
+        let mut resident = Resident::new(Fake::new(native));
+        resident.ready();
+        let key = resident.model["output"]["choices"][0]["key"].clone();
+        resident.intent("select", json!({"kind":"output","key":key}));
+        resident.until(|r| r.actions("follow") == 1 && r.model["output"]["busy"] == false);
+        let operations: Vec<_> = resident
+            .fake
+            .actions
+            .iter()
+            .map(|action| action.0.as_str())
+            .collect();
+        assert_eq!(operations, ["default", "follow"]);
+        assert_eq!(
+            resident.fake.state.object("Chrome").unwrap()["targetSerial"],
+            -1
+        );
+        resident.close();
+    }
+
+    #[test]
+    fn resident_physical_profile_selection_and_rollback_use_guarded_native_rpcs_end_to_end() {
+        use super::{fixtures, protocol_and_cli::DumpFixture, resident_policy::native};
+        use crate::audio::{Action, Backend};
+        for (fail_route, external, final_race) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (true, false, true),
+        ] {
+            let mut legacy = fixtures::Fake::default();
+            let fixture = std::sync::Arc::new(DumpFixture::new(&legacy.dump));
+            let updates = fixture.clone();
+            let mut initial = native(legacy.snapshot.clone());
+            initial.objects.push(json!({"key":"Chrome","type":"stream","id":40,"serial":"400","name":"Chrome","targetSerial":100}));
+            let mut fake = Fake::new(initial);
+            if fail_route {
+                fake.fail = "route".into();
+            }
+            fake.hook = Some(Box::new(move |fake, operation| {
+                if !matches!(operation, "profile" | "route" | "default") {
+                    return;
+                }
+                let (_, key, args) = fake.actions.last().unwrap();
+                let object = fake.state.object(key).unwrap();
+                let identity = crate::model::Identity {
+                    id: object["id"].as_u64().unwrap() as u32,
+                    serial: object["serial"].as_str().unwrap().into(),
+                };
+                let action = match operation {
+                    "profile" => Action::Profile {
+                        card: identity,
+                        profile: args["profile"].as_i64().unwrap() as i32,
+                    },
+                    "route" => Action::Route {
+                        node: identity,
+                        route: args["route"].as_i64().unwrap() as i32,
+                    },
+                    _ => Action::Default { node: identity },
+                };
+                if external && matches!(action, Action::Profile { profile: 1, .. }) {
+                    legacy.snapshot.default_output = Some(crate::model::Identity {
+                        id: 20,
+                        serial: "200".into(),
+                    });
+                }
+                legacy.action(action).unwrap();
+                let snapshot = legacy.observe().unwrap().snapshot;
+                updates.update(&legacy.dump);
+                let streams = fake.state.objects("stream").cloned().collect::<Vec<_>>();
+                fake.state = native(snapshot);
+                fake.state.objects.extend(streams);
+            }));
+            let mut resident = Resident::with_dump(fake, &fixture.executable);
+            resident.ready();
+            let key = crate::audio::physical_key(fixtures::CARD, fixtures::HEADPHONES);
+            assert!(
+                resident.model["output"]["choices"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["key"] == key)
+            );
+            resident.intent("select", json!({"kind":"output","key":key}));
+            if final_race {
+                loop {
+                    let event = resident
+                        .output
+                        .recv_timeout(Duration::from_secs(7))
+                        .unwrap();
+                    if event["operation"] == "default" {
+                        assert_eq!(resident.actions("profile"), 2);
+                        resident.fake.state.output_epoch.push('x');
+                        resident.step(event);
+                        break;
+                    }
+                    resident.step(event);
+                }
+            }
+            resident.until(|r| r.actions("profile") > 0 && r.model["output"]["busy"] == false);
+            if fail_route {
+                assert!(
+                    resident.model["output"]["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains(if final_race {
+                            "Native object changed"
+                        } else {
+                            "Previous profile restored"
+                        })
+                );
+                if final_race {
+                    assert_eq!(resident.actions("default"), 0);
+                }
+                assert_eq!(resident.actions("follow"), 0);
+                assert_eq!(resident.actions("profile"), 2);
+                if external {
+                    assert_eq!(resident.actions("default"), 0);
+                    assert_eq!(resident.fake.state.default_output, "node:20:200");
+                }
+                assert_eq!(
+                    resident.fake.state.object("Chrome").unwrap()["targetSerial"],
+                    100
+                );
+            } else {
+                assert_eq!(resident.model["output"]["error"], "");
+                assert_eq!(resident.actions("follow"), 1);
+                assert_eq!(
+                    resident.fake.state.object("Chrome").unwrap()["targetSerial"],
+                    -1
+                );
+            }
+            resident.close();
+        }
+    }
+
+    #[test]
+    fn volume_and_mute_queues_are_rust_serialized_and_do_not_reset_playback() {
+        let mut resident = Resident::new(Fake::new(simple(AudioKind::Output)));
+        resident.ready();
+        let key = resident.model["output"]["nodeKey"].clone();
+        for value in [0.1, 0.2, 1.5] {
+            resident.intent("volume", json!({"kind":"output","key":key,"value":value}));
+        }
+        resident.until(|r| r.actions("volume") == 3);
+        assert_eq!(
+            resident
+                .fake
+                .actions
+                .iter()
+                .filter(|action| action.0 == "volume")
+                .map(|action| action.2["volume"].clone())
+                .collect::<Vec<_>>(),
+            [json!(0.1), json!(0.2), json!(1.5)]
+        );
+        assert_eq!(resident.actions("follow"), 0);
+        resident.intent("mute", json!({"kind":"output","key":key}));
+        resident.intent("mute", json!({"kind":"output","key":key}));
+        resident.until(|r| r.actions("mute") == 2);
+        assert_eq!(
+            resident
+                .fake
+                .actions
+                .iter()
+                .filter(|action| action.0 == "mute")
+                .map(|action| action.2["muted"].clone())
+                .collect::<Vec<_>>(),
+            [json!(true), json!(false)]
+        );
+        resident.close();
+    }
+
+    #[test]
+    fn discovery_owns_a_session_even_if_another_client_is_scanning_and_follows_tab_power_and_shutdown()
+     {
+        let mut resident = Resident::new(bluetooth());
+        resident.ready();
+        assert_eq!(resident.actions("startDiscovery"), 0);
+        resident.fake.state.opened = true;
+        resident.fake.state.tab = 0;
+        resident.snapshot();
+        resident.until(|r| r.actions("startDiscovery") == 1);
+        resident.fake.state.tab = 1;
+        resident.snapshot();
+        resident.until(|r| r.actions("stopDiscovery") == 1);
+        resident.fake.state.tab = 0;
+        resident.snapshot();
+        resident.until(|r| r.actions("startDiscovery") == 2);
+        resident.intent("bluetoothPower", json!({}));
+        resident.until(|r| r.actions("power") == 1);
+        resident.quiet(100);
+        assert_eq!(resident.actions("stopDiscovery"), 2);
+        assert_eq!(resident.actions("startDiscovery"), 2);
+        assert_eq!(resident.model["bluetooth"]["powered"], false);
+        resident
+            .fake
+            .state
+            .objects
+            .iter_mut()
+            .find(|object| object["key"] == "adapter")
+            .unwrap()["powered"] = true.into();
+        resident.snapshot();
+        resident.until(|r| r.actions("startDiscovery") == 3);
+        resident.close();
+        assert_eq!(resident.actions("stopDiscovery"), 3);
+        assert!(resident.held.is_empty());
+    }
+
+    #[test]
+    fn failed_discovery_start_does_not_spin_or_stop_an_unowned_session_and_can_retry() {
+        let mut fake = bluetooth();
+        fake.fail = "startDiscovery".into();
+        fake.state.opened = true;
+        fake.state.tab = 0;
+        let mut resident = Resident::new(fake);
+        resident.until(|r| {
+            r.model["bluetooth"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("rejected"))
+        });
+        resident.quiet(100);
+        assert_eq!(resident.actions("startDiscovery"), 1);
+        assert_eq!(resident.actions("stopDiscovery"), 0);
+        resident.fake.state.opened = false;
+        resident.snapshot();
+        resident.quiet(50);
+        assert_eq!(resident.actions("stopDiscovery"), 0);
+        resident.fake.fail.clear();
+        resident.fake.state.opened = true;
+        resident.snapshot();
+        resident.until(|r| r.actions("startDiscovery") == 2);
+        resident.close();
+        assert_eq!(resident.actions("stopDiscovery"), 1);
+    }
+
+    #[test]
+    fn failed_discovery_stop_retains_ownership_for_later_cleanup_without_spinning() {
+        let mut fake = bluetooth();
+        fake.state.opened = true;
+        fake.state.tab = 0;
+        let mut resident = Resident::new(fake);
+        resident.until(|r| r.actions("startDiscovery") == 1);
+        resident.fake.fail = "stopDiscovery".into();
+        resident.fake.state.opened = false;
+        resident.snapshot();
+        resident.until(|r| {
+            r.model["bluetooth"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("rejected"))
+        });
+        resident.quiet(100);
+        assert_eq!(resident.actions("stopDiscovery"), 1);
+        assert!(!resident.held.is_empty());
+        resident.fake.fail.clear();
+        resident.intent("active", json!({}));
+        resident.until(|r| r.actions("stopDiscovery") == 2);
+        resident.close();
+        assert!(resident.held.is_empty());
+    }
+
+    #[test]
+    fn adapter_replacement_stops_only_the_owned_old_adapter_and_starts_the_current_one() {
+        for fail_stop in [false, true] {
+            let mut fake = bluetooth();
+            fake.state.opened = true;
+            fake.state.tab = 0;
+            let mut resident = Resident::new(fake);
+            resident.until(|r| r.actions("startDiscovery") == 1);
+            resident
+                .fake
+                .state
+                .objects
+                .retain(|object| object["key"] != "adapter");
+            resident.fake.state.objects.push(json!({"key":"replacement","type":"adapter","path":"/org/bluez/hci12","powered":true,"discovering":false}));
+            resident.fake.state.adapter = "replacement".into();
+            if fail_stop {
+                resident.fake.fail = "stopDiscovery".into();
+            }
+            resident.snapshot();
+            resident.until(|r| r.actions("startDiscovery") == 2);
+            assert!(
+                resident
+                    .fake
+                    .actions
+                    .iter()
+                    .any(|action| action.0 == "stopDiscovery" && action.1 == "adapter")
+            );
+            assert_eq!(
+                resident
+                    .fake
+                    .actions
+                    .iter()
+                    .filter(|action| action.0 == "startDiscovery")
+                    .map(|action| action.1.as_str())
+                    .collect::<Vec<_>>(),
+                ["adapter", "replacement"]
+            );
+            assert_eq!(resident.held.contains_key("adapter"), fail_stop);
+            assert!(resident.held.contains_key("replacement"));
+            resident.fake.fail.clear();
+            resident.close();
+            let stops: Vec<_> = resident
+                .fake
+                .actions
+                .iter()
+                .filter(|a| a.0 == "stopDiscovery")
+                .map(|a| a.1.as_str())
+                .collect();
+            if fail_stop {
+                assert_eq!(stops, ["adapter", "adapter", "replacement"]);
+            } else {
+                assert_eq!(stops, ["adapter", "replacement"]);
+            }
+            assert!(resident.held.is_empty());
+        }
+    }
+
+    #[test]
+    fn bluetooth_device_semantic_authorization_and_forget_run_only_in_rust() {
+        let mut resident = Resident::new(bluetooth());
+        resident.ready();
+        resident.intent("device", json!({"key":"buds"}));
+        resident.until(|r| {
+            r.actions("connect") == 1 && r.model["bluetooth"]["devices"][0]["busy"] == false
+        });
+        resident.intent("forget", json!({"key":"buds"}));
+        resident.until(|r| r.actions("forget") == 1);
+        resident
+            .fake
+            .state
+            .objects
+            .iter_mut()
+            .find(|object| object["key"] == "buds")
+            .unwrap()["paired"] = false.into();
+        resident.snapshot();
+        resident.intent("forget", json!({"key":"buds"}));
+        resident.quiet(75);
+        assert_eq!(resident.actions("forget"), 1);
+        resident.intent("device", json!({"key":"missing"}));
+        resident.until(|r| {
+            !r.model["bluetooth"]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty()
+        });
+        resident.close();
+    }
+
+    #[test]
+    fn cancellation_after_retaining_a_pair_target_prevents_trust_and_connect_and_releases_the_handle()
+     {
+        let mut fake = bluetooth();
+        fake.state.opened = true;
+        fake.state.tab = 0;
+        fake.state
+            .objects
+            .iter_mut()
+            .find(|object| object["key"] == "buds")
+            .unwrap()["paired"] = false.into();
+        let mut resident = Resident::new(fake);
+        resident.ready();
+        resident.intent("device", json!({"key":"buds"}));
+        loop {
+            let event = resident
+                .output
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            if event["type"] == "action"
+                && event["operation"] == "retain"
+                && event["target"] == "buds"
+            {
+                resident.fake.state.opened = false;
+                resident.snapshot();
+                resident.step(event);
+                break;
+            }
+            resident.step(event);
+        }
+        resident
+            .until(|r| r.actions("cancelPairing") == 1 && r.model["bluetooth"]["pairing"] == false);
+        resident.quiet(100);
+        assert_eq!(resident.actions("trust"), 0);
+        assert_eq!(resident.actions("connect"), 0);
+        assert!(resident.model["bluetooth"]["pairingMessage"].is_null());
+        resident.close();
+        assert!(resident.held.is_empty());
+    }
+
+    #[test]
+    fn slow_native_bluetooth_completion_is_not_a_six_second_rpc_failure() {
+        let mut resident = Resident::new(bluetooth());
+        resident.ready();
+        resident.intent("device", json!({"key":"buds"}));
+        let action = loop {
+            let event = resident
+                .output
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            if event["type"] == "action" && event["operation"] == "connect" {
+                assert_eq!(event["id"], resident.id + 1);
+                resident.id += 1;
+                break event;
+            }
+            resident.step(event);
+        };
+        resident.quiet(6100);
+        assert!(resident.child.try_wait().unwrap().is_none());
+        assert_eq!(resident.model["bluetooth"]["devices"][0]["busy"], true);
+        resident.send(
+            json!({"type":"reply","id":action["id"],"ok":true,"snapshot":resident.fake.state}),
+        );
+        resident.until(|r| r.model["bluetooth"]["devices"][0]["busy"] == false);
+        assert_eq!(resident.model["bluetooth"]["error"], "");
+        resident.close();
+    }
+
+    #[test]
+    fn late_removed_device_failure_cannot_leak_into_a_replacement_with_the_same_address() {
+        let mut resident = Resident::new(bluetooth());
+        resident.ready();
+        resident.intent("device", json!({"key":"buds"}));
+        let old = loop {
+            let event = resident
+                .output
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            if event["type"] == "action" && event["operation"] == "connect" {
+                assert_eq!(event["id"], resident.id + 1);
+                resident.id += 1;
+                break event;
+            }
+            resident.step(event);
+        };
+        resident
+            .fake
+            .state
+            .objects
+            .iter_mut()
+            .find(|object| object["key"] == "buds")
+            .unwrap()["key"] = "new-buds".into();
+        resident.snapshot();
+        resident.intent("device", json!({"key":"new-buds"}));
+        let current = loop {
+            let event = resident
+                .output
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            if event["type"] == "action" && event["operation"] == "connect" {
+                assert_eq!(event["id"], resident.id + 1);
+                resident.id += 1;
+                break event;
+            }
+            resident.step(event);
+        };
+        resident.send(json!({"type":"reply","id":old["id"],"ok":false,"error":"Old connection failed","snapshot":resident.fake.state}));
+        resident.quiet(75);
+        assert_eq!(resident.model["bluetooth"]["error"], "");
+        assert_eq!(resident.model["bluetooth"]["devices"][0]["key"], "new-buds");
+        assert_eq!(resident.model["bluetooth"]["devices"][0]["busy"], true);
+        resident.send(
+            json!({"type":"reply","id":current["id"],"ok":true,"snapshot":resident.fake.state}),
+        );
+        resident.until(|r| r.model["bluetooth"]["devices"][0]["busy"] == false);
+        resident.close();
+    }
+
+    #[test]
+    fn rust_metadata_polling_is_visible_audio_only_and_default_controls_do_not_reset_pins() {
+        let mut resident = Resident::new(Fake::new(simple(AudioKind::Output)));
+        resident.ready();
+        let start = Instant::now();
+        resident.quiet(200);
+        assert!(resident.fake.actions.is_empty());
+        resident.fake.state.opened = true;
+        resident.fake.state.tab = 1;
+        resident.snapshot();
+        resident.intent("active", json!({}));
+        let mut reloads = 0;
+        while start.elapsed() < Duration::from_millis(2300) {
+            let event = resident
+                .output
+                .recv_timeout(Duration::from_millis(2400).saturating_sub(start.elapsed()))
+                .unwrap();
+            if event["type"] == "model" && event["model"]["output"]["loading"] == true {
+                reloads += 1;
+            }
+            resident.step(event);
+            if reloads >= 2 {
+                break;
+            }
+        }
+        assert_eq!(
+            reloads, 2,
+            "opening refreshes immediately, then polls at two seconds"
+        );
+        resident.fake.state.opened = false;
+        resident.snapshot();
+        resident.quiet(2100);
+        assert_eq!(resident.model["output"]["loading"], false);
+        assert!(resident.fake.actions.is_empty());
+        resident.close();
+    }
+
+    #[test]
+    fn malformed_resident_intents_report_errors_without_starting_native_actions() {
+        let mut resident = Resident::new(Fake::new(simple(AudioKind::Output)));
+        resident.ready();
+        resident.intent("volume", json!({"kind":"output","key":"stale","value":0.5}));
+        resident.until(|r| {
+            r.model["output"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("changed"))
+        });
+        resident.intent(
+            "volume",
+            json!({"kind":"output","key":"stale","value":0.5,"answer":"unexpected"}),
+        );
+        resident.until(|r| {
+            r.model["output"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("fields"))
+        });
+        assert!(resident.fake.actions.is_empty());
+        resident.close();
+    }
+}
+
 mod fixtures {
     use crate::{
         AppResult,
@@ -1464,12 +2934,12 @@ mod protocol_and_cli {
         assert!(output.stderr.is_empty(), "{output:?}");
         serde_json::from_slice(&output.stdout).unwrap()
     }
-    struct DumpFixture {
+    pub struct DumpFixture {
         directory: PathBuf,
-        executable: PathBuf,
+        pub executable: PathBuf,
     }
     impl DumpFixture {
-        fn new(dump: &Value) -> Self {
+        pub fn new(dump: &Value) -> Self {
             static SERIAL: AtomicU64 = AtomicU64::new(0);
             let directory = std::env::temp_dir().join(format!(
                 "audio-policy-{}-{}",
@@ -1503,8 +2973,13 @@ mod protocol_and_cli {
             fixture.update(dump);
             fixture
         }
-        fn update(&self, dump: &Value) {
-            fs::write(self.directory.join("dump.json"), format!("{dump}\n")).unwrap();
+        pub fn update(&self, dump: &Value) {
+            fs::write(self.directory.join("dump.next"), format!("{dump}\n")).unwrap();
+            fs::rename(
+                self.directory.join("dump.next"),
+                self.directory.join("dump.json"),
+            )
+            .unwrap();
         }
     }
     impl Drop for DumpFixture {

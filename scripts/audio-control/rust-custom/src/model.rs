@@ -1,6 +1,7 @@
 use std::{collections::HashSet, io};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::AppResult;
 
@@ -52,6 +53,8 @@ pub struct Identity {
 pub struct Snapshot {
     pub cards: Vec<Card>,
     pub nodes: Vec<Node>,
+    #[serde(skip)]
+    pub output_stamp: (String, String),
     pub default_output: Option<Identity>,
     pub default_input: Option<Identity>,
 }
@@ -247,6 +250,149 @@ fn validate_identity(id: u32, serial: &str) -> AppResult<()> {
         return Err(io::Error::other("Invalid native object identity").into());
     }
     Ok(())
+}
+
+/// Raw Astal objects. Keys identify object lifetimes, not names, addresses, or
+/// reusable PipeWire IDs. The executor treats guards as opaque field equality.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeSnapshot {
+    pub objects: Vec<Value>,
+    pub default_output: String,
+    pub default_input: String,
+    pub output_epoch: String,
+    pub input_epoch: String,
+    pub pairing_epoch: u64,
+    pub adapter: String,
+    pub opened: bool,
+    pub tab: u8,
+}
+
+impl NativeSnapshot {
+    pub fn validate(&self) -> AppResult<()> {
+        if self.objects.len() > 8192 || self.tab > 1 {
+            return Err("Invalid native panel snapshot".into());
+        }
+        let mut keys = HashSet::new();
+        for object in &self.objects {
+            let key = object["key"].as_str().ok_or("Missing native object key")?;
+            validate_text(key)?;
+            if key.is_empty()
+                || !keys.insert(key)
+                || !matches!(
+                    object["type"].as_str(),
+                    Some("card" | "node" | "stream" | "adapter" | "device")
+                )
+            {
+                return Err("Invalid or duplicate native object key/type".into());
+            }
+        }
+        self.audio()?.validate()
+    }
+
+    pub fn object(&self, key: &str) -> AppResult<&Value> {
+        self.objects
+            .iter()
+            .find(|object| object["key"] == key)
+            .ok_or_else(|| "The native object disappeared or was replaced".into())
+    }
+
+    pub fn objects(&self, kind: &str) -> impl Iterator<Item = &Value> {
+        self.objects
+            .iter()
+            .filter(move |object| object["type"] == kind)
+    }
+
+    pub fn endpoint(&self, identity: &Identity) -> AppResult<&Value> {
+        self.objects("node")
+            .find(|node| node["id"] == identity.id && node["serial"] == identity.serial)
+            .ok_or_else(|| "The selected audio endpoint disappeared or was replaced".into())
+    }
+
+    pub fn default_key(&self, kind: AudioKind) -> &str {
+        match kind {
+            AudioKind::Output => &self.default_output,
+            AudioKind::Input => &self.default_input,
+        }
+    }
+
+    pub fn epoch(&self, kind: AudioKind) -> &str {
+        match kind {
+            AudioKind::Output => &self.output_epoch,
+            AudioKind::Input => &self.input_epoch,
+        }
+    }
+
+    pub fn audio(&self) -> AppResult<Snapshot> {
+        fn fields(object: &Value, names: &[&str]) -> Value {
+            Value::Object(
+                names
+                    .iter()
+                    .map(|name| ((*name).into(), object[*name].clone()))
+                    .collect(),
+            )
+        }
+        let cards = self
+            .objects("card")
+            .map(|card| {
+                serde_json::from_value(fields(
+                    card,
+                    &["id", "serial", "name", "activeProfile", "profiles"],
+                ))
+            })
+            .collect::<Result<Vec<Card>, _>>()?;
+        let nodes = self
+            .objects("node")
+            .map(|node| {
+                serde_json::from_value(fields(
+                    node,
+                    &[
+                        "id",
+                        "serial",
+                        "name",
+                        "description",
+                        "kind",
+                        "cardId",
+                        "cardSerial",
+                        "profileDevice",
+                        "routes",
+                        "routeName",
+                    ],
+                ))
+            })
+            .collect::<Result<Vec<Node>, _>>()?;
+        let default = |key: &str| {
+            self.object(key)
+                .ok()
+                .filter(|object| object["type"] == "node")
+                .and_then(|object| {
+                    Some(Identity {
+                        id: object["id"].as_u64()?.try_into().ok()?,
+                        serial: object["serial"].as_str()?.into(),
+                    })
+                })
+        };
+        Ok(Snapshot {
+            cards,
+            nodes,
+            output_stamp: (self.default_output.clone(), self.output_epoch.clone()),
+            default_output: default(&self.default_output),
+            default_input: default(&self.default_input),
+        })
+    }
+
+    pub fn root_guard(&self, fields: &[&str]) -> Value {
+        let root = serde_json::to_value(self).expect("serializable native snapshot");
+        json!({"key":null,"expect":fields.iter().map(|field| ((*field).to_owned(), root[*field].clone())).collect::<serde_json::Map<_, _>>()})
+    }
+}
+
+pub fn object_guard(object: &Value, fields: &[&str]) -> Value {
+    json!({"key":object["key"],"expect":fields.iter().map(|field| ((*field).to_owned(), object[*field].clone())).collect::<serde_json::Map<_, _>>()})
+}
+
+pub fn object_key(object: &Value) -> &str {
+    object["key"].as_str().unwrap_or_default()
 }
 
 /// Boilerplate that appears in many native audio descriptions and

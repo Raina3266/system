@@ -34,15 +34,9 @@ export function identityEqual(left, right) {
         .every(field => left[field] === right[field]));
 }
 
-export function profileStamp(row) {
-    return JSON.stringify((row?.profiles || []).map(profile => profile.uuid).sort());
-}
-
 function savedInfoStamp(row) {
-    if (!row?.known || row.connected || !row.profiles?.length) return '';
-    // Detection and display-name changes do not change the saved selection.
-    return JSON.stringify([row.key, row.interface, row.ssid, row.wireless, row.securityType,
-        Boolean(row.changing), profileStamp(row), row.savedIdentity || '']);
+    // Rust stamps native/raw-SSID selection context; presentation never rebuilds it.
+    return row?.savedInfoStamp || '';
 }
 
 export function escapeMarkup(value) {
@@ -83,10 +77,10 @@ export function parseRequest(text) {
     return request;
 }
 
-const acceptsPassword = row => row && ['wep', 'psk', 'sae'].includes(row.securityType);
+const acceptsPassword = row => row?.acceptsPassword === true;
 
-// Request policy lives here; all service state and network mutations stay in the
-// native adapter. Injected runtime hooks also make races testable without NM.
+// Only presentation, selection and request lifetimes live here. Rust supplies
+// action permissions and opaque stamps, and revalidates every native request.
 export class NetworkController {
     constructor({ backend, onChange = () => {}, createCancellable }) {
         this.backend = backend;
@@ -131,20 +125,22 @@ export class NetworkController {
         if (this.disposed) return;
         this.rows = sortRows(this.backend.rows);
         const radios = `${this.wifiEnabled}:${this.wifiHardwareEnabled}`;
-        if (this.radios !== undefined && this.radios !== radios) this._reset();
+        if (this.radios !== undefined && this.radios !== radios) this._reset(this.mutation?.radio === true);
         this.radios = radios;
         if (this.selectedKey) {
-            if (!this._selectionCurrent(this.selectedKey, this.selectionIdentity, this.selectionSavedStamp, this.selectedProfileUuid)) {
+            if (!this._selectionCurrent(this.selectedKey, this.selectionIdentity, this.selectionSavedStamp, this.selectedProfileUuid)
+                || ((this.secretRequested || this.read) && !this._canShare())) {
                 this._reset();
                 this.error = 'The connection changed. Reopen its details.';
             }
         }
-        if (this.credentialKey && (!this.credentialRow || profileStamp(this.credentialRow) !== this.credentialProfiles)) {
+        if (this.credentialKey && (!acceptsPassword(this.credentialRow)
+            || this.credentialRow.selectionStamp !== this.credentialSelection || this.credentialRow.credentialStamp !== this.credentialProfiles)) {
             this.credentialKey = '';
             this.credentialProfiles = '';
             this.error = 'Saved profiles changed. Select the network again.';
         }
-        if (this.forgetKey && !this.row(this.forgetKey)) this.forgetKey = '';
+        if (this.forgetKey && !this.row(this.forgetKey)?.canForget) this.forgetKey = '';
         if (this.pendingKey && !this.row(this.pendingKey)) {
             this.mutation?.io.cancel();
             this.mutation = null;
@@ -160,16 +156,19 @@ export class NetworkController {
         this.secretLoading = false;
     }
 
-    _reset() {
+    _reset(keepRadioMutation = false) {
         this.serial++;
         this._cancelRead();
-        this.mutation?.io.cancel();
-        this.mutation = null;
+        if (!keepRadioMutation) {
+            this.mutation?.io.cancel();
+            this.mutation = null;
+        }
         this.page = 'list';
         this.error = '';
         this.selectedKey = '';
         this.selectionIdentity = null;
         this.selectionSavedStamp = '';
+        this.selectionSavedIdentity = '';
         this.selectedProfileUuid = '';
         this.credentialKey = '';
         this.credentialProfiles = '';
@@ -205,29 +204,43 @@ export class NetworkController {
 
     toggleWifi() {
         this._reset();
-        try { this.backend.toggleWifi(); }
-        catch (error) { this.error = error.message; }
-        this.emit();
+        const operation = { radio: true, io: this.createCancellable() };
+        this.mutation = operation;
+        const finish = () => { if (this.mutation === operation) this.mutation = null; };
+        const report = error => {
+            if (!this.disposed && this.mutation === operation) { this.error = error.message; this.emit(); }
+            return error.message;
+        };
+        try {
+            const result = this.backend.toggleWifi(operation.io);
+            this.emit();
+            // Preserve synchronous test/UI hooks while real JSONL replies are asynchronous.
+            if (result?.then) return result.then(() => '', report).finally(finish);
+            finish();
+        } catch (error) { report(error); finish(); }
     }
 
 
     requestCredentials(row) {
         this.credentialKey = row.key;
-        this.credentialProfiles = profileStamp(row);
+        this.credentialProfiles = row.credentialStamp;
+        this.credentialSelection = row.selectionStamp;
     }
 
     async connectNetwork(key, profileUuid = '') {
         const row = this.row(key);
-        if (!row || row.changing || this.pendingKey || this.disposed
-            || (row.wireless && (!this.wifiEnabled || !this.wifiHardwareEnabled))) return;
+        if (!row || this.mutation || this.disposed) return;
+        if (!row.canActivate) {
+            this.error = 'Connecting is not available. Check the network settings in a connection editor.';
+            this.emit();
+            return;
+        }
         this.error = '';
         this.credentialKey = '';
         if (profileUuid && !row.profiles.some(profile => profile.uuid === profileUuid)) {
             this.error = 'The selected saved profile is no longer available.';
-        } else if (row.wireless && !row.known && acceptsPassword(row)) {
+        } else if (row.requiresPassword) {
             this.requestCredentials(row);
-        } else if (row.wireless && !row.known && !['open', 'owe'].includes(row.securityType)) {
-            this.error = 'Create a saved authentication profile in a network connection editor before connecting to this network.';
         } else {
             return this._activate(row, { profileUuid });
         }
@@ -235,7 +248,7 @@ export class NetworkController {
     }
 
     async _activate(row, options) {
-        const operation = { key: row.key, serial: this.serial, io: this.createCancellable() };
+        const operation = { serial: this.serial, io: this.createCancellable() };
         this.mutation = operation;
         this.pendingKey = row.key;
         this.credentialKey = '';
@@ -246,9 +259,7 @@ export class NetworkController {
         } catch (error) {
             if (this.mutation !== operation || operation.serial !== this.serial || this.disposed) return;
             const current = this.row(row.key);
-            if (error.authentication && current?.profiles.length > 1) {
-                this.error = 'This saved profile needs credentials. Update it in a network connection editor without changing another profile.';
-            } else if (error.authentication && acceptsPassword(current) && this.opened) {
+            if (error.authentication && current?.selectionStamp === row.selectionStamp && acceptsPassword(current) && this.opened) {
                 this.requestCredentials(current);
                 this.error = 'A Wi-Fi password is required or was not accepted.';
             } else this.error = error.message;
@@ -262,16 +273,17 @@ export class NetworkController {
     }
 
     async submitPassword(password) {
-        const row = this.credentialRow;
-        if (!acceptsPassword(row) || !password || this.pendingKey || !this.wifiEnabled || !this.wifiHardwareEnabled) return;
-        if (row.profiles.length > 1 || profileStamp(row) !== this.credentialProfiles) {
+        const row = this.backend.rows.find(row => row.key === this.credentialKey);
+        if (!row || !password || this.mutation || this.disposed) return;
+        if (!acceptsPassword(row) || row.selectionStamp !== this.credentialSelection || row.credentialStamp !== this.credentialProfiles) {
             this.cancelCredentials();
             this.error = 'Saved profiles changed or need per-profile credentials. Update the selected profile in a network connection editor.';
             this.emit();
             return;
         }
+        if (!row.canActivate) return;
         this.error = '';
-        return this._activate(row, { password });
+        return this._activate(row, { password, expectedStamp: this.credentialSelection });
     }
 
     cancelCredentials() {
@@ -283,39 +295,50 @@ export class NetworkController {
 
     async disconnectNetwork(key) {
         const row = this.row(key);
-        if (!row || row.changing) return;
-        return this._action(() => this.backend.disconnect(key));
+        if (!row?.canDisconnect || this.disposed) return;
+        return this._action(key, io => this.backend.disconnect(key, io));
     }
 
     requestForget(key) {
-        if (!this.row(key)?.known) return;
+        if (!this.row(key)?.canForget || this.disposed) return;
         this._reset();
         this.forgetKey = key;
+        this.forgetStamp = this.row(key).selectionStamp;
         this.emit();
     }
 
     confirmForget() {
         const key = this.forgetKey;
         this.forgetKey = '';
-        if (!this.row(key)?.known) { this.emit(); return; }
-        return this._action(() => this.backend.forget(key));
+        if (!this.backend.rows.find(row => row.key === key)?.canForget || this.disposed) { this.emit(); return; }
+        const stamp = this.forgetStamp;
+        if (this.backend.rows.find(row => row.key === key)?.selectionStamp !== stamp) {
+            this.error = 'Saved profiles changed. Review the network again.'; this.emit(); return;
+        }
+        return this._action(key, io => this.backend.forget(key, io, { expectedStamp: stamp }));
     }
 
     cancelForget() { this.forgetKey = ''; this.emit(); }
 
-    async _action(action) {
-        const serial = this.serial;
+    async _action(key, action) {
+        if (this.mutation) return;
+        const operation = { io: this.createCancellable() };
+        this.mutation = operation;
+        this.pendingKey = key;
         this.error = '';
         this.emit();
-        try { await action(); }
-        catch (error) { if (!this.disposed && serial === this.serial) this.error = error.message; }
-        this.changed();
+        try { await action(operation.io); }
+        catch (error) { if (!this.disposed && this.mutation === operation) this.error = error.message; }
+        if (this.mutation === operation) {
+            this.mutation = null; this.pendingKey = ''; this.changed();
+        }
     }
 
     _select(key) {
         const row = this.row(key);
         const savedStamp = savedInfoStamp(row);
-        if (!row || (!row.connected && !savedStamp)) return false;
+        const savedIdentity = row?.savedIdentity;
+        if (!savedIdentity || (!row.connected && !savedStamp)) return false;
         this._reset();
         try {
             const identity = this.backend.getIdentity(key);
@@ -323,8 +346,8 @@ export class NetworkController {
             const details = this.backend.details(key);
             const currentIdentity = this.backend.getIdentity(key);
             const currentRow = this.backend.rows.find(row => row.key === key);
-            if (savedStamp ? currentIdentity || savedInfoStamp(currentRow) !== savedStamp
-                : !identityEqual(identity, currentIdentity))
+            if (currentRow?.selectionStamp !== row.selectionStamp || currentRow?.savedIdentity !== savedIdentity || (savedStamp
+                ? currentIdentity || savedInfoStamp(currentRow) !== savedStamp : !identityEqual(identity, currentIdentity)))
                 throw new Error('The connection changed. Reopen its details.');
             if (savedStamp) {
                 const profile = currentRow.profiles.find(profile => profile.uuid === details.profileUuid) || currentRow.profiles[0];
@@ -334,6 +357,8 @@ export class NetworkController {
             this.selectedKey = key;
             this.selectionIdentity = identity ? { ...identity } : null;
             this.selectionSavedStamp = savedStamp;
+            this.selectionSavedIdentity = currentRow.savedIdentity;
+            this.selectionStamp = row.selectionStamp;
             this.page = 'info';
         } catch (error) { this.error = error.message; this.emit(); return false; }
         this.emit();
@@ -361,9 +386,15 @@ export class NetworkController {
         this.emit();
     }
 
+    _canShare() {
+        const row = this.selectedRow;
+        return row?.canShare === true && (!this.selectedProfileUuid
+            || row.profiles.some(profile => profile.uuid === this.selectedProfileUuid && profile.canShare === true));
+    }
+
     revealSecret() {
         const row = this.selectedRow;
-        if (this.page !== 'info' || !row?.wireless || this.secretLoading
+        if (this.page !== 'info' || !this._canShare() || this.secretLoading
             || !(row.connected ? this.selectionIdentity
                 : row.known && !row.changing && this.selectionSavedStamp && this.selectedProfileUuid)) return;
         this.secretRequested = true;
@@ -378,11 +409,10 @@ export class NetworkController {
     }
 
     _selectionCurrent(key, identity, savedStamp, profileUuid) {
-        // getIdentity refreshes native rows before the saved-profile check, even
-        // when a DBus change notification has not reached the controller yet.
         const active = this.backend.getIdentity(key);
-        if (identity) return identityEqual(identity, active);
         const row = this.backend.rows.find(row => row.key === key);
+        if (!row || row.selectionStamp !== this.selectionStamp || row.savedIdentity !== this.selectionSavedIdentity) return false;
+        if (identity) return identityEqual(identity, active);
         return Boolean(savedStamp && !active && savedInfoStamp(row) === savedStamp
             && row.profiles.some(profile => profile.uuid === profileUuid));
     }
@@ -391,7 +421,7 @@ export class NetworkController {
         return !this.disposed && this.opened && this.read === request && request.serial === this.serial
             && !request.io.is_cancelled() && request.radios === `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
             && request.key === this.selectedKey && request.page === this.page
-            && this.secretRequested
+            && this.secretRequested && this._canShare()
             && request.savedInfoStamp === this.selectionSavedStamp
             && (request.identity || request.profileUuid === this.selectedProfileUuid)
             && this._selectionCurrent(request.key, request.identity, request.savedInfoStamp, request.profileUuid);
@@ -401,7 +431,7 @@ export class NetworkController {
         const row = this.selectedRow;
         const saved = this.page === 'info' && this.selectionSavedStamp
             && this.selectedProfileUuid && row?.known && !row.connected && !row.changing;
-        if (this.disposed || !this.opened || !row?.wireless
+        if (this.disposed || !this.opened || !this._canShare()
             || (!saved && (!row.connected || !this.selectionIdentity))) return;
         if (this.radios !== `${this.wifiEnabled}:${this.wifiHardwareEnabled}`
             || !this._selectionCurrent(this.selectedKey, this.selectionIdentity, this.selectionSavedStamp, this.selectedProfileUuid)) {
@@ -411,7 +441,7 @@ export class NetworkController {
         this._cancelRead();
         this.secret = '';
         this.error = '';
-        const request = { key: this.selectedKey, page: this.page, serial: this.serial,
+        const request = { stamp: this.selectionStamp, key: this.selectedKey, page: this.page, serial: this.serial,
             identity: this.selectionIdentity ? { ...this.selectionIdentity } : null,
             savedInfoStamp: this.selectionSavedStamp, profileUuid: this.selectedProfileUuid,
             radios: `${this.wifiEnabled}:${this.wifiHardwareEnabled}`, io: this.createCancellable() };
@@ -420,8 +450,8 @@ export class NetworkController {
         this.emit();
         try {
             const credentials = request.identity
-                ? await this.backend.readSecret(request.key, request.identity, request.io)
-                : await this.backend.readSavedSecret(request.key, request.profileUuid, request.io);
+                ? await this.backend.readSecret(request.key, request.identity, request.io, { expectedStamp: request.stamp })
+                : await this.backend.readSavedSecret(request.key, request.profileUuid, request.io, { expectedStamp: request.stamp });
             if (!this._readCurrent(request)) return;
             this.secret = credentials.password || 'No password (open network)';
         } catch (error) {

@@ -3,9 +3,8 @@ name = "audio-control"
 version.workspace = true
 edition.workspace = true
 
-# Astal supplies canonical state and executes every audio action. Rust supplies
-# missing route/profile relationships, physical-row and transaction policy,
-# same-connection pairing agents, and the HID++ battery provider.
+# Rust owns panel policy, scheduling and transactions. Astal supplies canonical
+# state and executes Rust-selected native controls; no alternative audio backend.
 [lib]
 name = "audio_control"
 path = "src/lib.rs"
@@ -28,4 +27,4 @@ bluer = { version = "0.17", default-features = false, features = [
 zbus = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }

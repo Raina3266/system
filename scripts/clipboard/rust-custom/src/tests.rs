@@ -2,6 +2,171 @@
 
 // Expand unit tests inside their production modules to retain private access.
 macro_rules! clipboard_unit_tests {
+    (observer) => {
+        mod tests {
+            use super::*;
+            use std::fs;
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SERIAL: AtomicU64 = AtomicU64::new(0);
+            struct Fixture(PathBuf);
+            impl Fixture {
+                fn new() -> Self {
+                    let root = std::env::temp_dir().join(format!("clipboard-observer-test-{}-{}", std::process::id(), SERIAL.fetch_add(1, Ordering::Relaxed)));
+                    fs::create_dir(&root).unwrap();
+                    Self(root)
+                }
+                fn directory(&self, name: &str) -> PathBuf {
+                    let path = self.0.join(name);
+                    fs::create_dir_all(&path).unwrap();
+                    path
+                }
+            }
+            impl Drop for Fixture {
+                fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+            }
+
+            #[test]
+            fn groups_canonical_linked_paths_by_parent_and_deduplicates_files() {
+                let paths: Vec<_> = ["/files/one", "/files/one", "/files/nested/../one", "/files//two",
+                    "/elsewhere/three", "relative/file", "/invalid\0file", "/"].into_iter().map(PathBuf::from).collect();
+                let directories = desired(Path::new("/history"), &paths);
+                assert_eq!(directories.len(), 3);
+                assert_eq!(directories[Path::new("/files")].files, BTreeSet::from([OsString::from("one"), OsString::from("two")]));
+                assert!(directories[Path::new("/history")].history);
+            }
+
+            #[test]
+            fn synchronizes_interests_reuses_watches_and_ignores_retired_descriptors() {
+                let fixture = Fixture::new();
+                let kept = fixture.directory("kept");
+                let removed = fixture.directory("removed");
+                let added = fixture.directory("added");
+                let mut watcher = Watcher::new(&fixture.0).unwrap();
+                let paths = [kept.join("old"), removed.join("file")];
+                assert!(watcher.sync(&paths).unwrap());
+                let descriptor = watcher.directories[&kept];
+                let retired = watcher.directories[&removed];
+                for _ in 0..10 { assert!(!watcher.sync(&paths).unwrap()); }
+                assert!(watcher.sync(&[kept.join("new"), added.join("file")]).unwrap());
+                assert_eq!(watcher.directories[&kept], descriptor);
+                assert!(!watcher.interests.contains_key(&retired));
+                assert_eq!(classify(&watcher.interests[&descriptor], libc::IN_DELETE, OsStr::new("old")), Changes::default());
+                assert!(classify(&watcher.interests[&descriptor], libc::IN_DELETE, OsStr::new("new")).prune);
+                watcher.sync(&[]).unwrap();
+                assert_eq!(watcher.directories.len(), 1);
+                assert_eq!(watcher.events().unwrap(), Changes::default());
+            }
+
+            #[test]
+            fn aliases_share_one_kernel_watch_and_removing_an_alias_does_not_cancel_it() {
+                let fixture = Fixture::new();
+                let directory = fixture.directory("files");
+                let alias = fixture.0.join("alias");
+                std::os::unix::fs::symlink(&directory, &alias).unwrap();
+                let mut watcher = Watcher::new(&fixture.0).unwrap();
+                watcher.sync(&[directory.join("one"), alias.join("two")]).unwrap();
+                assert_eq!(watcher.directories[&directory], watcher.directories[&alias]);
+                assert_eq!(watcher.interests.len(), 2);
+                watcher.sync(&[alias.join("two")]).unwrap();
+                let interest = &watcher.interests[&watcher.directories[&alias]];
+                assert!(interest.files.contains(OsStr::new("two")));
+                assert!(!interest.files.contains(OsStr::new("one")));
+                assert_eq!(watcher.events().unwrap(), Changes::default());
+            }
+
+            #[test]
+            fn missing_parent_setup_is_isolated_and_retried_only_on_sync() {
+                let fixture = Fixture::new();
+                let working = fixture.directory("working");
+                let missing = fixture.0.join("missing");
+                let paths = [working.join("one"), missing.join("two")];
+                let mut watcher = Watcher::new(&fixture.0).unwrap();
+                watcher.sync(&paths).unwrap();
+                assert_eq!(watcher.directories.len(), 2);
+                fs::create_dir(&missing).unwrap();
+                assert!(!watcher.directories.contains_key(&missing));
+                assert!(watcher.sync(&paths).unwrap());
+                assert_eq!(watcher.directories.len(), 3);
+                assert!(!watcher.sync(&paths).unwrap());
+            }
+
+            #[test]
+            fn source_deletion_rename_and_parent_loss_prune_but_unrelated_events_do_not() {
+                let interest = Interest { history: false, files: BTreeSet::from([OsString::from("linked")]) };
+                for mask in [libc::IN_DELETE, libc::IN_MOVED_FROM] {
+                    assert!(classify(&interest, mask, OsStr::new("linked")).prune);
+                    assert_eq!(classify(&interest, mask, OsStr::new("other")), Changes::default());
+                    assert_eq!(classify(&interest, mask, OsStr::new("")), Changes::default());
+                }
+                for mask in [libc::IN_DELETE_SELF, libc::IN_MOVE_SELF, libc::IN_UNMOUNT, libc::IN_IGNORED] {
+                    assert!(classify(&interest, mask, OsStr::new("")).prune);
+                }
+                for mask in [libc::IN_MODIFY, libc::IN_CLOSE_WRITE, libc::IN_CREATE, libc::IN_ATTRIB, libc::IN_MOVED_TO] {
+                    assert_eq!(classify(&interest, mask, OsStr::new("linked")), Changes::default());
+                }
+            }
+
+            #[test]
+            fn history_events_are_filtered_and_can_share_a_source_directory() {
+                let interest = Interest { history: true, files: BTreeSet::from([OsString::from("source")]) };
+                assert_eq!(classify(&interest, libc::IN_MOVED_TO, OsStr::new("history.json")), Changes { history: true, prune: false });
+                assert_eq!(classify(&interest, libc::IN_DELETE, OsStr::new("source")), Changes { history: false, prune: true });
+                assert_eq!(classify(&interest, libc::IN_MODIFY, OsStr::new("unrelated")), Changes::default());
+                assert_eq!(classify(&interest, libc::IN_UNMOUNT, OsStr::new("")), Changes { history: true, prune: true });
+            }
+
+            #[test]
+            fn file_and_history_events_share_one_resetting_debounce_and_idle_never_polls() {
+                for file_first in [false, true] {
+                    let now = Instant::now();
+                    let mut pending = Debounce::default();
+                    assert_eq!(pending.timeout(now), -1);
+                    assert!(pending.take(now).is_none());
+                    let file = Changes { history: false, prune: true };
+                    let history = Changes { history: true, prune: false };
+                    pending.push(if file_first { file } else { history }, now);
+                    pending.push(if file_first { history } else { file }, now + Duration::from_millis(50));
+                    assert_eq!(pending.timeout(now + Duration::from_millis(149)), 1);
+                    assert!(pending.take(now + Duration::from_millis(149)).is_none());
+                    assert_eq!(pending.take(now + Duration::from_millis(150)), Some(Changes { history: true, prune: true }));
+                    assert_eq!(pending.timeout(now + Duration::from_secs(1)), -1);
+                    pending.push(history, now + Duration::from_secs(1));
+                    pending.push(Changes::default(), now + Duration::from_millis(1050));
+                    assert_eq!(pending.take(now + Duration::from_millis(1100)), Some(history));
+                }
+            }
+
+            #[test]
+            fn real_inotify_handles_rename_atomic_replacement_and_directory_loss() {
+                let fixture = Fixture::new();
+                let directory = fixture.directory("files");
+                let source = directory.join("source");
+                fs::write(&source, b"source").unwrap();
+                let mut watcher = Watcher::new(&fixture.0).unwrap();
+                watcher.sync(std::slice::from_ref(&source)).unwrap();
+                assert_eq!(watcher.events().unwrap(), Changes::default());
+                fs::write(directory.join("temporary"), b"replacement").unwrap();
+                fs::rename(directory.join("temporary"), &source).unwrap();
+                watcher.wait(500, None).unwrap();
+                assert!(!watcher.events().unwrap().prune);
+                fs::rename(&source, directory.join("away")).unwrap();
+                watcher.wait(500, None).unwrap();
+                assert!(watcher.events().unwrap().prune);
+                fs::rename(&directory, fixture.0.join("moved-parent")).unwrap();
+                watcher.wait(500, None).unwrap();
+                assert!(watcher.events().unwrap().prune);
+                assert!(!watcher.directories.contains_key(&directory));
+            }
+
+            #[test]
+            fn initial_observer_delivery_is_small_and_explicitly_flushed() {
+                let mut output = Vec::new();
+                emit(&mut output, true).unwrap();
+                emit(&mut output, false).unwrap();
+                assert_eq!(String::from_utf8(output).unwrap(), "{\"pruneMissing\":true}\n{\"pruneMissing\":false}\n");
+            }
+        }
+    };
     (store) => {
         mod tests {
             use super::*;
@@ -20,6 +185,12 @@ macro_rules! clipboard_unit_tests {
                         )),
                     })
                 }
+                fn delete(&self, id: u64) -> Result<Value> {
+                    let history = self.history();
+                    let item = history.items.iter().find(|item| item.id == id).unwrap();
+                    self.0.delete(id, &item.delete_token()?)
+                }
+
                 fn history(&self) -> History {
                     serde_json::from_slice(&fs::read(self.0.root.join("history.json")).unwrap()).unwrap()
                 }
@@ -70,7 +241,7 @@ macro_rules! clipboard_unit_tests {
                         .as_deref(),
                     Some("external edit")
                 );
-                fixture.0.delete(id).unwrap();
+                fixture.delete(id).unwrap();
                 assert!(
                     fixture
                         .0
@@ -93,7 +264,7 @@ macro_rules! clipboard_unit_tests {
                 .unwrap();
                 assert_eq!(fixture.0.snapshot().unwrap()["items"][0]["kind"], "file");
                 assert_eq!(fixture.0.payload(7).unwrap()["mime"], "image/png");
-                fixture.0.delete(7).unwrap();
+                fixture.delete(7).unwrap();
                 assert!(!fixture.0.root.join("images/7.png").exists());
             }
 
@@ -216,6 +387,254 @@ macro_rules! clipboard_unit_tests {
                 assert!(fixture.0.root.join("images/2.png").exists());
             }
 
+            fn linked(fixture: &Fixture, name: &str, image: bool) -> (u64, String) {
+                fixture.0.capture(vec![if image {
+                    captured_image(b"linked image", Some(name))
+                } else {
+                    Captured::File { text: name.into(), mime: "text/uri-list".into(), name: Some(name.into()) }
+                }]).unwrap();
+                let history = fixture.history();
+                let item = &history.items[0];
+                (item.id, item.delete_token().unwrap())
+            }
+
+            #[test]
+            fn deletion_revalidates_the_exact_displayed_source_before_touching_disk() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let original = fixture.0.root.join("original");
+                let replacement = fixture.0.root.join("replacement");
+                fs::write(&original, b"original").unwrap();
+                fs::write(&replacement, b"replacement").unwrap();
+                let (id, token) = linked(&fixture, original.to_str().unwrap(), true);
+                let mut history = fixture.history();
+                history.items[0].name = Some(replacement.to_str().unwrap().into());
+                fixture.write(&history);
+                let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                let error = fixture.0.delete_with(id, &token, |_| panic!("stale association reached Trash")).unwrap_err();
+                assert!(error.to_string().contains("changed in clipboard history"));
+                assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+                assert!(original.is_file() && replacement.is_file());
+                assert!(fixture.0.root.join("images/2.png").is_file());
+            }
+
+            #[test]
+            fn atomic_replacement_at_displayed_path_never_reaches_trash() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let path = fixture.0.root.join("source");
+                let replacement = fixture.0.root.join("replacement");
+                fs::write(&path, b"A").unwrap();
+                fs::write(&replacement, b"B").unwrap();
+                let (id, token) = linked(&fixture, path.to_str().unwrap(), true);
+                fs::rename(replacement, &path).unwrap();
+                let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                assert!(fixture.0.delete_with(id, &token, |_| panic!("replacement reached Trash")).is_err());
+                assert_eq!(fs::read(path).unwrap(), b"B");
+                assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+            }
+
+            #[test]
+            fn prepare_preserves_cached_dangling_link_until_explicit_trash() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let path = fixture.0.root.join("link");
+                let target = fixture.0.root.join("missing");
+                std::os::unix::fs::symlink(&target, &path).unwrap();
+                let (id, token) = linked(&fixture, path.to_str().unwrap(), true);
+                let cache = fixture.0.root.join(format!("images/{id}.png"));
+                fixture.0.prepare().unwrap();
+                assert!(fixture.history().items.iter().any(|item| item.id == id));
+                assert_eq!(fs::read(&cache).unwrap(), b"linked image");
+                let trashed = fixture.0.root.join("trashed-link");
+                fixture.0.delete_with(id, &token, |source| {
+                    assert_eq!(source, path);
+                    fs::rename(source, &trashed)?;
+                    Ok(())
+                }).unwrap();
+                assert_eq!(fs::read_link(trashed).unwrap(), target);
+                assert!(!cache.exists());
+            }
+
+            #[test]
+            fn source_classification_and_deletion_metadata_are_owned_by_rust() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let template = fixture.history().items[0].clone();
+                for (kind, name, local) in [
+                    (Kind::File, Some("/tmp/source image.png"), true),
+                    (Kind::File, Some("relative.txt"), false),
+                    (Kind::File, Some("file:///tmp/source.png"), false),
+                    (Kind::File, Some("https://example.org/image.png"), false),
+                    (Kind::File, Some("/tmp/a\0b"), false),
+                    (Kind::File, None, false),
+                    (Kind::Text, Some("/tmp/not-a-source"), false),
+                    (Kind::Memo, Some("/tmp/not-a-source"), false),
+                ] {
+                    let mut item = template.clone();
+                    item.kind = kind;
+                    item.name = name.map(str::to_owned);
+                    item.text = Some("/tmp/text-is-not-a-source".into());
+                    assert_eq!(item.source().is_some(), local);
+                    let history = History { items: vec![item.clone()], ..History::default() };
+                    let value = fixture.0.items(&history).unwrap();
+                    assert_eq!(value[0]["can_trash"], local);
+                    assert_eq!(value[0]["delete_token"], item.delete_token().unwrap());
+                }
+            }
+
+            #[test]
+            fn linked_files_and_named_images_trash_before_history_and_cache_removal() {
+                for image in [false, true] {
+                    let fixture = Fixture::new();
+                    fixture.0.memo().unwrap();
+                    let path = fixture.0.root.join("literal file ");
+                    let trash = fixture.0.root.join("recoverable");
+                    fs::write(&path, b"source").unwrap();
+                    let (id, token) = linked(&fixture, path.to_str().unwrap(), image);
+                    fixture.0.delete_with(id, &token, |source| {
+                        assert_eq!(source, path);
+                        assert!(fixture.history().items.iter().any(|item| item.id == id));
+                        if image { assert!(fixture.0.root.join("images/2.png").is_file()); }
+                        fs::rename(source, &trash)?;
+                        Ok(())
+                    }).unwrap();
+                    assert_eq!(fs::read(trash).unwrap(), b"source");
+                    assert!(!fixture.history().items.iter().any(|item| item.id == id));
+                    assert!(!fixture.0.root.join("images/2.png").exists());
+                }
+            }
+
+            #[test]
+            fn trash_failure_or_inspection_error_keeps_history_source_and_cache() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let path = fixture.0.root.join("source");
+                fs::write(&path, b"source").unwrap();
+                let (id, token) = linked(&fixture, path.to_str().unwrap(), true);
+                let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                assert!(fixture.0.delete_with(id, &token, |_| anyhow::bail!("Trash unavailable")).unwrap_err().to_string().contains("Trash unavailable"));
+                assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+                assert_eq!(fs::read(&path).unwrap(), b"source");
+                assert!(fixture.0.root.join("images/2.png").is_file());
+                let loop_path = fixture.0.root.join("loop");
+                std::os::unix::fs::symlink("loop", &loop_path).unwrap();
+                let (id, token) = linked(&fixture, loop_path.join("child").to_str().unwrap(), false);
+                let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                assert!(fixture.0.delete_with(id, &token, |_| panic!("inspection error reached Trash")).is_err());
+                assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+                assert!(path.is_file());
+            }
+
+            #[test]
+            fn unsafe_paths_folders_and_special_files_fail_closed_without_history_deletion() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let directory = fixture.0.root.join("directory");
+                fs::create_dir(&directory).unwrap();
+                let fifo = fixture.0.root.join("fifo");
+                let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+                assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+                for path in ["/tmp/a\0b", "/", "/tmp/../source", "/tmp/.", "/tmp/source/",
+                    directory.to_str().unwrap(), fifo.to_str().unwrap()] {
+                    let (id, token) = linked(&fixture, path, false);
+                    let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                    assert!(fixture.0.delete_with(id, &token, |_| panic!("unsafe path reached Trash")).is_err(), "{path:?}");
+                    assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+                }
+                assert!(directory.is_dir());
+                assert!(fs::symlink_metadata(fifo).is_ok());
+            }
+
+            #[test]
+            fn symlinks_are_trashed_without_following_their_targets_including_dangling_links() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let target = fixture.0.root.join("target");
+                fs::write(&target, b"keep target").unwrap();
+                for (index, destination) in [&target, &fixture.0.root.join("missing target")].into_iter().enumerate() {
+                    let path = fixture.0.root.join(format!("link-{index}"));
+                    std::os::unix::fs::symlink(destination, &path).unwrap();
+                    let (id, token) = linked(&fixture, path.to_str().unwrap(), false);
+                    fixture.0.delete_with(id, &token, |source| {
+                        assert!(fs::symlink_metadata(source)?.file_type().is_symlink());
+                        fs::rename(source, fixture.0.root.join(format!("trashed-link-{index}")))?;
+                        Ok(())
+                    }).unwrap();
+                }
+                assert_eq!(fs::read(target).unwrap(), b"keep target");
+            }
+
+            #[test]
+            fn missing_sources_and_nonlocal_entries_remove_only_their_history_and_cache() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                for name in ["relative.png", "https://example.org/image.png", "file:///tmp/not-a-local-name"] {
+                    let (id, token) = linked(&fixture, name, true);
+                    fixture.0.delete_with(id, &token, |_| panic!("nonlocal entry reached Trash")).unwrap();
+                }
+                let (id, token) = linked(&fixture, fixture.0.root.join("missing").to_str().unwrap(), true);
+                fixture.0.delete_with(id, &token, |_| panic!("missing source reached Trash")).unwrap();
+                fixture.0.capture(vec![captured_image(b"cache only", None), captured_text("/tmp/not-a-source")]).unwrap();
+                for item in fixture.history().items.into_iter().filter(|item| item.kind != Kind::Memo) {
+                    fixture.0.delete_with(item.id, &item.delete_token().unwrap(), |_| panic!("cache/text reached Trash")).unwrap();
+                }
+                assert_eq!(fixture.history().items.len(), 1);
+                assert_eq!(fs::read_dir(fixture.0.root.join("images")).unwrap().count(), 0);
+            }
+
+            #[test]
+            fn history_failure_after_trash_reports_partial_success_and_missing_source_retry_is_safe() {
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let path = fixture.0.root.join("source");
+                let trash = fixture.0.root.join("recoverable");
+                fs::write(&path, b"recoverable source").unwrap();
+                let (id, token) = linked(&fixture, path.to_str().unwrap(), true);
+                let before = fs::read(fixture.0.root.join("history.json")).unwrap();
+                let temporary = fixture.0.root.join(format!(".clipboard-panel.{}.tmp", std::process::id()));
+                fs::create_dir(&temporary).unwrap();
+                let error = fixture.0.delete_with(id, &token, |source| { fs::rename(source, &trash)?; Ok(()) }).unwrap_err();
+                assert!(error.to_string().contains("moved to Trash, but its clipboard entry could not be removed"));
+                assert_eq!(fs::read(fixture.0.root.join("history.json")).unwrap(), before);
+                assert!(fixture.0.root.join("images/2.png").is_file());
+                fs::remove_dir(temporary).unwrap();
+                fixture.0.delete_with(id, &token, |_| panic!("missing retry reached Trash")).unwrap();
+                assert_eq!(fs::read(trash).unwrap(), b"recoverable source");
+                assert!(!fixture.0.root.join("images/2.png").exists());
+            }
+
+            #[test]
+            fn source_check_and_trash_hold_the_same_exclusive_lock_as_history_commit() {
+                use std::sync::mpsc;
+                use std::time::Duration;
+                let fixture = Fixture::new();
+                fixture.0.memo().unwrap();
+                let source = fixture.0.root.join("source");
+                fs::write(&source, b"source").unwrap();
+                let (id, token) = linked(&fixture, source.to_str().unwrap(), false);
+                let (entered, ready) = mpsc::channel();
+                let (release, proceed) = mpsc::channel();
+                let root = fixture.0.root.clone();
+                let deletion = std::thread::spawn(move || Store { root }.delete_with(id, &token, |_| {
+                    entered.send(()).unwrap();
+                    proceed.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                }).unwrap());
+                ready.recv_timeout(Duration::from_secs(5)).unwrap();
+                let (done, completed) = mpsc::channel();
+                let root = fixture.0.root.clone();
+                let writer = std::thread::spawn(move || {
+                    Store { root }.capture(vec![captured_text("concurrent capture")]).unwrap();
+                    done.send(()).unwrap();
+                });
+                assert!(completed.recv_timeout(Duration::from_millis(50)).is_err());
+                release.send(()).unwrap();
+                deletion.join().unwrap();
+                writer.join().unwrap();
+                assert!(fixture.history().items.iter().any(|item| item.text.as_deref() == Some("concurrent capture")));
+            }
+
             #[test]
             fn independent_image_limit_and_overall_limit_preserve_the_memo_draft() {
                 let mut history = History::default();
@@ -251,6 +670,9 @@ macro_rules! clipboard_unit_tests {
                 assert!(serde_json::from_str::<Request>(r#"{"command":"snapshot","id":1}"#).is_err());
                 assert!(serde_json::from_str::<Request>(r#"{"command":"save","id":1,"text":"x"}"#).is_err());
                 assert!(serde_json::from_str::<Request>(r#"{"command":"delete","id":-1}"#).is_err());
+                assert!(serde_json::from_str::<Request>(r#"{"command":"delete","id":1}"#).is_err());
+                assert!(serde_json::from_str::<Request>(r#"{"command":"delete","id":1,"expected":null}"#).is_err());
+                assert!(serde_json::from_str::<Request>(r#"{"command":"delete","id":1,"expected":"opaque"}"#).is_ok());
                 assert!(serde_json::from_str::<Request>(r#"{"command":"copy","id":1}"#).is_err());
                 assert!(serde_json::from_str::<Request>(r#"{"command":"snapshot"}"#).is_ok());
             }
@@ -288,7 +710,7 @@ macro_rules! clipboard_unit_tests {
                     .unwrap()["id"]
                     .as_u64()
                     .unwrap();
-                let deleted = fixture.0.delete(draft).unwrap();
+                let deleted = fixture.delete(draft).unwrap();
                 assert_eq!(deleted["items"], fixture.0.snapshot().unwrap()["items"]);
                 let history = fixture.history();
                 assert_eq!(history.items.iter().filter(|item| item.draft()).count(), 1);
@@ -1117,6 +1539,15 @@ mod cli {
                 .env_remove("CLIPBOARD_STATE")
                 .env_remove("CLIPBOARD_DATA_DIR")
                 .env_remove("CLIPBOARD_WL_PASTE")
+                .env_remove("CLIPBOARD_GIO")
+                .env("GIO_USE_VFS", "local")
+                .env("GSETTINGS_BACKEND", "memory")
+                .env(
+                    "DBUS_SESSION_BUS_ADDRESS",
+                    format!("unix:path={}/no-bus", self.0.display()),
+                )
+                .env("XDG_CONFIG_HOME", self.0.join("config"))
+                .env("XDG_CACHE_HOME", self.0.join("cache"))
                 .env("HOME", self.0.join("home"))
                 .env("XDG_DATA_HOME", self.0.join("data"))
                 .env("CLIPBOARD_SCREENSHOT_DIR", self.0.join("screenshots"))
@@ -1204,6 +1635,342 @@ mod cli {
         assert_eq!(
             fs::read(fixture.0.join("data/clipboard/history.json")).unwrap(),
             before
+        );
+    }
+
+    fn deletion(item: &Value) -> Value {
+        json!({ "command": "delete", "id": item["id"], "expected": item["delete_token"] })
+    }
+
+    #[test]
+    fn delete_cli_requires_the_displayed_guard_and_trash_backend_errors_never_fall_back_to_unlink()
+    {
+        let fixture = Fixture::new();
+        let source = fixture.0.join("literal source ");
+        fs::write(&source, b"keep source").unwrap();
+        fixture.store(
+            "text/uri-list",
+            format!("file://{}\n", source.display())
+                .replace(' ', "%20")
+                .as_bytes(),
+        );
+        let snapshot = fixture.request(json!({ "command": "snapshot" }));
+        let item = &snapshot["items"][0];
+        assert_eq!(item["can_trash"], true);
+        let history = fixture.0.join("data/clipboard/history.json");
+        let before = fs::read(&history).unwrap();
+        for request in [
+            json!({ "command": "delete", "id": item["id"] }),
+            json!({ "command": "delete", "id": item["id"], "expected": "stale" }),
+        ] {
+            assert!(fixture.request(request)["error"].is_string());
+            assert_eq!(fs::read(&history).unwrap(), before);
+        }
+        let gio = fixture.0.join("fake-gio");
+        fs::write(&gio, "#!/bin/sh\n[ \"$#\" -eq 3 ] && [ \"$1\" = trash ] && [ \"$2\" = -- ] || exit 99\nprintf '%s' \"$3\" > \"$CLIPBOARD_FAKE_DIR/argument\"\necho 'private backend stderr' >&2\nexit 23\n").unwrap();
+        fs::set_permissions(&gio, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut command = fixture.command();
+        command
+            .env("CLIPBOARD_GIO", &gio)
+            .env("CLIPBOARD_FAKE_DIR", &fixture.0);
+        let output = run(command, &[], deletion(item).to_string().as_bytes());
+        let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .contains("no permanent deletion")
+        );
+        assert!(output.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("private backend stderr"));
+        assert_eq!(
+            fs::read(fixture.0.join("argument")).unwrap(),
+            source.as_os_str().as_bytes()
+        );
+        assert_eq!(fs::read(&history).unwrap(), before);
+        assert_eq!(fs::read(&source).unwrap(), b"keep source");
+        let mut command = fixture.command();
+        command.env("CLIPBOARD_GIO", fixture.0.join("no-gio"));
+        let output = run(command, &[], deletion(item).to_string().as_bytes());
+        assert!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]
+                .as_str()
+                .unwrap()
+                .contains("Cannot start the Trash backend")
+        );
+        assert_eq!(fs::read(history).unwrap(), before);
+        assert!(source.is_file());
+    }
+
+    fn wait_until(mut ready: impl FnMut() -> bool) -> bool {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < until {
+            if ready() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    }
+
+    struct Running(std::process::Child);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn cancelling_a_delete_helper_also_kills_its_trash_subprocess_before_it_can_outlive_the_ui() {
+        let fixture = Fixture::new();
+        let source = fixture.0.join("source");
+        fs::write(&source, b"kept").unwrap();
+        fixture.store(
+            "text/uri-list",
+            format!("file://{}\n", source.display()).as_bytes(),
+        );
+        let snapshot = fixture.request(json!({ "command": "snapshot" }));
+        let before = fs::read(fixture.0.join("data/clipboard/history.json")).unwrap();
+        let gio = fixture.0.join("fake-gio");
+        fs::write(
+            &gio,
+            "#!/bin/sh\nprintf '%s' \"$$\" > \"$CLIPBOARD_FAKE_DIR/gio-pid\"\nexec sleep 30\n",
+        )
+        .unwrap();
+        fs::set_permissions(&gio, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut helper = Running(
+            fixture
+                .command()
+                .env("CLIPBOARD_GIO", &gio)
+                .env("CLIPBOARD_FAKE_DIR", &fixture.0)
+                .spawn()
+                .unwrap(),
+        );
+        helper
+            .0
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(deletion(&snapshot["items"][0]).to_string().as_bytes())
+            .unwrap();
+        let marker = fixture.0.join("gio-pid");
+        assert!(wait_until(
+            || fs::read_to_string(&marker).is_ok_and(|pid| pid.parse::<i32>().is_ok())
+        ));
+        let pid = fs::read_to_string(marker).unwrap().parse::<i32>().unwrap();
+        helper.0.kill().unwrap();
+        helper.0.wait().unwrap();
+        let stopped = wait_until(|| match fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => true,
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z')),
+        });
+        if !stopped {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        assert!(stopped, "Trash child outlived its cancelled helper");
+        assert_eq!(fs::read(source).unwrap(), b"kept");
+        assert_eq!(
+            fs::read(fixture.0.join("data/clipboard/history.json")).unwrap(),
+            before
+        );
+    }
+
+    struct Observation {
+        process: Running,
+        output: std::io::BufReader<std::process::ChildStdout>,
+    }
+    impl Observation {
+        fn start(fixture: &Fixture) -> Self {
+            let mut process = Running(
+                fixture
+                    .command()
+                    .arg("observe")
+                    .stdin(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+            let output = std::io::BufReader::new(process.0.stdout.take().unwrap());
+            Self { process, output }
+        }
+        fn ready(&self, timeout: i32) -> bool {
+            use std::os::fd::AsRawFd;
+            if !self.output.buffer().is_empty() {
+                return true;
+            }
+            let mut fd = libc::pollfd {
+                fd: self.output.get_ref().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            unsafe { libc::poll(&mut fd, 1, timeout) > 0 }
+        }
+        fn event(&mut self) -> Value {
+            use std::io::BufRead;
+            assert!(self.ready(5000), "Rust observer did not emit an event");
+            let mut line = String::new();
+            assert!(
+                self.output.read_line(&mut line).unwrap() > 0,
+                "Rust observer exited"
+            );
+            serde_json::from_str(&line).unwrap()
+        }
+    }
+
+    #[test]
+    fn observer_cli_closes_setup_gaps_reports_source_and_history_changes_and_never_mutates_history()
+    {
+        let fixture = Fixture::new();
+        let source = fixture.0.join("source");
+        fs::write(&source, b"source").unwrap();
+        let mut observer = Observation::start(&fixture);
+        assert_eq!(observer.event(), json!({ "pruneMissing": false }));
+        fixture.store(
+            "text/uri-list",
+            format!("file://{}\n", source.display()).as_bytes(),
+        );
+        assert_eq!(observer.event(), json!({ "pruneMissing": true }));
+        let history = fixture.0.join("data/clipboard/history.json");
+        let before = fs::read(&history).unwrap();
+        fs::write(&source, b"changed contents").unwrap();
+        assert!(
+            !observer.ready(150),
+            "source content changes must not request pruning"
+        );
+        fs::rename(&source, fixture.0.join("moved source")).unwrap();
+        assert_eq!(observer.event(), json!({ "pruneMissing": true }));
+        assert_eq!(
+            fs::read(&history).unwrap(),
+            before,
+            "observation must be read-only"
+        );
+        let prepared = fixture.request(json!({ "command": "prepare" }));
+        assert!(
+            !prepared["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "file")
+        );
+        assert_eq!(observer.event(), json!({ "pruneMissing": false }));
+        assert!(
+            !observer.ready(150),
+            "idle observation must not emit periodic refreshes"
+        );
+        // Closing the UI's read end wakes poll even when no filesystem events
+        // occur; the orphaned observer must terminate without a timer.
+        let Observation {
+            mut process,
+            output,
+        } = observer;
+        drop(output);
+        assert!(wait_until(|| process.0.try_wait().unwrap().is_some()));
+    }
+
+    #[test]
+    fn observer_keeps_source_watches_on_corrupt_history_instead_of_dropping_them_or_pruning() {
+        let fixture = Fixture::new();
+        let source = fixture.0.join("source");
+        fs::write(&source, b"source").unwrap();
+        fixture.store(
+            "text/uri-list",
+            format!("file://{}\n", source.display()).as_bytes(),
+        );
+        let mut observer = Observation::start(&fixture);
+        assert_eq!(observer.event(), json!({ "pruneMissing": true }));
+        let history = fixture.0.join("data/clipboard/history.json");
+        fs::write(&history, b"invalid history").unwrap();
+        assert_eq!(observer.event(), json!({ "pruneMissing": false }));
+        fs::remove_file(source).unwrap();
+        assert_eq!(observer.event(), json!({ "pruneMissing": true }));
+        assert_eq!(fs::read(history).unwrap(), b"invalid history");
+    }
+
+    #[test]
+    fn observer_migrates_before_watching_and_reconciles_sources_already_missing_at_startup() {
+        let fixture = Fixture::new();
+        let legacy = fixture.0.join("data/rofi-clipboard");
+        fs::create_dir_all(&legacy).unwrap();
+        let bytes = br#"{"version":1,"next_id":1,"items":[]}"#;
+        fs::write(legacy.join("history.json"), bytes).unwrap();
+        let mut observer = Observation::start(&fixture);
+        assert_eq!(observer.event(), json!({ "pruneMissing": false }));
+        assert_eq!(
+            fs::read(fixture.0.join("data/clipboard/history.json")).unwrap(),
+            bytes
+        );
+        fs::write(legacy.join("history.json"), b"old writer").unwrap();
+        assert!(!observer.ready(150));
+        let missing = fixture.0.join("already missing");
+        fixture.store(
+            "text/uri-list",
+            format!("file://{}\n", missing.display())
+                .replace(' ', "%20")
+                .as_bytes(),
+        );
+        assert_eq!(observer.event(), json!({ "pruneMissing": true }));
+        assert_eq!(
+            fs::read(legacy.join("history.json")).unwrap(),
+            b"old writer"
+        );
+        drop(observer);
+        let mut restarted = Observation::start(&fixture);
+        assert_eq!(restarted.event(), json!({ "pruneMissing": true }));
+        let prepared = fixture.request(json!({ "command": "prepare" }));
+        assert!(
+            prepared["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["kind"] != "file")
+        );
+    }
+
+    #[test]
+    fn system_gio_trash_preserves_recoverable_sources_and_symlink_targets_in_isolated_xdg_data() {
+        let fixture = Fixture::new();
+        let source = fixture.0.join("recoverable file ");
+        let target = fixture.0.join("keep target");
+        let link = fixture.0.join("link");
+        fs::write(&source, b"recoverable content").unwrap();
+        fs::write(&target, b"target content").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        for path in [&source, &link] {
+            fixture.store(
+                "text/uri-list",
+                format!("file://{}\n", path.display())
+                    .replace(' ', "%20")
+                    .as_bytes(),
+            );
+            let snapshot = fixture.request(json!({ "command": "snapshot" }));
+            let reply = fixture.request(deletion(&snapshot["items"][0]));
+            assert!(reply.get("error").is_none(), "{reply}");
+            assert!(fs::symlink_metadata(path).is_err());
+        }
+        let files: Vec<_> = fs::read_dir(fixture.0.join("data/Trash/files"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert!(
+            files
+                .iter()
+                .any(|path| fs::read(path).ok().as_deref() == Some(b"recoverable content"))
+        );
+        assert!(
+            files
+                .iter()
+                .any(|path| fs::symlink_metadata(path).unwrap().file_type().is_symlink())
+        );
+        assert_eq!(fs::read(target).unwrap(), b"target content");
+        assert_eq!(
+            fs::read_dir(fixture.0.join("data/Trash/info"))
+                .unwrap()
+                .count(),
+            2
         );
     }
 

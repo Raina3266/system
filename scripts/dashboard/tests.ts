@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { registerHooks } from 'node:module';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
+
 import type { NotificationRow, Palette } from './notification.ts';
 import type { DashboardPanel } from './power.ts';
 
@@ -134,6 +134,7 @@ class Image extends Widget {
     set_from_gicon(icon: unknown) { this.gicon = icon; }
 }
 const Gtk = {
+    init() {},
     Box, Label, Button, Overlay, DrawingArea, FlowBox, Image,
     ScrolledWindow: Widget, ProgressBar: class extends Widget { fraction = 0; },
     EventControllerKey: Widget, EventControllerMotion: Widget, GestureClick: Widget,
@@ -145,106 +146,40 @@ const Gtk = {
     AccessibleProperty: { LABEL: 0, DESCRIPTION: 1 },
 };
 
-let clock = 0, serial = 0;
-const timers = new Map<number, { due: number; interval: number; callback: () => boolean }>();
-const files = new Map<string, string>();
-const writes: { path: string; flags: number }[] = [];
+let serial = 0;
 const settings = new Map<string, any>();
 const environment = new Map<string, string>();
-const reads: { path: string; io: any; callback: (file: any, result: any) => void }[] = [];
-const syncReads: string[] = [];
-const children: Child[] = [];
-const missing = () => Object.assign(new Error('Not found'), { matches: () => true });
 const delay = () => new Promise<void>(resolve => setImmediate(resolve));
 
-function advance(ms: number) {
-    const end = clock + ms;
-    while (true) {
-        const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0];
-        if (!next) break;
-        const [id, timer] = next;
-        clock = timer.due;
-        timers.delete(id);
-        if (timer.callback()) timers.set(id, { ...timer, due: clock + timer.interval });
-    }
-    clock = end;
+// Native I/O must be explicitly doubled by the test, never delegated to the host.
+function unexpectedHostIO(operation: string): never {
+    assert.fail(`Unexpected host I/O: ${operation}`);
 }
 
 const GLib = {
+    unsetenv(_name: string) {},
     PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false, SOURCE_CONTINUE: true,
-    timeout_add(_priority: number, interval: number, callback: () => boolean) {
-        const id = ++serial;
-        timers.set(id, { due: clock + interval, interval, callback });
-        return id;
-    },
-    source_remove(id: number) { return timers.delete(id); },
     getenv(name: string) { return environment.get(name) ?? null; },
-    get_home_dir: () => '/test/home', build_filenamev: (parts: string[]) => path.join(...parts),
-    path_get_dirname: path.dirname, mkdir_with_parents: () => 0,
     uuid_string_random: () => `uuid-${++serial}`,
-    shell_quote: (text: string) => `'${text.replaceAll("'", "'\\''")}'`,
+    file_get_contents(_filename: string): never { return unexpectedHostIO('GLib.file_get_contents'); },
 };
-
-class Child {
-    argv: string[];
-    flags: number;
-    killed = false;
-    done = false;
-    signals: number[] = [];
-    waitCancellable: any = undefined;
-    reaped = 0;
-    wait: ((child: Child, result: any) => void) | null = null;
-    communicate: ((child: Child, result: any) => void) | null = null;
-    constructor(argv: string[], flags = 0) { this.argv = argv; this.flags = flags; children.push(this); }
-    wait_async(io: any, callback: any) { this.waitCancellable = io; this.wait = callback; }
-    wait_finish() { this.reaped++; return true; }
-    communicate_utf8_async(_input: any, _io: any, callback: any) { this.communicate = callback; }
-    communicate_utf8_finish(result: any) { return [true, result, '']; }
-    get_successful() { return !this.killed; }
-    send_signal(signal: number) { this.signals.push(signal); }
-    force_exit() { this.killed = true; this.finish(''); }
-    finish(output: string) {
-        if (this.done) return;
-        this.done = true;
-        this.wait?.(this, null);
-        this.communicate?.(this, output);
-    }
-}
 
 class Settings {
     static sync() {}
     constructor(_options: any) {}
     get_user_value(key: string) { return settings.get(key) ?? null; }
-    get_boolean(key: string) { return settings.get(key) ?? false; }
     set_strv(key: string, value: string[]) { settings.set(key, [...value]); return true; }
 }
 
 const Gio = {
     Settings,
     Cancellable: class { cancelled = false; cancel() { this.cancelled = true; } },
-    FileQueryInfoFlags: { NONE: 0 }, IOErrorEnum: { NOT_FOUND: 1 }, io_error_quark: () => 0,
-    FileCreateFlags: { PRIVATE: 1, REPLACE_DESTINATION: 2 },
-    SubprocessFlags: { STDOUT_PIPE: 1, STDERR_SILENCE: 2, STDOUT_SILENCE: 4, STDERR_PIPE: 8 },
-    SubprocessLauncher: class {
-        flags: number;
-        constructor(options: { flags: number }) { this.flags = options.flags; }
-        setenv() {}
-        spawnv(argv: string[]) { return new Child(argv, this.flags); }
+    Subprocess: { new(_argv: string[], _flags: number): any { return unexpectedHostIO('Gio.Subprocess.new'); } },
+    SubprocessFlags: { STDIN_PIPE: 16, STDOUT_PIPE: 1, STDERR_SILENCE: 2, STDOUT_SILENCE: 4, STDERR_PIPE: 8 },
+    File: {
+        new_for_path(_filename: string): never { return unexpectedHostIO('Gio.File.new_for_path'); },
+        new_for_uri(_uri: string): never { return unexpectedHostIO('Gio.File.new_for_uri'); },
     },
-    File: { new_for_path(filename: string) {
-        return {
-            query_info() { if (!files.has(filename)) throw missing(); return { get_size: () => new TextEncoder().encode(files.get(filename)!).length }; },
-            load_contents() { syncReads.push(filename); if (!files.has(filename)) throw missing(); return [true, new TextEncoder().encode(files.get(filename)!)]; },
-            replace_contents(bytes: Uint8Array, _etag: any, _backup: boolean, flags: number) {
-                files.set(filename, new TextDecoder().decode(bytes)); writes.push({ path: filename, flags }); return [true, 'etag'];
-            },
-            load_contents_async(io: any, callback: any) { reads.push({ path: filename, io, callback }); },
-            load_contents_finish(result: any) {
-                if (result.error) throw result.error;
-                return [true, new TextEncoder().encode(result.text)];
-            },
-        };
-    } },
 };
 
 class NativeNotification {
@@ -299,7 +234,10 @@ const mockGI: Record<string, any> = {
     AstalPowerProfiles: { get_default: () => power },
     // Native widget doubles exercise controls without starting the application.
     GObject: { registerClass: (_metadata: any, implementation: any) => implementation },
-    Astal: { Application: class {}, Window: Widget, WindowAnchor: { TOP: 1, BOTTOM: 2, LEFT: 4, RIGHT: 8 },
+    Astal: { Application: class extends Signals {
+        acquire_socket() {} hold() {} quit() { this.emit('shutdown'); }
+        async runAsync(_args: string[]) { this.emit('activate'); await Promise.resolve(); return 0; }
+    }, Window: Widget, WindowAnchor: { TOP: 1, BOTTOM: 2, LEFT: 4, RIGHT: 8 },
         Exclusivity: { IGNORE: 0 }, Layer: { OVERLAY: 0 }, Keymode: { NONE: 0 } },
     AstalIO: {}, Gtk, Gdk: { BUTTON_PRIMARY: 1 },
     Pango: { EllipsizeMode: { END: 0 }, WrapMode: { WORD_CHAR: 0 } }, Gtk4LayerShell: {},
@@ -321,34 +259,40 @@ const hooks = registerHooks({
     },
 });
 const {
-    NotificationCenter, NotificationEntry, NotificationStack, archived, DEFAULT_TIMEOUT, HISTORY_LIMIT, newestFirst,
-    notificationTimeout, POPUP_LIMIT, restoreArchive, serializeArchive, invoke, iconButton,
+    NotificationCenter, DashboardPipe, NotificationEntry, NotificationStack, invoke, iconButton,
 } = await import('./notification.ts');
 const {
-    MetricsSampler, cpuPercent, emptyMetrics, parseCpu, parseDisk, parseMemory, parseTemperature,
+    emptyMetrics,
 } = await import('./parameters.ts');
 const {
     ButtonSwitcher, DashboardApplication, DashboardBackend, DashboardPanel: DashboardPanelWidget,
-    parseRequest, SCREEN_TIMEOUT_CHOICES, ScreenTimeoutController,
+    main, parseRequest, SCREEN_TIMEOUT_CHOICES,
 } = await import('./power.ts');
 hooks.deregister();
 
 beforeEach(() => {
-    clock = 0; serial = 0; timers.clear(); files.clear(); writes.length = 0; settings.clear(); environment.clear();
-    reads.length = 0; syncReads.length = 0; children.length = 0; native = new Native();
-    environment.set('XDG_STATE_HOME', '/test/state');
+    serial = 0; settings.clear(); environment.clear(); native = new Native();
     device.is_present = true; device.percentage = 0.42; device.state = 1;
     upower.daemon_version = '1'; upower.on_battery = false;
     availableProfiles = [{ profile: 'balanced' }, { profile: 'power-saver' }]; power.active_profile = 'balanced';
 });
 
-const archivePath = '/test/state/dashboard/notifications.json';
-const screenTimeoutPath = '/test/state/dashboard/screen-timeout.json';
-function completeReads(cpu = 'cpu 10 0 0 90', memory = 'MemTotal: 2097152 kB\nMemAvailable: 1048576 kB', temperature = '45000') {
-    for (const request of reads.splice(0)) request.callback(Gio.File.new_for_path(request.path), request.io.cancelled
-        ? { error: new Error('Cancelled') } : { text: request.path === '/proc/stat' ? cpu : request.path === '/proc/meminfo' ? memory : temperature });
-}
+test('native doubles reject unexpected host file and process I/O', () => {
+    for (const [operation, action] of [
+        ['GLib.file_get_contents', () => GLib.file_get_contents('/test/unexpected')],
+        ['Gio.File.new_for_path', () => Gio.File.new_for_path('/test/unexpected')],
+        ['Gio.File.new_for_uri', () => Gio.File.new_for_uri('file:///test/unexpected')],
+        ['Gio.Subprocess.new', () => Gio.Subprocess.new(['unexpected-helper'], 0)],
+    ] as const) assert.throws(action, { message: `Unexpected host I/O: ${operation}` });
+});
 
+// Widget tests supply authoritative events explicitly, not a second policy implementation.
+let deliver: (e: any) => void;
+const sent: any[] = [];
+function connect(receive: (e: any) => void) {
+    deliver = receive; sent.length = 0;
+    return { send(frame: any) { sent.push(frame); }, whenDrained(cb: () => void) { queueMicrotask(cb); }, dispose() { receive({ event: 'offline' }); } };
+}
 const row = (id: string, overrides: Partial<NotificationRow> = {}): NotificationRow => ({
     id, app: 'Test', summary: 'Summary', body: 'Body', icon: 'test-symbolic', urgency: 1,
     transient: false, timeout: -1, actions: [{ identifier: 'open', text: 'Open' }], closed: false,
@@ -405,7 +349,7 @@ test('icon buttons keep optional accessible labels and callbacks without visual 
 });
 
 test('dashboard controls keep sleep descriptions and dynamic DND labels without visual tooltips', () => {
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     const panel = new DashboardPanelWidget({ app: new DashboardApplication(), backend, palette });
     const sleep = panel.screenTimeout.widget as unknown as Widget;
     const dnd = panel.dnd as unknown as Button;
@@ -417,14 +361,13 @@ test('dashboard controls keep sleep descriptions and dynamic DND labels without 
     assert.equal(clear.accessible.get(Gtk.AccessibleProperty.LABEL), 'Clear all');
     assert.equal(dnd.accessible.get(Gtk.AccessibleProperty.LABEL), 'Enable do not disturb');
     for (const enabled of [false, true, false]) {
-        if (backend.notifications.dnd !== enabled) dnd.emit('clicked');
+        if (backend.notifications.dnd !== enabled) { dnd.emit('clicked'); assert.equal(sent.at(-1).command.kind, 'toggle'); deliver({ event: 'toggle' }); }
         panel.render();
         assert.equal(backend.notifications.dnd, enabled);
         assert.equal(dnd.accessible.get(Gtk.AccessibleProperty.LABEL), enabled ? 'Disable do not disturb' : 'Enable do not disturb');
         assert.equal((dnd.get_child() as Label).label, enabled ? '󰂛' : '󰂚');
         assertNoTooltips(panel.window as unknown as Widget);
     }
-    assert.equal(children.length, 0);
     panel.dispose();
     backend.dispose();
 });
@@ -675,328 +618,6 @@ test('sleep timer choices have exact labels and switcher arrows wrap without opt
     }
 });
 
-test('screen timeout defaults to None without writes, a child or change notifications', () => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    assert.equal(controller.minutes, 0);
-    controller.setMinutes(0);
-    controller.setMinutes(0);
-    controller.dispose(); controller.dispose();
-    assert.equal(changes, 0);
-    assert.equal(writes.length, 0);
-    assert.equal(children.length, 0);
-    assert.equal(timers.size, 0);
-});
-
-for (const [minutes, seconds] of [[10, 600], [30, 1800], [60, 3600], [120, 7200], [180, 10800], [360, 21600]]) {
-    test(`sleep timer ${minutes} minutes requests suspend after ${seconds} idle seconds and persists synchronously`, () => {
-        const observed: number[] = [];
-        const controller = new ScreenTimeoutController(() => observed.push(controller.minutes));
-        controller.setMinutes(minutes);
-        assert.equal(controller.minutes, minutes);
-        assert.deepEqual(observed, [minutes]);
-        assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes });
-        assert.deepEqual(writes, [{ path: screenTimeoutPath,
-            flags: Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION }]);
-        assert.equal(children.length, 1);
-        const child = children[0];
-        assert.deepEqual(child.argv, ['swayidle', '-w', '-C', '/dev/null', 'timeout', String(seconds),
-            "exec 'systemctl' suspend"]);
-        assert.equal(child.flags, Gio.SubprocessFlags.STDOUT_SILENCE, 'stderr must inherit, not be silenced or piped');
-        assert.equal(child.waitCancellable, null);
-        assert.equal(typeof child.wait, 'function');
-        controller.setMinutes(minutes);
-        assert.equal(children.length, 1, 'identical active selection must not spawn again');
-        assert.equal(writes.length, 1);
-        assert.deepEqual(observed, [minutes]);
-        controller.dispose();
-        assert.deepEqual(child.signals, [15]);
-        assert.equal(child.killed, false);
-        child.finish('');
-        assert.equal(child.reaped, 1);
-    });
-}
-
-test('sleep timer honors executable overrides and shell-quotes systemctl', () => {
-    environment.set('SWAYIDLE', '/test/sway idle');
-    environment.set('SYSTEMCTL', "/test/system'ctl with spaces");
-    const controller = new ScreenTimeoutController(() => {});
-    controller.setMinutes(30);
-    assert.deepEqual(children[0].argv, ['/test/sway idle', '-w', '-C', '/dev/null', 'timeout', '1800',
-        "exec '/test/system'\\''ctl with spaces' suspend"]);
-    controller.dispose();
-});
-
-test('screen timeout rejects values outside the exact numeric choices without side effects', () => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(10);
-    for (const invalid of [-1, 1, 5, 10.5, 20, 61, 361, NaN, Infinity, -Infinity, '10', null, undefined, true]) {
-        assert.throws(() => controller.setMinutes(invalid as number), String(invalid));
-        assert.equal(controller.minutes, 10);
-    }
-    assert.equal(changes, 1);
-    assert.equal(children.length, 1);
-    assert.equal(writes.length, 1);
-    assert.deepEqual(children[0].signals, []);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
-    controller.dispose();
-});
-
-for (const minutes of [0, 10, 30, 60, 120, 180, 360]) {
-    test(`sleep timer reuses saved screen timeout of ${minutes} minutes without rewriting the preference`, () => {
-        const saved = JSON.stringify({ version: 1, minutes });
-        files.set(screenTimeoutPath, saved);
-        const controller = new ScreenTimeoutController(() => {});
-        assert.equal(controller.minutes, minutes);
-        assert.equal(children.length, minutes === 0 ? 0 : 1);
-        if (minutes) {
-            assert.equal(children[0].argv[5], String(minutes * 60));
-            assert.equal(children[0].argv[6], "exec 'systemctl' suspend");
-            assert.equal(children[0].waitCancellable, null);
-        }
-        assert.deepEqual(syncReads, [screenTimeoutPath]);
-        assert.equal(writes.length, 0);
-        assert.equal(files.get(screenTimeoutPath), saved);
-        controller.dispose();
-    });
-}
-
-test('screen timeout ignores corrupt, unsupported and oversized saved preferences without loading oversized files', t => {
-    t.mock.method(console, 'warn', () => {});
-    for (const text of ['{broken', 'null', '[]', '{}', '{"minutes":10}',
-        '{"version":2,"minutes":10}', '{"version":1}', '{"version":1,"minutes":"10"}',
-        '{"version":1,"minutes":null}', '{"version":1,"minutes":true}',
-        '{"version":1,"minutes":-1}', '{"version":1,"minutes":20}', '{"version":1,"minutes":10.5}',
-        JSON.stringify({ version: 1, minutes: 10 }).padEnd(1025)]) {
-        files.set(screenTimeoutPath, text);
-        syncReads.length = 0;
-        const controller = new ScreenTimeoutController(() => {});
-        assert.equal(controller.minutes, 0, text);
-        assert.equal(children.length, 0);
-        assert.equal(writes.length, 0);
-        assert.equal(files.get(screenTimeoutPath), text);
-        if (text.length > 1024) assert.deepEqual(syncReads, [], 'size must be checked before reading contents');
-        controller.dispose();
-    }
-});
-
-test('screen timeout accepts a saved preference at the 1024-byte size boundary', () => {
-    files.set(screenTimeoutPath, JSON.stringify({ version: 1, minutes: 60 }).padEnd(1024));
-    const controller = new ScreenTimeoutController(() => {});
-    assert.equal(controller.minutes, 60);
-    assert.equal(children.length, 1);
-    assert.deepEqual(syncReads, [screenTimeoutPath]);
-    assert.equal(writes.length, 0);
-    controller.dispose();
-});
-
-test('screen timeout saves and restores under ~/.local/state when XDG_STATE_HOME is absent', () => {
-    environment.delete('XDG_STATE_HOME');
-    const filename = '/test/home/.local/state/dashboard/screen-timeout.json';
-    let controller = new ScreenTimeoutController(() => {});
-    assert.equal(writes.length, 0);
-    assert.equal(children.length, 0);
-    controller.setMinutes(120);
-    assert.deepEqual(JSON.parse(files.get(filename)!), { version: 1, minutes: 120 });
-    assert.equal(writes[0].path, filename);
-    controller.dispose();
-    controller = new ScreenTimeoutController(() => {});
-    assert.equal(controller.minutes, 120);
-    assert.equal(children.length, 2);
-    assert.equal(children[1].argv[5], '7200');
-    assert.equal(writes.length, 1);
-    controller.dispose();
-});
-
-test('sleep timer None stops the watcher without a power or lock command and can re-enable before its stale exit', async t => {
-    const warnings = t.mock.method(console, 'warn', () => {});
-    const observed: number[] = [];
-    const controller = new ScreenTimeoutController(() => observed.push(controller.minutes));
-    controller.setMinutes(10);
-    const old = children[0];
-    controller.setMinutes(0);
-    assert.equal(controller.minutes, 0);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 0 });
-    assert.deepEqual(old.signals, [15]);
-    assert.equal(old.killed, false, 'watchers should shut down gracefully');
-    assert.equal(children.length, 1, 'None must not launch a suspend, resume or lock command');
-    assert.equal(old.argv.includes('resume'), false, 'stopping the watcher must not trigger a power action');
-    assert.equal(old.waitCancellable, null);
-    controller.setMinutes(0);
-    assert.equal(writes.length, 2);
-    assert.equal(children.length, 1);
-    controller.setMinutes(30);
-    assert.equal(controller.minutes, 30);
-    assert.equal(children.length, 2);
-    old.finish(''); await delay();
-    assert.equal(old.reaped, 1);
-    assert.equal(controller.minutes, 30);
-    assert.deepEqual(observed, [10, 0, 30]);
-    assert.equal(warnings.mock.callCount(), 0);
-    assert.deepEqual(children[1].signals, []);
-    controller.dispose();
-});
-
-test('screen timeout replacement spawns and saves before committing and terminating the old child', async t => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(10);
-    const old = children[0];
-    const open = Gio.File.new_for_path;
-    const saving = t.mock.method(Gio.File, 'new_for_path', (filename: string) => {
-        const file = open(filename);
-        if (filename !== screenTimeoutPath) return file;
-        return { ...file, replace_contents(...args: Parameters<typeof file.replace_contents>) {
-            assert.equal(controller.minutes, 10, 'selection must not commit before persistence');
-            assert.equal(children.length, 2, 'replacement must exist before persistence');
-            assert.deepEqual(old.signals, []);
-            return file.replace_contents(...args);
-        } };
-    });
-    const signal = old.send_signal.bind(old);
-    t.mock.method(old, 'send_signal', (number: number) => {
-        assert.equal(controller.minutes, 30);
-        assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 30 });
-        signal(number);
-    });
-    controller.setMinutes(30);
-    saving.mock.restore();
-    assert.equal(controller.minutes, 30);
-    assert.equal(changes, 2);
-    assert.deepEqual(old.signals, [15]);
-    assert.equal(old.killed, false);
-    assert.deepEqual(children[1].signals, []);
-    old.finish(''); await delay();
-    assert.equal(old.reaped, 1);
-    assert.equal(controller.minutes, 30);
-    assert.equal(changes, 2, 'stale replacement exit must not emit a change');
-    controller.dispose();
-});
-
-test('screen timeout unexpected active exit resets live state, warns and retains the preference for restart', async t => {
-    const warnings = t.mock.method(console, 'warn', () => {});
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(60);
-    const child = children[0];
-    child.finish(''); await delay();
-    assert.equal(child.reaped, 1);
-    assert.equal(controller.minutes, 0);
-    assert.equal(changes, 2);
-    assert.ok(warnings.mock.callCount() > 0, 'unexpected exit must log a warning');
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 60 });
-    assert.equal(writes.length, 1);
-    assert.equal(children.length, 1, 'unexpected exit must not enter an automatic restart loop');
-    controller.dispose();
-    assert.deepEqual(child.signals, []);
-    const restarted = new ScreenTimeoutController(() => {});
-    assert.equal(restarted.minutes, 60);
-    assert.equal(children.length, 2);
-    assert.equal(writes.length, 1);
-    restarted.dispose();
-});
-
-test('screen timeout failed spawn preserves the active child, preference and notifications', t => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(10);
-    const spawn = t.mock.method(Gio.SubprocessLauncher.prototype, 'spawnv', () => { throw new Error('spawn failed'); });
-    assert.throws(() => controller.setMinutes(30), /spawn failed/);
-    assert.equal(spawn.mock.callCount(), 1);
-    assert.equal(controller.minutes, 10);
-    assert.equal(changes, 1);
-    assert.equal(children.length, 1);
-    assert.deepEqual(children[0].signals, []);
-    assert.equal(children[0].killed, false);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
-    assert.equal(writes.length, 1);
-    spawn.mock.restore();
-    controller.setMinutes(30);
-    assert.equal(controller.minutes, 30);
-    assert.deepEqual(children[0].signals, [15]);
-    controller.dispose();
-});
-
-test('screen timeout failed save terminates only the candidate and failed None preserves the active child', async t => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(10);
-    const old = children[0];
-    const open = Gio.File.new_for_path;
-    const saving = t.mock.method(Gio.File, 'new_for_path', (filename: string) => {
-        const file = open(filename);
-        return filename !== screenTimeoutPath ? file : { ...file,
-            replace_contents() { throw new Error('save failed'); } };
-    });
-    assert.throws(() => controller.setMinutes(30), /save failed/);
-    assert.equal(children.length, 2);
-    const candidate = children[1];
-    assert.deepEqual(candidate.signals, [15]);
-    assert.equal(candidate.killed, false);
-    assert.equal(candidate.waitCancellable, null);
-    candidate.finish(''); await delay();
-    assert.equal(candidate.reaped, 1);
-    assert.equal(controller.minutes, 10);
-    assert.equal(changes, 1, 'discarded candidate exit must not change active state');
-    assert.throws(() => controller.setMinutes(0), /save failed/);
-    assert.equal(controller.minutes, 10);
-    assert.equal(changes, 1);
-    assert.deepEqual(old.signals, []);
-    assert.equal(old.killed, false);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
-    assert.equal(writes.length, 1);
-    assert.equal(children.length, 2, 'failed None must not spawn a child');
-    saving.mock.restore();
-    controller.setMinutes(30);
-    assert.equal(controller.minutes, 30);
-    assert.deepEqual(old.signals, [15]);
-    controller.dispose();
-});
-
-test('screen timeout failed restore spawn leaves None live without erasing the saved preference', t => {
-    const warnings = t.mock.method(console, 'warn', () => {});
-    const saved = JSON.stringify({ version: 1, minutes: 30 });
-    files.set(screenTimeoutPath, saved);
-    const spawn = t.mock.method(Gio.SubprocessLauncher.prototype, 'spawnv', () => { throw new Error('restore spawn failed'); });
-    const controller = new ScreenTimeoutController(() => {});
-    assert.equal(controller.minutes, 0);
-    assert.equal(children.length, 0);
-    assert.equal(writes.length, 0);
-    assert.equal(files.get(screenTimeoutPath), saved);
-    assert.equal(spawn.mock.callCount(), 1);
-    assert.ok(warnings.mock.callCount() > 0);
-    spawn.mock.restore();
-    controller.setMinutes(30);
-    assert.equal(controller.minutes, 30);
-    assert.equal(children.length, 1);
-    controller.dispose();
-});
-
-test('screen timeout disposal is idempotent, reaps with SIGTERM and makes all later setters inert', async () => {
-    let changes = 0;
-    const controller = new ScreenTimeoutController(() => changes++);
-    controller.setMinutes(180);
-    const child = children[0];
-    controller.dispose(); controller.dispose();
-    const disposedMinutes = controller.minutes;
-    for (const value of [0, 30, NaN]) assert.doesNotThrow(() => controller.setMinutes(value));
-    assert.equal(controller.minutes, disposedMinutes);
-    assert.deepEqual(child.signals, [15]);
-    assert.equal(child.killed, false);
-    assert.equal(child.waitCancellable, null);
-    assert.equal(writes.length, 1, 'disposal must not erase the saved preference');
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 180 });
-    assert.equal(children.length, 1);
-    const beforeExit = changes;
-    child.finish(''); await delay();
-    assert.equal(child.reaped, 1);
-    assert.equal(controller.minutes, disposedMinutes);
-    assert.equal(changes, beforeExit);
-    controller.dispose();
-    assert.deepEqual(child.signals, [15]);
-});
-
 test('dashboard actions safely report thrown and rejected non-Error values', async () => {
     const warnings: string[] = [];
     const warn = console.warn;
@@ -1031,215 +652,11 @@ test('strict JSON request envelope and command arity', () => {
     for (const text of ['', 'status', '{} {}', '{broken']) assert.throws(() => parseRequest(text));
 });
 
-test('all missing metrics use -1, not plausible zero readings', () => {
-    assert.ok(Object.values(emptyMetrics()).every(value => value === -1));
-    assert.equal(parseCpu(''), null);
-    assert.deepEqual(parseMemory(''), { memoryPercent: -1, memoryUsedGiB: -1, memoryTotalGiB: -1 });
-    assert.deepEqual(parseDisk(''), { diskPercent: -1, diskUsedGiB: -1, diskTotalGiB: -1 });
-    assert.equal(parseTemperature(''), -1);
-});
-
-test('CPU deltas include iowait as idle, exclude double-counted guest time', () => {
-    const before = parseCpu('cpu  100 20 30 400 50 6 7 8 20 5\ncpu0 1 2 3 4');
-    assert.deepEqual(before, { total: 621, idle: 450 });
-    for (const newline of ['\n', '\r\n']) {
-        assert.deepEqual(parseCpu(`cpu 1 2 3 4${newline}cpu0 malformed${newline}intr 999`), { total: 10, idle: 4 });
-        assert.equal(parseCpu(`cpu malformed${newline}cpu 1 2 3 4`), null, 'only the first line is the aggregate sample');
-    }
-    const after = parseCpu('cpu  140 20 40 440 60 6 7 8 60 5');
-    assert.equal(cpuPercent(before, after), 50);
-    assert.equal(cpuPercent(null, after), -1);
-    assert.equal(cpuPercent(before, before), -1);
-    assert.equal(cpuPercent(after, before), -1);
-    assert.equal(cpuPercent(before, null), -1);
-    assert.equal(cpuPercent({ total: 10, idle: 5 }, { total: 20, idle: 16 }), -1);
-    assert.equal(cpuPercent({ total: 10, idle: 5 }, { total: 20, idle: 4 }), -1);
-    for (const text of ['cpu0 1 2 3 4', 'cpu 1 2 3', 'cpu 1 -2 3 4', 'cpu 1 NaN 3 4', 'cpu 1 2 3 4x'])
-        assert.equal(parseCpu(text), null);
-});
-
-test('memory uses MemAvailable including zero, with old-kernel fallback', () => {
-    assert.deepEqual(parseMemory('MemTotal: 2097152 kB\nMemAvailable: 524288 kB\nMemFree: 0 kB'),
-        { memoryPercent: 75, memoryUsedGiB: 1.5, memoryTotalGiB: 2 });
-    assert.equal(parseMemory('MemTotal: 100 kB\nMemAvailable: 0 kB\nMemFree: 80 kB').memoryPercent, 100);
-    assert.equal(parseMemory('MemTotal: 100 kB\nMemFree: 10 kB\nBuffers: 10 kB\nCached: 30 kB').memoryPercent, 50);
-    assert.equal(parseMemory('MemTotal: 100 kB\nMemAvailable: 200 kB').memoryPercent, 0);
-    for (const text of ['MemTotal: 0 kB\nMemFree: 2 kB', 'MemTotal: 100 kB', 'MemAvailable: 100 kB', 'MemTotal: nonsense'])
-        assert.equal(parseMemory(text).memoryPercent, -1);
-});
-
-test('df byte units and supplied pcent (reserved blocks) are preserved', () => {
-    assert.deepEqual(parseDisk(' Used 1B-blocks Use%\n 1073741824 4294967296 30%\n'),
-        { diskPercent: 30, diskUsedGiB: 1, diskTotalGiB: 4 });
-    for (const text of ['header', 'header\n1 0 5%', 'header\n1 2 NaN', 'header\n1 2 5%garbage', 'header\n1 2 5%\nextra'])
-        assert.equal(parseDisk(text).diskPercent, -1);
-    assert.equal(parseDisk('header\n0 100 0%').diskPercent, 0);
-});
-
-test('temperature handles millidegrees and missing/malformed files', () => {
-    assert.equal(parseTemperature('45678\n'), 45.678);
-    assert.equal(parseTemperature(' 52.5 '), 52.5);
-    for (const text of ['', '0', '-1', 'NaN', '45C', '40000\n50000']) assert.equal(parseTemperature(text), -1);
-});
-
-test('history and popup ordering is newest-first, bounded and replacement-deduplicated', () => {
-    let history: NotificationRow[] = [];
-    let popups: NotificationRow[] = [];
-    for (let index = 0; index < 205; index++) {
-        history = newestFirst(history, row(String(index)), HISTORY_LIMIT);
-        popups = newestFirst(popups, row(String(index)), POPUP_LIMIT);
-    }
-    assert.equal(history.length, 200);
-    assert.equal(history[0].id, '204');
-    assert.equal(history[199].id, '5');
-    assert.deepEqual(popups.map(row => row.id), ['204', '203', '202', '201', '200']);
-    history = newestFirst(history, row('10', { summary: 'Replaced' }), HISTORY_LIMIT);
-    assert.equal(history[0].summary, 'Replaced');
-    assert.equal(history.filter(row => row.id === '10').length, 1);
-});
-
-test('timeout policy: eight-second default, milliseconds, critical and zero exemption', () => {
-    assert.equal(notificationTimeout(row('1')), DEFAULT_TIMEOUT);
-    assert.equal(notificationTimeout(row('1', { timeout: 350 })), 350);
-    assert.equal(notificationTimeout(row('1', { timeout: 0 })), 0);
-    assert.equal(notificationTimeout(row('1', { urgency: 2, timeout: 350 })), 0);
-    assert.equal(notificationTimeout(row('1', { urgency: 0, timeout: 350 })), 350);
-});
-
-test('v1 archives keep existing fields, strip live actions and transient image providers', () => {
-    const live = row('nonce:42', { icon: 'image://native/image' });
-    const saved = serializeArchive([live, row('transient', { transient: true })], true);
-    const raw = JSON.parse(saved);
-    assert.deepEqual(Object.keys(raw).sort(), ['dnd', 'history', 'version']);
-    assert.equal(raw.version, 1);
-    assert.deepEqual(raw.history, [archived(live)]);
-    assert.equal(live.closed, false);
-    assert.equal(live.actions.length, 1);
-    const restored = restoreArchive(saved);
-    assert.equal(restored.dnd, true);
-    assert.equal(restored.history[0].closed, true);
-    assert.deepEqual(restored.history[0].actions, []);
-    assert.equal(restored.history[0].icon, '');
-    assert.equal(archived(row('file', { icon: '/tmp/cached.png' })).icon, '/tmp/cached.png');
-});
-
-test('restore tolerates malformed rows, defaults optional fields, deduplicates, excludes transients', () => {
-    const restored = restoreArchive(JSON.stringify({ version: 1, dnd: 'true', history: [null, {}, row('a'), row('a'),
-        { id: 'old:1', app: 'App', summary: 'Legacy', body: '', icon: 4, urgency: 9, timeout: 'bad', actions: ['bad'] },
-        row('t', { transient: true }), row('', {}), { id: 4, app: '', summary: '', body: '' }] }));
-    assert.equal(restored.dnd, false);
-    assert.deepEqual(restored.history.map(row => row.id), ['a', 'old:1']);
-    assert.deepEqual(restored.history[1], row('old:1', { app: 'App', summary: 'Legacy', body: '', icon: '', actions: [], closed: true }));
-    assert.equal(restoreArchive(serializeArchive(Array.from({ length: 210 }, (_, index) => row(String(index))), false)).history.length, 200);
-    assert.deepEqual(restoreArchive('  '), { history: [], dnd: false });
-    for (const text of ['null', '[]', '{}', '{broken', '{"version":2,"history":[]}', '{"version":1,"history":{}}'])
-        assert.throws(() => restoreArchive(text));
-});
-
-test('backend native controls, fractional battery, screen timeout and read-only status', () => {
-    const backend = new DashboardBackend();
-    let changes = 0;
-    const unsubscribe = backend.subscribe(() => changes++);
-    assert.equal(backend.battery.percentage, 0.42);
-    assert.equal(backend.battery.status, 'CHARGING');
-    assert.equal(backend.screenTimeoutMinutes, 0);
-    assert.equal('airplaneMode' in backend, false);
-    assert.equal('toggleAirplaneMode' in backend, false);
-    assert.equal(reads.length, 0);
-    assert.equal(children.length, 0);
-    const writesBefore = writes.length;
-    for (let i = 0; i < 20; i++) assert.equal(backend.status().historyCount, 0);
-    assert.equal(writes.length, writesBefore);
-    assert.equal(timers.size, 0);
-    backend.setScreenTimeout(10);
-    assert.equal(backend.screenTimeoutMinutes, 10);
-    assert.equal(backend.status().screenTimeoutMinutes, 10);
-    assert.ok(changes > 0, 'timeout selection must synchronously notify subscribers');
-    assert.equal(children.length, 1);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 10 });
-    backend.setProfile('power-saver');
-    assert.equal(power.active_profile, 'power-saver');
-    assert.throws(() => backend.setProfile('performance'));
-    native.send(new NativeNotification(1, 'Changed'));
-    assert.ok(changes > 0);
-    assert.equal(backend.status().historyCount, 1);
-    assert.equal(backend.status().popupCount, 1);
-    unsubscribe();
-    const before = changes;
-    native.send(new NativeNotification(2, 'Unsubscribed'));
-    assert.equal(changes, before);
-    backend.dispose(); backend.dispose();
-    assert.deepEqual(children[0].signals, [15]);
-    assert.equal(children[0].killed, false);
-    assert.equal(timers.size, 0);
-});
-
-test('backend keeps restored screen timeout running across panel close and status reads have no side effects', async () => {
-    files.set(screenTimeoutPath, JSON.stringify({ version: 1, minutes: 30 }));
-    const backend = new DashboardBackend();
-    assert.equal(backend.screenTimeoutMinutes, 30);
-    assert.equal(children.length, 1, 'saved timeout must run even before the panel opens');
-    const child = children[0];
-    const descriptor = Object.getOwnPropertyDescriptor(DashboardBackend.prototype, 'screenTimeoutMinutes')!;
-    assert.equal(typeof descriptor.get, 'function');
-    assert.equal(descriptor.set, undefined);
-    backend.setActive(true);
-    assert.equal(children.length, 2);
-    const metricsChild = children[1];
-    backend.setActive(false);
-    completeReads(); await delay();
-    assert.equal(metricsChild.killed, true, 'panel close still stops metrics');
-    assert.equal(child.killed, false);
-    assert.deepEqual(child.signals, [], 'panel close must not terminate swayidle');
-    assert.equal(backend.screenTimeoutMinutes, 30);
-    assert.equal(backend.status().screenTimeoutMinutes, 30);
-    assert.equal('airplaneMode' in backend.status(), false);
-    let changes = 0;
-    backend.subscribe(() => changes++);
-    const state = () => ({
-        files: [...files], writes: [...writes], reads: reads.length, syncReads: [...syncReads],
-        children: [...children], signals: [...child.signals], timers: timers.size, settings: [...settings],
-        battery: backend.battery, history: backend.notifications.history, popups: backend.notifications.popups,
-        resolutions: [...native.resolutions], notifications: [...native.notifications],
-    });
-    const before = state();
-    const status = backend.status();
-    for (let index = 0; index < 20; index++) {
-        assert.equal(backend.screenTimeoutMinutes, 30);
-        assert.deepEqual(backend.status(), status);
-    }
-    assert.deepEqual(state(), before);
-    assert.equal(changes, 0);
-    backend.dispose(); backend.dispose();
-    assert.deepEqual(child.signals, [15]);
-    assert.equal(child.killed, false);
-    child.finish(''); await delay();
-    assert.equal(child.reaped, 1);
-    const afterDispose = { writes: writes.length, children: children.length, changes };
-    backend.setScreenTimeout(60);
-    assert.deepEqual({ writes: writes.length, children: children.length, changes }, afterDispose);
-});
-
-test('backend publishes unexpected timeout exit synchronously through its getter and subscribers', async t => {
-    t.mock.method(console, 'warn', () => {});
-    const backend = new DashboardBackend();
-    const observed: number[] = [];
-    backend.subscribe(() => observed.push(backend.screenTimeoutMinutes));
-    backend.setScreenTimeout(60);
-    assert.deepEqual(observed, [60]);
-    children[0].finish(''); await delay();
-    assert.equal(backend.screenTimeoutMinutes, 0);
-    assert.equal(backend.status().screenTimeoutMinutes, 0);
-    assert.deepEqual(observed, [60, 0]);
-    assert.deepEqual(JSON.parse(files.get(screenTimeoutPath)!), { version: 1, minutes: 60 });
-    backend.dispose();
-});
-
 test('power profile switcher uses the native getter and cycles all available profiles', () => {
     availableProfiles = profileChoices.map(choice => ({ profile: choice.id }));
     power.active_profile = 'power-saver';
     assert.equal('profiles' in power, false);
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     const control = new ButtonSwitcher('Power profile', profileChoices, profile => backend.setProfile(profile), palette);
     const render = () => control.update(backend.activeProfile, backend.profiles);
     const unsubscribe = backend.subscribe(render);
@@ -1274,7 +691,7 @@ test('power profile switcher uses the native getter and cycles all available pro
 test('status preserves battery percentage, decile glyphs, thresholds and profile tooltip', () => {
     device.state = 2;
     upower.on_battery = true;
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     const icons = ['󰁺', '󰁻', '󰁼', '󰁽', '󰁾', '󰁿', '󰂀', '󰂁', '󰂂', '󰁹'];
     for (let percent = 0; percent <= 100; percent++) {
         device.percentage = percent / 100;
@@ -1297,7 +714,7 @@ test('status preserves battery percentage, decile glyphs, thresholds and profile
 });
 
 test('status gives charging, pending charge and full priority over percentage thresholds', () => {
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     for (const [state, expectedClass, expectedStatus] of [
         [1, 'charging', 'CHARGING'],
         [5, 'charging', 'CONNECTED · CHARGING SOON'],
@@ -1317,7 +734,7 @@ test('status gives charging, pending charge and full priority over percentage th
 });
 
 test('status preserves clear dashboard badge for absent, unreadable or not-ready batteries', () => {
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     const assertClear = () => {
         const status = backend.status();
         assert.equal(status.text, '󰕮');
@@ -1341,25 +758,25 @@ test('status preserves clear dashboard badge for absent, unreadable or not-ready
 });
 
 test('status keeps notification metadata without changing the battery badge or mutating state', () => {
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     native.send(new NativeNotification(1, 'History'));
     native.send(new NativeNotification(2, 'Transient', { transient: true }));
+    deliver({ event: 'notifications', history: [row('one')], popups: [row('two'), row('one')] });
     assert.deepEqual(backend.status(), {
         text: '󰂄 42%', tooltip: 'CHARGING | Profile: balanced | Click: Dashboard', class: 'charging',
         historyCount: 1, popupCount: 2, dnd: false, screenTimeoutMinutes: 0, activeProfile: 'balanced',
     });
-    backend.notifications.toggleDnd();
+    backend.notifications.toggleDnd(); deliver({ event: 'toggle' });
+    deliver({ event: 'notifications', history: [row('one')], popups: [] });
     const expected = { ...backend.status(), historyCount: 1, popupCount: 0, dnd: true };
     assert.equal(expected.text, '󰂄 42%');
     assert.equal(expected.class, 'charging');
-    const before = { writes: writes.length, reads: reads.length, children: children.length, timers: timers.size,
-        settings: [...settings], native: [...native.notifications], history: backend.notifications.history,
+    const before = { frames: sent.length, settings: [...settings], native: [...native.notifications], history: backend.notifications.history,
         popups: backend.notifications.popups, resolutions: [...native.resolutions], battery: backend.battery };
     let changes = 0;
     backend.subscribe(() => changes++);
     for (let index = 0; index < 20; index++) assert.deepEqual(backend.status(), expected);
-    assert.deepEqual({ writes: writes.length, reads: reads.length, children: children.length, timers: timers.size,
-        settings: [...settings], native: [...native.notifications], history: backend.notifications.history,
+    assert.deepEqual({ frames: sent.length, settings: [...settings], native: [...native.notifications], history: backend.notifications.history,
         popups: backend.notifications.popups, resolutions: [...native.resolutions], battery: backend.battery }, before);
     assert.equal(changes, 0);
     backend.dispose();
@@ -1367,7 +784,7 @@ test('status keeps notification metadata without changing the battery badge or m
 
 test('application status serializes the native status object with panel visibility and monitor', () => {
     const panelDouble = (state: Pick<DashboardPanel, 'opened' | 'connector'>): DashboardPanel => state as DashboardPanel;
-    const backend = new DashboardBackend();
+    const backend = new DashboardBackend(connect);
     const app = new DashboardApplication();
     app.backend = backend;
     app.panel = panelDouble({ opened: true, connector: 'DP-1' });
@@ -1385,212 +802,158 @@ test('notification capabilities advertise only implemented plaintext UI features
     settings.set('server-capabilites', ['action-icons', 'actions', 'body', 'body-hyperlinks', 'body-images',
         'body-markup', 'icon-static', 'persistence', 'sound']);
     const center = new NotificationCenter();
+    center.start(connect(() => {}));
     assert.deepEqual(settings.get('server-capabilites'), ['actions', 'body', 'icon-static', 'persistence']);
     center.dispose();
 });
 
-test('metrics cancel on close, never overlap, discard stale completions, reset CPU baseline', async () => {
-    let changes = 0;
-    const sampler = new MetricsSampler(() => changes++);
-    sampler.setActive(true);
-    assert.equal(reads.length, 3);
-    assert.equal(children.length, 1);
-    assert.deepEqual(children[0].argv, ['df', '-B1', '--output=used,size,pcent', '/']);
-    advance(30000);
-    assert.equal(reads.length, 3);
-    assert.equal(children.length, 1);
-    sampler.setActive(false);
-    assert.ok(reads.every(read => read.io.cancelled));
-    assert.equal(timers.size, 0);
-    assert.ok(children[0].killed);
-    const before = changes;
-    sampler.setActive(true);
-    assert.equal(reads.length, 3, 'reopen must wait for cancelled reads');
-    completeReads(); await delay();
-    assert.equal(reads.length, 3, 'new generation starts after cancellation completes');
-    completeReads(); await delay();
-    assert.equal(sampler.data.cpuPercent, -1);
-    assert.equal(sampler.data.memoryPercent, 50);
-    assert.equal(sampler.data.cpuTemperatureC, 45);
-    advance(2500);
-    completeReads('cpu 60 0 0 140'); await delay();
-    assert.equal(sampler.data.cpuPercent, 50);
-    sampler.dispose(); await delay();
-    assert.equal(timers.size, 0);
-    assert.ok(changes > before);
+test('metrics and timeout render authoritative events only; hide, reopen and EOF invalidate stale work', () => {
+    const backend = new DashboardBackend(connect);
+    assert.ok(Object.values(backend.metrics).every(v => v === -1));
+    assert.equal(sent.length, 1); assert.equal(sent[0].command.kind, 'init');
+    const values = { ...emptyMetrics(), cpuPercent: 50 };
+    backend.setActive(true); backend.setActive(true);
+    assert.deepEqual(sent.at(-1), { op: 'active', active: true, generation: 1 });
+    deliver({ event: 'metrics', generation: 1, data: values }); assert.deepEqual(backend.metrics, values);
+    backend.setActive(false); backend.setActive(true);
+    deliver({ event: 'metrics', generation: 1, data: values }); assert.deepEqual(backend.metrics, emptyMetrics());
+    let changes = 0; const unsubscribe = backend.subscribe(() => changes++);
+    backend.setScreenTimeout(30); assert.equal(changes, 0); assert.equal(backend.screenTimeoutMinutes, 0);
+    assert.deepEqual(sent.at(-1), { op: 'timeout', minutes: 30 });
+    deliver({ event: 'timeout', minutes: 30 }); assert.equal(changes, 1);
+    assert.equal(backend.status().screenTimeoutMinutes, 30);
+    const frames = sent.length;
+    for (let i = 0; i < 20; i++) backend.status();
+    assert.equal(sent.length, frames); assert.equal(changes, 1);
+    backend.setActive(false); assert.equal(backend.screenTimeoutMinutes, 30);
+    deliver({ event: 'offline' }); assert.equal(backend.screenTimeoutMinutes, 0);
+    unsubscribe(); backend.dispose(); backend.setScreenTimeout(60); assert.equal(sent.length, frames + 1);
 });
 
-test('metrics failures replace old readings with -1 and df uses explicit executable path', async () => {
-    environment.set('COREUTILS_DF', '/test/coreutils/df');
-    const sampler = new MetricsSampler(() => {});
-    sampler.setActive(true);
-    assert.equal(children[0].argv[0], '/test/coreutils/df');
-    completeReads(); children[0].finish('Used 1B-blocks Use%\n1073741824 2147483648 55%'); await delay();
-    assert.equal(sampler.data.diskPercent, 55);
-    assert.equal(sampler.data.diskUsedGiB, 1);
-    advance(30000); completeReads('', '', ''); await delay();
-    children[1].finish('bad'); await delay();
-    assert.equal(sampler.data.cpuPercent, -1);
-    assert.equal(sampler.data.memoryUsedGiB, -1);
-    assert.equal(sampler.data.diskUsedGiB, -1);
-    assert.equal(sampler.data.cpuTemperatureC, -1);
-    sampler.dispose();
+test('native operations require both the selected token and the current Astal instance', () => {
+    const backend = new DashboardBackend(connect);
+    assert.equal(native.ignore_timeout, true); assert.equal(native.default_timeout, -1);
+    native.send(new NativeNotification(1, 'old')); const old = sent.at(-1).command;
+    native.send(new NativeNotification(1, 'new', { resident: true })); const current = sent.at(-1).command;
+    assert.notEqual(old.token, current.token); assert.equal(current.row.summary, 'new');
+    const op = (operation: string, token: string) => deliver({ event: 'native', native: 1, token, operation, argument: 'open' });
+    for (const operation of ['expire', 'dismiss', 'invoke']) op(operation, old.token);
+    assert.deepEqual(native.resolutions, []); assert.deepEqual(native.invoked, []);
+    op('invoke', current.token); assert.deepEqual(native.invoked, [[1, 'open']]);
+    op('dismiss', current.token); assert.deepEqual(native.resolutions, [[1, 2]]);
+    assert.deepEqual(sent.at(-1).command, { kind: 'resolved', token: current.token, reason: 2 });
+    native.notifications = [new NativeNotification(2, 'pending')]; backend.notifications.clearNotifications();
+    assert.equal(sent.at(-1).command.kind, 'clear'); assert.equal(sent.at(-1).command.instances[0].native, 2);
+    backend.dispose();
 });
 
-test('notification replacement, hover reset, critical exemption and native close semantics', () => {
-    const center = new NotificationCenter();
-    assert.equal(native.ignore_timeout, true);
-    assert.equal(native.default_timeout, -1);
-    native.send(new NativeNotification(1, 'Original', { expire_timeout: 600 }));
-    const key = center.history[0].id;
-    advance(400);
-    native.send(new NativeNotification(1, 'Replacement', { expire_timeout: 600, time: 102 }));
-    assert.equal(center.history[0].id, key);
-    advance(300);
-    assert.equal(center.popups.length, 1);
-    center.setHovered(key, true); advance(1000);
-    assert.equal(center.popups.length, 1);
-    center.setHovered(key, false); advance(599);
-    assert.equal(center.popups.length, 1);
-    advance(1);
-    assert.equal(center.popups.length, 0);
-    assert.equal(center.history[0].closed, true);
-    assert.deepEqual(center.history[0].actions, []);
-    center.invokeNotificationAction(key, 'open');
-    assert.equal(native.invoked.length, 0);
-    native.send(new NativeNotification(2, 'Critical', { urgency: 2, expire_timeout: 50 }));
-    advance(10000);
-    assert.equal(center.popups.length, 1);
-    native.resolve(2, 3);
-    assert.equal(center.history.length, 1);
-    center.dismissNotification(key);
-    assert.equal(center.history.length, 0);
-    center.dispose();
+test('unexpected EOF is fatal once, drops pending restores, and ignores later helper events', async () => {
+    let fatal = 0;
+    native.notifications = [new NativeNotification(1, 'pending')];
+    const backend = new DashboardBackend(connect, () => { fatal++; });
+    deliver({ event: 'offline' }); deliver({ event: 'offline' });
+    deliver({ event: 'toggle' }); native.send(new NativeNotification(2, 'after EOF'));
+    await Promise.resolve();
+    assert.equal(fatal, 1); assert.equal(native.dont_disturb, false);
+    assert.deepEqual(sent.map(f => f.command.kind), ['init']);
+    backend.dispose(); await Promise.resolve(); assert.equal(fatal, 1);
 });
 
-test('notification controls find the matching live row without acting on archived or missing rows', () => {
-    const center = new NotificationCenter();
-    native.send(new NativeNotification(1, 'First', { expire_timeout: 10 }));
-    const first = center.history[0].id;
-    native.send(new NativeNotification(2, 'Second', { resident: true }));
-    const second = center.history[0].id;
-    native.send(new NativeNotification(3, 'Third', { expire_timeout: 20 }));
-    const third = center.history[0].id;
-
-    center.setHovered(third, true);
-    advance(20);
-    assert.equal(center.history.find(row => row.id === first)!.closed, true);
-    assert.ok(native.get_notification(3), 'hover must pause only the matching live notification');
-    center.invokeNotificationAction(first, 'open');
-    center.invokeNotificationAction('missing', 'open');
-    center.invokeNotificationAction(second, 'missing');
-    assert.deepEqual(native.invoked, []);
-    center.invokeNotificationAction(second, 'open');
-    assert.deepEqual(native.invoked, [[2, 'open']]);
-
-    native.send(new NativeNotification(2, 'Replacement', { resident: true, actions: [{ id: 'reply', label: 'Reply' }] }));
-    center.invokeNotificationAction(second, 'open');
-    center.invokeNotificationAction(second, 'reply');
-    assert.deepEqual(native.invoked, [[2, 'open'], [2, 'reply']]);
-    center.dismissNotification(second);
-    assert.equal(native.get_notification(2), undefined);
-    assert.deepEqual(native.resolutions, [[1, 1], [2, 2]]);
-    center.dismissNotification(first);
-    center.dismissNotification('missing');
-    center.setHovered('missing', true);
-    assert.deepEqual(center.history.map(row => row.id), [third]);
-    center.setHovered(third, false);
-    advance(20);
-    assert.equal(native.get_notification(3), undefined);
-    center.dispose();
+test('planned disposal suppresses both transport close and a still-deferred fatal callback', async () => {
+    for (const pending of [false, true]) {
+        let fatal = 0;
+        const backend = new DashboardBackend(connect, () => { fatal++; });
+        if (pending) deliver({ event: 'offline' });
+        backend.dispose(); deliver({ event: 'offline' });
+        await Promise.resolve(); assert.equal(fatal, 0);
+    }
 });
 
-test('DND is native truth, clears popups, releases transients and mirrors archive', () => {
-    files.set(archivePath, JSON.stringify({ version: 1, dnd: true, history: [] }));
-    settings.set('dont-disturb', false);
-    const center = new NotificationCenter();
-    assert.equal(center.dnd, false, 'explicit native false must override archive true');
-    native.send(new NativeNotification(1, 'Normal'));
-    native.send(new NativeNotification(2, 'Transient', { transient: true }));
-    assert.equal(center.history.length, 1);
-    assert.equal(center.popups.length, 2);
-    native.dont_disturb = true;
-    assert.equal(center.popups.length, 0);
-    assert.equal(native.get_notification(2), undefined);
-    native.send(new NativeNotification(3, 'Quiet transient', { transient: true }));
-    assert.equal(native.get_notification(3), undefined);
-    assert.equal(center.history.length, 1);
-    assert.equal(JSON.parse(files.get(archivePath)!).dnd, true);
-    assert.ok(writes.every(write => write.flags === 3));
-    center.toggleDnd();
-    assert.equal(native.dont_disturb, false);
-    assert.equal(center.popups.length, 0);
-    center.dispose();
+test('synchronous init pipe failure quits the assigned notification owner and main returns failure', async t => {
+    let attempts = 0, quits = 0, writes = 0;
+    const input = { close() {}, write_all_async() { writes++; throw new Error('closed'); } };
+    t.mock.method(Gio.Subprocess, 'new', () => {
+        attempts++;
+        return { wait_async() {}, get_stdin_pipe: () => input,
+            get_stdout_pipe: () => ({ read_bytes_async() {}, close() {} }) };
+    });
+    const quit = mockGI.Astal.Application.prototype.quit;
+    t.mock.method(mockGI.Astal.Application.prototype, 'quit', function(this: InstanceType<typeof DashboardApplication>) {
+        quits++; assert.equal(this.backend?.offline, true, 'quit must run after assignment');
+        quit.call(this); assert.equal(this.backend, undefined, 'shutdown must dispose the owner');
+    });
+    t.mock.method(console, 'error', () => {});
+    native.notifications = [new NativeNotification(1, 'pending')];
+    assert.equal(await main(), 1); native.send(new NativeNotification(2, 'after shutdown'));
+    assert.deepEqual([attempts, quits, writes], [1, 1, 1]);
 });
 
-test('reload retains ordering/actions and never pops up restored native notifications', () => {
-    let center = new NotificationCenter();
-    native.send(new NativeNotification(1, 'First'));
-    native.send(new NativeNotification(2, 'Second'));
-    native.send(new NativeNotification(1, 'Replacement later', { time: 105 }));
-    const keys = center.history.map(row => row.id);
-    center.dispose();
-    center = new NotificationCenter();
-    assert.equal(center.popups.length, 0);
-    assert.deepEqual(center.history.map(row => row.id), keys);
-    assert.ok(center.history.every(row => !row.closed && row.actions.length === 1));
-    center.invokeNotificationAction(keys[0], 'open');
-    assert.deepEqual(native.invoked, [[1, 'open']]);
-    center.clearNotifications();
-    center.dispose();
-    // Simulate a native cache flush which had not yet observed clear.
-    native.notifications = [new NativeNotification(2, 'Second')];
-    center = new NotificationCenter();
-    assert.deepEqual(center.history, []);
-    assert.deepEqual(center.popups, []);
-    assert.equal(native.notifications.length, 0);
-    center.dispose();
+test('offline during connect or init cannot start native restoration or keep signal work alive', () => {
+    for (const phase of ['connect', 'init']) {
+        const frames: any[] = [];
+        native.notifications = [new NativeNotification(1, 'old')];
+        const backend = new DashboardBackend(receive => {
+            if (phase === 'connect') receive({ event: 'offline' });
+            return { send(frame) { frames.push(frame); receive({ event: 'offline' }); },
+                whenDrained() { assert.fail('Scheduled restore after EOF'); }, dispose() {} };
+        });
+        native.send(new NativeNotification(2, 'new'));
+        assert.deepEqual(frames.map(f => f.command.kind), phase === 'init' ? ['init'] : []);
+        assert.deepEqual(backend.notifications.history, []); backend.dispose();
+    }
 });
 
-test('archive migration is once-only, supports override paths and survives corrupt restore', () => {
-    environment.set('NOTIFICATION_HISTORY', '/test/custom/history.json');
-    environment.set('LEGACY_NOTIFICATION_HISTORY', '/test/legacy.json');
-    files.set('/test/legacy.json', JSON.stringify({ version: 1, dnd: true, history: [
-        { id: 'quickshell:1', app: 'App', summary: 'Legacy', body: '', actions: [{ identifier: 'open', text: 'Open' }] },
-    ] }));
-    let center = new NotificationCenter();
-    assert.equal(center.dnd, true);
-    assert.equal(center.history.length, 1);
-    assert.equal(center.history[0].closed, true);
-    assert.deepEqual(center.history[0].actions, []);
-    center.clearNotifications(); center.dispose();
-    center = new NotificationCenter();
-    assert.deepEqual(center.history, []);
-    center.dispose();
-    files.set('/test/custom/history.json', '{broken');
-    center = new NotificationCenter();
-    assert.deepEqual(center.history, []);
-    assert.equal(JSON.parse(files.get('/test/custom/history.json')!).version, 1);
-    center.dispose();
+test('stalled pipe restores over 512 large native snapshots without starving controls or overflowing either limit', t => {
+    const count = 600, large = '\u0001'.repeat(15000);
+    let snapshots = 0, total = 0, largest = 0, closes = 0;
+    native.notifications = Array.from({ length: count }, (_, i) => {
+        const obj = new NativeNotification(i, large, { app_name: large, image: large,
+            actions: Array.from({ length: 16 }, () => ({ id: large.slice(0, 128), label: large })) });
+        Object.defineProperty(obj, 'body', { get() { snapshots++; return large; } });
+        return obj;
+    });
+    let complete: (() => void) | undefined;
+    const frames: { name: string; id?: number; token?: string; restore?: boolean }[] = [];
+    const input = {
+        write_all_async(bytes: Uint8Array, _priority: number, _io: any, cb: Function) {
+            assert.equal(complete, undefined, 'only one outstanding write');
+            const f = JSON.parse(new TextDecoder().decode(bytes));
+            frames.push({ name: f.command?.kind ?? f.op, id: f.command?.native, token: f.command?.token, restore: f.command?.restore });
+            largest = Math.max(largest, bytes.length); total += bytes.length;
+            complete = () => { complete = undefined; cb(input, bytes.length); };
+        }, write_all_finish(n: number) { return [true, n]; }, close() { closes++; },
+    };
+    t.mock.method(Gio.Subprocess, 'new', () => ({ wait_async() {}, get_stdin_pipe: () => input,
+        get_stdout_pipe: () => ({ read_bytes_async() {}, close() {} }) }));
+    const warn = t.mock.method(console, 'warn', () => {});
+    let transport: InstanceType<typeof DashboardPipe>;
+    const backend = new DashboardBackend(cb => transport = new DashboardPipe(cb));
+    assert.equal(snapshots, 0, 'stalled init must not marshal any bodies'); complete!();
+    assert.equal(snapshots, 1);
+    transport!.send({ op: 'notify', command: { kind: 'action', id: '', token: '', identifier: 'x'.repeat(131072) } });
+    assert.equal(warn.mock.callCount(), 1);
+    backend.setScreenTimeout(10);
+    complete!(); assert.equal(frames.at(-1)!.name, 'timeout'); assert.equal(snapshots, 1);
+    // Signals overtaking bulk restore still preserve instance history and order.
+    native.send(new NativeNotification(599, 'replacement')); native.resolve(598, 3);
+    while (complete) complete();
+    const restored = frames.filter(f => f.restore);
+    assert.deepEqual(restored.map(f => f.id).sort((a,b) => a! - b!), Array.from({ length: count }, (_, i) => i));
+    const replaced = frames.filter(f => f.id === 599);
+    assert.deepEqual(replaced.map(f => f.restore), [true, false]); assert.notEqual(replaced[0].token, replaced[1].token);
+    assert.equal(frames.find(f => f.name === 'resolved')!.token, restored.find(f => f.id === 598)!.token);
+    assert.equal(snapshots, count); assert.ok(total > 8 * 1024 * 1024); assert.ok(largest <= 131072);
+    assert.equal(closes, 0); assert.deepEqual(backend.notifications.popups, []);
+    backend.dispose(); assert.equal(closes, 1);
 });
 
-test('limits release evicted native objects and unpause evicted hovered popups', () => {
-    const center = new NotificationCenter();
-    native.send(new NativeNotification(1, 'Hovered oldest', { expire_timeout: 500 }));
-    center.setHovered(center.popups[0].id, true);
-    for (let id = 2; id <= 6; id++) native.send(new NativeNotification(id, `Row ${id}`));
-    assert.equal(center.popups.length, 5);
-    advance(500);
-    assert.equal(native.get_notification(1), undefined, 'evicted popup remained hovered forever');
-    for (let id = 7; id <= 202; id++) native.send(new NativeNotification(id, `Row ${id}`));
-    assert.equal(center.history.length, 200);
-    assert.equal(center.history[0].summary, 'Row 202');
-    assert.equal(native.get_notification(2), undefined);
-    center.clearNotifications();
-    for (let id = 300; id <= 305; id++) native.send(new NativeNotification(id, `Transient ${id}`, { transient: true }));
-    assert.equal(center.history.length, 0);
-    assert.equal(center.popups.length, 5);
-    assert.equal(native.get_notification(300), undefined);
-    center.dispose();
-    assert.equal(timers.size, 0);
+test('reattach snapshots do not synthesize notified signals; seed cannot override a newly explicit native preference', async () => {
+    native.notifications = [new NativeNotification(1, 'restored')];
+    const backend = new DashboardBackend(connect);
+    await Promise.resolve();
+    assert.equal(sent[0].command.user, false); assert.equal(sent[1].command.restore, true);
+    assert.equal(backend.status().popupCount, 0);
+    settings.set('dont-disturb', false); deliver({ event: 'seed', value: true });
+    assert.equal(native.dont_disturb, false); assert.deepEqual(sent.at(-1).command, { kind: 'seedAck', value: false });
+    backend.dispose();
 });

@@ -3,6 +3,34 @@
 Desktop panels and utilities for this NixOS/Niri configuration. Panels use
 AGS/Astal GTK4; Rust helpers handle custom policy and background tasks.
 
+## Architecture rule for all custom scripts
+
+**AGS/Astal owns the frontend and Astal-native integrations; Rust owns custom
+backend functionality.** This rule applies to every repository-maintained panel
+and utility, not just the media panel.
+
+- Use JavaScript/TypeScript with AGS/Astal for UI rendering, widget bindings,
+  interaction handling, and configuring or controlling features already exposed
+  by Astal's native libraries.
+- Implement backend features that Astal does **not** natively provide in Rust.
+  This includes custom discovery or protocol adapters, system-data collection,
+  business/policy decisions, processing, persistence, and external integrations.
+  Using Gio/GLib, raw D-Bus, or subprocesses from JavaScript does not make such
+  custom backend logic an Astal-native feature.
+- Keep the frontend-to-Rust boundary thin: send requests, receive results, manage
+  cancellation, and present state or errors. Do not duplicate backend decisions
+  or maintain a second backend implementation in the frontend.
+- Display formatting, widget/layout calculations, UI lifecycle, CSS reloading,
+  and temporary interaction state belong in the frontend. Nix and launch wrappers
+  may package, configure, and start components; custom backend work still belongs
+  in Rust. Packaged upstream tools and build-time asset generators are not locally
+  maintained runtime backends. Stateful runtime helpers are not exempt merely
+  because their source is embedded in Nix.
+
+The [architecture audit](#architecture-audit) records how the current source meets
+this boundary. Keep new features on the same side of it; frontend bindings and
+Rust helpers must be rebuilt and deployed together when their protocol changes.
+
 ## Quick access
 
 | Feature | Open / use | Extra Waybar controls |
@@ -84,9 +112,10 @@ Sources: [`scripts/media-control/`](scripts/media-control/).
 - Artwork, title, artist/author, album, playback controls, seeking, and a source
   selector. Source selection is shared with Waybar even while the panel is closed.
 - Play/pause actions group duplicate sources; Next/Previous target one publisher.
-- Volume is **0–100%**, using the player’s volume when writable, otherwise a safely
-  matched audio stream. Ambiguous streams are not guessed; system output volume
-  is never used as a fallback. Mute requires a matched stream and preserves volume.
+- The backend volume API is **0–100%**, using the player’s volume when writable,
+  otherwise a safely matched audio stream. Ambiguous streams are not guessed;
+  system output volume is never a fallback. Mute requires a matched stream and
+  preserves volume. The Media UI has no volume or mute controls; use Audio.
 - Physical output selection belongs in Audio, not Media.
 - Badge requests reuse the current grouping model. Native changes still update it;
   silent audio-property changes are checked at most every five seconds during badge polling.
@@ -211,10 +240,23 @@ packaged in [`scripts/packages.nix`](scripts/packages.nix) and configured in
 
 ## Helpers & commands
 
-`audio-control` handles audio compatibility policy, pairing prompts, and HID++
-battery publication. `media-control` handles source grouping, stream matching,
-artwork, and credits. `clipboard-custom` handles capture and stored history.
-[`panel-launcher`](scripts/panel-launcher/) starts packaged panels and forwards commands.
+The resident Rust backends are `audio-control panel`, `media-control service`,
+`panel-launcher backend network`, and `panel-launcher backend dashboard`.
+They own custom policy, state reconciliation, timing, persistence, and guarded
+action orchestration. Frontends render their results, marshal native snapshots,
+and execute only Astal-native operations selected by Rust. NetworkManager’s
+custom D-Bus integration lives entirely in Rust.
+
+`clipboard-custom` owns capture, history, linked-source observation, deletion
+validation, and Trash; its `observe` command streams invalidations while the panel
+is open. GDK clipboard ownership stays in the resident GUI. Media artwork/credits
+and the stateless `media-control model` command also remain available.
+
+[`panel-launcher`](scripts/panel-launcher/) still starts packaged panels and
+forwards their commands. Its `runtime` subcommands provide the focused-monitor
+query, input-method toggle, calendar toggle, parent-death supervisor, and cloud
+sync/watch orchestration. `media-control playerctl <command>` owns the media-key
+playing-first selection policy; `mediactl` is only an exec wrapper.
 
 The six panel commands are `audio-panel`, `network-panel`, `media-panel`,
 `dashboard-panel`, `clipboard-panel`, and `app-launcher`. Each supports
@@ -239,4 +281,54 @@ its panel does **not** load edited checkout code. Packaging/services live in
 For checks, run `npm test` in a panel’s source directory or
 `cargo test --manifest-path scripts/Cargo.toml --locked` from the repository root.
 Normal frontend tests use simulated services; native/UI test modes have additional
-runtime and isolation requirements documented in their test files.
+runtime and isolation requirements documented in their test files. To check all
+Rust components, use `cargo test --manifest-path scripts/Cargo.toml --workspace --locked`
+and `cargo clippy --manifest-path scripts/Cargo.toml --workspace --all-targets --locked -- -D warnings`.
+
+Deploy the migrated frontend bundles and Rust helpers together. In particular,
+Niri’s input-toggle binding hot-reloads but needs the updated installed
+`panel-launcher`; restarting an old panel does not install the new subcommands.
+
+## Architecture audit
+
+All audited repository-maintained runtime components now follow the rule in
+source. **Compliant** describes the implementation boundary, not activation of
+the edited checkout or a guarantee that every live desktop scenario has been
+tested. UI state, display formatting, layout, CSS loading, native Astal calls,
+and bounded/cancellable Rust IPC remain frontend responsibilities.
+
+| Script / component | Status | Backend boundary |
+| --- | --- | --- |
+| Audio & Bluetooth | Compliant | Rust [`policy.rs`](scripts/audio-control/rust-custom/src/policy.rs) and [`audio.rs`](scripts/audio-control/rust-custom/src/audio.rs) own route reliability, selection transactions/rollback, stream-pin resets, discovery ownership, and post-pair trust/connect orchestration. JS captures raw Astal state and executes guarded native calls. |
+| Network | Compliant | Rust’s `network_backend` in [`main.rs`](scripts/panel-launcher/src/main.rs) owns NetworkManager discovery/reconciliation, connection construction/activation, profile deletion, credential authorization, and scans. JS consumes opaque context stamps and action descriptors, renders state, and manages UI cancellation. |
+| Media | Compliant | Rust [`model.rs`](scripts/media-control/rust-custom/src/model.rs) owns custom policy, selection, timing, and action transactions; [`playback.rs`](scripts/media-control/rust-custom/src/playback.rs) owns private-player recovery. Artwork, credits, and media-key selection also live in Rust. |
+| Dashboard & notifications | Compliant | Rust’s `dashboard_backend` in [`main.rs`](scripts/panel-launcher/src/main.rs) owns telemetry, idle-sleep persistence/supervision, notification archive migration/retention, popup admission, and lifetime/hover policy. TS retains GTK rendering and guarded Astal notification operations/settings. |
+| Clipboard | Compliant | Rust [`main.rs`](scripts/clipboard/rust-custom/src/main.rs) and [`store.rs`](scripts/clipboard/rust-custom/src/store.rs) own source classification/observation, deletion guards, Trash, history, and payload selection. Native GDK clipboard publication and UI editing remain in JS. |
+| App launcher | Compliant | Rust’s `runtime focused-output` handles the external Niri query. AstalApps lookup/launch and GTK monitor/layout handling stay in [`backend.js`](scripts/app-launcher/backend.js). |
+| Screenshot OCR | Compliant | Backend is in [`scripts/ocr-screenshot/`](scripts/ocr-screenshot/). |
+| Countdown timer | Compliant | Backend is in [`scripts/waybar-timer/`](scripts/waybar-timer/). |
+| Cropped webcam | Compliant | Backend is in [`scripts/webcam-crop/`](scripts/webcam-crop/). |
+| Panel launcher | Compliant | Launch/request handling and shared backend/runtime entrypoints are in [`scripts/panel-launcher/`](scripts/panel-launcher/). |
+| Shared stylesheet loader | Frontend-only | [`scripts/live-style.js`](scripts/live-style.js) loads and reloads UI styles. |
+| Node type metadata | Not runtime code | [`scripts/node-types/`](scripts/node-types/) contains development type dependencies. |
+| Build/update entrypoints | Configuration/build glue | `switch.sh`, `update.sh`, ordinary Nix build/launch wiring, and [`themes/patch-daemon.py`](themes/patch-daemon.py) are build-time/configuration tools, not custom runtime backends. |
+
+Locally maintained runtime helpers outside `scripts/` have been migrated too:
+
+- [`niri/default.nix`](niri/default.nix): `mediactl` only execs the Rust media-key
+  selector. Native player listing order and playing-first fallback are preserved;
+  bounded queries never retry a playback command.
+- [`home/cloud.nix`](home/cloud.nix): static rclone settings/excludes stay in Nix;
+  Rust chooses resync from state and debounces filesystem events before scheduling
+  sync. The packaged upstream inotify/rclone tools are adapters, not shell policy.
+- [`scripts/packages.nix`](scripts/packages.nix): calendar PID validation,
+  signalling, retries/fallback, and parent-death supervision are Rust runtime
+  subcommands. The wrappers only pass configuration and exec them; the local C
+  supervisor has been removed.
+- [`niri/config.kdl`](niri/config.kdl): the English/Chinese input binding invokes
+  Rust’s `runtime input-toggle`, rather than inspecting state in inline shell.
+
+These source migrations do not activate themselves. Use the rebuild/switch step
+above to install the matching helpers, bundles, and configuration. Packaged
+upstream applications and build-time UI asset/type generators remain outside the
+custom runtime-backend rule.
