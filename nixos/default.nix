@@ -11,14 +11,13 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   # One canonical checkout path for every live-linked desktop configuration.
   repoRoot = "/home/raina/System";
-  repoPackages = import ../scripts/packages.nix {
+  repoPackages = import ../scripts {
     inherit pkgs kernelPackages repoRoot;
     craneLib = inputs.crane.mkLib pkgs;
     agsPackage = inputs.ags.packages.${system}.ags;
     astalPackages = inputs.astal.packages.${system};
     niriWindowButtonsSrc = inputs.niri-window-buttons;
     waybarYcalSrc = inputs.waybar-ycal;
-    dolphinGdriveActionsSrc = inputs.dolphin-gdrive-actions;
   };
 in
 {

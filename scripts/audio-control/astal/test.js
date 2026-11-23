@@ -14,6 +14,7 @@ const { tmpdir } = await import('node:os');
 const { join } = await import('node:path');
 const { default: vm } = await import('node:vm');
 const logic = await import('./logic.js');
+const { loadIPC } = await import('../../ipc-test-loader.js');
 const {
     parseRequest, nativeEvent, rawEqual, waybarStatus,
 } = await import('./logic.js');
@@ -539,13 +540,14 @@ function helperFixture(data, { written = 4096, exited = true, successful = true 
     const child = { get_stdout_pipe: () => stdout, get_stdin_pipe: () => stdin, get_successful: () => successful,
         wait_async(cancellable, callback) { assert.equal(cancellable, null); status.waits++; waitCallback = callback; if (exited) exit(); },
         wait_finish() { status.reaped++; }, force_exit() { status.killed++; exit(); } };
-    const Helper = vm.runInNewContext(`${completeSource}\nHelperProcess;`, {
+    const context = {
         GLib: { ...timers.GLib, Bytes: class { constructor(data) { this.data = data; } } },
         Gio: { Cancellable: class { cancel() { status.cancelled++; } },
             SubprocessFlags: { STDOUT_PIPE: 1, STDERR_MERGE: 2, STDIN_PIPE: 4 },
             Subprocess: { new(argv, flags) { assert.deepEqual(argv, ['fake']); assert.equal(flags, 7); return child; } } },
         TextDecoder, TextEncoder, Uint8Array,
-    });
+    };
+    const Helper = vm.runInNewContext(`${completeSource}\nHelperProcess;`, { ...context, ...loadIPC(context.GLib, context.Gio) });
     const worker = new Helper(['fake'], { onChunk: text => chunks.push(text), onExit: error => exits.push(error) });
     return { worker, chunks, exits, writes, status, stdout, stdin, exit, advance: milliseconds => timers.advance(milliseconds) };
 }
@@ -2415,10 +2417,9 @@ function owner(name) {
 const entry = GLib.getenv('AUDIO_PANEL_CONFIG');
 const source = read(entry);
 const boundary = source.indexOf('\nfunction monitorFor(');
-assert(boundary > source.indexOf('export class AudioPanel'), 'Production extraction boundary exists');
+assert(boundary > source.indexOf('class AudioPanel'), 'Production extraction boundary exists');
 const extracted = source.slice(0, boundary)
-    .replace(/^import .*;[ \t]*$/gm, '')
-    .replace('export class AudioPanel', 'class AudioPanel');
+    .replace(/^import .*;[ \t]*$/gm, '');
 assert(!/^\s*(?:import|export)\b/m.test(extracted), 'All imports/exports stripped before evaluation');
 const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib', 'loadPanelStyle',
     `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib, loadPanelStyle);

@@ -2,3 +2,6 @@
 name = "waybar-timer"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+clap.workspace = true

@@ -29,7 +29,12 @@ let
 in
 {
   imports = [
-    (import ./panels.nix).module
+    repoPackages.mediaPanel.homeManagerModule
+    repoPackages.audioPanel.homeManagerModule
+    repoPackages.dashboardPanel.homeManagerModule
+    repoPackages.networkPanel.homeManagerModule
+    repoPackages.appLauncher.homeManagerModule
+    repoPackages.clipboardPanel.homeManagerModule
     ./waybar
   ];
 
@@ -60,6 +65,7 @@ in
     brightnessctl # Screen brightness control
     xrandr # Display layout info for X11 apps
     mediactl
+    repoPackages.panelLauncher
   ];
 
   # fcitx5 theme: cyberpunk color palette matching Waybar and the panels.

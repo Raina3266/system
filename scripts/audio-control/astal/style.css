@@ -50,7 +50,6 @@ window.audio-panel {
     margin: 0;
 }
 
-.audio-panel button.control-button.selected { background: transparent; border-color: var(--ap_red); }
 .audio-panel button.control-button:hover {
     border-color: var(--ap_yellow);
     border-width: 1.5px;

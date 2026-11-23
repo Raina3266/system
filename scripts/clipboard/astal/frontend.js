@@ -416,7 +416,7 @@ export function createApplication() {
     return new Application({ instance_name: 'clipboard-panel' });
 }
 
-export function main() {
+function main() {
     Gtk.init();
     GLib.unsetenv('LD_PRELOAD');
     const app = createApplication();

@@ -16,7 +16,8 @@ pub(crate) use clipboard_unit_tests;
 mod capture;
 mod store;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, Read};
@@ -58,20 +59,37 @@ fn run() -> Result<Value> {
     )
 }
 
-fn run_cli(args: &[String]) -> Result<()> {
-    match args {
-        [command] if command == "capture" => capture::capture_clipboard(),
-        [command] if command == "observe" => observer::run(),
-        [command, flag, mime] if command == "store" && flag == "--mime" => {
+#[derive(Parser)]
+#[command(
+    name = "clipboard-custom",
+    version,
+    about = "Clipboard capture and history policy",
+    after_help = "Without arguments, read one JSON history request from standard input.",
+    disable_help_subcommand = true
+)]
+enum Cli {
+    /// Capture the current Wayland clipboard.
+    Capture,
+    /// Stream history and linked-source invalidations as JSONL.
+    Observe,
+    /// Store clipboard data read from standard input.
+    Store {
+        #[arg(long, value_name = "MIME", allow_hyphen_values = true)]
+        mime: String,
+    },
+}
+
+fn run_cli(command: Cli) -> Result<()> {
+    match command {
+        Cli::Capture => capture::capture_clipboard(),
+        Cli::Observe => observer::run(),
+        Cli::Store { mime } => {
             ensure!(
                 !mime.is_empty() && !mime.contains(['\n', '\r', '\0']),
                 "Invalid MIME type"
             );
-            capture::store_stdin(mime)
+            capture::store_stdin(&mime)
         }
-        _ => bail!(
-            "Usage: clipboard-custom [capture | store --mime MIME | observe]; without arguments, read one JSON request"
-        ),
     }
 }
 
@@ -80,11 +98,11 @@ fn run_cli(args: &[String]) -> Result<()> {
 mod observer {
     use super::store::Store;
     use anyhow::{Context, Result, ensure};
+    use inotify::{Inotify, WatchDescriptor, WatchMask};
     use std::collections::{BTreeMap, BTreeSet};
-    use std::ffi::{CString, OsStr, OsString};
-    use std::fs::File;
-    use std::io::{Read, Write};
-    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::ffi::{OsStr, OsString};
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Component, Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -92,15 +110,18 @@ mod observer {
     const DEBOUNCE: Duration = Duration::from_millis(100);
     const SELF_EVENTS: u32 =
         libc::IN_DELETE_SELF | libc::IN_MOVE_SELF | libc::IN_UNMOUNT | libc::IN_IGNORED;
-    const MASK: u32 = libc::IN_MODIFY
-        | libc::IN_CLOSE_WRITE
-        | libc::IN_CREATE
-        | libc::IN_DELETE
-        | libc::IN_MOVED_FROM
-        | libc::IN_MOVED_TO
-        | libc::IN_ATTRIB
-        | SELF_EVENTS
-        | libc::IN_ONLYDIR;
+    // Keep the Linux mask, including UNMOUNT/IGNORED bits not named by WatchMask.
+    const MASK: WatchMask = WatchMask::from_bits_retain(
+        libc::IN_MODIFY
+            | libc::IN_CLOSE_WRITE
+            | libc::IN_CREATE
+            | libc::IN_DELETE
+            | libc::IN_MOVED_FROM
+            | libc::IN_MOVED_TO
+            | libc::IN_ATTRIB
+            | SELF_EVENTS
+            | libc::IN_ONLYDIR,
+    );
 
     #[derive(Clone, Debug, Default, PartialEq)]
     struct Interest {
@@ -200,19 +221,15 @@ mod observer {
     }
 
     struct Watcher {
-        fd: File,
+        inotify: Inotify,
         root: PathBuf,
-        directories: BTreeMap<PathBuf, i32>,
-        interests: BTreeMap<i32, Interest>,
+        directories: BTreeMap<PathBuf, WatchDescriptor>,
+        interests: BTreeMap<WatchDescriptor, Interest>,
     }
     impl Watcher {
         fn new(root: &Path) -> Result<Self> {
-            // SAFETY: inotify_init1 has no pointer arguments; successful return
-            // is a fresh descriptor transferred exactly once to File.
-            let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
-            ensure!(fd >= 0, "Cannot create clipboard filesystem observer");
             Ok(Self {
-                fd: unsafe { File::from_raw_fd(fd) },
+                inotify: Inotify::init().context("Cannot create clipboard filesystem observer")?,
                 root: normalized(&std::path::absolute(root)?),
                 directories: BTreeMap::new(),
                 interests: BTreeMap::new(),
@@ -223,14 +240,11 @@ mod observer {
             let mut changed_sources = false;
             let mut retained = BTreeMap::new();
             for (directory, interest) in &wanted {
-                let descriptor = self.directories.get(directory).copied().or_else(|| {
-                    let name = CString::new(directory.as_os_str().as_bytes()).ok()?;
-                    // SAFETY: name is NUL-terminated and fd is owned by self.
-                    let descriptor = unsafe {
-                        libc::inotify_add_watch(self.fd.as_raw_fd(), name.as_ptr(), MASK)
-                    };
-                    (descriptor >= 0).then_some(descriptor)
-                });
+                let descriptor = self
+                    .directories
+                    .get(directory)
+                    .cloned()
+                    .or_else(|| self.inotify.watches().add(directory, MASK).ok());
                 if let Some(descriptor) = descriptor {
                     let previous = self.interests.get(&descriptor);
                     changed_sources |= interest
@@ -244,22 +258,19 @@ mod observer {
                     // on the next history snapshot, never on a polling timer.
                 }
             }
-            let kept: BTreeSet<_> = retained.values().copied().collect();
+            let kept: BTreeSet<_> = retained.values().cloned().collect();
             for descriptor in self
                 .interests
                 .keys()
                 .filter(|descriptor| !kept.contains(descriptor))
             {
-                // SAFETY: removing an owned inotify watch; stale queued events
-                // are ignored because its interests are removed below.
-                unsafe {
-                    libc::inotify_rm_watch(self.fd.as_raw_fd(), *descriptor);
-                }
+                // Stale queued events are ignored once interests are removed.
+                let _ = self.inotify.watches().remove(descriptor.clone());
             }
             self.directories = retained;
             self.interests.clear();
             for (directory, descriptor) in &self.directories {
-                let entry = self.interests.entry(*descriptor).or_default();
+                let entry = self.interests.entry(descriptor.clone()).or_default();
                 let interest = &wanted[directory];
                 entry.history |= interest.history;
                 entry.files.extend(interest.files.iter().cloned());
@@ -271,52 +282,32 @@ mod observer {
             let mut bytes = [0_u8; 64 * 1024];
             // Bound one drain even under heavy unrelated directory traffic.
             for _ in 0..16 {
-                let count = match self.fd.read(&mut bytes) {
-                    Ok(count) => count,
+                let events = match self.inotify.read_events(&mut bytes) {
+                    Ok(events) => events,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        anyhow::bail!("Clipboard filesystem observer closed")
+                    }
                     Err(_) => anyhow::bail!("Cannot read clipboard filesystem events"),
                 };
-                ensure!(count > 0, "Clipboard filesystem observer closed");
-                let mut offset = 0;
-                while offset + size_of::<libc::inotify_event>() <= count {
-                    // SAFETY: the fixed header fits in initialized bytes. The
-                    // byte buffer need not have inotify_event's alignment.
-                    let event = unsafe {
-                        bytes
-                            .as_ptr()
-                            .add(offset)
-                            .cast::<libc::inotify_event>()
-                            .read_unaligned()
-                    };
-                    let start = offset + size_of::<libc::inotify_event>();
-                    let end = start + event.len as usize;
-                    ensure!(end <= count, "Invalid clipboard filesystem event");
-                    let name = &bytes[start..end];
-                    let name = OsStr::from_bytes(
-                        &name[..name
-                            .iter()
-                            .position(|byte| *byte == 0)
-                            .unwrap_or(name.len())],
-                    );
-                    if event.mask & libc::IN_Q_OVERFLOW != 0 {
+                for event in events {
+                    let mask = event.mask.bits();
+                    if mask & libc::IN_Q_OVERFLOW != 0 {
                         changes.merge(Changes {
                             history: true,
                             prune: true,
                         });
                     } else if let Some(interest) = self.interests.get(&event.wd) {
-                        changes.merge(classify(interest, event.mask, name));
-                        if event.mask & SELF_EVENTS != 0 {
+                        changes.merge(classify(interest, mask, event.name.unwrap_or_default()));
+                        if mask & SELF_EVENTS != 0 {
                             self.directories
                                 .retain(|_, descriptor| *descriptor != event.wd);
                             self.interests.remove(&event.wd);
                             // A moved directory still has an active kernel watch.
-                            unsafe {
-                                libc::inotify_rm_watch(self.fd.as_raw_fd(), event.wd);
-                            }
+                            let _ = self.inotify.watches().remove(event.wd);
                         }
                     }
-                    offset = end;
                 }
             }
             Ok(changes)
@@ -324,7 +315,7 @@ mod observer {
         fn wait(&self, timeout: i32, output: Option<std::os::fd::RawFd>) -> Result<()> {
             let mut fds = [
                 libc::pollfd {
-                    fd: self.fd.as_raw_fd(),
+                    fd: self.inotify.as_raw_fd(),
                     events: libc::POLLIN,
                     revents: 0,
                 },
@@ -392,9 +383,20 @@ mod observer {
 }
 
 fn main() {
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    if !args.is_empty() {
-        if let Err(error) = run_cli(&args) {
+    if std::env::args_os().len() > 1 {
+        let cli = Cli::try_parse().unwrap_or_else(|error| {
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) {
+                error.exit();
+            }
+            // Clap diagnostics can echo arbitrary arguments, including private MIME
+            // values. Render only static usage and retain the CLI's failure status.
+            eprintln!("clipboard-custom: {}", Cli::command().render_usage());
+            std::process::exit(1);
+        });
+        if let Err(error) = run_cli(cli) {
             // Never echo clipboard bytes, MIME lists, or subprocess stderr.
             eprintln!("clipboard-custom: {error}");
             std::process::exit(1);

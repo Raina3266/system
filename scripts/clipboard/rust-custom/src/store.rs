@@ -1,6 +1,7 @@
 //! Transactional clipboard history shared by background capture and the GTK panel.
 //! The on-disk version, digests and retention limits remain backward compatible.
 use anyhow::{Context, Result, ensure};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs::{self, OpenOptions};
@@ -123,10 +124,6 @@ impl Drop for PendingImages {
     }
 }
 
-unsafe extern "C" {
-    fn flock(fd: i32, operation: i32) -> i32;
-}
-
 impl Store {
     pub fn discover() -> Result<Self> {
         if let Some(path) = std::env::var_os("CLIPBOARD_DATA_DIR").filter(|p| !p.is_empty()) {
@@ -184,7 +181,7 @@ impl Store {
             .mode(0o600)
             .open(self.root.join("history.lock"))?;
         // SAFETY: the File owns this descriptor for the whole transaction.
-        if unsafe { flock(lock.as_raw_fd(), if write { 2 } else { 1 }) } == -1 {
+        if unsafe { libc::flock(lock.as_raw_fd(), if write { 2 } else { 1 }) } == -1 {
             return Err(std::io::Error::last_os_error()).context("Lock clipboard history");
         }
         // Closing `lock` releases flock, including on every error path.
@@ -614,8 +611,7 @@ fn ensure_draft(history: &mut History) -> u64 {
     id
 }
 
-fn trim(history: &mut History) -> Vec<Item> {
-    let mut removed = Vec::new();
+fn trim(history: &mut History) {
     let mut excess = history
         .items
         .iter()
@@ -624,7 +620,7 @@ fn trim(history: &mut History) -> Vec<Item> {
         .saturating_sub(100);
     for index in (0..history.items.len()).rev() {
         if excess > 0 && history.items[index].image_file.is_some() {
-            removed.push(history.items.remove(index));
+            history.items.remove(index);
             excess -= 1;
         }
     }
@@ -634,9 +630,8 @@ fn trim(history: &mut History) -> Vec<Item> {
             .iter()
             .rposition(|item| !item.draft())
             .unwrap_or(history.items.len() - 1);
-        removed.push(history.items.remove(index));
+        history.items.remove(index);
     }
-    removed
 }
 
 fn take_id(history: &mut History) -> Result<u64> {
@@ -677,17 +672,16 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn file_uri(path: &Path) -> String {
-    let mut uri = String::from("file://");
-    for &byte in path.as_os_str().as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
-            uri.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            let _ = write!(uri, "%{byte:02X}");
-        }
-    }
-    uri.push('\n');
-    uri
+    const PATH_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~')
+        .remove(b'/');
+    format!(
+        "file://{}\n",
+        percent_encode(path.as_os_str().as_bytes(), PATH_ENCODE_SET)
+    )
 }
 
 #[path = "migration.rs"]

@@ -5,11 +5,9 @@
 //! discovery and D-Bus recovery, stream ownership, artwork, and credit lookups.
 //! The resident service has no GUI; the pure model command remains available.
 
-// The explicit integration target owns all tests; keep library test builds valid.
 #[cfg(test)]
-macro_rules! media_unit_tests {
-    ($module:ident) => {};
-}
+#[macro_use]
+mod unit_tests;
 
 pub mod artwork;
 pub mod credit;

@@ -6,16 +6,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
-unsafe extern "C" {
-    fn renameat2(
-        oldfd: i32,
-        old: *const std::ffi::c_char,
-        newfd: i32,
-        new: *const std::ffi::c_char,
-        flags: u32,
-    ) -> i32;
-}
-
 struct Staging(PathBuf);
 impl Drop for Staging {
     fn drop(&mut self) {
@@ -61,7 +51,7 @@ fn exclusive_lock(path: &Path) -> Result<fs::File> {
         .mode(0o600)
         .open(path)?;
     // SAFETY: file owns the descriptor until the returned File is dropped.
-    if unsafe { flock(file.as_raw_fd(), 2) } == -1 {
+    if unsafe { libc::flock(file.as_raw_fd(), 2) } == -1 {
         return Err(std::io::Error::last_os_error()).context("Lock clipboard migration");
     }
     Ok(file)
@@ -143,7 +133,8 @@ impl Store {
         let destination = CString::new(root.as_os_str().as_bytes())?;
         // SAFETY: both C strings live through the call. Linux RENAME_NOREPLACE
         // atomically publishes the complete copy without replacing ANY target.
-        let result = unsafe { renameat2(-100, source.as_ptr(), -100, destination.as_ptr(), 1) };
+        let result =
+            unsafe { libc::renameat2(-100, source.as_ptr(), -100, destination.as_ptr(), 1) };
         if result == -1 {
             let error = std::io::Error::last_os_error();
             if error.kind() != std::io::ErrorKind::AlreadyExists {

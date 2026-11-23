@@ -4,6 +4,7 @@
   config,
   lib,
   pkgs,
+  inputs,
   repoPackages,
   ...
 }:
@@ -158,12 +159,53 @@ let
       remote = "Dga${spec.name}";
     }) driveActionSpecs;
   };
+  dolphinGdriveActionsPackage = pkgs.python3Packages.buildPythonApplication {
+    pname = "dolphin-gdrive-actions";
+    version = "0-unstable-${inputs.dolphin-gdrive-actions.shortRev}";
+    pyproject = true;
+    src = inputs.dolphin-gdrive-actions;
+
+    build-system = [ pkgs.python3Packages.setuptools ];
+
+    doCheck = true;
+    nativeCheckInputs = [ pkgs.python3Packages.pytestCheckHook ];
+    enabledTestPaths = [ "tests" ];
+    preCheck = ''
+      # Keep configuration and integration tests away from real user data.
+      export HOME="$(mktemp -d)"
+      export XDG_CONFIG_HOME="$HOME/.config"
+      export XDG_DATA_HOME="$HOME/.local/share"
+      export XDG_CACHE_HOME="$HOME/.cache"
+      export RCLONE_CONFIG="$XDG_CONFIG_HOME/rclone/rclone.conf"
+    '';
+    pythonImportsCheck = [ "dolphin_gdrive_actions" ];
+
+    # Only the installed CLI needs these tools; tests mock external services.
+    makeWrapperArgs = [
+      "--prefix"
+      "PATH"
+      ":"
+      (lib.makeBinPath [
+        pkgs.rclone
+        pkgs.wl-clipboard
+        pkgs.libnotify
+      ])
+    ];
+
+    meta = {
+      description = "Google Drive actions for rclone mounts";
+      homepage = "https://github.com/sktk4/dolphin-gdrive-actions";
+      license = lib.licenses.mit;
+      mainProgram = "dga";
+    };
+  };
+
   # Upstream accepts remote names, not remote subpaths. Private aliases retain
   # the existing connection without editing the credential-bearing rclone config.
   dolphinGdriveActions = pkgs.symlinkJoin {
     name = "dolphin-gdrive-actions";
     meta.mainProgram = "dga";
-    paths = [ repoPackages.dolphinGdriveActions ];
+    paths = [ dolphinGdriveActionsPackage ];
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       wrapProgram "$out/bin/dga" \

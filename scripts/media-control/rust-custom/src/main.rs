@@ -5,7 +5,38 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, io};
 
+use clap::{CommandFactory, Parser, Subcommand};
 use media_control::{AppResult, artwork, credit, model};
+
+#[derive(Parser)]
+#[command(
+    name = "media-control",
+    about = "Headless media backend for the Astal panel"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<MediaCommand>,
+}
+
+#[derive(Subcommand)]
+enum MediaCommand {
+    /// Resident media backend; JSONL IPC on stdin/stdout
+    Service,
+    /// JSONL native snapshots on stdin; JSONL models/actions on stdout
+    Model,
+    /// JSON track metadata on stdin; one JSON credit reply on stdout
+    Credit,
+    /// Send one playerctl command to the first playing player, or the first player
+    Playerctl {
+        #[arg(value_name = "command", value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        command: String,
+    },
+    /// Find local cover art for a xesam:url or absolute filesystem path
+    Artwork {
+        #[arg(value_name = "xesam-url|path")]
+        url: String,
+    },
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -15,40 +46,16 @@ fn main() {
 }
 
 fn run() -> AppResult<()> {
-    let mut args = env::args().skip(1);
-    match args.next().as_deref() {
-        Some("model") => model::serve(),
-        Some("service") => model::serve_service(),
-        Some("credit") => credit::print_credit(),
-        Some("playerctl") => {
-            let command = args
-                .next()
-                .filter(|arg| !arg.is_empty())
-                .ok_or_else(|| io::Error::other("a playerctl command is required"))?;
-            if args.next().is_some() {
-                return Err(io::Error::other("expected one playerctl command").into());
-            }
-            media_key(&command)
-        }
-        Some("artwork") => {
-            let url = args
-                .next()
-                .ok_or_else(|| io::Error::other("track URL is missing"))?;
-            artwork::print_path(&url)
-        }
-        None | Some("help" | "--help" | "-h") => {
-            println!(
-                "media-control\n\n\
-                 Usage:\n  \
-                 media-control service (resident media backend; JSONL IPC)\n  \
-                 media-control model (JSONL native snapshots on stdin)\n  \
-                 media-control credit (JSON track metadata on stdin)\n  \
-                 media-control playerctl <command> (playing-first media keys)\n  \
-                 media-control artwork <xesam-url|path>"
-            );
+    match Cli::parse().command {
+        Some(MediaCommand::Model) => model::serve(),
+        Some(MediaCommand::Service) => model::serve_service(),
+        Some(MediaCommand::Credit) => credit::print_credit(),
+        Some(MediaCommand::Playerctl { command }) => media_key(&command),
+        Some(MediaCommand::Artwork { url }) => artwork::print_path(&url),
+        None => {
+            Cli::command().print_help()?;
             Ok(())
         }
-        Some(command) => Err(io::Error::other(format!("unknown command {command:?}")).into()),
     }
 }
 
@@ -169,6 +176,28 @@ fn media_key(command: &str) -> AppResult<()> {
 #[cfg(test)]
 mod media_key_tests {
     use super::*;
+
+    #[test]
+    fn cli_preserves_native_commands_verbatim_without_a_fixed_command_allowlist() {
+        Cli::command().debug_assert();
+        for command in [
+            "play-pause",
+            "next",
+            "previous",
+            "custom-native-command",
+            "metadata title",
+        ] {
+            let cli = Cli::try_parse_from(["media-control", "playerctl", command]).unwrap();
+            let Some(MediaCommand::Playerctl { command: parsed }) = cli.command else {
+                panic!("expected playerctl subcommand");
+            };
+            assert_eq!(parsed, command);
+        }
+        let cli = Cli::try_parse_from(["media-control", "playerctl", "--", "--version"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(MediaCommand::Playerctl { command }) if command == "--version")
+        );
+    }
 
     #[test]
     fn media_keys_choose_first_playing_and_preserve_native_fallback_order() {

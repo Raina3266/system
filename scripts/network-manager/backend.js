@@ -1,5 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import { LineDecoder, writeBytes } from '../ipc.js';
 
 const PRIORITY = GLib.PRIORITY_DEFAULT;
 const CHUNK_BYTES = 8192;
@@ -11,7 +12,6 @@ const REQUEST_TIMEOUT_MS = 30000;
 const START_TIMEOUT_MS = 10000;
 const WRITE_TIMEOUT_MS = 5000;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
 const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const owns = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -32,7 +32,7 @@ export class NetworkBackend {
         this._queue = [];
         this._queuedBytes = 0;
         this._writing = null;
-        this._buffer = new Uint8Array();
+        this._frames = new LineDecoder(MAX_LINE_BYTES);
         this._startupTimer = this._writeTimer = 0;
         this._failure = null;
         this._clearState();
@@ -56,7 +56,7 @@ export class NetworkBackend {
         const generation = ++this._generation;
         try {
             this._io = new Gio.Cancellable();
-            this._child = this._launch([GLib.getenv('PANEL_BACKEND') || 'panel-launcher', 'backend', 'network'],
+            this._child = this._launch([GLib.getenv('NETWORK_CONTROL') || 'network-control'],
                 Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
             this._input = this._child.get_stdin_pipe();
             this._output = this._child.get_stdout_pipe();
@@ -178,33 +178,18 @@ export class NetworkBackend {
             this._failed(failure('The network backend stopped accepting requests.', 'timeout'));
             return GLib.SOURCE_REMOVE;
         });
-        const next = offset => {
-            if (generation !== this._generation) return;
-            if (offset === frame.data.length) {
+        writeBytes(this._input, frame.data, this._io, {
+            chunkBytes: CHUNK_BYTES, active: () => generation === this._generation,
+            onDone: () => {
                 if (this._writeTimer) GLib.source_remove(this._writeTimer);
                 this._writeTimer = 0;
                 this._queuedBytes -= frame.data.length;
                 frame.data.fill(0);
                 this._writing = null;
                 this._write();
-                return;
-            }
-            try {
-                this._input.write_bytes_async(new GLib.Bytes(frame.data.slice(offset, offset + CHUNK_BYTES)), PRIORITY, this._io,
-                    (stream, result) => {
-                        try {
-                            const written = stream.write_bytes_finish(result);
-                            if (generation !== this._generation) return;
-                            if (!Number.isInteger(written) || written <= 0 || written > Math.min(CHUNK_BYTES, frame.data.length - offset))
-                                throw new Error();
-                            next(offset + written);
-                        } catch (_) {
-                            if (generation === this._generation) this._failed(failure('Could not write to the network backend.'));
-                        }
-                    });
-            } catch (_) { this._failed(failure('Could not write to the network backend.')); }
-        };
-        next(0);
+            },
+            onError: () => this._failed(failure('Could not write to the network backend.')),
+        });
     }
 
     _read(generation) {
@@ -215,20 +200,11 @@ export class NetworkBackend {
                     const bytes = stream.read_bytes_finish(result).toArray();
                     if (generation !== this._generation) return;
                     if (!bytes.length) throw failure('The network backend closed its output.');
-                    const joined = new Uint8Array(this._buffer.length + bytes.length);
-                    joined.set(this._buffer);
-                    joined.set(bytes, this._buffer.length);
-                    let start = 0;
-                    for (let index = 0; index < joined.length; index++) {
-                        if (joined[index] !== 10) continue;
-                        if (index - start > MAX_LINE_BYTES) throw new Error();
-                        this._receive(JSON.parse(decoder.decode(joined.subarray(start, index))));
-                        if (generation !== this._generation) return;
-                        start = index + 1;
-                    }
-                    if (joined.length - start > MAX_LINE_BYTES) throw new Error();
-                    this._buffer = joined.slice(start);
-                    this._read(generation);
+                    this._frames.push(bytes, line => {
+                        this._receive(JSON.parse(line));
+                        return generation === this._generation;
+                    });
+                    if (generation === this._generation) this._read(generation);
                 } catch (_) {
                     if (generation === this._generation) this._failed(failure('The network backend returned an invalid or incomplete response.'));
                 }
@@ -280,7 +256,8 @@ export class NetworkBackend {
         this._queue = [];
         this._queuedBytes = 0;
         this._writing = null;
-        this._buffer = new Uint8Array();
+        this._frames.clear();
+        this._frames = new LineDecoder(MAX_LINE_BYTES);
         this._clearState();
     }
 

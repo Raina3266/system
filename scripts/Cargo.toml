@@ -2,7 +2,9 @@
 members = [
   "audio-control/rust-custom",
   "clipboard/rust-custom",
+  "dashboard/rust-custom",
   "media-control/rust-custom",
+  "network-manager/rust-custom",
   "ocr-screenshot",
   "panel-launcher",
 
@@ -14,6 +16,9 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive", "string"] }
 
 # These crates sit blocked on a subprocess or a D-Bus round trip, so LTO buys
 # little at runtime and costs plenty at build time. Keep strip.

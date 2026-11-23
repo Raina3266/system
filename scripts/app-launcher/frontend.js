@@ -352,7 +352,7 @@ export const LauncherApplication = GObject.registerClass({ GTypeName: 'Cyberpunk
         }
     });
 
-export async function main() {
+async function main() {
     Gtk.init();
     GLib.unsetenv('LD_PRELOAD');
     const app = new LauncherApplication({ instance_name: 'app-launcher' });

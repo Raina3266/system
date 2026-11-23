@@ -1,5 +1,79 @@
 //! Every test in the script, one mod per feature and one test per sub-feature.
 
+mod cli {
+    use clap::{Parser, error::ErrorKind};
+
+    use crate::{Action, Cli};
+
+    fn parse(arguments: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("waybar-timer").chain(arguments.iter().copied()))
+    }
+
+    #[test]
+    fn no_arguments_default_to_the_daemon() {
+        assert_eq!(
+            parse(&[]).unwrap().action.unwrap_or_default(),
+            Action::Daemon
+        );
+    }
+
+    #[test]
+    fn parses_commands_and_the_stop_alias() {
+        for (argument, expected) in [
+            ("daemon", Action::Daemon),
+            ("status", Action::Status),
+            ("add", Action::Add),
+            ("toggle", Action::Toggle),
+            ("clear", Action::Clear),
+            ("stop", Action::Clear),
+        ] {
+            assert_eq!(parse(&[argument]).unwrap().action, Some(expected));
+        }
+    }
+
+    #[test]
+    fn generated_help_covers_commands_and_aliases() {
+        for argument in ["-h", "--help", "help"] {
+            let error = parse(&[argument]).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+            assert_eq!(error.exit_code(), 0);
+            let help = error.to_string();
+            assert!(help.contains("Usage: waybar-timer"));
+            for command in ["daemon", "status", "add", "toggle", "clear", "stop"] {
+                assert!(help.contains(command), "missing command: {command}");
+            }
+        }
+    }
+
+    #[test]
+    fn subcommands_and_aliases_have_help_without_running_them() {
+        for arguments in [
+            &["help", "add"][..],
+            &["add", "--help"],
+            &["daemon", "-h"],
+            &["stop", "--help"],
+        ] {
+            let error = parse(arguments).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+            assert_eq!(error.exit_code(), 0);
+            assert!(error.to_string().contains("Usage: waybar-timer"));
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_commands_flags_and_extra_arguments() {
+        for arguments in [
+            &["unknown"][..],
+            &["--unknown"],
+            &["add", "extra"],
+            &["status", "--unknown"],
+            &["clear", "stop"],
+        ] {
+            assert_eq!(parse(arguments).unwrap_err().exit_code(), 2);
+        }
+    }
+}
+
 mod model {
     use std::time::{Duration, Instant};
 

@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gdk from 'gi://Gdk?version=4.0';
+import { communicate } from '../../ipc.js';
 
 const helper = () => GLib.getenv('CLIPBOARD_CUSTOM_HELPER') || 'clipboard-custom';
 
@@ -15,45 +16,27 @@ export class ClipboardBackend {
         this.observer = null;
         this.disposed = false;
     }
-    request(message) {
-        if (this.disposed) return Promise.reject(new Error('Clipboard panel is shutting down.'));
-        return new Promise((resolve, reject) => {
-            let process;
-            try {
-                process = Gio.Subprocess.new([helper()],
-                    Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
-            } catch (error) { reject(error); return; }
-            const cancellable = new Gio.Cancellable();
-            this.processes.add(process);
-            this.cancellables.add(cancellable);
-            let timedOut = false;
-            let timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10000, () => {
-                timer = 0;
-                timedOut = true;
-                cancellable.cancel();
-                process.force_exit();
-                return GLib.SOURCE_REMOVE;
+    async request(message) {
+        if (this.disposed) throw new Error('Clipboard panel is shutting down.');
+        const input = JSON.stringify(message), cancellable = new Gio.Cancellable();
+        this.cancellables.add(cancellable);
+        try {
+            const stdout = await communicate([helper()], {
+                input, cancellable, flags: Gio.SubprocessFlags.STDERR_SILENCE,
+                onSpawn: process => this.processes.add(process),
+                onSettled: process => { this.processes.delete(process); this.cancellables.delete(cancellable); },
+                errors: { failed: 'Clipboard history helper failed.',
+                    timeout: 'Clipboard history request timed out. Reopen the panel to check its result.' },
             });
-            process.communicate_utf8_async(JSON.stringify(message), cancellable, (source, result) => {
-                if (timer) GLib.source_remove(timer);
-                this.processes.delete(process);
-                this.cancellables.delete(cancellable);
-                try {
-                    const [, stdout] = source.communicate_utf8_finish(result);
-                    if (this.disposed) throw new Error('Clipboard panel is shutting down.');
-                    if (timedOut) throw new Error('Clipboard history request timed out. Reopen the panel to check its result.');
-                    if (!source.get_successful()) throw new Error('Clipboard history helper failed.');
-                    const reply = JSON.parse(stdout);
-                    if (reply.error) throw new Error(reply.error);
-                    // Optional observer setup must never reject a committed save.
-                    if (this.watching) this.watch();
-                    resolve(reply);
-                } catch (error) {
-                    reject(this.disposed ? new Error('Clipboard panel is shutting down.')
-                        : timedOut ? new Error('Clipboard history request timed out. Reopen the panel to check its result.') : error);
-                }
-            });
-        });
+            if (this.disposed) throw new Error('Clipboard panel is shutting down.');
+            const reply = JSON.parse(stdout);
+            if (reply.error) throw new Error(reply.error);
+            // Optional observer setup must never reject a committed save.
+            if (this.watching) this.watch();
+            return reply;
+        } catch (error) {
+            throw this.disposed ? new Error('Clipboard panel is shutting down.') : error;
+        }
     }
     watch() {
         if (this.disposed) return;

@@ -1147,7 +1147,7 @@ async function viewTests(test, assert) {
     test('clipboard status retains its tooltip metadata contract while open and closed', async () => {
         let respond;
         const createApplication = new Function('GObject', 'Astal', 'AstalIO',
-            source.slice(source.indexOf('export function createApplication('), source.indexOf('export function main(')).replace('export ', '')
+            source.slice(source.indexOf('export function createApplication('), source.indexOf('\nfunction main(')).replace('export ', '')
             + '\nreturn createApplication;')({ registerClass: value => value }, { Application: class {} }, {
                 write_sock(connection, response, callback) { respond(JSON.parse(response)); callback(null, {}); },
                 write_sock_finish() {},
@@ -1594,9 +1594,15 @@ async function backendTests(test, assert) {
     const { registerHooks } = await import('node:module');
     let state;
     class Cancellable {
-        cancel() { this.cancelled = true; }
+        connect(callback) { this.callback = callback; return 1; }
+        disconnect() { this.callback = null; }
+        cancel() { this.cancelled = true; this.callback?.(); }
         is_cancelled() { return Boolean(this.cancelled); }
     }
+    const pipe = () => ({
+        closed: false, is_closed() { return this.closed; }, has_pending() { return false; },
+        close_async(priority, cancellable, callback) { this.closed = true; callback(this, {}); }, close_finish() {},
+    });
     const gi = {
         'gi://Gio': {
             Cancellable,
@@ -1604,7 +1610,7 @@ async function backendTests(test, assert) {
             Subprocess: { new: (args, flags) => {
                 if (state.failSpawn) throw new Error('Cannot start helper');
                 const child = {
-                    args, flags, exits: 0,
+                    args, flags, exits: 0, input: pipe(), output: pipe(),
                     communicate_utf8_async(input, cancellable, callback) {
                         state.requests.push({ args, input: JSON.parse(input), cancellable, child,
                             finish: (reply = { items: [] }, error = null) => callback(child, { reply, error }) });
@@ -1613,8 +1619,11 @@ async function backendTests(test, assert) {
                         if (result.error) throw result.error;
                         return [true, JSON.stringify(result.reply)];
                     },
+                    wait_async(cancellable, callback) { assert.equal(cancellable, null); this.wait = callback; },
+                    wait_finish() { this.reaped = true; },
                     get_successful() { return true; },
-                    get_stdout_pipe() { return this; },
+                    get_stdin_pipe() { return this.input; },
+                    get_stdout_pipe() { return this.output; },
                     force_exit() { this.exits++; },
                 };
                 state.spawns.push(child);
@@ -1643,6 +1652,7 @@ async function backendTests(test, assert) {
         },
         'gi://GLib': {
             PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
+            idle_add(priority, callback) { queueMicrotask(callback); return 1; },
             getenv: name => state.env[name] || null,
             timeout_add(priority, delay, callback) {
                 assert.equal(priority, 0);

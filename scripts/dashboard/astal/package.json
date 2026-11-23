@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-transform-types --test tests.ts"
+    "test": "node --experimental-transform-types --test test.ts"
   }
 }

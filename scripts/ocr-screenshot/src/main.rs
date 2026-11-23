@@ -5,13 +5,28 @@ mod ocr;
 #[cfg(test)]
 mod tests;
 
-use std::env;
 use std::fs;
 use std::process::ExitCode;
+
+use clap::{CommandFactory, Parser, Subcommand};
 
 use capture::capture_screenshot;
 use model::{Tools, Workspace};
 use ocr::{copy_to_clipboard, notify, run_ocr};
+
+/// Select a screen region, recognize its text, and copy it to the clipboard.
+#[derive(Debug, Parser)]
+#[command(name = "ocr-screenshot", disable_help_subcommand = true)]
+struct Cli {
+    #[command(subcommand)]
+    action: Option<Action>,
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+enum Action {
+    /// Show this help.
+    Help,
+}
 
 fn run() -> Result<(), String> {
     let workspace = Workspace::create()?;
@@ -29,31 +44,18 @@ fn run() -> Result<(), String> {
     notify(&tools.notify_send, &text)
 }
 
-fn print_help() {
-    println!(
-        "ocr-screenshot\n\n\
-         Select a screen region, recognize its text, and copy it to the clipboard.\n\n\
-         Usage: ocr-screenshot"
-    );
-}
-
 fn main() -> ExitCode {
-    match env::args().nth(1).as_deref() {
-        None => match run() {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("ocr-screenshot: {error}");
-                ExitCode::FAILURE
-            }
-        },
-        Some("help" | "--help" | "-h") => {
-            print_help();
-            ExitCode::SUCCESS
-        }
-        Some(argument) => {
-            eprintln!("ocr-screenshot: unexpected argument: {argument}\n");
-            print_help();
-            ExitCode::from(2)
+    let result = match Cli::parse().action {
+        None => run(),
+        Some(Action::Help) => Cli::command()
+            .print_help()
+            .map_err(|error| format!("could not print help: {error}")),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("ocr-screenshot: {error}");
+            ExitCode::FAILURE
         }
     }
 }

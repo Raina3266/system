@@ -4,9 +4,10 @@ import { beforeEach, test } from 'node:test';
 import { registerHooks, stripTypeScriptTypes } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { pathToFileURL } from 'node:url';
 
-import type { NotificationRow, Palette } from './notification.ts';
-import type { DashboardPanel } from './power.ts';
+import type { NotificationRow, Palette } from './logic.ts';
+import type { DashboardPanel } from './frontend.ts';
 
 test('notification history uses dim yellow interactions, a later dim red focus override and borderless popups', () => {
     const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
@@ -245,30 +246,34 @@ const mockGI: Record<string, any> = {
     system: { programPath: '' },
 };
 (globalThis as any)[Symbol.for('dashboard-test-gi')] = mockGI;
-const hooks = registerHooks({
-    resolve(specifier, context, next) {
-        if (specifier.startsWith('gi://') || specifier === 'system') {
-            const name = specifier === 'system' ? 'system' : specifier.slice(5).split('?')[0];
-            return { url: `dashboard-test:${name}`, shortCircuit: true };
-        }
-        return next(specifier, context);
-    },
-    load(url, context, next) {
-        if (url.startsWith('dashboard-test:')) return { format: 'module', shortCircuit: true,
-            source: `export default globalThis[Symbol.for('dashboard-test-gi')][${JSON.stringify(url.slice(15))}];` };
-        return next(url, context);
-    },
-});
+function nativeHooks() {
+    return registerHooks({
+        resolve(specifier, context, next) {
+            if (specifier.startsWith('gi://') || specifier === 'system') {
+                const name = specifier === 'system' ? 'system' : specifier.slice(5).split('?')[0];
+                return { url: `dashboard-test:${name}`, shortCircuit: true };
+            }
+            return next(specifier, context);
+        },
+        load(url, context, next) {
+            if (url.startsWith('dashboard-test:')) return { format: 'module', shortCircuit: true,
+                source: `export default globalThis[Symbol.for('dashboard-test-gi')][${JSON.stringify(url.slice(15))}];` };
+            return next(url, context);
+        },
+    });
+}
+const hooks = nativeHooks();
 const {
-    NotificationCenter, DashboardPipe, NotificationEntry, NotificationStack, invoke, iconButton,
-} = await import('./notification.ts');
+    NotificationCenter, DashboardPipe, DashboardBackend,
+} = await import('./backend.ts');
+
 const {
-    emptyMetrics,
-} = await import('./parameters.ts');
+    emptyMetrics, parseRequest, SCREEN_TIMEOUT_CHOICES,
+} = await import('./logic.ts');
 const {
-    ButtonSwitcher, DashboardApplication, DashboardBackend, DashboardPanel: DashboardPanelWidget,
-    main, parseRequest, SCREEN_TIMEOUT_CHOICES,
-} = await import('./power.ts');
+    NotificationEntry, NotificationStack, invoke, iconButton,
+    ButtonSwitcher, DashboardApplication, DashboardPanel: DashboardPanelWidget, main, isMainModule,
+} = await import('./frontend.ts');
 hooks.deregister();
 
 beforeEach(() => {
@@ -285,6 +290,101 @@ test('native doubles reject unexpected host file and process I/O', () => {
         ['Gio.File.new_for_uri', () => Gio.File.new_for_uri('file:///test/unexpected')],
         ['Gio.Subprocess.new', () => Gio.Subprocess.new(['unexpected-helper'], 0)],
     ] as const) assert.throws(action, { message: `Unexpected host I/O: ${operation}` });
+});
+
+test('GJS entry detection compares frontend.ts or bundled file identity, not just the filename', t => {
+    const previous = mockGI.system.programPath;
+    const fromURI = t.mock.method(Gio.File as any, 'new_for_uri', (uri: string) => ({
+        equal(file: { uri: string }) { return uri === file.uri; },
+    }));
+    const fromPath = t.mock.method(Gio.File as any, 'new_for_path', (path: string) => ({ uri: pathToFileURL(path).href }));
+    try {
+        assert.equal(isMainModule('file:///test/dashboard/astal/frontend.ts'), false);
+        assert.equal(fromURI.mock.callCount(), 0);
+        assert.equal(fromPath.mock.callCount(), 0);
+        for (const path of ['/test/dashboard/astal/frontend.ts', '/test/dashboard with spaces/astal/frontend.ts',
+            '/nix/store/test-dashboard/dashboard-panel.js']) {
+            mockGI.system.programPath = path;
+            const entry = pathToFileURL(path);
+            assert.equal(isMainModule(entry.href), true);
+            assert.equal(isMainModule(new URL('./backend.ts', entry).href), false);
+            assert.equal(isMainModule('file:///test/unrelated/frontend.ts'), false);
+        }
+    } finally { mockGI.system.programPath = previous; }
+});
+
+test('import-only frontend evaluation does not initialize GTK or start a notification owner even as the entry', async t => {
+    const previous = mockGI.system.programPath;
+    mockGI.system.programPath = '/test/dashboard/astal/frontend.ts';
+    environment.set('DASHBOARD_PANEL_IMPORT_ONLY', '1');
+    const fromURI = t.mock.method(Gio.File as any, 'new_for_uri', () => ({ equal: () => true }));
+    t.mock.method(Gio.File as any, 'new_for_path', () => ({}));
+    const gtk = t.mock.method(Gtk, 'init');
+    const notifd = t.mock.method(mockGI.AstalNotifd, 'get_default');
+    const battery = t.mock.method(mockGI.AstalBattery, 'get_default');
+    const profiles = t.mock.method(mockGI.AstalPowerProfiles, 'get_default');
+    const run = t.mock.method(mockGI.Astal.Application.prototype, 'runAsync');
+    const imports = nativeHooks();
+    try {
+        const frontend = await import(new URL('./frontend.ts?import-only', import.meta.url).href) as typeof import('./frontend.ts');
+        assert.equal(typeof frontend.main, 'function');
+        assert.equal(fromURI.mock.callCount(), 1, 'Exercise the positive entry-file check before the import-only guard');
+        for (const method of [gtk, notifd, battery, profiles, run]) assert.equal(method.mock.callCount(), 0);
+        assert.equal(native.ignore_timeout, false);
+        assert.equal(native.default_timeout, 42);
+        assert.deepEqual([...settings], []);
+    } finally {
+        imports.deregister();
+        mockGI.system.programPath = previous;
+        environment.delete('DASHBOARD_PANEL_IMPORT_ONLY');
+    }
+});
+
+test('backend imports only native bindings, shared Gio transport and pure logic without reapplying policy', async t => {
+    const backendURL = new URL('./backend.ts?native-boundary', import.meta.url).href;
+    const logicURL = new URL('./logic.ts?native-boundary', import.meta.url).href;
+    const allowed = new Set(['Gio', 'GLib', 'AstalBattery', 'AstalPowerProfiles', 'AstalNotifd']);
+    const notifd = t.mock.method(mockGI.AstalNotifd, 'get_default');
+    const imports = registerHooks({
+        resolve(specifier, context, next) {
+            if (context.parentURL === logicURL) assert.fail(`Pure display logic imported ${specifier}`);
+            if (context.parentURL === backendURL) {
+                if (specifier === './logic.ts') return { url: logicURL, shortCircuit: true };
+                if (specifier === '../../ipc.js') return next(specifier, context);
+                const name = specifier.startsWith('gi://') ? specifier.slice(5).split('?')[0] : specifier;
+                assert.ok(allowed.has(name), `Native backend must not depend on widgets or non-Gio I/O adapters: ${specifier}`);
+                return { url: `dashboard-test:${name}`, shortCircuit: true };
+            }
+            return next(specifier, context);
+        },
+    });
+    let backend: InstanceType<typeof DashboardBackend> | undefined;
+    try {
+        const module = await import(backendURL);
+        assert.equal(notifd.mock.callCount(), 0, 'Importing the backend must not acquire the notification owner');
+        backend = new module.DashboardBackend(connect);
+        assert.equal(notifd.mock.callCount(), 1);
+        // Deliberately cross the Rust retention/admission limits: TS must consume
+        // the authoritative arrays verbatim, not enforce another copy of policy.
+        const history = Array.from({ length: 205 }, (_, i) => row(String(i), { transient: i % 2 === 0 }));
+        const popups = history.slice(0, 6);
+        deliver({ event: 'notifications', history, popups });
+        assert.equal(backend!.notifications.history, history);
+        assert.equal(backend!.notifications.popups, popups);
+        deliver({ event: 'timeout', minutes: 77 });
+        assert.equal(backend!.screenTimeoutMinutes, 77);
+        assert.equal(backend!.status().historyCount, history.length);
+        assert.equal(backend!.status().popupCount, popups.length);
+        backend!.dispose();
+        const count = sent.length;
+        native.send(new NativeNotification(1, 'after disposal'));
+        power.active_profile = 'power-saver'; power.emit('notify::active-profile');
+        assert.equal(sent.length, count);
+        assert.equal(backend!.activeProfile, 'balanced');
+    } finally {
+        backend?.dispose();
+        imports.deregister();
+    }
 });
 
 // Widget tests supply authoritative events explicitly, not a second policy implementation.
@@ -306,23 +406,23 @@ const palette: Palette = {
 };
 
 test('dashboard palette defines scoped CSS variables and preserves palette validation', () => {
-    const source = readFileSync(new URL('./notification.ts', import.meta.url), 'utf8');
-    const definition = source.match(/export function loadTheme\([^]*?\n\}/)?.[0];
+    const source = readFileSync(new URL('./frontend.ts', import.meta.url), 'utf8');
+    const definition = source.match(/function loadTheme\([^]*?\n\}/)?.[0];
     assert.ok(definition);
     let contents = JSON.stringify({ ...palette, accent: '#123ABC', bad_key: '#112233', invalid: 'red' });
     const reads: string[] = [];
     const styles: { entry: string; definitions: string; label: string }[] = [];
     const provider = {};
-    const loadTheme = runInNewContext(stripTypeScriptTypes(definition.replace('export ', '')) + '\nloadTheme;', {
+    const loadTheme = runInNewContext(stripTypeScriptTypes(definition) + '\nloadTheme;', {
         read(path: string) { reads.push(path); return contents; },
         loadPanelStyle(style: typeof styles[number]) { styles.push(style); return provider; },
     });
-    const result = loadTheme('/dashboard/power.ts', '/dashboard/palette.json');
+    const result = loadTheme('/dashboard/astal/frontend.ts', '/dashboard/palette.json');
     assert.deepEqual(reads, ['/dashboard/palette.json']);
     assert.equal(JSON.stringify(result.palette), contents);
     assert.equal(result.provider, provider);
     assert.equal(styles.length, 1);
-    assert.equal(styles[0].entry, '/dashboard/power.ts');
+    assert.equal(styles[0].entry, '/dashboard/astal/frontend.ts');
     assert.equal(styles[0].label, 'Dashboard');
     const definitions = styles[0].definitions;
     assert.match(definitions, /^\.dashboard-ui \{\n[^]*\n\}$/);
@@ -339,11 +439,11 @@ test('dashboard palette defines scoped CSS variables and preserves palette valid
     assert.match(css, /color-mix\(in srgb, var\(--dp_pink\) 33\.3%, transparent\)/);
     for (const key of Object.keys(palette)) {
         contents = JSON.stringify({ ...palette, [key]: 'invalid' });
-        assert.throws(() => loadTheme('/dashboard/power.ts', '/dashboard/palette.json'),
+        assert.throws(() => loadTheme('/dashboard/astal/frontend.ts', '/dashboard/palette.json'),
             { message: `Invalid dashboard palette colour: ${key}` });
     }
     contents = '{';
-    assert.throws(() => loadTheme('/dashboard/power.ts', '/dashboard/palette.json'), { name: 'SyntaxError' });
+    assert.throws(() => loadTheme('/dashboard/astal/frontend.ts', '/dashboard/palette.json'), { name: 'SyntaxError' });
     assert.equal(styles.length, 1, 'Invalid palettes must not reach the stylesheet loader');
 });
 const profileChoices = [
@@ -370,12 +470,10 @@ function assertNoTooltips(widget: Widget): void {
 }
 
 test('dashboard widget sources never configure or activate visual tooltips', () => {
-    for (const file of ['power.ts', 'notification.ts', 'parameters.ts']) {
-        const source = readFileSync(new URL(file, import.meta.url), 'utf8');
-        assert.doesNotMatch(source,
-            /\b(?:tooltip[_-](?:text|markup)|has[_-]tooltip|set_tooltip(?:_\w+)?|set_has_tooltip|trigger_tooltip_query|query-tooltip)\b/,
-            file);
-    }
+    const source = readFileSync(new URL('./frontend.ts', import.meta.url), 'utf8');
+    assert.doesNotMatch(source,
+        /\b(?:tooltip[_-](?:text|markup)|has[_-]tooltip|set_tooltip(?:_\w+)?|set_has_tooltip|trigger_tooltip_query|query-tooltip)\b/,
+        'frontend.ts');
 });
 
 test('icon buttons keep optional accessible labels and callbacks without visual tooltips', () => {
@@ -912,10 +1010,35 @@ test('planned disposal suppresses both transport close and a still-deferred fata
     }
 });
 
+for (const [name, value, executable] of [
+    ['unset', undefined, 'dashboard-control'],
+    ['empty', '', 'dashboard-control'],
+    ['literal path with spaces', '/test/dashboard control/bin/dashboard-control', '/test/dashboard control/bin/dashboard-control'],
+] as const) test(`DashboardPipe routes ${name} DASHBOARD_CONTROL to one literal executable`, t => {
+    environment.set('PANEL_BACKEND', '/test/legacy panel-launcher');
+    if (value !== undefined) environment.set('DASHBOARD_CONTROL', value);
+    let inputCloses = 0, outputCloses = 0;
+    const spawn = t.mock.method(Gio.Subprocess, 'new', () => ({
+        wait_async() {}, get_stdin_pipe: () => ({ close() { inputCloses++; } }),
+        get_stdout_pipe: () => ({ read_bytes_async() {}, close() { outputCloses++; } }),
+    }));
+    const events: any[] = [];
+    const pipe = new DashboardPipe(event => events.push(event));
+    assert.deepEqual(spawn.mock.calls[0].arguments, [
+        [executable], Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE,
+    ]);
+    assert.deepEqual(events, []);
+    pipe.dispose(); pipe.dispose();
+    assert.deepEqual(events, [{ event: 'offline' }]);
+    assert.deepEqual([inputCloses, outputCloses, spawn.mock.callCount()], [1, 1, 1]);
+});
+
 test('synchronous init pipe failure quits the assigned notification owner and main returns failure', async t => {
     let attempts = 0, quits = 0, writes = 0;
     const input = { close() {}, write_all_async() { writes++; throw new Error('closed'); } };
-    t.mock.method(Gio.Subprocess, 'new', () => {
+    t.mock.method(Gio.Subprocess, 'new', (argv: string[], flags: number) => {
+        assert.deepEqual(argv, ['dashboard-control']);
+        assert.equal(flags, Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE);
         attempts++;
         return { wait_async() {}, get_stdin_pipe: () => input,
             get_stdout_pipe: () => ({ read_bytes_async() {}, close() {} }) };
@@ -966,8 +1089,12 @@ test('stalled pipe restores over 512 large native snapshots without starving con
             complete = () => { complete = undefined; cb(input, bytes.length); };
         }, write_all_finish(n: number) { return [true, n]; }, close() { closes++; },
     };
-    t.mock.method(Gio.Subprocess, 'new', () => ({ wait_async() {}, get_stdin_pipe: () => input,
-        get_stdout_pipe: () => ({ read_bytes_async() {}, close() {} }) }));
+    t.mock.method(Gio.Subprocess, 'new', (argv: string[], flags: number) => {
+        assert.deepEqual(argv, ['dashboard-control']);
+        assert.equal(flags, Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE);
+        return { wait_async() {}, get_stdin_pipe: () => input,
+            get_stdout_pipe: () => ({ read_bytes_async() {}, close() {} }) };
+    });
     const warn = t.mock.method(console, 'warn', () => {});
     let transport: InstanceType<typeof DashboardPipe>;
     const backend = new DashboardBackend(cb => transport = new DashboardPipe(cb));

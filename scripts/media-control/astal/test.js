@@ -2,6 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { badge, truncateTitle, formatTime } from './logic.js';
+import { loadIPC } from '../../ipc-test-loader.js';
 
 const viewSource = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
 const accessibleProperty = { LABEL: 'label', DESCRIPTION: 'description' };
@@ -264,8 +265,10 @@ test('the entire built media tree stays tooltip-free through source, title and c
 });
 
 test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
-    const runtime = readFileSync(new URL('../../../niri/panels.nix', import.meta.url), 'utf8');
+    const runtime = readFileSync(new URL('../../shared.nix', import.meta.url), 'utf8');
+    const recipe = readFileSync(new URL('../default.nix', import.meta.url), 'utf8');
     assert.match(runtime, /pkgs\.libavif/);
+    assert.match(recipe, /imageLoaders\s*=\s*true\s*;/);
     assert.match(viewSource, /positionTimer = GLib\.timeout_add/);
     assert.match(viewSource, /GLib\.source_remove\(this\.positionTimer\)/);
 });
@@ -765,14 +768,15 @@ describe('Media view transport feedback', () => {
 const source = readFileSync(new URL('./backend.js', import.meta.url), 'utf8')
     .replace(/^import .+;\r?$/gm, '')
     .replace(/^export /gm, '');
-const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', `'use strict';
+const factory = new Function('GLib', 'Gio', 'Mpris', 'Wp', 'badge', 'helper', 'ipc', `'use strict';
+    const { communicate, LineDecoder, writeBytes } = ipc;
     ${source}
     if (helper) runHelper = helper;
     return { NativeMedia, MediaBackend, ServiceWorker, runHelper, matchesGuard };
 `);
 
 function loadBackend({ GLib = {}, Gio = {}, Mpris = {}, Wp = {}, runHelper = null } = {}) {
-    return factory(GLib, Gio, Mpris, Wp, badge, runHelper);
+    return factory(GLib, Gio, Mpris, Wp, badge, runHelper, loadIPC(GLib, Gio));
 }
 
 class Signals {

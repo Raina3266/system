@@ -179,9 +179,7 @@ export class ClipboardModel {
         if (id === this.editor?.id) return true;
         return this.act(async () => {
             await this.commit();
-            const item = this.items.find(item => item.id === id);
-            if (!item) throw new Error('This clipboard item no longer exists.');
-            this.setEditor(item);
+            this.setEditor(this.requireItem(id));
         });
     }
     filter(query) {

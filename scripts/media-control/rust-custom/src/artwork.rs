@@ -49,19 +49,17 @@ pub(crate) fn local_path(url: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn percent_decode(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            out.push(u8::from_str_radix(value.get(index + 1..index + 3)?, 16).ok()?);
-            index += 3;
-        } else {
-            out.push(bytes[index]);
-            index += 1;
+    // percent-encoding leaves malformed escapes untouched; local URLs must fail closed.
+    for escape in value.split('%').skip(1) {
+        let hex = escape.as_bytes().get(..2)?;
+        if !hex.iter().all(u8::is_ascii_hexdigit) {
+            return None;
         }
     }
-    String::from_utf8(out).ok()
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8()
+        .ok()
+        .map(|text| text.into_owned())
 }
 
 /// A cover stored as its own file in the track's folder.

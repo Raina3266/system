@@ -1,127 +1,55 @@
 use std::env;
 use std::ffi::OsString;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+use clap::{Parser, Subcommand, builder::NonEmptyStringValueParser};
+
+/// Keep a selectable v4l2loopback webcam idle on a placeholder and switch
+/// to a centre-cropped real camera feed while applications use it.
+#[derive(Clone, Debug, Eq, PartialEq, Parser)]
+#[command(
+    name = "webcam-crop",
+    args_override_self = true,
+    disable_help_subcommand = true
+)]
 pub(crate) struct Config {
+    /// Real camera device.
+    #[arg(long, default_value = "/dev/cam-raw", value_parser = NonEmptyStringValueParser::new())]
     pub(crate) source: String,
+    /// v4l2loopback device.
+    #[arg(long, default_value = "/dev/video10", value_parser = NonEmptyStringValueParser::new())]
     pub(crate) output: String,
+    /// Input stream format.
+    #[arg(long, default_value = "mjpeg", value_parser = NonEmptyStringValueParser::new())]
     pub(crate) input_format: String,
+    /// Input width in pixels.
+    #[arg(long, default_value_t = 1280, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) input_width: u32,
+    /// Input height in pixels.
+    #[arg(long, default_value_t = 720, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) input_height: u32,
+    /// Capture/output framerate.
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) framerate: u32,
+    /// Square output size in pixels.
+    #[arg(long, default_value_t = 720, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) output_size: u32,
+    /// Release the real camera after this many idle seconds.
+    #[arg(long, default_value_t = 3)]
     pub(crate) idle_seconds: u64,
+    /// Let a consumer settle for this many seconds before switching.
+    #[arg(long, default_value_t = 2)]
     pub(crate) warmup_seconds: u64,
+    /// Active consumer polling interval in seconds.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) poll_seconds: u64,
+    #[command(subcommand)]
+    pub(crate) action: Option<Action>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            source: "/dev/cam-raw".to_owned(),
-            output: "/dev/video10".to_owned(),
-            input_format: "mjpeg".to_owned(),
-            input_width: 1280,
-            input_height: 720,
-            framerate: 30,
-            output_size: 720,
-            idle_seconds: 3,
-            warmup_seconds: 2,
-            poll_seconds: 1,
-        }
-    }
-}
-
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {
-    Run(Config),
+    /// Show this help.
     Help,
-}
-
-impl Config {
-    pub(crate) fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Action, String> {
-        let arguments: Vec<String> = arguments.into_iter().collect();
-        let mut config = Self::default();
-        let mut index = 0;
-
-        while index < arguments.len() {
-            let option = arguments[index].as_str();
-            if matches!(option, "-h" | "--help" | "help") {
-                return Ok(Action::Help);
-            }
-
-            let value = arguments
-                .get(index + 1)
-                .ok_or_else(|| format!("missing value for {option}"))?;
-
-            match option {
-                "--source" => config.source.clone_from(value),
-                "--output" => config.output.clone_from(value),
-                "--input-format" => config.input_format.clone_from(value),
-                "--input-width" => {
-                    config.input_width = parse_positive_u32(option, value)?;
-                }
-                "--input-height" => {
-                    config.input_height = parse_positive_u32(option, value)?;
-                }
-                "--framerate" => {
-                    config.framerate = parse_positive_u32(option, value)?;
-                }
-                "--output-size" => {
-                    config.output_size = parse_positive_u32(option, value)?;
-                }
-                "--idle-seconds" => {
-                    config.idle_seconds = parse_u64(option, value)?;
-                }
-                "--warmup-seconds" => {
-                    config.warmup_seconds = parse_u64(option, value)?;
-                }
-                "--poll-seconds" => {
-                    config.poll_seconds = parse_positive_u64(option, value)?;
-                }
-                _ => return Err(format!("unknown option: {option}")),
-            }
-
-            index += 2;
-        }
-
-        if config.source.is_empty() {
-            return Err("--source cannot be empty".to_owned());
-        }
-        if config.output.is_empty() {
-            return Err("--output cannot be empty".to_owned());
-        }
-        if config.input_format.is_empty() {
-            return Err("--input-format cannot be empty".to_owned());
-        }
-
-        Ok(Action::Run(config))
-    }
-}
-
-fn parse_u64(option: &str, value: &str) -> Result<u64, String> {
-    value
-        .parse::<u64>()
-        .map_err(|_| format!("invalid value for {option}: {value}"))
-}
-
-fn parse_positive_u64(option: &str, value: &str) -> Result<u64, String> {
-    let number = parse_u64(option, value)?;
-    if number == 0 {
-        Err(format!("{option} must be greater than zero"))
-    } else {
-        Ok(number)
-    }
-}
-
-fn parse_positive_u32(option: &str, value: &str) -> Result<u32, String> {
-    let number = value
-        .parse::<u32>()
-        .map_err(|_| format!("invalid value for {option}: {value}"))?;
-    if number == 0 {
-        Err(format!("{option} must be greater than zero"))
-    } else {
-        Ok(number)
-    }
 }
 
 #[derive(Clone, Debug)]

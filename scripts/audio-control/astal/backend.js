@@ -4,15 +4,9 @@ import GObject from 'gi://GObject';
 import Wp from 'gi://AstalWp';
 import Bluetooth from 'gi://AstalBluetooth';
 import { nativeEvent, rawEqual, waybarStatus } from './logic.js';
+import { closeStream, LineDecoder, writeBytes } from '../../ipc.js';
 
 const PRIORITY = GLib.PRIORITY_DEFAULT;
-
-function closeStream(stream) {
-    if (!stream || stream.is_closed() || stream.has_pending()) return;
-    stream.close_async(PRIORITY, null, (source, result) => {
-        try { source.close_finish(result); } catch (_) { /* Cancelled pipes may already be closed. */ }
-    });
-}
 
 // Transport limits apply per frame for the resident connection, not per lifetime.
 // Waiting is never cancelled: every child is still reaped.
@@ -24,8 +18,7 @@ export class HelperProcess {
 
         this.queue = [];
         this.done = this.exited = this.eof = this.writing = false;
-        this.decoder = new TextDecoder('utf-8', { fatal: true });
-        this.pendingBytes = new Uint8Array(0);
+        this.frames = new LineDecoder(1024 * 1024, { includeNewline: true, error: 'Audio helper frame is too large.' });
         try {
             this.child = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE | Gio.SubprocessFlags.STDIN_PIPE);
             this.stdout = this.child.get_stdout_pipe();
@@ -48,18 +41,9 @@ export class HelperProcess {
                 if (this.done) return;
                 const size = chunk.get_size();
 
-                const data = new Uint8Array(this.pendingBytes.length + size);
-                data.set(this.pendingBytes);
-                data.set(chunk.toArray(), this.pendingBytes.length);
-                let frameStart = 0;
-                for (let index = 0; index < data.length; index++) if (data[index] === 10) {
-                    if (index + 1 - frameStart > 1024 * 1024) throw new Error('Audio helper frame is too large.');
-                    frameStart = index + 1;
-                }
-                if (data.length - frameStart > 1024 * 1024) throw new Error('Audio helper frame is too large.');
-                const end = size ? data.lastIndexOf(10) + 1 : data.length;
-                const text = this.decoder.decode(data.subarray(0, end));
-                this.pendingBytes = data.slice(end);
+                let text = '';
+                this.frames.push(chunk.toArray(), line => { text += line; });
+                if (!size) text += this.frames.finish();
                 this.output = (this.output + text).slice(-8192);
                 if (text) this.onChunk(text);
                 if (size) this.read();
@@ -86,18 +70,11 @@ export class HelperProcess {
     write() {
         if (this.done || this.writing || !this.queue.length) return;
         this.writing = true;
-        // GUnixOutputStream may write inline; stay within PIPE_BUF.
-        this.stdin.write_bytes_async(new GLib.Bytes(this.queue[0].subarray(0, 4096)), PRIORITY, this.io, (stream, result) => {
-            try {
-                const written = stream.write_bytes_finish(result);
-                if (this.done) return;
-                if (written <= 0) throw new Error('The audio helper stopped accepting input.');
-                if (written === this.queue[0].length) this.queue.shift();
-                else this.queue[0] = this.queue[0].slice(written);
-                this.writing = false;
-                this.write();
-            } catch (error) { this.finish(error); }
-            finally { if (this.done) closeStream(stream); }
+        writeBytes(this.stdin, this.queue[0], this.io, {
+            active: () => !this.done, closeInactive: true,
+            onProgress: count => { this.queue[0] = this.queue[0].slice(count); },
+            onDone: () => { this.queue.shift(); this.writing = false; this.write(); },
+            onError: () => this.finish(new Error('The audio helper stopped accepting input.')),
         });
     }
 
@@ -152,8 +129,8 @@ export class AudioBackend {
             this.identities.set(object, identity);
         }
         const previous = this.records.get(identity.key);
-        const record = { object, type, key: identity.key, fields: { key: identity.key, type, ...fields }, holds: previous?.holds || 0, drops: previous?.drops || [], live: true };
-        this.records.set(record.key, record);
+        const record = { object, fields: { key: identity.key, type, ...fields }, holds: previous?.holds || 0, drops: previous?.drops || [], live: true };
+        this.records.set(identity.key, record);
         return record.fields;
     }
 

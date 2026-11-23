@@ -10,6 +10,8 @@ use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, ensure};
+use percent_encoding::percent_decode_str;
+use scraper::{Html, Selector};
 
 use super::store::{Captured, Store};
 
@@ -122,15 +124,11 @@ fn collect(
     }
     if let Some(mime) = preferred_uri_mime(types.lines()) {
         let bytes = read(mime)?.unwrap_or(watched);
-        let entries = file_references(
+        return Ok(file_references(
             mime,
             &decode_clipboard_text(&bytes),
             preferred_text_mime(types.lines()).unwrap_or("text/plain;charset=utf-8"),
-        );
-        if !entries.is_empty() {
-            return Ok(entries);
-        }
-        return Ok(Vec::new());
+        ));
     }
     // Never turn an arbitrary binary target into text merely because its bytes
     // happen to be UTF-8. The watch payload is used verbatim for text targets.
@@ -421,60 +419,12 @@ fn standalone_file_source(text: &str) -> Option<String> {
 }
 
 fn image_source_from_html(html: &str) -> Option<String> {
-    let lowercase = html.to_ascii_lowercase();
-    let mut offset = 0;
-    while let Some(relative_start) = lowercase[offset..].find("<img") {
-        let tag_start = offset + relative_start;
-        let tag_end = tag_start + lowercase[tag_start..].find('>')?;
-        let tag_lower = &lowercase[tag_start..tag_end];
-        let tag_original = &html[tag_start..tag_end];
-        let mut search_from = 0;
-        while let Some(relative_src) = tag_lower[search_from..].find("src") {
-            let src_start = search_from + relative_src;
-            let boundary =
-                src_start == 0 || tag_lower.as_bytes()[src_start - 1].is_ascii_whitespace();
-            let mut cursor = src_start + 3;
-            while tag_lower
-                .as_bytes()
-                .get(cursor)
-                .is_some_and(u8::is_ascii_whitespace)
-            {
-                cursor += 1;
-            }
-            if boundary && tag_lower.as_bytes().get(cursor) == Some(&b'=') {
-                cursor += 1;
-                while tag_lower
-                    .as_bytes()
-                    .get(cursor)
-                    .is_some_and(u8::is_ascii_whitespace)
-                {
-                    cursor += 1;
-                }
-                let quote = *tag_original.as_bytes().get(cursor)?;
-                let value_start = if matches!(quote, b'\'' | b'"') {
-                    cursor + 1
-                } else {
-                    cursor
-                };
-                let value_end = if matches!(quote, b'\'' | b'"') {
-                    tag_original[value_start..].find(char::from(quote))? + value_start
-                } else {
-                    tag_original[value_start..]
-                        .find(char::is_whitespace)
-                        .map(|end| value_start + end)
-                        .unwrap_or(tag_original.len())
-                };
-                if let Some(source) =
-                    source_from_value(&tag_original[value_start..value_end].replace("&amp;", "&"))
-                {
-                    return Some(source);
-                }
-            }
-            search_from = src_start + 3;
-        }
-        offset = tag_end + 1;
-    }
-    None
+    let document = Html::parse_fragment(html);
+    let selector = Selector::parse("img[src]").ok()?;
+    document
+        .select(&selector)
+        .filter_map(|image| image.value().attr("src"))
+        .find_map(source_from_value)
 }
 
 fn preferred_uri_mime<'a>(types: impl Iterator<Item = &'a str>) -> Option<&'a str> {
@@ -497,22 +447,17 @@ fn local_file_path(line: &str) -> Option<PathBuf> {
     if !encoded.starts_with('/') {
         return None;
     }
-    let mut decoded = Vec::with_capacity(encoded.len());
-    let mut bytes = encoded.bytes();
-    while let Some(byte) = bytes.next() {
-        let byte = if byte == b'%' {
-            let high = char::from(bytes.next()?).to_digit(16)?;
-            let low = char::from(bytes.next()?).to_digit(16)?;
-            ((high << 4) | low) as u8
-        } else {
-            byte
-        };
-        if byte == 0 {
-            return None;
-        }
-        decoded.push(byte);
+    // percent_decode_str preserves malformed escapes; file URIs must reject them.
+    if encoded
+        .as_bytes()
+        .split(|byte| *byte == b'%')
+        .skip(1)
+        .any(|escape| escape.len() < 2 || !escape[..2].iter().all(u8::is_ascii_hexdigit))
+    {
+        return None;
     }
-    Some(PathBuf::from(OsString::from_vec(decoded)))
+    let decoded: Vec<u8> = percent_decode_str(encoded).collect();
+    (!decoded.contains(&0)).then(|| PathBuf::from(OsString::from_vec(decoded)))
 }
 
 fn detected_image_mime(bytes: &[u8]) -> Option<&'static str> {

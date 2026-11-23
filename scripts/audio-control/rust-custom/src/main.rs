@@ -1,8 +1,35 @@
 //! Supplemental policy/agent helper. Astal owns all native controls and status.
 
-use std::{env, io};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use audio_control::{AppResult, bluetooth, policy};
+
+#[derive(Parser)]
+#[command(
+    name = "audio-control",
+    about = "Audio/Bluetooth policy and agents for the Astal panel"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<AudioCommand>,
+}
+
+#[derive(Subcommand)]
+enum AudioCommand {
+    /// Resident protocol v1: JSONL snapshots/intents, guarded native RPCs and models
+    Panel,
+    /// One JSON request on stdin; JSON result/RPC lines on stdout
+    Policy,
+    /// Pair an explicit hciN adapter and AA:BB:CC:DD:EE:FF address
+    BluetoothPair {
+        #[arg(value_name = "adapter")]
+        adapter: String,
+        #[arg(value_name = "address")]
+        address: String,
+    },
+    /// Export HID++ battery levels for bt-battery-provider.service
+    BatteryProvider,
+}
 
 #[tokio::main]
 async fn main() {
@@ -13,30 +40,16 @@ async fn main() {
 }
 
 async fn run() -> AppResult<()> {
-    let arguments: Vec<_> = env::args().skip(1).collect();
-    match arguments.first().map(String::as_str) {
-        Some("policy") if arguments.len() == 1 => policy::run(),
-        Some("panel") if arguments.len() == 1 => policy::panel::run(),
-        Some("bluetooth-pair") if arguments.len() == 3 => {
-            bluetooth::pair(&arguments[1], &arguments[2]).await
+    match Cli::parse().command {
+        Some(AudioCommand::Policy) => policy::run(),
+        Some(AudioCommand::Panel) => policy::panel::run(),
+        Some(AudioCommand::BluetoothPair { adapter, address }) => {
+            bluetooth::pair(&adapter, &address).await
         }
-        Some("battery-provider") if arguments.len() == 1 => {
-            bluetooth::battery_provider::run().await
-        }
-        None | Some("help" | "--help" | "-h") if arguments.len() <= 1 => {
-            print!(
-                "audio-control\n\nUsage:\n  \
-                audio-control panel (resident protocol v1: raw snapshots/intents, guarded native RPCs, models)\n  \
-                audio-control policy (one JSON request on stdin; JSON result/RPC lines on stdout)\n  \
-                audio-control bluetooth-pair <adapter> <address> (hciN and AA:BB:CC:DD:EE:FF)\n  \
-                audio-control battery-provider (bt-battery-provider.service)\n"
-            );
+        Some(AudioCommand::BatteryProvider) => bluetooth::battery_provider::run().await,
+        None => {
+            Cli::command().print_help()?;
             Ok(())
         }
-        Some(
-            "panel" | "policy" | "bluetooth-pair" | "battery-provider" | "help" | "--help" | "-h",
-        ) => Err(io::Error::other("invalid arguments; use audio-control --help").into()),
-        Some(command) => Err(io::Error::other(format!("unknown command {command:?}")).into()),
-        None => unreachable!(),
     }
 }

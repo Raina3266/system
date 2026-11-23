@@ -44,8 +44,8 @@ macro_rules! clipboard_unit_tests {
                 let mut watcher = Watcher::new(&fixture.0).unwrap();
                 let paths = [kept.join("old"), removed.join("file")];
                 assert!(watcher.sync(&paths).unwrap());
-                let descriptor = watcher.directories[&kept];
-                let retired = watcher.directories[&removed];
+                let descriptor = watcher.directories[&kept].clone();
+                let retired = watcher.directories[&removed].clone();
                 for _ in 0..10 { assert!(!watcher.sync(&paths).unwrap()); }
                 assert!(watcher.sync(&[kept.join("new"), added.join("file")]).unwrap());
                 assert_eq!(watcher.directories[&kept], descriptor);
@@ -156,6 +156,21 @@ macro_rules! clipboard_unit_tests {
                 watcher.wait(500, None).unwrap();
                 assert!(watcher.events().unwrap().prune);
                 assert!(!watcher.directories.contains_key(&directory));
+            }
+
+            #[test]
+            fn real_inotify_preserves_non_utf8_names_when_matching_sources() {
+                let fixture = Fixture::new();
+                let directory = fixture.directory("files");
+                let source = directory.join(OsStr::from_bytes(b"linked-\xff"));
+                let mut watcher = Watcher::new(&fixture.0).unwrap();
+                watcher.sync(std::slice::from_ref(&source)).unwrap();
+                fs::write(&source, b"source").unwrap();
+                watcher.wait(500, None).unwrap();
+                assert_eq!(watcher.events().unwrap(), Changes::default());
+                fs::remove_file(&source).unwrap();
+                watcher.wait(500, None).unwrap();
+                assert_eq!(watcher.events().unwrap(), Changes { history: false, prune: true });
             }
 
             #[test]
@@ -310,6 +325,21 @@ macro_rules! clipboard_unit_tests {
                 assert_eq!(file_uri(Path::new("/tmp/a b#c")), "file:///tmp/a%20b%23c\n");
                 assert_eq!(digest(b""), "cbf29ce484222325-0");
                 assert_eq!(digest(b"hello"), "a430d84680aabd0b-5");
+            }
+
+            #[test]
+            fn file_uri_encoding_preserves_the_exact_safe_set_for_every_path_byte() {
+                use std::ffi::OsStr;
+                for byte in 0..=u8::MAX {
+                    let bytes = [b'/', byte];
+                    let path = Path::new(OsStr::from_bytes(&bytes));
+                    let suffix = if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+                        char::from(byte).to_string()
+                    } else {
+                        format!("%{byte:02X}")
+                    };
+                    assert_eq!(file_uri(path), format!("file:///{suffix}\n"));
+                }
             }
 
             #[test]
@@ -648,8 +678,9 @@ macro_rules! clipboard_unit_tests {
                     item.image_file = Some(format!("{id}.png"));
                     history.items.insert(0, item);
                 }
-                let removed = trim(&mut history);
-                assert_eq!(removed.len(), 2099);
+                let before = history.items.len();
+                trim(&mut history);
+                assert_eq!(before - history.items.len(), 2099);
                 assert_eq!(history.items.len(), 101);
                 assert!(history.items.iter().any(Item::draft));
                 for id in 2201..=4400 {
@@ -1148,7 +1179,7 @@ macro_rules! clipboard_unit_tests {
                     .open(legacy.root.join("history.lock"))
                     .unwrap();
                 // SAFETY: lock owns the valid descriptor until explicitly dropped below.
-                assert_eq!(unsafe { flock(lock.as_raw_fd(), 2) }, 0);
+                assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), 2) }, 0);
                 let (send, receive) = std::sync::mpsc::channel();
                 let base = fixture.0.root.clone();
                 let worker = std::thread::spawn(move || {
@@ -1249,6 +1280,41 @@ macro_rules! clipboard_unit_tests {
             }
 
             #[test]
+            fn file_uri_decoding_rejects_malformed_escapes_and_nuls() {
+                for suffix in ["%", "%0", "%GG", "%0g", "%g0", "%%20", "%20%", "%FF%Z0", "%00", "a%00b", "a\0b"] {
+                    let uri = format!("file:///tmp/{suffix}");
+                    assert!(local_file_path(&uri).is_none(), "{uri:?}");
+                }
+                for suffix in ["%", "%0", "%GG", "%00", "%FF", "a+b?#c", "a&amp;b"] {
+                    let literal = format!("/tmp/{suffix}");
+                    assert_eq!(local_file_path(&literal), Some(PathBuf::from(&literal)));
+                }
+                assert_eq!(
+                    local_file_path("file:///tmp/a+b?#c/../d"),
+                    Some(PathBuf::from("/tmp/a+b?#c/../d"))
+                );
+            }
+
+            #[test]
+            fn file_uri_decoding_preserves_non_utf8_bytes_and_decodes_only_once() {
+                for byte in 1..=u8::MAX {
+                    for escape in [format!("%{byte:02X}"), format!("%{byte:02x}")] {
+                        let mut expected = b"/tmp/".to_vec();
+                        expected.push(byte);
+                        assert_eq!(
+                            local_file_path(&format!("file:///tmp/{escape}")),
+                            Some(PathBuf::from(OsString::from_vec(expected)))
+                        );
+                    }
+                }
+                assert_eq!(
+                    local_file_path("file://localhost/tmp/%2520%25FF"),
+                    Some(PathBuf::from("/tmp/%20%FF"))
+                );
+                assert!(source_from_value("file:///tmp/%FF").is_none());
+            }
+
+            #[test]
             fn literal_local_filenames_are_not_uri_or_html_decoded() {
                 for path in [
                     "/tmp/report%20final.pdf",
@@ -1281,6 +1347,57 @@ macro_rules! clipboard_unit_tests {
                     image_source_from_html("<img src='file:///tmp/a&amp;b.png'>").as_deref(),
                     Some("/tmp/a&b.png")
                 );
+            }
+
+            #[test]
+            fn html_image_sources_parse_attributes_and_decode_character_references() {
+                for (html, expected) in [
+                    ("<IMG data-src='wrong' SRC = '/tmp/a.png'>", "/tmp/a.png"),
+                    ("<img src=https://example.org/unquoted.png>", "https://example.org/unquoted.png"),
+                    ("<img alt='a > b' src='https://example.org/quoted.png'>", "https://example.org/quoted.png"),
+                    ("<img src='https://example.org/a>b.png'>", "https://example.org/a>b.png"),
+                    ("<img src='https://example.org/a?x=1&#38;y=2&#x26;z=3'>", "https://example.org/a?x=1&y=2&z=3"),
+                    ("<img src='file:///tmp/a&#32;b&amp;c.png'>", "/tmp/a b&c.png"),
+                    ("<img src='file:///tmp/a&amp;amp;b.png'>", "/tmp/a&amp;b.png"),
+                    ("<img src='https://example.org/first.png' src='https://example.org/second.png'>", "https://example.org/first.png"),
+                ] {
+                    assert_eq!(image_source_from_html(html).as_deref(), Some(expected), "{html}");
+                }
+            }
+
+            #[test]
+            fn html_image_sources_ignore_non_elements_and_similarly_named_attributes() {
+                let html = r#"
+                    <!-- <img src='https://example.org/comment.png'> -->
+                    <script>const image = "<img src='https://example.org/script.png'>";</script>
+                    <style>/* <img src='https://example.org/style.png'> */</style>
+                    <textarea><img src='https://example.org/textarea.png'></textarea>
+                    <img-other src='https://example.org/not-an-image.png'></img-other>
+                    <div title="<img src='https://example.org/attribute.png'>"></div>
+                    <img data-src='https://example.org/lazy.png' srcset='https://example.org/set.png 1x'>
+                "#;
+                assert!(image_source_from_html(html).is_none());
+                assert_eq!(
+                    image_source_from_html(&format!("{html}<img src='/tmp/real.png'>")).as_deref(),
+                    Some("/tmp/real.png")
+                );
+            }
+
+            #[test]
+            fn html_image_sources_choose_the_first_usable_source_in_document_order() {
+                let html = r#"
+                    <img><img src=''><img src='relative.png'>
+                    <img src='data:image/png;base64,AA=='><img src='javascript:alert(1)'>
+                    <img src='file://remote/tmp/a.png'><img src='file:///tmp/%GG.png'>
+                    <img src='file:///tmp/%00.png'><img src='file:///tmp/%FF.png'>
+                    <img src='https://example.org/a b.png'>
+                "#;
+                assert!(image_source_from_html(html).is_none());
+                assert_eq!(
+                    image_source_from_html(&format!("{html}<img src='/tmp/first.png'><img src='/tmp/second.png'>")).as_deref(),
+                    Some("/tmp/first.png")
+                );
+                assert!(image_source_from_html("<img src='unterminated").is_none());
             }
 
             #[test]
@@ -1641,6 +1758,122 @@ mod cli {
     }
 
     #[test]
+    fn clap_help_and_version_are_successful_without_reading_stdin_or_creating_history() {
+        use std::io::Read;
+
+        let fixture = Fixture::new();
+        for args in [
+            &["--help"][..],
+            &["-h"],
+            &["capture", "--help"],
+            &["observe", "--help"],
+            &["store", "--help"],
+            &["--version"],
+        ] {
+            let mut child = Running(fixture.command().args(args).spawn().unwrap());
+            // Keep stdin open: help/version must not enter the JSON or capture paths.
+            let input = child.0.stdin.take().unwrap();
+            assert!(
+                wait_until(|| child.0.try_wait().unwrap().is_some()),
+                "CLI waited for stdin: {args:?}"
+            );
+            drop(input);
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            child
+                .0
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut stdout)
+                .unwrap();
+            child
+                .0
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut stderr)
+                .unwrap();
+            assert!(child.0.wait().unwrap().success(), "{args:?}: {stderr}");
+            assert!(stderr.is_empty(), "{args:?}: {stderr}");
+            if args == ["--version"] {
+                assert_eq!(
+                    stdout.trim(),
+                    format!("clipboard-custom {}", env!("CARGO_PKG_VERSION"))
+                );
+            } else {
+                assert!(
+                    stdout.contains("Usage: clipboard-custom"),
+                    "{args:?}: {stdout}"
+                );
+                if args == ["--help"] || args == ["-h"] {
+                    for text in ["capture", "observe", "store", "Without arguments", "JSON"] {
+                        assert!(stdout.contains(text), "{text}: {stdout}");
+                    }
+                } else if args == ["store", "--help"] {
+                    assert!(stdout.contains("--mime <MIME>"), "{stdout}");
+                }
+            }
+        }
+        assert!(!fixture.0.join("data").exists());
+    }
+
+    #[test]
+    fn invalid_cli_arguments_do_not_expose_values_or_touch_the_store() {
+        let fixture = Fixture::new();
+        for args in [
+            &["store"][..],
+            &["store", "--mime"],
+            &["store", "--mime", "private/mime", "private-extra"],
+            &["store", "--mime", "private/mime", "--mime", "other/private"],
+            &["capture", "private-extra"],
+            &["observe", "--private-option"],
+            &["private-command"],
+            &["--private-option"],
+            &["--"],
+        ] {
+            let output = run(fixture.command(), args, b"private clipboard contents");
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+            assert!(output.stdout.is_empty());
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("Usage: clipboard-custom"),
+                "{args:?}: {stderr}"
+            );
+            assert!(!stderr.contains("private"), "{args:?}: {stderr}");
+        }
+        for mime in ["", "private/mime\nprivate", "private/mime\rprivate"] {
+            let output = run(
+                fixture.command(),
+                &["store", "--mime", mime],
+                b"private clipboard contents",
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, b"clipboard-custom: Invalid MIME type\n");
+        }
+        assert!(!fixture.0.join("data").exists());
+    }
+
+    #[test]
+    fn no_argument_protocol_preserves_json_error_replies_and_success_status() {
+        let fixture = Fixture::new();
+        for bytes in [
+            &b"{"[..],
+            br#"{"command":"no-such-command"}"#,
+            br#"{"command":"snapshot","unexpected":"private"}"#,
+        ] {
+            let output = run(fixture.command(), &[], bytes);
+            assert!(output.status.success(), "{output:?}");
+            assert!(output.stderr.is_empty());
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                json!({ "error": "Invalid history request" })
+            );
+        }
+    }
+
+    #[test]
     fn no_argument_protocol_and_store_cli_coexist_and_preserve_payloads() {
         let fixture = Fixture::new();
         let prepared = fixture.request(json!({ "command": "prepare" }));
@@ -1653,19 +1886,6 @@ mod cli {
         assert_eq!(payload["text"], "  typed 你好\n\n");
         assert!(fixture.0.join("data/clipboard/history.json").is_file());
         let before = fs::read(fixture.0.join("data/clipboard/history.json")).unwrap();
-        for args in [
-            &["store"][..],
-            &["store", "--mime", "text/plain", "extra"],
-            &["capture", "extra"],
-            &["unknown"],
-        ] {
-            let output = run(fixture.command(), args, b"private clipboard contents");
-            assert!(!output.status.success());
-            assert!(output.stdout.is_empty());
-            assert!(
-                !String::from_utf8_lossy(&output.stderr).contains("private clipboard contents")
-            );
-        }
         assert!(fixture.request(json!({ "command": "no-such-command" }))["error"].is_string());
         assert_eq!(
             fs::read(fixture.0.join("data/clipboard/history.json")).unwrap(),
@@ -2167,14 +2387,11 @@ mod cli {
 
     #[test]
     fn uri_capture_does_not_block_on_fifos_or_read_oversized_files() {
-        unsafe extern "C" {
-            fn mkfifo(path: *const std::ffi::c_char, mode: u32) -> i32;
-        }
         let fixture = Fixture::new();
         let fifo = fixture.0.join("pipe");
         let path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
         // SAFETY: path is a valid, NUL-terminated string for the duration of the call.
-        assert_eq!(unsafe { mkfifo(path.as_ptr(), 0o600) }, 0);
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
         let oversized = fixture.0.join("large.png");
         let mut file = fs::File::create(&oversized).unwrap();
         file.write_all(b"\x89PNG\r\n\x1a\n").unwrap();

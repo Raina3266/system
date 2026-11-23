@@ -3,6 +3,9 @@ name = "webcam-crop"
 version.workspace = true
 edition.workspace = true
 
+[dependencies]
+clap.workspace = true
+
 [[bin]]
 name = "webcam-crop"
 path = "src/main.rs"

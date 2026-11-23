@@ -3,6 +3,10 @@ name = "ocr-screenshot"
 version.workspace = true
 edition.workspace = true
 
+[dependencies]
+clap.workspace = true
+tempfile = "3"
+
 [[bin]]
 name = "ocr-screenshot"
 path = "src/main.rs"

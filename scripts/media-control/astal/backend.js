@@ -3,13 +3,12 @@ import Gio from 'gi://Gio';
 import Mpris from 'gi://AstalMpris';
 import Wp from 'gi://AstalWp';
 import { badge } from './logic.js';
+import { communicate, LineDecoder, writeBytes } from '../../ipc.js';
 
-export const clock = () => GLib.get_monotonic_time() / 1e6;
+const clock = () => GLib.get_monotonic_time() / 1e6;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
 const MAX_HELPER_BYTES = 1024 * 1024;
 const PIPE_CHUNK_BYTES = 8192;
-const HELPER_TIMEOUT_MS = 12000;
 const SERVICE_TIMEOUT_MS = 4000;
 const SERVICE_RETRY_MS = 1500;
 const PROPERTIES = [
@@ -29,7 +28,7 @@ function canonical(value) {
 
 // Rust chooses the guarded fields. This is an opaque native-object/IPC check,
 // not a second implementation of source selection or action policy.
-export function matchesGuard(guard, snapshot) {
+function matchesGuard(guard, snapshot) {
     return Boolean(guard && snapshot && ['players', 'streams'].every(kind =>
         Array.isArray(guard[kind]) && Array.isArray(snapshot[kind])
         && guard[kind].length === snapshot[kind].length
@@ -155,129 +154,13 @@ class NativeMedia {
     }
 }
 
-export function runHelper(argv, input = null, cancellable = new Gio.Cancellable()) {
-    return new Promise((resolve, reject) => {
-        const io = new Gio.Cancellable();
-        let process = null, output = null, stdin = null;
-        let settled = false, exited = false, outputDone = false, inputDone = input === null;
-        let timer = 0, cancelId = 0, length = 0;
-        let chunks = [];
-        const close = stream => {
-            if (!stream || stream.is_closed() || stream.has_pending()) return;
-            stream.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                try { source.close_finish(result); } catch (_) { /* Best-effort pipe cleanup. */ }
-            });
-        };
-        const settle = (error, value) => {
-            if (settled) return;
-            settled = true;
-            if (timer) GLib.source_remove(timer);
-            timer = 0;
-            if (cancelId) {
-                // Disconnecting inside the cancellable's own handler can deadlock.
-                GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                    cancellable.disconnect(cancelId);
-                    cancelId = 0;
-                    return GLib.SOURCE_REMOVE;
-                });
-            }
-            if (error) {
-                io.cancel();
-                if (!exited) process?.force_exit();
-            }
-            chunks = [];
-            close(output);
-            close(stdin);
-            if (error) reject(error);
-            else resolve(value);
-        };
-        const complete = () => {
-            if (settled || !exited || !outputDone || !inputDone) return;
-            try {
-                const bytes = new Uint8Array(length);
-                let offset = 0;
-                for (const chunk of chunks) {
-                    const data = chunk.toArray();
-                    bytes.set(data, offset);
-                    offset += data.length;
-                }
-                settle(null, decoder.decode(bytes));
-            } catch (error) { settle(error); }
-        };
-        const read = () => output.read_bytes_async(PIPE_CHUNK_BYTES, GLib.PRIORITY_DEFAULT, io, (stream, result) => {
-            try {
-                const bytes = stream.read_bytes_finish(result);
-                if (settled) return;
-                const size = bytes.get_size();
-                if (!size) {
-                    outputDone = true;
-                    close(stream);
-                    complete();
-                } else if (length + size > MAX_HELPER_BYTES) {
-                    settle(new Error('Media helper response is too large.'));
-                } else {
-                    length += size;
-                    chunks.push(bytes);
-                    read();
-                }
-            } catch (error) { settle(error); }
-            finally { if (settled) close(stream); }
-        });
-        const write = (data, offset = 0) => {
-            if (offset === data.length) {
-                stdin.close_async(GLib.PRIORITY_DEFAULT, io, (stream, result) => {
-                    try {
-                        stream.close_finish(result);
-                        inputDone = true;
-                        complete();
-                    } catch (error) { settle(error); }
-                    finally { if (settled) close(stream); }
-                });
-                return;
-            }
-            const end = Math.min(data.length, offset + 4096);
-            const bytes = new GLib.Bytes(data.slice(offset, end));
-            stdin.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, io, (stream, result) => {
-                try {
-                    const written = stream.write_bytes_finish(result);
-                    if (!settled) {
-                        if (written <= 0) throw new Error('Media helper input pipe stopped accepting data.');
-                        write(data, offset + written);
-                    }
-                } catch (error) { settle(error); }
-                finally { if (settled) close(stream); }
-            });
-        };
-        try {
-            if (cancellable.is_cancelled()) throw new Error('Media lookup cancelled.');
-            if (input !== null && typeof input !== 'string') throw new TypeError('Media helper input must be a string or null.');
-            if (input !== null && input.length > MAX_HELPER_BYTES) throw new Error('Media helper input is too large.');
-            const data = input === null ? null : encoder.encode(input);
-            if (data && data.length > MAX_HELPER_BYTES) throw new Error('Media helper input is too large.');
-            process = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | (input === null ? 0 : Gio.SubprocessFlags.STDIN_PIPE));
-            output = process.get_stdout_pipe();
-            stdin = data === null ? null : process.get_stdin_pipe();
-            // Waiting is never cancelled: rejected lookups still reap their child.
-            process.wait_async(null, (child, result) => {
-                try {
-                    child.wait_finish(result);
-                    exited = true;
-                    if (settled) return;
-                    if (!child.get_successful()) throw new Error('Media helper failed; check the user-service journal.');
-                    complete();
-                } catch (error) { settle(error); }
-            });
-            cancelId = cancellable.connect(() => settle(new Error('Media lookup cancelled.')));
-            if (settled) return;
-            timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HELPER_TIMEOUT_MS, () => {
-                timer = 0;
-                settle(new Error('Media helper timed out.'));
-                return GLib.SOURCE_REMOVE;
-            });
-            read();
-            if (stdin) write(data);
-        } catch (error) { settle(error); }
-    });
+function runHelper(argv, input = null, cancellable = new Gio.Cancellable()) {
+    return communicate(argv, { input, cancellable, maxBytes: MAX_HELPER_BYTES, timeoutMs: 12000, errors: {
+        cancelled: 'Media lookup cancelled.', inputLimit: 'Media helper input is too large.',
+        invalidInput: 'Media helper input must be a string or null.',
+        responseLimit: 'Media helper response is too large.', timeout: 'Media helper timed out.',
+        failed: 'Media helper failed; check the user-service journal.',
+    } });
 }
 
 // Bounded JSONL transport only. Rust owns the intent queue and all media policy.
@@ -299,7 +182,7 @@ class ServiceWorker {
             this.cancel = new Gio.Cancellable();
             this.child = Gio.Subprocess.new([this.helper, 'service'], Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE);
             this.output = this.child.get_stdout_pipe();
-            this.buffer = new Uint8Array();
+            this.frames = new LineDecoder(MAX_HELPER_BYTES, { error: 'Media service response is too large.' });
             this.read(generation);
             this.child.wait_async(null, (child, result) => {
                 try { child.wait_finish(result); }
@@ -338,51 +221,29 @@ class ServiceWorker {
         const generation = this.generation;
         const input = this.child.get_stdin_pipe();
         this.writing = true;
-        const next = offset => {
-            if (generation !== this.generation) return;
-            if (offset === data.length) {
-                this.pendingBytes -= data.length;
-                this.writing = false;
-                this.write();
-                return;
-            }
-            const bytes = new GLib.Bytes(data.slice(offset, Math.min(data.length, offset + 4096)));
-            input.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, this.cancel, (stream, result) => {
-                try {
-                    const written = stream.write_bytes_finish(result);
-                    if (written <= 0) throw new Error('Media helper input pipe stopped accepting data.');
-                    next(offset + written);
-                } catch (error) { if (generation === this.generation) this.failed(message(error)); }
-            });
-        };
-        next(0);
+        writeBytes(input, data, this.cancel, {
+            active: () => generation === this.generation,
+            onDone: () => { this.pendingBytes -= data.length; this.writing = false; this.write(); },
+            onError: error => this.failed(message(error)),
+        });
     }
     read(generation) {
         this.output.read_bytes_async(PIPE_CHUNK_BYTES, GLib.PRIORITY_DEFAULT, this.cancel, (stream, result) => {
-            if (generation !== this.generation) return;
             try {
                 const bytes = stream.read_bytes_finish(result).toArray();
+                if (generation !== this.generation) return;
                 if (!bytes.length) throw new Error('Media helper closed its output.');
-                const joined = new Uint8Array(this.buffer.length + bytes.length);
-                joined.set(this.buffer);
-                joined.set(bytes, this.buffer.length);
-                let start = 0;
-                for (let index = 0; index < joined.length; index++) {
-                    if (joined[index] !== 10) continue;
-                    if (index - start > MAX_HELPER_BYTES) throw new Error('Media service response is too large.');
-                    const value = JSON.parse(decoder.decode(joined.subarray(start, index)));
+                this.frames.push(bytes, line => {
+                    const value = JSON.parse(line);
                     if (!value || typeof value.type !== 'string') throw new Error('Invalid media service response.');
                     if (this.watchdog) GLib.source_remove(this.watchdog);
                     this.watchdog = 0;
                     if (value.type === 'ready') this.ready = true;
                     this.onMessage(value);
-                    if (generation !== this.generation) return;
-                    start = index + 1;
-                }
-                if (joined.length - start > MAX_HELPER_BYTES) throw new Error('Media service response is too large.');
-                this.buffer = joined.slice(start);
-                this.read(generation);
-            } catch (error) { this.failed(`Media helper protocol failed: ${message(error)}`); }
+                    return generation === this.generation;
+                });
+                if (generation === this.generation) this.read(generation);
+            } catch (error) { if (generation === this.generation) this.failed(`Media helper protocol failed: ${message(error)}`); }
         });
     }
     failed(reason) {
@@ -463,7 +324,7 @@ export class MediaBackend {
         if (this.disposed) return;
         switch (value.type) {
         case 'ack': break;
-        case 'ready': this.refresh(); break;
+        case 'ready':
         case 'capture': this.refresh(); break;
         case 'state':
             if (!Array.isArray(value.groups) || !Array.isArray(value.players) || !Array.isArray(value.progress)

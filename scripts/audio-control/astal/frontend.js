@@ -132,7 +132,7 @@ function frame(palette) {
     return drawing;
 }
 
-export class AudioPanel {
+class AudioPanel {
     constructor({ app, backend, palette }) {
         this.backend = backend;
         this.opened = false;

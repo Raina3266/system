@@ -3,190 +3,437 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
+import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import AstalIO from 'gi://AstalIO';
+import Gtk4LayerShell from 'gi://Gtk4LayerShell';
 import System from 'system';
-import Battery from 'gi://AstalBattery';
-import PowerProfiles from 'gi://AstalPowerProfiles';
 import type Cairo from 'cairo';
 
-import { MetricBar, emptyMetrics, type Metrics } from './parameters.ts';
+import { DashboardBackend } from './backend.ts';
 import {
-    DashboardPipe, NotificationCenter, NotificationPopups, NotificationStack, CutCornerFrame, Section,
-    connectedMonitors, box, iconButton, invoke, label, loadTheme, scroll, style,
-    type Palette, type Transport, type EventFrame,
-} from './notification.ts';
+    parseRequest, SCREEN_TIMEOUT_CHOICES,
+    type Palette, type NotificationRow, type NotificationController,
+} from './logic.ts';
+import { loadPanelStyle } from '../../live-style.js';
 
-const BATTERY_ICONS = ['󰁺', '󰁻', '󰁼', '󰁽', '󰁾', '󰁿', '󰂀', '󰂁', '󰂂', '󰁹'];
+function read(path: string | null): string {
+    if (!path) throw new Error('Run through dashboard-panel, or set DASHBOARD_PANEL_CONFIG and DASHBOARD_PANEL_PALETTE.');
+    const [ok, contents] = GLib.file_get_contents(path);
+    if (!ok) throw new Error(`Could not read dashboard theme: ${path}`);
+    return new TextDecoder().decode(contents);
+}
 
-export const SCREEN_TIMEOUT_CHOICES = [
-    { id: '0', label: 'Sleep after: None' },
-    { id: '10', label: 'Sleep after: 10 min' },
-    { id: '30', label: 'Sleep after: 30 min' },
-    { id: '60', label: 'Sleep after: 1h' },
-    { id: '120', label: 'Sleep after: 2h' },
-    { id: '180', label: 'Sleep after: 3h' },
-    { id: '360', label: 'Sleep after: 6h' },
-] as const;
+function loadTheme(entry: string | null, palettePath: string | null) {
+    const palette = JSON.parse(read(palettePath)) as Palette;
+    for (const key of ['background', 'secondaryBackground', 'elevated', 'foreground',
+        'separator', 'cyan', 'pink', 'dimPink', 'yellow', 'red'] as const) {
+        if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid dashboard palette colour: ${key}`);
+    }
+    const definitions = '.dashboard-ui {\n' + Object.entries(palette)
+        .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
+        .map(([key, value]) => `    --dp_${key}: ${value};`).join('\n') + '\n}';
+    const provider = loadPanelStyle({ entry, definitions, label: 'Dashboard' });
+    return { palette, provider };
+}
 
-export class DashboardBackend {
-    readonly notifications: NotificationCenter;
-    battery = { ready: false, present: false, percentage: -1, status: 'READING BATTERY STATUS' };
-    profiles: string[] = [];
-    activeProfile = '';
-    private batteryDevice = Battery.get_default();
-    private upower = new Battery.UPower();
-    private power = PowerProfiles.get_default();
-    private pipe: Transport;
-    private generation = 0;
-    private active = false;
-    private minutes = 0;
-    private readings = emptyMetrics();
-    private listeners = new Set<() => void>();
-    private signals: [any, number][] = [];
-    private unsubscribeNotifications: () => void;
-    private disposed = false;
+function box(vertical = false, spacing = 0, children: Gtk.Widget[] = []): Gtk.Box {
+    const widget = new Gtk.Box({ orientation: vertical ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL, spacing });
+    children.forEach(child => widget.append(child));
+    return widget;
+}
 
-    private failed = false;
-    get offline(): boolean { return this.failed; }
+function label(text = '', classes: string[] = [], expand = false): Gtk.Label {
+    return new Gtk.Label({ label: text, css_classes: classes, use_markup: false, xalign: 0, hexpand: expand });
+}
 
-    constructor(connect: (receive: (event: EventFrame) => void) => Transport = cb => new DashboardPipe(cb), onFatal?: () => void) {
-        this.notifications = new NotificationCenter();
-        this.pipe = connect(e => {
-            if (this.disposed || this.failed) return;
-            if (e.event === 'offline') {
-                this.failed = true;
-                this.minutes = 0;
-                this.readings = emptyMetrics();
-                // EOF can arrive during connect/init, before the application owns this object.
-                if (onFatal) void Promise.resolve().then(() => { if (!this.disposed) onFatal(); });
-                this.notifications.receive(e);
-                return;
+function ellipsis(text = '', classes: string[] = []): Gtk.Label {
+    return new Gtk.Label({ label: text, css_classes: classes, use_markup: false, xalign: 0,
+        hexpand: true, ellipsize: Pango.EllipsizeMode.END, max_width_chars: 1 });
+}
+
+function wrapped(classes: string[], lines: number): Gtk.Label {
+    return new Gtk.Label({ css_classes: classes, use_markup: false, xalign: 0, yalign: 0,
+        hexpand: true, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR,
+        ellipsize: Pango.EllipsizeMode.END, lines, max_width_chars: 1 });
+}
+
+function scroll(child: Gtk.Widget, maxHeight: number): Gtk.ScrolledWindow {
+    return new Gtk.ScrolledWindow({ child, hscrollbar_policy: Gtk.PolicyType.NEVER,
+        vscrollbar_policy: Gtk.PolicyType.AUTOMATIC, min_content_width: 0, min_content_height: 0,
+        max_content_height: Math.max(1, maxHeight), propagate_natural_width: false,
+        propagate_natural_height: true, hexpand: true, overlay_scrolling: true });
+}
+
+function style(widget: Gtk.Widget, name: string, enabled: boolean): void {
+    if (enabled) widget.add_css_class(name);
+    else widget.remove_css_class(name);
+}
+
+export function invoke(action: () => unknown): void {
+    try {
+        void Promise.resolve(action()).catch((error: unknown) => console.warn(`Dashboard action: ${String(error)}`));
+    } catch (error) { console.warn(`Dashboard action: ${String(error)}`); }
+}
+
+export function iconButton(glyph: string, accessibleLabel: string | null, clicked: () => unknown, size = 28): Gtk.Button {
+    const child = label(glyph, ['icon-glyph']);
+    child.xalign = 0.5;
+    const widget = new Gtk.Button({ child, css_classes: ['icon-button'],
+        width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
+    if (accessibleLabel !== null) widget.update_property([Gtk.AccessibleProperty.LABEL], [accessibleLabel]);
+    widget.connect('clicked', () => invoke(clicked));
+    return widget;
+}
+
+class Section {
+    readonly widget: Gtk.Box;
+
+    constructor(glyph: string, title: string, controls: Gtk.Widget[] = []) {
+        const heading = box(false, 8, [label(glyph, ['section-glyph']), label(title, ['section-title'], true), ...controls]);
+        this.widget = box(true, 10, [heading, new Gtk.Box({ css_classes: ['section-divider'], height_request: 1 })]);
+        this.widget.add_css_class('section');
+    }
+
+    append(child: Gtk.Widget): void { this.widget.append(child); }
+}
+
+function rgb(colour: string): [number, number, number] {
+    return [1, 3, 5].map(offset => parseInt(colour.slice(offset, offset + 2), 16) / 255) as [number, number, number];
+}
+
+// Glow has its own allocation, rather than clipping a CSS shadow or rounding
+// the six-sided outline into a toolkit rectangle. Width excludes that halo.
+class CutCornerFrame {
+    readonly widget: Gtk.Overlay;
+    readonly drawing: Gtk.DrawingArea;
+    private colour: string;
+
+    constructor(palette: Palette, child: Gtk.Widget, { padding = 0, glow = 0, width = 0 } = {}) {
+        this.colour = palette.yellow;
+        this.widget = new Gtk.Overlay({ css_classes: ['cut-frame'], overflow: Gtk.Overflow.VISIBLE });
+        if (width) this.widget.width_request = width + glow * 2;
+        this.drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
+        this.drawing.set_draw_func((_area: Gtk.DrawingArea, cr: Cairo.Context, allocatedWidth: number, allocatedHeight: number) => {
+            const x = glow + 0.5, y = glow + 0.5;
+            const width = allocatedWidth - glow * 2 - 1, height = allocatedHeight - glow * 2 - 1;
+            if (width <= 0 || height <= 0) return;
+            const cut = Math.min(10, width / 2, height / 2);
+            const path = () => {
+                cr.moveTo(x + cut, y);
+                cr.lineTo(x + width, y);
+                cr.lineTo(x + width, y + height - cut);
+                cr.lineTo(x + width - cut, y + height);
+                cr.lineTo(x, y + height);
+                cr.lineTo(x, y + cut);
+                cr.closePath();
+            };
+            const [red, green, blue] = rgb(this.colour);
+            if (glow) {
+                cr.save();
+                cr.translate(0, 3);
+                for (let radius = glow; radius > 0; radius--) {
+                    path();
+                    cr.setSourceRGBA(red, green, blue, 0.025);
+                    cr.setLineWidth(radius * 2);
+                    cr.stroke();
+                }
+                cr.restore();
             }
-            if (e.event === 'metrics' && this.active && e.generation === this.generation) { this.readings = e.data; this.emit(); }
-            else if (e.event === 'timeout') { this.minutes = e.minutes; this.emit(); }
-            else {
-
-                if (e.event === 'error') console.warn('Dashboard backend operation failed');
-                this.notifications.receive(e);
-            }
+            path();
+            // Match the audio panel's neutral, translucent surface.
+            const [backgroundRed, backgroundGreen, backgroundBlue] = rgb('#25252F');
+            cr.setSourceRGBA(backgroundRed, backgroundGreen, backgroundBlue, 0.9);
+            cr.fillPreserve();
+            cr.setSourceRGBA(red, green, blue, 1);
+            cr.setLineWidth(1);
+            cr.stroke();
         });
-        this.unsubscribeNotifications = this.notifications.subscribe(() => this.emit());
-        this.notifications.start(this.pipe);
-        const refresh = () => this.refresh();
-        this.watch(this.batteryDevice, 'notify', refresh);
-        this.watch(this.upower, 'notify', refresh);
-        this.watch(this.power, 'notify::profiles', refresh);
-        this.watch(this.power, 'notify::active-profile', refresh);
-        this.refresh();
+        this.widget.set_child(this.drawing);
+        child.margin_top = child.margin_bottom = child.margin_start = child.margin_end = padding + glow;
+        this.widget.add_overlay(child);
+        this.widget.set_measure_overlay(child, true);
     }
 
-    get metrics(): Metrics { return this.readings; }
-
-    subscribe(callback: () => void): () => void {
-        if (this.disposed) return () => {};
-        this.listeners.add(callback);
-        return () => this.listeners.delete(callback);
-    }
-
-    private watch(object: any, signal: string, callback: () => void) {
-        if (object) this.signals.push([object, object.connect(signal, callback)]);
-    }
-
-    private refresh() {
-        if (this.disposed) return;
-        const device = this.batteryDevice;
-        const ready = Boolean(device && this.upower.daemon_version);
-        const present = ready && device.is_present;
-        let status = 'READING BATTERY STATUS';
-        if (ready) {
-            if (!present) status = 'NO BATTERY DETECTED';
-            else if (device.state === Battery.State.CHARGING) status = 'CHARGING';
-            else if (device.state === Battery.State.PENDING_CHARGE) status = 'CONNECTED · CHARGING SOON';
-            else if (device.state === Battery.State.FULLY_CHARGED) status = 'FULLY CHARGED';
-            else if (this.upower.on_battery) status = 'ON BATTERY';
-            else status = 'AC POWER';
-        }
-        this.battery = { ready, present, status,
-            percentage: present && Number.isFinite(device.percentage) ? Math.max(0, Math.min(1, device.percentage)) : -1 };
-        this.profiles = (this.power.get_profiles() || []).map((profile: PowerProfiles.Profile) => profile.profile)
-                    .filter((profile: string) => typeof profile === 'string' && profile.length > 0);
-        this.activeProfile = this.power.active_profile || '';
-        this.emit();
-    }
-
-    private emit() {
-        if (!this.disposed) for (const callback of this.listeners) callback();
-    }
-
-    setActive(active: boolean) {
-        if (this.disposed || this.failed || this.active === active) return;
-        this.active = active; this.readings = emptyMetrics();
-        this.pipe.send({ op: 'active', active, generation: ++this.generation });
-        this.emit();
-    }
-
-    get screenTimeoutMinutes(): number { return this.minutes; }
-
-    setScreenTimeout(minutes: number) {
-        if (!this.disposed && !this.failed) this.pipe.send({ op: 'timeout', minutes });
-    }
-
-    setProfile(profile: string) {
-        if (this.disposed) return;
-        if (!this.profiles.includes(profile)) throw new Error(`Unavailable power profile: ${profile}`);
-        this.power.active_profile = profile;
-    }
-
-    status() {
-        const historyCount = this.notifications.history.length;
-        const popupCount = this.notifications.popups.length;
-        const dnd = this.notifications.dnd;
-        const battery = this.battery;
-        const available = battery.ready && battery.present && Number.isFinite(battery.percentage) && battery.percentage >= 0;
-        const percent = Math.round(battery.percentage * 100);
-        const charging = battery.status === 'CHARGING' || battery.status === 'CONNECTED · CHARGING SOON';
-        const full = battery.status === 'FULLY CHARGED';
-        const icon = charging || full ? '󰂄' : BATTERY_ICONS[Math.min(9, Math.floor(percent / 10))];
-        return {
-            text: available ? `${icon} ${percent}%` : '󰕮',
-            tooltip: available ? `${battery.status} | Profile: ${this.activeProfile} | Click: Dashboard` : 'Dashboard',
-            class: !available ? 'clear' : charging ? 'charging' : full ? 'full'
-                : percent <= 15 ? 'critical' : percent <= 25 ? 'warning' : percent < 50 ? 'low' : 'discharging',
-            historyCount, popupCount, dnd, screenTimeoutMinutes: this.screenTimeoutMinutes,
-            activeProfile: this.activeProfile,
-        };
-    }
-
-    dispose() {
-        if (this.disposed) return;
-        this.disposed = true;
-        this.pipe.dispose();
-        this.unsubscribeNotifications();
-        this.notifications.dispose();
-        for (const [object, signal] of this.signals) object.disconnect(signal);
-        this.signals = [];
-        this.listeners.clear();
+    setUrgency(urgency: number, palette: Palette): void {
+        const colour = urgency === 2 ? palette.red : palette.yellow;
+        if (this.colour === colour) return;
+        this.colour = colour;
+        this.drawing.queue_draw();
     }
 }
 
-export type DashboardRequest = {
-    command: 'status' | 'toggle' | 'close' | 'toggleDnd' | 'clearNotifications';
-    monitor?: string;
-};
+export class NotificationEntry {
+    readonly widget: Gtk.Overlay;
+    readonly copy: Gtk.Box;
+    readonly artwork: Gtk.Image;
+    readonly app: Gtk.Label;
+    readonly summary: Gtk.Label;
+    readonly body: Gtk.Label;
+    readonly actions: Gtk.FlowBox;
+    readonly close: Gtk.Button;
+    private row: NotificationRow;
+    private actionKey = '';
+    private iconKey: string | null = null;
+    private hovered = false;
 
-export function parseRequest(text: string): DashboardRequest {
-    const request = JSON.parse(text);
-    if (!request || typeof request !== 'object' || Array.isArray(request)
-        || !['status', 'toggle', 'close', 'toggleDnd', 'clearNotifications'].includes(request.command))
-        throw new Error('Unknown dashboard command.');
-    if (Object.keys(request).some(key => !['command', 'monitor'].includes(key)))
-        throw new Error('Unexpected dashboard request field.');
-    if (Object.hasOwn(request, 'monitor') && (request.command !== 'toggle'
-        || typeof request.monitor !== 'string' || request.monitor.length > 256
-        || /[\x00-\x1f\x7f]/.test(request.monitor)))
-        throw new Error('Monitor must be a connector name, only for toggle.');
-    return request;
+    constructor(row: NotificationRow, private readonly center: NotificationController, readonly popup = false) {
+        this.row = row;
+        this.widget = new Gtk.Overlay({ css_classes: ['notification-entry', ...(popup ? ['popup-entry'] : [])],
+            hexpand: true, height_request: 64, overflow: Gtk.Overflow.HIDDEN });
+        const artworkSize = popup ? 66 : 64;
+        this.artwork = new Gtk.Image({ pixel_size: artworkSize, width_request: artworkSize,
+            height_request: artworkSize, valign: Gtk.Align.START });
+        this.app = ellipsis('', ['notification-app']);
+        this.summary = wrapped(['notification-summary'], 2);
+        this.body = wrapped(['notification-body'], 3);
+        this.actions = new Gtk.FlowBox({ selection_mode: Gtk.SelectionMode.NONE, homogeneous: false,
+            column_spacing: 6, row_spacing: 6, min_children_per_line: 1, max_children_per_line: 20,
+            activate_on_single_click: false, css_classes: ['notification-actions'], hexpand: true });
+        this.copy = box(true, 3, [this.app, this.summary, this.body, this.actions]);
+        this.copy.hexpand = true;
+        const content = box(false, 8, [this.artwork, this.copy]);
+        content.add_css_class('notification-layout');
+        this.widget.set_child(content);
+        if (!popup) this.widget.add_overlay(new Gtk.Box({ css_classes: ['notification-stripe'], width_request: 2,
+            halign: Gtk.Align.START, can_target: false }));
+        this.close = iconButton('󰅖', null, () => this.center.dismissNotification(this.row.id, this.row.token), 16);
+        this.close.update_property([Gtk.AccessibleProperty.LABEL], ['Dismiss notification']);
+        this.close.add_css_class('notification-close');
+        this.close.halign = Gtk.Align.END;
+        this.close.valign = Gtk.Align.START;
+        this.close.margin_top = 4;
+        this.close.margin_end = 3;
+        this.widget.add_overlay(this.close);
+        const click = new Gtk.GestureClick({ button: Gdk.BUTTON_PRIMARY, propagation_phase: Gtk.PropagationPhase.BUBBLE });
+        click.connect('released', (_gesture: Gtk.GestureClick, count: number, x: number, y: number) => {
+            if (count !== 1) return;
+            // A click on a close/action button must never also invoke default.
+            for (let target = this.widget.pick(x, y, Gtk.PickFlags.DEFAULT); target && target !== this.widget; target = target.get_parent()) {
+                if (target instanceof Gtk.Button) return;
+            }
+            this.activateDefault();
+        });
+        this.widget.add_controller(click);
+        const keys = new Gtk.EventControllerKey();
+        keys.connect('key-pressed', (_controller: Gtk.EventControllerKey, key: number) => {
+            if (!this.widget.has_focus || ![Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space].includes(key)) return false;
+            this.activateDefault();
+            return true;
+        });
+        this.widget.add_controller(keys);
+        const motion = new Gtk.EventControllerMotion();
+        motion.connect('enter', () => this.setHovered(true));
+        motion.connect('leave', () => this.setHovered(false));
+        this.widget.add_controller(motion);
+        this.update(row);
+    }
+
+    private activateDefault(): void {
+        if (this.row.actions.some(action => action.identifier === 'default'))
+            invoke(() => this.center.invokeNotificationAction(this.row.id, 'default', this.row.token));
+    }
+
+    private setHovered(hovered: boolean): void {
+        if (this.hovered === hovered) return;
+        this.hovered = hovered;
+        style(this.widget, 'hovered', hovered);
+        if (this.popup) invoke(() => this.center.setHovered(this.row.id, hovered, this.row.token));
+    }
+
+    update(row: NotificationRow): void {
+        this.row = row;
+        this.app.label = (row.app || 'SYSTEM').toUpperCase();
+        this.summary.label = row.summary || 'Notification';
+        this.body.label = row.body || '';
+        this.body.visible = Boolean(row.body);
+        this.widget.focusable = row.actions.some(action => action.identifier === 'default');
+        style(this.widget, 'critical', row.urgency === 2);
+        if (this.iconKey !== row.icon) {
+            this.iconKey = row.icon;
+            this.artwork.clear();
+            this.artwork.visible = Boolean(row.icon);
+            if (row.icon) {
+                try { this.artwork.set_from_gicon(Gio.Icon.new_for_string(row.icon)); }
+                catch (error) {
+                    this.artwork.visible = false;
+                    console.warn('Invalid dashboard notification icon');
+                }
+            }
+        }
+        // Keep controls (and their focus/pressed state) alive across metrics,
+        // timeout and hover updates that do not change notification actions.
+        const actions = row.actions.filter(action => action.identifier !== 'default');
+        const actionKey = JSON.stringify([row.token, actions]);
+        if (actionKey !== this.actionKey) {
+            this.actionKey = actionKey;
+            for (let child = this.actions.get_first_child(); child;) {
+                const next = child.get_next_sibling();
+                this.actions.remove(child);
+                child = next;
+            }
+            for (const action of actions) {
+                const text = new Gtk.Label({ label: action.text, use_markup: false, ellipsize: Pango.EllipsizeMode.END,
+                    max_width_chars: 24, css_classes: ['notification-action-label'] });
+                const button = new Gtk.Button({ child: text, css_classes: ['notification-action'],
+                    height_request: 28, valign: Gtk.Align.START });
+                button.update_property([Gtk.AccessibleProperty.LABEL], [action.text]);
+                button.connect('clicked', () => invoke(() => this.center.invokeNotificationAction(row.id, action.identifier, row.token)));
+                this.actions.insert(button, -1);
+                button.get_parent()?.set_focusable(false);
+            }
+        }
+        this.actions.visible = actions.length > 0;
+    }
+
+    resetHover(): void { this.setHovered(false); }
+    dispose(): void { this.resetHover(); }
+}
+
+export class NotificationStack {
+    readonly widget = box(true, 6);
+    readonly rows = new Map<string, {
+        entry: NotificationEntry;
+        widget: Gtk.Widget;
+        notification: NotificationRow;
+        frame?: CutCornerFrame;
+    }>();
+
+    constructor(private readonly center: NotificationController, private readonly palette: Palette, readonly popup = false) {}
+
+    sync(notifications: readonly NotificationRow[]): void {
+        // The center supplies newest-first ordering for both native views.
+        const wanted = new Set(notifications.map(row => row.id));
+        for (const [id, row] of this.rows) {
+            if (wanted.has(id)) continue;
+            this.rows.delete(id);
+            this.widget.remove(row.widget);
+            row.entry.dispose();
+        }
+        let previous: Gtk.Widget | null = null;
+        for (const notification of notifications) {
+            let row = this.rows.get(notification.id);
+            if (!row) {
+                const entry = new NotificationEntry(notification, this.center, this.popup);
+                const frame = this.popup ? new CutCornerFrame(this.palette, entry.widget, { padding: 8 }) : undefined;
+                row = { entry, frame, notification, widget: frame?.widget || entry.widget };
+                frame?.setUrgency(notification.urgency, this.palette);
+                this.rows.set(notification.id, row);
+                this.widget.append(row.widget);
+            } else if (row.notification !== notification) {
+                row.notification = notification;
+                row.entry.update(notification);
+                row.frame?.setUrgency(notification.urgency, this.palette);
+            }
+            if (row.widget.get_prev_sibling() !== previous)
+                this.widget.reorder_child_after(row.widget, previous);
+            previous = row.widget;
+        }
+    }
+
+    resetHover(): void { this.rows.forEach(row => row.entry.resetHover()); }
+
+    dispose(): void {
+        const rows = [...this.rows.values()];
+        this.rows.clear();
+        rows.forEach(row => row.entry.dispose());
+    }
+}
+
+function connectedMonitors(): Gdk.Monitor[] {
+    const model = Gdk.Display.get_default()?.get_monitors();
+    if (!model) return [];
+    return Array.from({ length: model.get_n_items() }, (_value, index) => model.get_item(index) as Gdk.Monitor);
+}
+
+class NotificationPopups {
+    readonly window: Astal.Window;
+    readonly stack: NotificationStack;
+    readonly viewport: Gtk.ScrolledWindow;
+    private monitor: Gdk.Monitor | null = null;
+
+    constructor({ app, backend, palette }: { app: Astal.Application; backend: DashboardBackend; palette: Palette }) {
+        this.backend = backend;
+        this.window = new Astal.Window({ application: app, name: 'dashboard-notifications', namespace: 'astal:notifications',
+            anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.RIGHT, exclusivity: Astal.Exclusivity.IGNORE,
+            layer: Astal.Layer.OVERLAY, keymode: Astal.Keymode.NONE, visible: false,
+            css_classes: ['dashboard-ui', 'notification-popups'] });
+        // These are layer-surface margins, not GTK widget padding. Keeping a
+        // content-sized surface also leaves the desktop beneath it clickable.
+        Gtk4LayerShell.set_margin(this.window, Gtk4LayerShell.Edge.TOP, 46);
+        Gtk4LayerShell.set_margin(this.window, Gtk4LayerShell.Edge.RIGHT, 6);
+        this.stack = new NotificationStack(backend.notifications, palette, true);
+        this.viewport = scroll(this.stack.widget, 800);
+        const content = box(true, 0, [this.viewport]);
+        content.margin_top = content.margin_bottom = content.margin_start = content.margin_end = 6;
+        this.window.set_child(content);
+    }
+
+    private readonly backend: DashboardBackend;
+
+    render(monitors = connectedMonitors()): void {
+        this.stack.sync(this.backend.notifications.popups);
+        const monitor = monitors[0] || null;
+        const changedMonitor = this.monitor !== monitor;
+        this.monitor = monitor;
+        if (changedMonitor) this.stack.resetHover();
+        if (!monitor) {
+            this.window.visible = false;
+            this.stack.resetHover();
+            return;
+        }
+        if (changedMonitor) this.window.gdkmonitor = monitor;
+        const { width, height } = monitor.get_geometry();
+        const popupWidth = Math.max(1, Math.min(420, width - 12));
+        this.viewport.width_request = Math.max(1, popupWidth - 12);
+        this.viewport.max_content_height = Math.max(1, height - 72 - 12);
+        this.window.set_default_size(popupWidth, -1);
+        this.window.visible = this.backend.notifications.popups.length > 0;
+        if (!this.window.visible) this.stack.resetHover();
+    }
+
+    dispose(): void {
+        this.stack.dispose();
+        this.window.destroy();
+    }
+}
+
+class MetricBar {
+    readonly widget: Gtk.Box;
+    readonly value: Gtk.Label;
+    readonly bar: Gtk.ProgressBar;
+    private target = 0;
+    private tick = 0;
+
+    constructor(title: string) {
+        this.value = label('—', ['metric-value']);
+        this.value.xalign = 1;
+        this.bar = new Gtk.ProgressBar({ css_classes: ['metric-bar'], hexpand: true, show_text: false });
+        this.widget = box(true, 4, [box(false, 8, [label(title, ['metric-label'], true), this.value]), this.bar]);
+    }
+
+    update(progress: number, value: string): void {
+        this.value.label = value;
+        style(this.bar, 'critical', progress >= 90);
+        const next = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) / 100 : 0;
+        if (next === this.target) return;
+        this.target = next;
+        if (this.tick) this.bar.remove_tick_callback(this.tick);
+        const from = this.bar.fraction;
+        const started = GLib.get_monotonic_time();
+        this.tick = this.bar.add_tick_callback(() => {
+            const t = Math.min(1, (GLib.get_monotonic_time() - started) / 180000);
+            this.bar.fraction = from + (next - from) * (1 - (1 - t) ** 3);
+            if (t < 1) return GLib.SOURCE_CONTINUE;
+            this.tick = 0;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    dispose(): void {
+        if (this.tick) this.bar.remove_tick_callback(this.tick);
+        this.tick = 0;
+    }
 }
 
 export class ButtonSwitcher {
@@ -227,8 +474,7 @@ export class ButtonSwitcher {
         control.valign = Gtk.Align.CENTER;
         const frame = new Gtk.Overlay({ hexpand: true, css_classes: ['button-switcher'] });
         const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
-        const colour = (hex: string) => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
-        const [red, green, blue] = colour(palette.foreground);
+        const [red, green, blue] = rgb(palette.foreground);
 
         drawing.set_draw_func((_area: Gtk.DrawingArea, cr: Cairo.Context, width: number, height: number) => {
             const right = width - 0.5, bottom = height - 0.5, cut = Math.min(9, width / 2, height / 2);
@@ -275,7 +521,7 @@ const CARD_PADDING = 16;
 const CARD_GLOW = 12;
 
 
-export function monitorFor(name?: string): Gdk.Monitor | null {
+function monitorFor(name?: string): Gdk.Monitor | null {
     const monitors = connectedMonitors();
     return monitors.find(monitor => monitor.get_connector() === name) || monitors[0] || null;
 }
@@ -285,7 +531,7 @@ function sameMonitor(left: Gdk.Monitor | null, right: Gdk.Monitor | null): boole
         && left.get_connector() === right.get_connector());
 }
 
-export function closeNetwork(): void {
+function closeNetwork(): void {
     try {
         AstalIO.Process.exec_asyncv([GLib.getenv('NETWORK_PANEL') || 'network-panel', 'close'], (_process: GObject.Object | null, result: Gio.AsyncResult) => {
             try { AstalIO.Process.exec_asyncv_finish(result); }
@@ -581,7 +827,6 @@ export const DashboardApplication = GObject.registerClass({ GTypeName: 'Dashboar
                 this.popups?.render();
             });
             this.watchGeometry();
-            this.backend.setActive(false);
             this.render();
         }
 
@@ -640,7 +885,7 @@ export async function main(): Promise<number> {
 }
 
 export function isMainModule(url: string): boolean {
-    // GJS exposes import.meta.url and System.programPath, not import.meta.main.
+    // File identity works for both frontend.ts and AGS bundles; GJS has no import.meta.main.
     return Boolean(System.programPath && Gio.File.new_for_uri(url).equal(Gio.File.new_for_path(System.programPath)));
 }
 

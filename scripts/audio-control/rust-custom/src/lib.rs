@@ -15,3 +15,6 @@ pub mod policy;
 
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod unit_tests;

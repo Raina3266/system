@@ -211,7 +211,7 @@ async function isolatedUI(argv) {
         fs.writeFileSync(guard, `#!${process.execPath}\nconst fs = require('node:fs');\n`
             + `fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.argv) + '\\n');\nprocess.exit(125);\n`,
             { mode: 0o700 });
-        for (const name of ['DASHBOARD_PANEL', 'MEDIA_PANEL', 'PANEL_BACKEND']) env[name] = guard;
+        for (const name of ['DASHBOARD_PANEL', 'MEDIA_PANEL', 'NETWORK_CONTROL']) env[name] = guard;
         const config = join(root, 'bus.conf');
         const socket = join(env.XDG_RUNTIME_DIR, 'bus').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         // Omit all service directories: nothing, including desktop portals, can autoactivate.
@@ -410,6 +410,7 @@ function protocolState(rows = []) {
 }
 
 async function nodeAdapterTests() {
+    const { loadIPC } = await import('../ipc-test-loader.js');
     const { test } = await import('node:test');
     const { default: assert } = await import('node:assert/strict');
     const { readFileSync } = await import('node:fs');
@@ -422,8 +423,8 @@ async function nodeAdapterTests() {
         profiles: [{ id: 'Cafe', uuid: 'profile-a' }], ...overrides });
     function fixture(t, { opened = false, override = null, start = true } = {}) {
         const mock = networkProtocolMock();
-        mock.GLib.getenv = () => override;
-        const NetworkBackend = vm.runInNewContext(source + '\nNetworkBackend;', { ...mock, TextEncoder, TextDecoder, console });
+        mock.GLib.getenv = name => name === 'NETWORK_CONTROL' ? override : null;
+        const NetworkBackend = vm.runInNewContext(source + '\nNetworkBackend;', { ...mock, ...loadIPC(mock.GLib, mock.Gio), TextEncoder, TextDecoder, console });
         let changes = 0;
         const backend = new NetworkBackend({ onChange: () => changes++ });
         t.after(() => backend.dispose());
@@ -437,14 +438,14 @@ async function nodeAdapterTests() {
         assert.doesNotMatch(source, /AstalNetwork|gi:\/\/NM|NM\./);
         const { backend, child, mock } = fixture(t);
         backend.start(); await flush();
-        assert.deepEqual(child.argv, ['panel-launcher', 'backend', 'network']);
+        assert.deepEqual(child.argv, ['network-control']);
         assert.deepEqual(child.messages, [{ method: 'setOpened', args: [false] }]);
         assert.equal(child.flags, 7); assert.equal(mock.children.length, 1);
     });
-    test('network adapter passes PANEL_BACKEND as a literal executable and remembers pre-start visibility', async t => {
-        const { backend, child } = fixture(t, { override: '/offline/path with spaces/backend', opened: true });
+    test('network adapter passes NETWORK_CONTROL as a literal executable and remembers pre-start visibility', async t => {
+        const { backend, child } = fixture(t, { override: '/offline/path with spaces/network-control', opened: true });
         await flush(); backend.setOpened(false); await flush();
-        assert.equal(child.argv[0], '/offline/path with spaces/backend');
+        assert.deepEqual(child.argv, ['/offline/path with spaces/network-control']);
         assert.deepEqual(child.messages, [{ method: 'setOpened', args: [true] }, { method: 'setOpened', args: [false] }]);
     });
     test('network adapter starts with safe empty synchronous caches, without implicit requests', t => {
@@ -621,6 +622,34 @@ async function nodeAdapterTests() {
         assert.equal(backend._pending.size, 0);
         const work = backend.toggleWifi(); await flush(); child.feed({ id: child.messages.at(-1).id, result: null }); await work;
     });
+    test('network adapter wipes decoded secret reply bytes without changing the returned result', async t => {
+        const { backend, child } = fixture(t); await flush();
+        const work = backend.readSecret('key', {}); await flush();
+        const frames = backend._frames;
+        child.feed({ id: child.messages.at(-1).id, result: { password: 'reply-only-secret' } });
+        assert.equal((await work).password, 'reply-only-secret');
+        assert.equal(backend._frames, frames);
+        assert.equal(frames.size, 0);
+        assert.ok(frames.buffer.length > 0);
+        assert.ok(frames.buffer.every(byte => byte === 0));
+    });
+    for (const trigger of ['dispose', 'eof', 'invalid UTF-8']) {
+        test(`network adapter wipes incomplete secret reply bytes before decoder replacement on ${trigger}`, async t => {
+            const { backend, child } = fixture(t); await flush();
+            const work = backend.readSecret('key', {}); await flush();
+            const frames = backend._frames;
+            child.feedBytes(new TextEncoder().encode('{"id":1,"result":{"password":"partial-secret'));
+            const buffer = frames.buffer;
+            assert.ok(frames.size > 0 && buffer.some(byte => byte !== 0));
+            if (trigger === 'dispose') backend.dispose();
+            else if (trigger === 'eof') child.eof();
+            else child.feedBytes(Uint8Array.of(0xff, 10));
+            await assert.rejects(work);
+            assert.notEqual(backend._frames, frames);
+            assert.equal(frames.size, 0);
+            assert.ok(buffer.every(byte => byte === 0));
+        });
+    }
     for (const bad of ['{not-json}\n', 'null\n', '{"id":1,"result":null,"error":{"message":"bad","code":"bad"}}\n',
         '{"id":1,"error":{"message":"bad"}}\n', '{"type":"state","rows":[]}\n', 'x'.repeat(1024 * 1024 + 1),
         new Uint8Array([0xff, 10])]) {
@@ -3145,10 +3174,17 @@ async function nodeLauncherTests() {
     const root = new URL('../../', import.meta.url);
     const read = path => readFileSync(new URL(path, root), 'utf8');
 
-    test('Niri imports the exported panel Home Manager module', () => {
+    test('Niri imports all six panel Home Manager modules directly', () => {
         const source = read('niri/default.nix');
-        assert.match(source, /imports = \[\s*\(import \.\/panels\.nix\)\.module\b/);
-        assert.doesNotMatch(source, /(?:^|\n)\s*\.\/panels\s*(?:\n|$)/);
+        const imports = source.match(/imports\s*=\s*\[([^\]]*)\]/)?.[1];
+        assert.ok(imports, 'Niri defines its module imports');
+        const panels = [...imports.matchAll(/\brepoPackages\.([A-Za-z]+)\.homeManagerModule\b/g)]
+            .map(match => match[1]).sort();
+        assert.deepEqual(panels, ['mediaPanel', 'audioPanel', 'dashboardPanel',
+            'networkPanel', 'appLauncher', 'clipboardPanel'].sort());
+        assert.match(imports, /\.\/waybar(?=\s|\])/);
+        assert.match(source, /home\.packages\s*=\s*with pkgs;\s*\[[^\]]*\brepoPackages\.panelLauncher\b/);
+        assert.doesNotMatch(source, /\.\/panels(?:\.nix)?(?=\s|\))/);
     });
 
 
@@ -3210,7 +3246,7 @@ async function nodeLauncherTests() {
         assert.match(manifest.forced_environment.NETWORK_PANEL_CONFIG,
             /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/frontend\.js$/,
             'the entry must come from the packaged source, never the checkout or XDG config');
-        for (const key of ['NETWORK_PANEL_PALETTE', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL']) {
+        for (const key of ['NETWORK_PANEL_PALETTE', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL', 'NETWORK_CONTROL']) {
             assert.equal(typeof manifest.environment[key], 'string', `${key} must have a manifest default`);
             assert.notEqual(manifest.environment[key], '');
         }
@@ -3306,6 +3342,7 @@ async function nodeLauncherTests() {
             assert.doesNotMatch(runtime.env.PANEL_CSS_FILE, /^\/nix\/store\//);
             assert.equal(runtime.env.DASHBOARD_PANEL, 'dashboard-panel');
             assert.equal(runtime.env.MEDIA_PANEL, 'media-panel');
+            assert.match(runtime.env.NETWORK_CONTROL, /^\/nix\/store\/[^/]+\/bin\/network-control$/);
         });
 
         await t.test('missing and empty environment variables use manifest defaults for runs and requests', () => {
@@ -3318,12 +3355,13 @@ async function nodeLauncherTests() {
             }
         });
 
-        await t.test('ignores live-source overrides but preserves literal palette, peer and CSS overrides', () => {
+        await t.test('ignores live-source overrides but preserves literal palette, peer, helper and CSS overrides', () => {
             const marker = join(fixture, 'config-was-evaluated');
             const overrides = { NETWORK_PANEL_CONFIG: join(fixture, `custom '"; $(touch ${marker}); frontend.js`),
                 NETWORK_PANEL_PALETTE: join(fixture, 'custom palette.json'),
                 PANEL_CSS_FILE: join(fixture, 'custom style with spaces.css'),
                 DASHBOARD_PANEL: join(fixture, 'custom dashboard'),
+                NETWORK_CONTROL: join(fixture, 'custom helper with spaces'),
                 MEDIA_PANEL: join(fixture, 'custom media'), XDG_RUNTIME_DIR: join(fixture, 'isolated runtime $HOME with spaces') };
             mkdirSync(overrides.XDG_RUNTIME_DIR, { mode: 0o700 });
             for (const data of [launch(overrides), request(['status'], overrides)]) {
@@ -3449,6 +3487,7 @@ async function nodeStartupTests() {
 //     plus savedIdentity/profileStamp/savedInfoStamp/credentialStamp (raw SSID
 //     and native replacement sensitive; opaque to the JavaScript adapter).
 async function gjsAdapterTests() {
+    const { default: GLib } = await import("gi://GLib");
     const { default: Gio } = await import("gi://Gio");
     const { default: System } = await import("system");
     const { NetworkBackend } = await import("./backend.js");
@@ -3461,7 +3500,7 @@ async function gjsAdapterTests() {
     try {
         backend.start(); await flush();
         const child = mock.children[0];
-        assert(child.argv.slice(1).join(" ") === "backend network", "Exact backend subcommand");
+        assert(child.argv.length === 1 && child.argv[0] === (GLib.getenv("NETWORK_CONTROL") || "network-control"), "Exact network-control argv");
         assert(child.messages[0].method === "setOpened" && child.messages[0].args[0] === false, "Initial closed notification");
         const row = mockNetworkRow({ key: "wlan-test:ff:psk", name: "Offline", ssid: "Offline", interface: "wlan-test",
             wireless: true, known: true, connected: true, changing: false, securityType: "psk",

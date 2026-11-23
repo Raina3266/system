@@ -18,6 +18,7 @@ name = "tests"
 path = "src/tests.rs"
 
 [dependencies]
+clap.workspace = true
 # Pair and its request-local agent must share one BlueZ connection.
 bluer = { version = "0.17", default-features = false, features = [
   "bluetoothd",

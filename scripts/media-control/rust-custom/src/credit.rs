@@ -8,7 +8,6 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use lofty::config::ParseOptions;
@@ -25,7 +24,6 @@ const MAX_CACHE_ENTRIES: usize = 128;
 const MAX_TAG_READ_BYTES: usize = 8 * 1024 * 1024;
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_DIR: &str = "media-control/authors";
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
 struct CreditRequest {
@@ -505,33 +503,13 @@ fn write_cached_author(directory: &Path, video: &Video, author: &str) {
     if bytes.len() > MAX_CACHE_BYTES {
         return;
     }
-    for _ in 0..4 {
-        let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let temporary = directory.join(format!(
-            ".media-author-{}-{sequence}.tmp",
-            std::process::id()
-        ));
-        let mut file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(_) => return,
-        };
-        let written = file.write_all(&bytes);
-        drop(file);
-        if written
-            .and_then(|()| fs::rename(&temporary, directory.join(video.cache_name())))
-            .is_err()
-        {
-            let _ = fs::remove_file(&temporary);
-        } else {
-            trim_cache(directory);
-        }
+    // Same-directory persistence atomically replaces the entry, not a symlink's target.
+    // NamedTempFile uses mode 0600 and removes unpublished files on every error path.
+    let Ok(mut file) = tempfile::NamedTempFile::new_in(directory) else {
         return;
+    };
+    if file.write_all(&bytes).is_ok() && file.persist(directory.join(video.cache_name())).is_ok() {
+        trim_cache(directory);
     }
 }
 
@@ -584,26 +562,18 @@ mod local_file_tests {
     use std::io::Cursor;
     use std::os::unix::fs::symlink;
 
-    struct Fixture(PathBuf);
+    struct Fixture(tempfile::TempDir);
 
     impl Fixture {
         fn new() -> Self {
-            loop {
-                let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-                let path = std::env::temp_dir().join(format!(
-                    "media-control-local-credit-test-{}-{sequence}",
-                    std::process::id()
-                ));
-                match fs::DirBuilder::new().mode(0o700).create(&path) {
-                    Ok(()) => return Self(path),
-                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                    Err(error) => panic!("create test directory: {error}"),
-                }
-            }
+            Self(tempfile::tempdir().unwrap())
         }
 
         fn mp3(&self, artist: Option<&str>, album: Option<&str>) -> String {
-            let path = self.0.join("Not the artist || Not the album % #? 曲.mp3");
+            let path = self
+                .0
+                .path()
+                .join("Not the artist || Not the album % #? 曲.mp3");
             let mut tag = Tag::new(TagType::Id3v2);
             if let Some(artist) = artist {
                 tag.set_artist(artist.to_owned());
@@ -623,12 +593,6 @@ mod local_file_tests {
         }
     }
 
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     fn credit(url: &str, artist: &str, album: &str) -> String {
         resolve_credit(
             &CreditRequest {
@@ -642,16 +606,13 @@ mod local_file_tests {
     }
 
     fn file_url(path: &str) -> String {
-        let encoded: String = path
-            .bytes()
-            .map(|byte| match byte {
-                b'/' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
-                    char::from(byte).to_string()
-                }
-                _ => format!("%{byte:02X}"),
-            })
-            .collect();
-        format!("file://{encoded}")
+        use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+        const PATH: &AsciiSet = &NON_ALPHANUMERIC
+            .remove(b'/')
+            .remove(b'-')
+            .remove(b'_')
+            .remove(b'.');
+        format!("file://{}", utf8_percent_encode(path, PATH))
     }
 
     #[test]
@@ -703,10 +664,10 @@ mod local_file_tests {
     #[test]
     fn missing_corrupt_and_nonregular_files_preserve_supplied_metadata() {
         let fixture = Fixture::new();
-        let missing = fixture.0.join("missing.mp3");
-        let bad = fixture.0.join("bad.mp3");
+        let missing = fixture.0.path().join("missing.mp3");
+        let bad = fixture.0.path().join("bad.mp3");
         fs::write(&bad, b"not an audio file").unwrap();
-        let fifo = fixture.0.join("fifo.mp3");
+        let fifo = fixture.0.path().join("fifo.mp3");
         assert!(
             Command::new("mkfifo")
                 .arg(&fifo)
@@ -714,9 +675,15 @@ mod local_file_tests {
                 .unwrap()
                 .success()
         );
-        let link = fixture.0.join("fifo-link.mp3");
+        let link = fixture.0.path().join("fifo-link.mp3");
         symlink(&fifo, &link).unwrap();
-        for path in [&missing, &bad, &fixture.0, &fifo, &link] {
+        for path in [
+            missing.as_path(),
+            bad.as_path(),
+            fixture.0.path(),
+            fifo.as_path(),
+            link.as_path(),
+        ] {
             for (artist, album, expected) in [
                 ("", "", ""),
                 ("Artist", "", "Artist"),
@@ -726,6 +693,21 @@ mod local_file_tests {
                 assert_eq!(credit(path.to_str().unwrap(), artist, album), expected);
             }
         }
+    }
+
+    #[test]
+    fn file_url_encoding_preserves_literal_paths_without_normalization() {
+        let path = "/music/a+b % #? 曲/../track.mp3";
+        let url = file_url(path);
+        assert_eq!(
+            url,
+            "file:///music/a%2Bb%20%25%20%23%3F%20%E6%9B%B2/../track.mp3"
+        );
+        assert_eq!(local_credit_path(&url), Some(PathBuf::from(path)));
+        assert_eq!(
+            local_credit_path("/music/literal%20+曲.mp3"),
+            Some(PathBuf::from("/music/literal%20+曲.mp3"))
+        );
     }
 
     #[test]
@@ -746,6 +728,12 @@ mod local_file_tests {
             "file:///music/bad%GG.mp3".into(),
             "file:///music/bad%00.mp3".into(),
             "file:///music/bad%FF.mp3".into(),
+            "file:///music/bad%0A.mp3".into(),
+            "file:///music/bad%7F.mp3".into(),
+            "file:///%2Fmusic/song.mp3".into(),
+            "file:///music/raw space.mp3".into(),
+            "file:///music/raw\\backslash.mp3".into(),
+            "file:///music/raw\nnewline.mp3".into(),
             format!("file://remote.test{path}"),
             format!("file://localhost{path}"),
             format!("file://user@remote.test{path}"),

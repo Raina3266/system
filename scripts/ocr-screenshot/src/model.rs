@@ -1,9 +1,10 @@
 use std::env;
 use std::ffi::OsString;
-use std::fs;
-use std::os::unix::fs::DirBuilderExt;
+use std::fs::Permissions;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use tempfile::{Builder, TempDir};
 
 #[derive(Debug)]
 pub(crate) struct Tools {
@@ -33,56 +34,29 @@ fn executable(variable: &str, fallback: &str) -> OsString {
 }
 
 pub(crate) struct Workspace {
-    directory: PathBuf,
+    directory: TempDir,
 }
 
 impl Workspace {
     pub(crate) fn create() -> Result<Self, String> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| format!("could not read the system clock: {error}"))?
-            .as_nanos();
-        let base = format!("ocr-screenshot-{}-{timestamp}", std::process::id());
-
-        for attempt in 0..100 {
-            let suffix = if attempt == 0 {
-                String::new()
-            } else {
-                format!("-{attempt}")
-            };
-            let directory = env::temp_dir().join(format!("{base}{suffix}"));
-
-            match fs::DirBuilder::new().mode(0o700).create(&directory) {
-                Ok(()) => return Ok(Self { directory }),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
-                    return Err(format!(
-                        "could not create temporary directory {}: {error}",
-                        directory.display()
-                    ));
-                }
-            }
-        }
-
-        Err("could not create a unique temporary directory".to_owned())
+        Builder::new()
+            .prefix(&format!("ocr-screenshot-{}-", std::process::id()))
+            .permissions(Permissions::from_mode(0o700))
+            .tempdir()
+            .map(|directory| Self { directory })
+            .map_err(|error| format!("could not create temporary directory: {error}"))
     }
 
     pub(crate) fn image_path(&self) -> PathBuf {
-        self.directory.join("capture.png")
+        self.directory.path().join("capture.png")
     }
 
     pub(crate) fn output_prefix(&self) -> PathBuf {
-        self.directory.join("output")
+        self.directory.path().join("output")
     }
 
     pub(crate) fn output_path(&self) -> PathBuf {
-        self.directory.join("output.txt")
-    }
-}
-
-impl Drop for Workspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
+        self.directory.path().join("output.txt")
     }
 }
 

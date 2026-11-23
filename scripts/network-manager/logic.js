@@ -334,11 +334,11 @@ export class NetworkController {
         }
     }
 
-    _select(key) {
+    info(key) {
         const row = this.row(key);
         const savedStamp = savedInfoStamp(row);
         const savedIdentity = row?.savedIdentity;
-        if (!savedIdentity || (!row.connected && !savedStamp)) return false;
+        if (!savedIdentity || (!row.connected && !savedStamp)) return;
         this._reset();
         try {
             const identity = this.backend.getIdentity(key);
@@ -360,12 +360,9 @@ export class NetworkController {
             this.selectionSavedIdentity = currentRow.savedIdentity;
             this.selectionStamp = row.selectionStamp;
             this.page = 'info';
-        } catch (error) { this.error = error.message; this.emit(); return false; }
+        } catch (error) { this.error = error.message; this.emit(); return; }
         this.emit();
-        return true;
     }
-
-    info(key) { this._select(key); }
 
     selectSavedProfile(uuid) {
         if (this.disposed || !this.opened || this.page !== 'info' || this.selectionIdentity
