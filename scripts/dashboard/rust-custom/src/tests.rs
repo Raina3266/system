@@ -538,3 +538,87 @@ fn bounded_order_pruning_and_hover_eviction() {
     assert_eq!(c.popups[4]["token"], "197");
     assert_eq!(center(&t).history.len(), 200)
 }
+
+// Expand in the original modules to retain private access and test paths.
+macro_rules! cli_tests {
+    () => {
+        mod cli_tests {
+            use super::*;
+            use clap::error::ErrorKind;
+
+            #[test]
+            fn cli_accepts_no_arguments_and_handles_help_without_starting_backend() {
+                assert!(Cli::try_parse_from(["dashboard-control"]).is_ok());
+                for argument in ["-h", "--help"] {
+                    assert_eq!(
+                        Cli::try_parse_from(["dashboard-control", argument])
+                            .unwrap_err()
+                            .kind(),
+                        ErrorKind::DisplayHelp
+                    );
+                }
+                assert_eq!(
+                    Cli::try_parse_from(["dashboard-control", "--version"])
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::DisplayVersion
+                );
+                assert!(Cli::try_parse_from(["dashboard-control", "unexpected"]).is_err());
+            }
+        }
+    };
+}
+pub(crate) use cli_tests;
+
+macro_rules! storage_tests {
+    () => {
+        mod tests {
+            use super::*;
+            use std::os::unix::fs::PermissionsExt;
+
+            #[test]
+            fn atomic_writes_replace_private_state_without_temporary_file_leaks() {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("state/settings.json");
+                save(&path, b"old").unwrap();
+                save(&path, b"new").unwrap();
+                assert_eq!(fs::read(&path).unwrap(), b"new");
+                assert_eq!(
+                    fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+                assert_eq!(
+                    fs::metadata(path.parent().unwrap())
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o700
+                );
+                assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+            }
+
+            #[test]
+            fn failed_atomic_publication_cleans_up_the_temporary_file() {
+                let directory = tempfile::tempdir().unwrap();
+                let destination = directory.path().join("existing-directory");
+                fs::create_dir(&destination).unwrap();
+                assert!(save(&destination, b"cannot replace a directory").is_err());
+                assert!(destination.is_dir());
+                assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+            }
+        }
+    };
+}
+pub(crate) use storage_tests;
+
+macro_rules! protocol_test_helpers {
+    () => {
+        thread_local! {pub(crate) static EVENTS: std::cell::RefCell<Vec<Value>>=const{std::cell::RefCell::new(Vec::new())};}
+        pub(crate) fn emit(v: Value) -> io::Result<()> {
+            EVENTS.with(|e| e.borrow_mut().push(v));
+            Ok(())
+        }
+    };
+}
+pub(crate) use protocol_test_helpers;

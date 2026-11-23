@@ -8,6 +8,18 @@ use std::{env, io};
 use clap::{CommandFactory, Parser, Subcommand};
 use media_control::{AppResult, artwork, credit, model};
 
+// Integration suites run only when tests.rs is the Cargo test target.
+#[cfg(test)]
+macro_rules! skip_integration_tests {
+    (integration) => {};
+}
+#[cfg(test)]
+pub(crate) use skip_integration_tests as script_tests;
+
+#[cfg(test)]
+#[macro_use]
+mod tests;
+
 #[derive(Parser)]
 #[command(
     name = "media-control",
@@ -174,77 +186,4 @@ fn media_key(command: &str) -> AppResult<()> {
 }
 
 #[cfg(test)]
-mod media_key_tests {
-    use super::*;
-
-    #[test]
-    fn cli_preserves_native_commands_verbatim_without_a_fixed_command_allowlist() {
-        Cli::command().debug_assert();
-        for command in [
-            "play-pause",
-            "next",
-            "previous",
-            "custom-native-command",
-            "metadata title",
-        ] {
-            let cli = Cli::try_parse_from(["media-control", "playerctl", command]).unwrap();
-            let Some(MediaCommand::Playerctl { command: parsed }) = cli.command else {
-                panic!("expected playerctl subcommand");
-            };
-            assert_eq!(parsed, command);
-        }
-        let cli = Cli::try_parse_from(["media-control", "playerctl", "--", "--version"]).unwrap();
-        assert!(
-            matches!(cli.command, Some(MediaCommand::Playerctl { command }) if command == "--version")
-        );
-    }
-
-    #[test]
-    fn media_keys_choose_first_playing_and_preserve_native_fallback_order() {
-        let players = vec!["recent".into(), "playing".into(), "also-playing".into()];
-        let mut reads = Vec::new();
-        let target = select_player(&players, |name| {
-            reads.push(name.to_owned());
-            Ok(name != "recent")
-        })
-        .unwrap();
-        assert_eq!(target, Some("playing"));
-        assert_eq!(reads, ["recent", "playing"]);
-        assert_eq!(
-            select_player(&players, |_| Ok(false)).unwrap(),
-            Some("recent")
-        );
-        assert_eq!(
-            select_player(&[], |_| panic!("empty lists must not query")).unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn uncertain_selection_does_not_fall_back_to_a_different_player() {
-        let players = vec!["first".into(), "second".into()];
-        assert!(
-            select_player(&players, |_| Err(io::Error::other("query timeout").into())).is_err()
-        );
-    }
-
-    #[test]
-    fn native_query_is_bounded_and_preserves_nonzero_status() {
-        let program = std::ffi::OsStr::new("sh");
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let (success, text) =
-            player_output(program, &["-c", "printf Paused; exit 1"], deadline).unwrap();
-        assert!(!success);
-        assert_eq!(text, "Paused");
-        let started = Instant::now();
-        assert!(
-            player_output(
-                program,
-                &["-c", "exec sleep 2"],
-                started + Duration::from_millis(30)
-            )
-            .is_err()
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-}
+media_unit_tests!(main);

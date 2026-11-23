@@ -3,29 +3,21 @@ import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
-import AstalIO from 'gi://AstalIO';
 import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { ClipboardBackend } from './backend.js';
 import { ClipboardModel, TABS, editable, title } from './logic.js';
-import { loadPanelStyle } from '../../live-style.js';
+import { loadPanelTheme } from '../../shared/astal/theme.js';
+import { replyAndClose } from '../../shared/astal/socket.js';
+import { drawCutCornerFrame } from '../../shared/astal/drawing.js';
 
 const PANEL_WIDTH = 450;
 
-function read(path) {
-    const [ok, bytes] = GLib.file_get_contents(path);
-    if (!ok) throw new Error('Cannot load the clipboard theme.');
-    return new TextDecoder().decode(bytes);
-}
-
 export function loadTheme(entry, palettePath) {
-    const palette = JSON.parse(read(palettePath));
-    for (const key of ['yellow', 'cyan', 'pink', 'red', 'separator', 'foreground', 'secondaryBackground', 'dimPink'])
-        if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid clipboard palette: ${key}`);
-    const definitions = '.clipboard-panel {\n' + Object.entries(palette)
-        .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `    --cp_${key}: ${value};`).join('\n') + '\n}';
-    loadPanelStyle({ entry, definitions, label: 'Clipboard' });
+    const { palette } = loadPanelTheme({ entry, palettePath,
+        required: ['yellow', 'cyan', 'pink', 'red', 'separator', 'foreground', 'secondaryBackground', 'dimPink'],
+        selector: '.clipboard-panel', prefix: 'cp', label: 'Clipboard',
+        errors: { read: 'Cannot load the clipboard theme.', invalid: 'Invalid clipboard palette' } });
     return palette;
 }
 
@@ -52,18 +44,8 @@ function button(text, description, action) {
 function frame(palette) {
     const drawing = new Gtk.DrawingArea({ hexpand: true, vexpand: true, can_target: false });
     drawing.set_draw_func((_, cr, width, height) => {
-        cr.moveTo(10.5, 0.5);
-        cr.lineTo(width - 0.5, 0.5);
-        cr.lineTo(width - 0.5, height - 10.5);
-        cr.lineTo(width - 10.5, height - 0.5);
-        cr.lineTo(0.5, height - 0.5);
-        cr.lineTo(0.5, 10.5);
-        cr.closePath();
-        cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.95);
-        cr.fillPreserve();
-        cr.setSourceRGBA(...palette.yellow.slice(1).match(/../g).map(value => parseInt(value, 16) / 255), 1);
-        cr.setLineWidth(1);
-        cr.stroke();
+        drawCutCornerFrame(cr, { width: width - 1, height: height - 1,
+            cut: 10, color: palette.yellow, opacity: 0.95 });
     });
     return drawing;
 }
@@ -396,20 +378,7 @@ export function createApplication() {
                 return 'ok';
             };
             void reply().catch(error => JSON.stringify({ error: error.message })).then(response => {
-                const close = () => {
-                    try { connection.close(null); }
-                    catch (error) { console.warn(`Clipboard request close: ${error.message}`); }
-                };
-                try {
-                    AstalIO.write_sock(connection, response, (_, result) => {
-                        try { AstalIO.write_sock_finish(result); }
-                        catch (error) { console.warn(`Clipboard request reply: ${error.message}`); }
-                        finally { close(); }
-                    });
-                } catch (error) {
-                    close();
-                    console.warn(`Clipboard request reply: ${error.message}`);
-                }
+                replyAndClose(connection, response, { label: 'Clipboard', asyncClose: false });
             });
         }
     });

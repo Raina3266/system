@@ -89,8 +89,6 @@ in
     home.packages = [
       pkgs.mprisence
       packages.ycal.package
-      packages.audioControl
-
     ];
     programs.google-chrome = {
       nativeMessagingHosts = [ mprisenceNativeHost ];

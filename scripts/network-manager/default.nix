@@ -15,8 +15,8 @@ mkPanel {
   inherit palette;
   name = "network-panel";
   prefix = "NETWORK_PANEL";
-  sourceDir = "network-manager";
-  cssFile = "${repoRoot}/scripts/network-manager/style.css";
+  sourceDir = "network-manager/astal";
+  cssFile = "${repoRoot}/scripts/network-manager/astal/style.css";
   environment = {
     NETWORK_CONTROL = pkgs.lib.getExe backend;
     DASHBOARD_PANEL = "dashboard-panel";

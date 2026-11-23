@@ -1,5 +1,5 @@
 export const TABS = ['memo', 'text', 'file'];
-export const isDraft = item => item?.kind === 'memo' && !item.text;
+const isDraft = item => item?.kind === 'memo' && !item.text;
 export const editable = item => item && ['memo', 'text'].includes(item.kind);
 
 export function title(item, home = '') {

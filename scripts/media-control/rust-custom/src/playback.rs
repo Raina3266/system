@@ -2,6 +2,8 @@
 //!
 //! The matching policy is pure. Private-owner recovery below supplements native
 //! Astal players without changing their discovery, controls, or matching policy.
+//! Native playback status is reconciled independently to cover Astal's startup
+//! window between its initial property reads and signal-handler connection.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -150,6 +152,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_millis(1500);
 const STARTUP_RETRY: Duration = Duration::from_millis(250);
 const POSITION_INTERVAL: Duration = Duration::from_millis(1000);
 const MAX_PROBES: usize = 4;
+const STATUS_RETRIES: u8 = 2;
 const MESSAGE_BATCH: usize = 64;
 
 /// Raw source observations, never display interpolation or an optimistic seek.
@@ -165,6 +168,86 @@ pub struct RecoveredPlayer {
     /// Advances even when a real position read repeats the preceding value.
     pub position_revision: u64,
     pub cover: String,
+}
+
+/// Verified status for one native object and its current unique D-Bus owner.
+/// The raw Astal snapshot remains untouched; this is separate policy evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePlayback {
+    pub bus: String,
+    pub instance: u64,
+    pub owner: String,
+    pub generation: u64,
+    pub revision: u64,
+    pub playing: bool,
+    pub stopped: bool,
+}
+
+struct NativeWatch {
+    generation: u64,
+    version: u64,
+    revision: u64,
+    status: Option<(bool, bool)>,
+    subscribed: bool,
+    initial_read: bool,
+    pending: bool,
+    requested: bool,
+    retries: u8,
+    retry_at: Option<Instant>,
+}
+
+impl NativeWatch {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation,
+            version: 0,
+            revision: 0,
+            status: None,
+            subscribed: false,
+            initial_read: true,
+            pending: false,
+            requested: true,
+            retries: 0,
+            retry_at: None,
+        }
+    }
+
+    fn signal(&mut self, properties: &PropMap, invalidated: &[String]) -> bool {
+        if !self.subscribed && !self.pending {
+            return false;
+        }
+        let status = if let Some(value) = properties.get("PlaybackStatus") {
+            playback_status(value.0.as_ref())
+        } else if invalidated.iter().any(|key| key == "PlaybackStatus") {
+            None
+        } else {
+            return false;
+        };
+        // Every signal fences an older read, but repeating the same confirmed
+        // status must not invalidate actions. Real ABA changes still do.
+        self.version += 1;
+        let changed = self.status != status;
+        if changed {
+            self.revision += 1;
+            self.status = status;
+        }
+        self.requested |= status.is_none();
+        self.retries = 0;
+        changed
+    }
+}
+
+fn playback_status(value: &dyn RefArg) -> Option<(bool, bool)> {
+    if value.arg_type() != ArgType::String {
+        return None;
+    }
+    match value.as_str()? {
+        "Playing" => Some((true, false)),
+        "Paused" => Some((false, false)),
+        "Stopped" => Some((false, true)),
+        _ => None,
+    }
 }
 
 /// The same clock domain as GLib.get_monotonic_time(), in seconds.
@@ -252,6 +335,23 @@ impl Recovery {
         self.shared.state().snapshots()
     }
 
+    pub fn watch_native(&self, players: &[(String, u64)]) {
+        let mut state = self.shared.state();
+        let players = players.iter().cloned().collect();
+        if state.native_instances == players || state.stopped {
+            return;
+        }
+        state.native_instances = players;
+        state.changed = true;
+        state.reconcile(self.shared.connection.as_ref());
+        drop(state);
+        self.shared.wake();
+    }
+
+    pub fn native_playback(&self) -> Vec<NativePlayback> {
+        self.shared.state().native_playback()
+    }
+
     pub fn take_changed(&self) -> bool {
         std::mem::take(&mut self.shared.state().changed)
     }
@@ -262,7 +362,7 @@ impl Recovery {
     pub fn dispatch(
         &self,
         operation: &NativeAction,
-        validate: impl FnOnce(Vec<RecoveredPlayer>) -> Result<(), String>,
+        validate: impl FnOnce(Vec<RecoveredPlayer>, Vec<NativePlayback>) -> Result<(), String>,
     ) -> crate::AppResult<()> {
         let mut state = self.shared.state();
         state.dispatch(operation, self.shared.connection.as_ref(), validate)?;
@@ -743,9 +843,25 @@ enum Query {
         instance: u64,
         generation: u64,
     },
+    NativeSubscribe {
+        owner: String,
+        generation: u64,
+    },
+    NativeStatus {
+        owner: String,
+        generation: u64,
+        revision: u64,
+    },
 }
 
 impl Query {
+    fn native_owner(&self) -> Option<&str> {
+        match self {
+            Self::NativeSubscribe { owner, .. } | Self::NativeStatus { owner, .. } => Some(owner),
+            _ => None,
+        }
+    }
+
     fn owner(&self) -> Option<&str> {
         match self {
             Self::Credentials { owner, .. }
@@ -797,6 +913,12 @@ fn player_rule(owner: &str) -> String {
     format!("type='signal',sender='{owner}',path='{MPRIS_PATH}'")
 }
 
+fn native_status_rule(owner: &str) -> String {
+    format!(
+        "type='signal',sender='{owner}',path='{MPRIS_PATH}',interface='{PROPERTIES}',member='PropertiesChanged',arg0='{MPRIS_PLAYER}'"
+    )
+}
+
 #[derive(Default)]
 struct RecoveryState {
     own_bus: String,
@@ -809,6 +931,8 @@ struct RecoveryState {
     keys: BTreeSet<String>,
     stream_ids: Vec<u32>,
     native_buses: BTreeSet<String>,
+    native_instances: BTreeMap<String, u64>,
+    native_watches: BTreeMap<String, NativeWatch>,
     aliases: HashMap<String, String>,
     alias_revisions: HashMap<String, u64>,
     alias_pending: HashSet<String>,
@@ -824,6 +948,26 @@ struct RecoveryState {
 }
 
 impl RecoveryState {
+    fn native_playback(&self) -> Vec<NativePlayback> {
+        self.native_instances
+            .iter()
+            .filter_map(|(bus, instance)| {
+                let owner = self.aliases.get(bus).unwrap_or(bus);
+                let watch = self.native_watches.get(owner)?;
+                let (playing, stopped) = watch.status?;
+                Some(NativePlayback {
+                    bus: bus.clone(),
+                    instance: *instance,
+                    owner: owner.clone(),
+                    generation: watch.generation,
+                    revision: watch.revision,
+                    playing,
+                    stopped,
+                })
+            })
+            .collect()
+    }
+
     fn snapshots(&self) -> Vec<RecoveredPlayer> {
         self.players
             .values()
@@ -878,6 +1022,35 @@ impl RecoveryState {
     }
 
     fn reconcile(&mut self, sender: &dyn Sender) {
+        let watched = self
+            .native_instances
+            .keys()
+            .map(|bus| self.aliases.get(bus).unwrap_or(bus))
+            .filter(|owner| owner.starts_with(':') && self.owners.contains(*owner))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let retired = self
+            .native_watches
+            .keys()
+            .filter(|owner| !watched.contains(*owner))
+            .cloned()
+            .collect::<Vec<_>>();
+        for owner in retired {
+            self.native_watches.remove(&owner);
+            self.pending
+                .retain(|_, pending| pending.query.native_owner() != Some(&owner));
+            let mut message = daemon_message("RemoveMatch").append1(native_status_rule(&owner));
+            message.set_no_reply(true);
+            let _ = sender.send(message);
+            self.changed = true;
+        }
+        for owner in watched {
+            if !self.native_watches.contains_key(&owner) {
+                self.next_instance += 1;
+                self.native_watches
+                    .insert(owner, NativeWatch::new(self.next_instance));
+            }
+        }
         let normal = self.normal_owners();
         let remove = self
             .players
@@ -996,6 +1169,7 @@ impl RecoveryState {
             self.request(sender, message, Query::Alias { name, revision }, now);
         }
         self.reconcile(sender);
+        self.pump_native(sender, now);
 
         let mut reads = Vec::new();
         for (owner, player) in &mut self.players {
@@ -1074,6 +1248,122 @@ impl RecoveryState {
         }
     }
 
+    fn pump_native(&mut self, sender: &dyn Sender, now: Instant) {
+        let in_flight = self
+            .native_watches
+            .values()
+            .filter(|watch| watch.pending)
+            .count();
+        let mut reads = Vec::new();
+        for (owner, watch) in &mut self.native_watches {
+            if reads.len() >= MAX_PROBES.saturating_sub(in_flight) {
+                break;
+            }
+            if watch.pending || watch.retry_at.is_some_and(|at| at > now) {
+                continue;
+            }
+            let request = if !watch.subscribed && watch.requested {
+                Some((
+                    daemon_message("AddMatch").append1(native_status_rule(owner)),
+                    Query::NativeSubscribe {
+                        owner: owner.clone(),
+                        generation: watch.generation,
+                    },
+                ))
+            } else if watch.subscribed && watch.requested {
+                watch.requested = false;
+                // Signals can precede AddMatch's acknowledgement too. Preserve
+                // every startup signal over the first baseline.
+                let revision = if std::mem::take(&mut watch.initial_read) && watch.status.is_some()
+                {
+                    0
+                } else {
+                    watch.version
+                };
+                Some((
+                    properties_message(owner, "Get").append2(MPRIS_PLAYER, "PlaybackStatus"),
+                    Query::NativeStatus {
+                        owner: owner.clone(),
+                        generation: watch.generation,
+                        revision,
+                    },
+                ))
+            } else {
+                None
+            };
+            if let Some(request) = request {
+                watch.pending = true;
+                watch.retry_at = None;
+                reads.push(request);
+            }
+        }
+        for (message, query) in reads {
+            self.request(sender, message, query, now);
+        }
+    }
+
+    fn finish_native(
+        &mut self,
+        sender: &dyn Sender,
+        owner: &str,
+        generation: u64,
+        revision: Option<u64>,
+        result: Result<Message, BusFailure>,
+        now: Instant,
+    ) {
+        let Some(watch) = self
+            .native_watches
+            .get_mut(owner)
+            .filter(|watch| watch.generation == generation)
+        else {
+            return;
+        };
+        watch.pending = false;
+        if revision.is_none() {
+            if result.is_ok() {
+                watch.subscribed = true;
+                return;
+            }
+            // A timeout may follow a successfully installed match. Balance this
+            // attempt before retrying; messages to the daemon are ordered.
+            let mut remove = daemon_message("RemoveMatch").append1(native_status_rule(owner));
+            remove.set_no_reply(true);
+            let _ = sender.send(remove);
+            // No subscription protects this evidence during the retry gap.
+            // Its replacement baseline must be allowed to observe missed changes.
+            if watch.status.take().is_some() {
+                watch.revision += 1;
+                self.changed = true;
+            }
+            watch.version += 1;
+            watch.initial_read = false;
+        }
+        if let Some(revision) = revision {
+            // A signal received after the read began wins, including an
+            // invalidation. Never resurrect the baseline that it superseded.
+            if revision != watch.version {
+                return;
+            }
+            let status = result
+                .ok()
+                .and_then(|message| message.read1::<Variant<Box<dyn RefArg>>>().ok())
+                .and_then(|value| playback_status(value.0.as_ref()));
+            if let Some(status) = status {
+                watch.status = Some(status);
+                watch.retries = 0;
+                self.changed = true;
+                return;
+            }
+        }
+        if watch.retries < STATUS_RETRIES {
+            watch.retries += 1;
+            watch.requested = true;
+            watch.retry_at = Some(now + STARTUP_RETRY);
+        } else {
+            watch.requested = false;
+        }
+    }
+
     fn current_probe(&self, owner: &str, instance: u64) -> bool {
         self.owners.contains(owner)
             && self.probing.get(owner) == Some(&instance)
@@ -1121,6 +1411,16 @@ impl RecoveryState {
         now: Instant,
     ) {
         match query {
+            Query::NativeSubscribe { owner, generation } => {
+                self.finish_native(sender, &owner, generation, None, result, now);
+            }
+            Query::NativeStatus {
+                owner,
+                generation,
+                revision,
+            } => {
+                self.finish_native(sender, &owner, generation, Some(revision), result, now);
+            }
             Query::ListNames => {
                 if let Ok(message) = result
                     && let Ok(names) = message.read1::<Vec<String>>()
@@ -1259,6 +1559,22 @@ impl RecoveryState {
             return;
         }
         if let Some(serial) = message.get_reply_serial() {
+            if let Some(pending) = self.pending.get(&serial) {
+                let expected = match &pending.query {
+                    Query::NativeSubscribe { .. } => Some(DBUS),
+                    Query::NativeStatus { owner, .. } => Some(owner.as_str()),
+                    _ => None,
+                };
+                if let Some(expected) = expected {
+                    let from = message.sender();
+                    let from = from.as_deref();
+                    if from != Some(expected)
+                        && !(from == Some(DBUS) && message.msg_type() == MessageType::Error)
+                    {
+                        return;
+                    }
+                }
+            }
             if let Some(pending) = self.pending.remove(&serial) {
                 let result = message.as_result().map(|_| ()).map_err(|error| BusFailure {
                     name: error.name().unwrap_or_default().to_owned(),
@@ -1294,6 +1610,15 @@ impl RecoveryState {
         }
         if path != MPRIS_PATH {
             return;
+        }
+        if interface == PROPERTIES
+            && member == "PropertiesChanged"
+            && let Ok((interface, properties, invalidated)) =
+                message.read3::<String, PropMap, Vec<String>>()
+            && interface == MPRIS_PLAYER
+            && let Some(watch) = self.native_watches.get_mut(&owner)
+        {
+            self.changed |= watch.signal(&properties, &invalidated);
         }
         let Some(player) = self.players.get_mut(&owner) else {
             return;
@@ -1337,12 +1662,24 @@ impl RecoveryState {
     }
 
     fn timeout_ms(&self, now: Instant) -> i32 {
+        let native_capacity = self
+            .native_watches
+            .values()
+            .filter(|watch| watch.pending)
+            .count()
+            < MAX_PROBES;
         let next = self
             .pending
             .values()
             .map(|pending| pending.deadline)
             .chain(self.retries.values().copied())
             .chain(self.players.values().filter_map(|player| player.next_poll))
+            .chain(
+                self.native_watches
+                    .values()
+                    .filter(|_| native_capacity)
+                    .filter_map(|watch| watch.retry_at),
+            )
             .min();
         next.map_or(-1, |at| {
             let remaining = at.saturating_duration_since(now);
@@ -1358,7 +1695,7 @@ impl RecoveryState {
         &mut self,
         operation: &NativeAction,
         sender: &dyn Sender,
-        validate: impl FnOnce(Vec<RecoveredPlayer>) -> Result<(), String>,
+        validate: impl FnOnce(Vec<RecoveredPlayer>, Vec<NativePlayback>) -> Result<(), String>,
     ) -> Result<(), String> {
         if self.stopped
             || !self.owners.contains(&operation.player)
@@ -1366,7 +1703,7 @@ impl RecoveryState {
         {
             return Err("The media player disappeared.".into());
         }
-        validate(self.snapshots())?;
+        validate(self.snapshots(), self.native_playback())?;
         let player = self
             .players
             .get_mut(&operation.player)
@@ -1384,7 +1721,9 @@ impl RecoveryState {
 
     fn disconnected(&mut self) {
         self.stopped = true;
-        self.changed |= self.players.values().any(|player| player.available);
+        self.changed |=
+            self.players.values().any(|player| player.available) || !self.native_watches.is_empty();
+        self.native_watches.clear();
         self.players.clear();
         self.probing.clear();
         self.pending.clear();
@@ -1461,858 +1800,10 @@ fn recovery_worker(shared: Arc<RecoveryShared>, mut wake: UnixStream) {
 }
 
 #[cfg(test)]
-mod recovery_tests {
-    use super::*;
-    use serde_json::json;
-    use std::cell::{Cell, RefCell};
+media_unit_tests!(native_playback);
 
-    #[derive(Default)]
-    struct RecordingSender {
-        serial: Cell<u32>,
-        messages: RefCell<Vec<Message>>,
-    }
-
-    impl Sender for RecordingSender {
-        fn send(&self, mut message: Message) -> Result<u32, ()> {
-            let serial = self.serial.get() + 1;
-            self.serial.set(serial);
-            message.set_serial(serial);
-            self.messages.borrow_mut().push(message);
-            Ok(serial)
-        }
-    }
-
-    fn properties<const N: usize>(values: [(&str, Box<dyn RefArg>); N]) -> PropMap {
-        values
-            .into_iter()
-            .map(|(key, value)| (key.into(), Variant(value)))
-            .collect()
-    }
-
-    fn metadata(track: &str, title: &str) -> PropMap {
-        properties([
-            (
-                "mpris:trackid",
-                Box::new(dbus::Path::new(track.to_owned()).unwrap()),
-            ),
-            ("xesam:title", Box::new(title.to_owned())),
-            (
-                "xesam:artist",
-                Box::new(vec!["One".to_owned(), "Two".to_owned()]),
-            ),
-            ("xesam:album", Box::new("Album".to_owned())),
-            ("xesam:url", Box::new("file:///track.ogg".to_owned())),
-            ("mpris:artUrl", Box::new("file:///cover.png".to_owned())),
-            ("mpris:length", Box::new(200_000_000_f64)),
-            ("mprisence:browser", Box::new(true)),
-        ])
-    }
-
-    fn ready_player(owner: &str) -> DirectPlayer {
-        let mut player = DirectPlayer::new(owner, 7);
-        player.available = true;
-        player.apply_properties(
-            properties([
-                ("Identity", Box::new("Haruna".to_owned())),
-                ("Metadata", Box::new(metadata("/track/one", "First"))),
-                ("Position", Box::new(10_000_000_i64)),
-                ("PlaybackStatus", Box::new("Playing".to_owned())),
-                ("CanPlay", Box::new(true)),
-                ("CanPause", Box::new(false)),
-                ("CanSeek", Box::new(true)),
-                ("CanGoNext", Box::new(true)),
-                ("CanGoPrevious", Box::new(true)),
-                ("Rate", Box::new(1.25_f64)),
-            ]),
-            false,
-            false,
-            Instant::now(),
-        );
-        player
-    }
-
-    fn stream(application: &str) -> Stream {
-        Stream {
-            id: 42,
-            properties: serde_json::from_value(json!({
-                "application.process.binary": application,
-            }))
-            .unwrap(),
-            ..Stream::default()
-        }
-    }
-
-    fn state_with_player() -> RecoveryState {
-        RecoveryState {
-            listed: true,
-            initial_started: true,
-            owners: BTreeSet::from([":1.20".into()]),
-            players: BTreeMap::from([(":1.20".into(), ready_player(":1.20"))]),
-            ..RecoveryState::default()
-        }
-    }
-
-    fn operation(kind: &str, value: Option<f64>) -> NativeAction {
-        NativeAction {
-            player: ":1.20".into(),
-            operation: kind.into(),
-            value,
-        }
-    }
-
-    #[test]
-    fn recovery_is_send_and_sync() {
-        fn assert_traits<T: Send + Sync>() {}
-        assert_traits::<Recovery>();
-        assert_traits::<RecoveredPlayer>();
-    }
-
-    #[test]
-    fn application_keys_match_the_native_stream_convention() {
-        for value in [
-            "Haruna",
-            "org.kde.haruna",
-            "org.kde.haruna.desktop",
-            "/nix/store/package/bin/.haruna-wrapped",
-            "C:\\bin\\haruna",
-        ] {
-            assert_eq!(application_key(value), "haruna", "{value}");
-        }
-        assert_eq!(application_key(""), "");
-        let sender = RecordingSender::default();
-        let mut state = RecoveryState::default();
-        for key in [
-            "application.name",
-            "application.id",
-            "application.process.binary",
-        ] {
-            let input = Stream {
-                id: 1,
-                properties: serde_json::Map::from_iter([(
-                    key.to_owned(),
-                    json!("org.kde.haruna.desktop"),
-                )]),
-                ..Stream::default()
-            };
-            state.update(&[input], &[], &sender);
-            assert_eq!(state.keys, BTreeSet::from(["haruna".into()]));
-        }
-    }
-
-    #[test]
-    fn variant_metadata_and_integer_or_double_microseconds_are_preserved() {
-        let metadata = metadata("/track/one", "Title");
-        let value = refarg_json(&Variant(Variant(metadata)));
-        assert_eq!(value["mpris:trackid"], "/track/one");
-        assert_eq!(value["xesam:artist"], json!(["One", "Two"]));
-        assert_eq!(value["mpris:length"], 200_000_000_f64);
-        assert_eq!(value["mprisence:browser"], true);
-        assert_eq!(refarg_json(&u64::MAX), json!(u64::MAX));
-        assert_eq!(refarg_json(&f64::NAN), serde_json::Value::Null);
-        assert_eq!(seconds(&Variant(1_250_000_i64)), Some(1.25));
-        assert_eq!(seconds(&Variant(1_250_000_f64)), Some(1.25));
-        for value in [&true as &dyn RefArg, &-1_i64, &f64::INFINITY, &f64::NAN] {
-            assert_eq!(seconds(value), None);
-        }
-        let player = ready_player(":1.20");
-        assert_eq!(player.snapshot.player.artist, "One, Two");
-        assert_eq!(player.snapshot.player.length, Some(200.0));
-        assert_eq!(player.snapshot.player.browser_hint, true);
-        assert_eq!(player.snapshot.rate, 1.25);
-    }
-
-    #[test]
-    fn initial_and_reload_baselines_never_roll_back_newer_signals() {
-        let now = Instant::now();
-        let mut player = DirectPlayer::new(":1.20", 1);
-        let baseline = player.baseline();
-        player.signal(
-            PlayerInterface::Root,
-            properties([("Identity", Box::new("New identity".to_owned()))]),
-            vec![],
-            now,
-        );
-        player.signal(
-            PlayerInterface::Player,
-            properties([
-                ("Metadata", Box::new(metadata("/track/two", "New track"))),
-                ("PlaybackStatus", Box::new("Paused".to_owned())),
-                ("CanSeek", Box::new(false)),
-                ("Position", Box::new(42_000_000_f64)),
-            ]),
-            vec![],
-            now,
-        );
-        player.apply_baseline(
-            properties([("Identity", Box::new("Old identity".to_owned()))]),
-            PlayerInterface::Root,
-            baseline,
-            now,
-        );
-        player.apply_baseline(
-            properties([
-                ("Metadata", Box::new(metadata("/track/one", "Old track"))),
-                ("PlaybackStatus", Box::new("Playing".to_owned())),
-                ("CanSeek", Box::new(true)),
-                ("Position", Box::new(1_000_000_i64)),
-            ]),
-            PlayerInterface::Player,
-            baseline,
-            now,
-        );
-        assert_eq!(player.snapshot.player.identity, "New identity");
-        assert_eq!(player.snapshot.player.title, "New track");
-        assert_eq!(player.snapshot.player.position, 42.0);
-        assert!(!player.snapshot.player.playing);
-        assert!(!player.snapshot.player.can_seek);
-
-        let reload = player.baseline();
-        player.signal(
-            PlayerInterface::Player,
-            properties([("Metadata", Box::new(metadata("/track/three", "Newest")))]),
-            vec![],
-            now,
-        );
-        player.apply_baseline(
-            properties([
-                ("Metadata", Box::new(metadata("/track/two", "New track"))),
-                ("Position", Box::new(60_000_000_i64)),
-            ]),
-            PlayerInterface::Player,
-            reload,
-            now,
-        );
-        assert_eq!(player.snapshot.player.title, "Newest");
-        assert!(!player.snapshot.position_supported);
-        assert!(player.position_requested);
-    }
-
-    #[test]
-    fn seeked_during_startup_survives_both_initial_snapshots() {
-        let mut player = DirectPlayer::new(":1.20", 1);
-        player.set_position(Some(37.5));
-        player.apply_baseline(
-            properties([
-                ("Metadata", Box::new(metadata("/track/one", "First"))),
-                ("Position", Box::new(1_000_000_i64)),
-            ]),
-            PlayerInterface::Player,
-            Baseline {
-                version: 0,
-                position_generation: 0,
-            },
-            Instant::now(),
-        );
-        assert_eq!(player.snapshot.player.position, 37.5);
-        assert!(player.snapshot.position_supported);
-    }
-
-    #[test]
-    fn stale_track_and_seek_reads_cannot_replace_newer_samples() {
-        let mut player = ready_player(":1.20");
-        let generation = player.position_generation;
-        player.position_read = Some(generation);
-        player.signal(
-            PlayerInterface::Player,
-            properties([("Metadata", Box::new(metadata("/track/two", "Second")))]),
-            vec![],
-            Instant::now(),
-        );
-        player.finish_position(generation, Some(100.0));
-        assert!(!player.snapshot.position_supported);
-        assert!(player.position_requested);
-
-        let generation = player.position_generation;
-        player.position_read = Some(generation);
-        player.set_position(Some(15.0));
-        let revision = player.snapshot.position_revision;
-        player.finish_position(generation, Some(2.0));
-        assert_eq!(player.snapshot.player.position, 15.0);
-        assert_eq!(player.snapshot.position_revision, revision);
-        assert!(!player.position_requested);
-        player.finish_position(player.position_generation, None);
-        assert_eq!(player.snapshot.player.position, 15.0);
-        assert_eq!(player.snapshot.position_revision, revision);
-        player.finish_position(player.position_generation, Some(15.0));
-        assert!(player.snapshot.position_revision > revision);
-    }
-
-    #[test]
-    fn invalidated_position_is_refreshed_while_paused_and_seeked_accepts_both_wire_types() {
-        let now = Instant::now();
-        let sender = RecordingSender::default();
-        let mut state = state_with_player();
-        let player = state.players.get_mut(":1.20").unwrap();
-        player.signal(
-            PlayerInterface::Player,
-            properties([("PlaybackStatus", Box::new("Paused".to_owned()))]),
-            vec![],
-            now,
-        );
-        player.position_requested = false;
-        player.signal(
-            PlayerInterface::Player,
-            PropMap::new(),
-            vec!["Position".into()],
-            now,
-        );
-        assert!(!player.snapshot.position_supported);
-        assert!(player.position_requested);
-        assert!(player.reload_requested[PlayerInterface::Player.index()]);
-        assert!(player.next_poll.is_none());
-        let baseline = player.baseline();
-        for (value, expected) in [
-            (Box::new(13_000_000_i64) as Box<dyn RefArg>, 13.0),
-            (Box::new(14_500_000_f64), 14.5),
-        ] {
-            let mut signal = Message::new_signal(MPRIS_PATH, MPRIS_PLAYER, "Seeked").unwrap();
-            value.append(&mut dbus::arg::IterAppend::new(&mut signal));
-            signal.set_sender(Some(":1.20".into()));
-            state.message(&sender, signal, now);
-            assert_eq!(state.players[":1.20"].snapshot.player.position, expected);
-        }
-        let player = state.players.get_mut(":1.20").unwrap();
-        player.apply_baseline(
-            properties([("Position", Box::new(1_000_000_i64))]),
-            PlayerInterface::Player,
-            baseline,
-            now,
-        );
-        assert_eq!(player.snapshot.player.position, 14.5);
-        assert!(player.snapshot.position_supported);
-    }
-
-    #[test]
-    fn dispatch_validation_sees_latest_state_and_rejection_sends_nothing() {
-        let sender = RecordingSender::default();
-        let mut state = state_with_player();
-        let observed = state.snapshots()[0].clone();
-        state.players.get_mut(":1.20").unwrap().signal(
-            PlayerInterface::Player,
-            properties([("Metadata", Box::new(metadata("/track/two", "Second")))]),
-            vec![],
-            Instant::now(),
-        );
-        let generation = state.players[":1.20"].position_generation;
-        let result = state.dispatch(&operation("seek", Some(12.0)), &sender, |latest| {
-            assert_eq!(latest[0].track_id, "/track/two");
-            if latest[0].track_id != observed.track_id {
-                Err("The observed track changed.".into())
-            } else {
-                Ok(())
-            }
-        });
-        assert_eq!(result.unwrap_err(), "The observed track changed.");
-        assert!(sender.messages.borrow().is_empty());
-        assert_eq!(state.players[":1.20"].position_generation, generation);
-    }
-
-    #[test]
-    fn commands_are_ordered_reply_free_and_seek_is_not_optimistic() {
-        let sender = RecordingSender::default();
-        let mut state = state_with_player();
-        let baseline = state.players[":1.20"].baseline();
-        let revision = state.players[":1.20"].snapshot.position_revision;
-        for kind in ["play", "pause", "next", "previous"] {
-            state
-                .dispatch(&operation(kind, None), &sender, |_| Ok(()))
-                .unwrap();
-        }
-        state
-            .dispatch(&operation("seek", Some(12.345678)), &sender, |_| Ok(()))
-            .unwrap();
-        let messages = sender.messages.borrow();
-        assert_eq!(
-            messages
-                .iter()
-                .map(|m| m.member().unwrap().to_string())
-                .collect::<Vec<_>>(),
-            ["Play", "Pause", "Next", "Previous", "SetPosition"]
-        );
-        assert!(messages.iter().all(|m| m.get_no_reply()));
-        assert!(
-            messages
-                .iter()
-                .all(|m| m.destination().as_deref() == Some(":1.20"))
-        );
-        let (track, microseconds) = messages[4].read2::<dbus::Path<'_>, i64>().unwrap();
-        assert_eq!(&*track, "/track/one");
-        assert_eq!(microseconds, 12_345_678);
-        let player = state.players.get_mut(":1.20").unwrap();
-        assert_eq!(player.snapshot.player.position, 10.0);
-        assert_eq!(player.snapshot.position_revision, revision);
-        assert!(player.position_requested);
-        player.apply_baseline(
-            properties([
-                ("Metadata", Box::new(metadata("/track/one", "First"))),
-                ("Position", Box::new(9_000_000_i64)),
-            ]),
-            PlayerInterface::Player,
-            baseline,
-            Instant::now(),
-        );
-        assert_eq!(player.snapshot.player.position, 10.0);
-        player.finish_position(baseline.position_generation, Some(9.0));
-        assert_eq!(player.snapshot.player.position, 10.0);
-        assert!(player.position_requested);
-    }
-
-    #[test]
-    fn seek_rejects_invalid_paths_and_nonfinite_or_overflowing_positions() {
-        let mut player = ready_player(":1.20");
-        for value in [
-            None,
-            Some(-1.0),
-            Some(f64::NAN),
-            Some(f64::INFINITY),
-            Some(f64::MAX),
-        ] {
-            assert!(player.control(&operation("seek", value)).is_err());
-        }
-        for track in [
-            "",
-            "not/a/path",
-            "/org/mpris/MediaPlayer2/TrackList/NoTrack",
-        ] {
-            player.snapshot.track_id = track.into();
-            assert!(player.control(&operation("seek", Some(1.0))).is_err());
-        }
-    }
-
-    #[test]
-    fn position_poll_is_playing_only_and_never_overlaps_a_read() {
-        let sender = RecordingSender::default();
-        let mut state = state_with_player();
-        let now = Instant::now();
-        state.players.get_mut(":1.20").unwrap().next_poll = Some(now);
-        state.pump(&sender, now);
-        assert_eq!(state.pending.len(), 1);
-        state.pump(&sender, now + POSITION_INTERVAL);
-        state.players.get_mut(":1.20").unwrap().request_position();
-        state.pump(&sender, now + POSITION_INTERVAL);
-        assert_eq!(state.pending.len(), 1);
-        assert_eq!(sender.messages.borrow().len(), 1);
-        let player = state.players.get_mut(":1.20").unwrap();
-        player.signal(
-            PlayerInterface::Player,
-            properties([("PlaybackStatus", Box::new("Paused".to_owned()))]),
-            vec![],
-            now,
-        );
-        assert!(player.next_poll.is_none());
-        let message = sender.messages.borrow_mut().remove(0);
-        state.message(
-            &sender,
-            message.method_return().append1(Variant(12_000_000_f64)),
-            now,
-        );
-        state.pump(&sender, now);
-        // Crossing Playing -> Paused invalidates the earlier read and asks once.
-        assert_eq!(sender.messages.borrow().len(), 1);
-        let message = sender.messages.borrow_mut().remove(0);
-        state.message(
-            &sender,
-            message.method_return().append1(Variant(12_000_000_i64)),
-            now,
-        );
-        state.pump(&sender, now + POSITION_INTERVAL * 10);
-        assert!(sender.messages.borrow().is_empty());
-        assert_eq!(state.players[":1.20"].snapshot.player.position, 12.0);
-        assert!(state.pending.is_empty());
-        assert_eq!(state.timeout_ms(now), -1);
-    }
-
-    #[test]
-    fn list_names_is_once_credentials_are_bounded_and_only_matching_apps_are_probed() {
-        let sender = RecordingSender::default();
-        let now = Instant::now();
-        let mut state = RecoveryState {
-            own_bus: ":1.0".into(),
-            ..RecoveryState::default()
-        };
-        state.update(&[stream("haruna")], &[], &sender);
-        state.pump(&sender, now);
-        let list = sender.messages.borrow_mut().remove(0);
-        state.owner_changed(":1.99".into(), String::new(), &sender);
-        let names = (1..=9)
-            .map(|id| format!(":1.{id}"))
-            .chain([":1.0".into(), ":1.99".into()])
-            .collect::<Vec<_>>();
-        state.message(&sender, list.method_return().append1(names), now);
-        state.pump(&sender, now);
-        assert!(!state.owners.contains(":1.99"));
-        assert!(!state.owners.contains(":1.0"));
-        assert_eq!(state.probing.len(), MAX_PROBES);
-        assert_eq!(state.pending.len(), MAX_PROBES);
-        assert!(sender.messages.borrow().iter().all(|message| {
-            message.destination().as_deref() == Some(DBUS)
-                && message.member().as_deref() == Some("GetConnectionUnixProcessID")
-        }));
-
-        let sender = RecordingSender::default();
-        let mut state = RecoveryState {
-            listed: true,
-            initial_started: true,
-            owners: BTreeSet::from([":1.1".into(), ":1.2".into(), ":1.3".into()]),
-            credentials: HashMap::from([
-                (":1.1".into(), "haruna".into()),
-                (":1.2".into(), "unrelated".into()),
-                (":1.3".into(), String::new()),
-            ]),
-            ..RecoveryState::default()
-        };
-        state.update(&[stream("haruna")], &[], &sender);
-        state.pump(&sender, now);
-        assert_eq!(state.players.len(), 1);
-        assert!(state.players.contains_key(":1.1"));
-        let subscription = sender.messages.borrow_mut().remove(0);
-        assert_eq!(subscription.member().as_deref(), Some("AddMatch"));
-        state.message(&sender, subscription.method_return(), now);
-        let messages = sender.messages.borrow();
-        assert_eq!(messages.len(), 2);
-        assert!(
-            messages
-                .iter()
-                .all(|message| message.destination().as_deref() == Some(":1.1")
-                    && message.member().as_deref() == Some("GetAll"))
-        );
-        drop(messages);
-        state.expire(&sender, now + REQUEST_TIMEOUT);
-        sender.messages.borrow_mut().clear();
-        state.pump(&sender, now + REQUEST_TIMEOUT * 20);
-        assert!(sender.messages.borrow().is_empty());
-        assert_eq!(state.timeout_ms(now + REQUEST_TIMEOUT * 20), -1);
-    }
-
-    #[test]
-    fn verified_private_players_survive_stream_loss_until_owner_exit_or_native_takeover() {
-        let sender = RecordingSender::default();
-        let mut state = state_with_player();
-        state.update(&[stream("haruna")], &[], &sender);
-        let instance = state.players[":1.20"].snapshot.instance;
-        state.update(&[], &[], &sender);
-        assert_eq!(state.snapshots()[0].instance, instance);
-        let normal = "org.mpris.MediaPlayer2.haruna".to_owned();
-        state.aliases.insert(normal.clone(), ":1.20".into());
-        state.update(&[], &[normal], &sender);
-        assert!(state.snapshots().is_empty());
-        assert!(state.changed);
-        assert_eq!(
-            sender.messages.borrow()[0].member().as_deref(),
-            Some("RemoveMatch")
-        );
-
-        let mut state = state_with_player();
-        state.credentials.insert(":1.20".into(), "haruna".into());
-        state.owner_changed(":1.20".into(), String::new(), &sender);
-        assert!(state.snapshots().is_empty());
-        assert!(!state.credentials.contains_key(":1.20"));
-    }
-
-    #[test]
-    fn native_alias_resolution_precedes_application_probes_and_rejects_stale_replies() {
-        let sender = RecordingSender::default();
-        let now = Instant::now();
-        let alias = "org.mpris.MediaPlayer2.haruna".to_owned();
-        let mut state = state_with_player();
-        state.update(&[stream("haruna")], std::slice::from_ref(&alias), &sender);
-        state.pump(&sender, now);
-        let query = sender.messages.borrow_mut().remove(0);
-        assert_eq!(query.member().as_deref(), Some("GetNameOwner"));
-        assert!(state.probing.is_empty());
-        state.owner_changed(alias, ":1.21".into(), &sender);
-        state.message(&sender, query.method_return().append1(":1.20"), now);
-        assert!(!state.snapshots().is_empty());
-        state.update(&[], &[":1.20".into()], &sender);
-        assert!(state.snapshots().is_empty());
-    }
-
-    #[test]
-    fn startup_retries_once_after_250ms_only_for_missing_exports() {
-        let sender = RecordingSender::default();
-        let now = Instant::now();
-        let mut state = RecoveryState {
-            listed: true,
-            initial_started: true,
-            owners: BTreeSet::from([":1.20".into()]),
-            credentials: HashMap::from([(":1.20".into(), "haruna".into())]),
-            ..RecoveryState::default()
-        };
-        state.update(&[stream("haruna")], &[], &sender);
-        state.pump(&sender, now);
-        let first_instance = state.players[":1.20"].snapshot.instance;
-        let error = BusFailure {
-            name: "org.freedesktop.DBus.Error.UnknownObject".into(),
-        };
-        state.fail_probe(&sender, ":1.20", &error, now);
-        state.pump(&sender, now + Duration::from_millis(249));
-        assert!(state.players.is_empty());
-        state.pump(&sender, now + STARTUP_RETRY);
-        assert!(state.players[":1.20"].snapshot.instance > first_instance);
-        state.fail_probe(&sender, ":1.20", &error, now + STARTUP_RETRY);
-        state.pump(&sender, now + STARTUP_RETRY * 10);
-        assert!(state.players.is_empty());
-        assert!(state.retries.is_empty());
-        for name in ["UnknownObject", "UnknownInterface", "UnknownMethod"] {
-            assert!(retryable_startup_error(&format!(
-                "org.freedesktop.DBus.Error.{name}"
-            )));
-        }
-        for name in [
-            "NoReply",
-            "AccessDenied",
-            "ServiceUnknown",
-            "NameHasNoOwner",
-        ] {
-            assert!(!retryable_startup_error(&format!(
-                "org.freedesktop.DBus.Error.{name}"
-            )));
-        }
-    }
-
-    struct LiveExport {
-        connection: Arc<SyncConnection>,
-        stopped: Arc<std::sync::atomic::AtomicBool>,
-        stalled: Arc<std::sync::atomic::AtomicBool>,
-        reads: Arc<std::sync::atomic::AtomicUsize>,
-        commands: Arc<Mutex<Vec<String>>>,
-        worker: Option<JoinHandle<()>>,
-    }
-
-    impl LiveExport {
-        fn new() -> Self {
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            let connection = Arc::new(SyncConnection::new_session().unwrap());
-            let stopped = Arc::new(AtomicBool::new(false));
-            let stalled = Arc::new(AtomicBool::new(false));
-            let reads = Arc::new(AtomicUsize::new(0));
-            let commands = Arc::new(Mutex::new(Vec::new()));
-            let worker = {
-                let connection = connection.clone();
-                let stopped = stopped.clone();
-                let stalled = stalled.clone();
-                let reads = reads.clone();
-                let commands = commands.clone();
-                thread::spawn(move || {
-                    let mut position = 10.5;
-                    while !stopped.load(Ordering::Relaxed) {
-                        if connection
-                            .channel()
-                            .read_write(Some(Duration::from_millis(10)))
-                            .is_err()
-                        {
-                            break;
-                        }
-                        while let Some(message) = connection.channel().pop_message() {
-                            if message.msg_type() != MessageType::MethodCall {
-                                continue;
-                            }
-                            let member = message.member().unwrap().to_string();
-                            let interface = message.interface().unwrap().to_string();
-                            let reply = if interface == PROPERTIES && member == "GetAll" {
-                                let interface = message.read1::<String>().unwrap();
-                                let props = if interface == MPRIS_ROOT {
-                                    properties([
-                                        ("Identity", Box::new("Haruna".to_owned())),
-                                        ("DesktopEntry", Box::new("org.kde.haruna".to_owned())),
-                                    ])
-                                } else {
-                                    properties([
-                                        (
-                                            "Metadata",
-                                            Box::new(metadata("/track/one", "Private export")),
-                                        ),
-                                        ("PlaybackStatus", Box::new("Paused".to_owned())),
-                                        ("Position", Box::new(position * 1e6)),
-                                        ("Rate", Box::new(1.25_f64)),
-                                        ("CanPlay", Box::new(true)),
-                                        ("CanPause", Box::new(false)),
-                                        ("CanSeek", Box::new(true)),
-                                        ("CanGoNext", Box::new(true)),
-                                    ])
-                                };
-                                Some(message.method_return().append1(props))
-                            } else if interface == PROPERTIES && member == "Get" {
-                                reads.fetch_add(1, Ordering::Relaxed);
-                                (!stalled.load(Ordering::Relaxed)).then(|| {
-                                    message.method_return().append1(Variant(position * 1e6))
-                                })
-                            } else if interface == MPRIS_PLAYER {
-                                assert!(message.get_no_reply());
-                                commands.lock().unwrap().push(member.clone());
-                                if member == "SetPosition" {
-                                    let (track, micros) =
-                                        message.read2::<dbus::Path<'_>, i64>().unwrap();
-                                    assert_eq!(&*track, "/track/one");
-                                    position = micros as f64 / 1e6;
-                                    connection
-                                        .send(
-                                            Message::new_signal(MPRIS_PATH, MPRIS_PLAYER, "Seeked")
-                                                .unwrap()
-                                                .append1(position * 1e6),
-                                        )
-                                        .unwrap();
-                                }
-                                None
-                            } else {
-                                dbus::channel::default_reply(&message)
-                            };
-                            if let Some(reply) = reply {
-                                connection.send(reply).unwrap();
-                            }
-                        }
-                    }
-                })
-            };
-            Self {
-                connection,
-                stopped,
-                stalled,
-                reads,
-                commands,
-                worker: Some(worker),
-            }
-        }
-
-        fn owner(&self) -> String {
-            self.connection.unique_name().to_string()
-        }
-
-        fn status(&self, status: &str) {
-            self.connection
-                .send(
-                    Message::new_signal(MPRIS_PATH, PROPERTIES, "PropertiesChanged")
-                        .unwrap()
-                        .append3(
-                            MPRIS_PLAYER,
-                            properties([("PlaybackStatus", Box::new(status.to_owned()))]),
-                            Vec::<String>::new(),
-                        ),
-                )
-                .unwrap();
-        }
-    }
-
-    impl Drop for LiveExport {
-        fn drop(&mut self) {
-            self.stopped
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            let _ = self.worker.take().unwrap().join();
-        }
-    }
-
-    fn wait_until(mut predicate: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(4);
-        while !predicate() {
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for private MPRIS recovery"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    #[test]
-    #[ignore = "uses a session bus; run with dbus-run-session -- cargo test --lib private_export -- --ignored"]
-    fn private_export_round_trips_real_dbus_and_shutdown_does_not_wait_for_replies() {
-        use std::sync::atomic::Ordering;
-        // No RequestName: like Haruna, the object exists only on a unique owner.
-        let export = LiveExport::new();
-        let owner = export.owner();
-        let application = std::env::current_exe().unwrap();
-        let streams = [stream(application.to_str().unwrap())];
-        let recovery = Recovery::new().unwrap();
-        recovery.update(&streams, &[]);
-        wait_until(|| {
-            recovery
-                .players()
-                .iter()
-                .any(|player| player.player.bus == owner)
-        });
-        let snapshot = recovery
-            .players()
-            .into_iter()
-            .find(|p| p.player.bus == owner)
-            .unwrap();
-        assert_eq!(snapshot.player.title, "Private export");
-        assert_eq!(snapshot.player.artist, "One, Two");
-        assert_eq!(snapshot.player.position, 10.5);
-        assert_eq!(snapshot.player.length, Some(200.0));
-        assert_eq!(snapshot.rate, 1.25);
-        assert!(snapshot.position_supported);
-        let instance = snapshot.instance;
-        recovery.update(&[], &[]);
-        assert_eq!(recovery.players()[0].instance, instance);
-        drop(export);
-        wait_until(|| recovery.players().is_empty());
-
-        // A later connection is discovered through NameOwnerChanged, not polling.
-        recovery.update(&streams, &[]);
-        let export = LiveExport::new();
-        let owner = export.owner();
-        wait_until(|| {
-            recovery
-                .players()
-                .iter()
-                .any(|player| player.player.bus == owner)
-        });
-        assert!(recovery.players()[0].instance > instance);
-        export.status("Playing");
-        wait_until(|| export.reads.load(Ordering::Relaxed) >= 1);
-        export.status("Paused");
-        wait_until(|| {
-            let state = recovery.shared.state();
-            state.players.get(&owner).is_some_and(|player| {
-                !player.snapshot.player.playing
-                    && player.position_read.is_none()
-                    && !player.position_requested
-            })
-        });
-        let reads = export.reads.load(Ordering::Relaxed);
-        thread::sleep(Duration::from_millis(1100));
-        assert_eq!(export.reads.load(Ordering::Relaxed), reads);
-
-        export.stalled.store(true, Ordering::Relaxed);
-        recovery.refresh_position(&owner);
-        wait_until(|| export.reads.load(Ordering::Relaxed) > reads);
-        let started = Instant::now();
-        for (kind, value) in [("pause", None), ("seek", Some(12.345678)), ("next", None)] {
-            recovery
-                .dispatch(
-                    &NativeAction {
-                        player: owner.clone(),
-                        operation: kind.into(),
-                        value,
-                    },
-                    |_| Ok(()),
-                )
-                .unwrap();
-        }
-        recovery.update(&streams, &[]);
-        recovery.take_changed();
-        recovery.players();
-        assert!(
-            started.elapsed() < Duration::from_millis(250),
-            "main-thread recovery calls waited for a reply"
-        );
-        wait_until(|| export.commands.lock().unwrap().len() == 3);
-        assert_eq!(
-            *export.commands.lock().unwrap(),
-            ["Pause", "SetPosition", "Next"]
-        );
-        wait_until(|| {
-            recovery.players().iter().any(|player| {
-                player.player.bus == owner && (player.player.position - 12.345678).abs() < 1e-9
-            })
-        });
-        let started = Instant::now();
-        drop(recovery);
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "shutdown waited for a missing D-Bus reply"
-        );
-    }
-}
+#[cfg(test)]
+media_unit_tests!(recovery);
 
 #[cfg(test)]
 media_unit_tests!(playback);

@@ -1323,5 +1323,4 @@ impl Engine {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+crate::tests::engine_tests!();

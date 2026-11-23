@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import { LineDecoder, writeBytes } from '../ipc.js';
+import { LineDecoder, writeBytes } from '../../shared/astal/ipc.js';
 
 const PRIORITY = GLib.PRIORITY_DEFAULT;
 const CHUNK_BYTES = 8192;

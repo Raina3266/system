@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::credit::http_authority;
-use crate::playback::{known_length, same_playback, source_name};
+use crate::playback::{NativePlayback, known_length, same_playback, source_name};
 
 /// Maximum request-line size in bytes, excluding the terminating LF.
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -1053,6 +1053,8 @@ impl NativeSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 struct ActionGuard {
     native: NativeGuard,
+    // Owner/watch/revision evidence fences Rust intents, never JS raw guards.
+    native_playback: Vec<NativePlayback>,
     recovered: Vec<Value>,
     groups: Vec<Group>,
     selected: String,
@@ -1220,6 +1222,7 @@ impl Timeline {
         }
         let query = !player.stopped
             && (previous.is_none()
+                || previous.is_some_and(|p| p.stopped)
                 || !same_track
                 || seek_changed
                 || (!player.playing
@@ -1437,6 +1440,7 @@ struct ServiceState<'a> {
 /// effects returned by advance(); tests can acknowledge them with raw fixtures.
 struct Runtime {
     native: NativeSnapshot,
+    native_playback: BTreeMap<(String, u64), NativePlayback>,
     recovered: Vec<ResidentPlayer>,
     recovered_revisions: HashMap<(String, u64), u64>,
     timelines: HashMap<String, Timeline>,
@@ -1463,6 +1467,7 @@ impl Runtime {
     fn new(now: f64) -> Self {
         Self {
             native: NativeSnapshot::default(),
+            native_playback: BTreeMap::new(),
             recovered: Vec::new(),
             recovered_revisions: HashMap::new(),
             timelines: HashMap::new(),
@@ -1495,6 +1500,7 @@ impl Runtime {
     fn guard(&self) -> ActionGuard {
         ActionGuard {
             native: self.native.guard.clone(),
+            native_playback: self.native_playback.values().cloned().collect(),
             recovered: self
                 .recovered
                 .iter()
@@ -1517,6 +1523,7 @@ impl Runtime {
         // An unrepresentable state must never leave an apparently current
         // ownership decision available to the frontend.
         self.native = NativeSnapshot::default();
+        self.native_playback.clear();
         self.recovered.clear();
         self.recovered_revisions.clear();
         self.timelines.clear();
@@ -1532,6 +1539,13 @@ impl Runtime {
         match NativeSnapshot::parse(raw) {
             Ok(snapshot) => {
                 self.native = snapshot;
+                self.native_playback.retain(|(bus, instance), _| {
+                    self.native
+                        .players
+                        .iter()
+                        .any(|p| p.view.player.bus == *bus && p.view.instance == *instance)
+                });
+                self.apply_native_playback();
                 // A native takeover wins over a previously verified adapter.
                 self.recovered.retain(|p| {
                     !self
@@ -1548,6 +1562,41 @@ impl Runtime {
             Err(error) => {
                 self.fail(error);
                 false
+            }
+        }
+    }
+
+    /// Recovery supplies the complete set of currently verified watch results;
+    /// absence withdraws an override rather than retaining unverified playback.
+    fn update_native_playback(&mut self, statuses: Vec<NativePlayback>, now: f64) {
+        self.native_playback = statuses
+            .into_iter()
+            .filter(|status| {
+                self.native
+                    .players
+                    .iter()
+                    .any(|p| p.view.player.bus == status.bus && p.view.instance == status.instance)
+            })
+            .map(|status| ((status.bus.clone(), status.instance), status))
+            .collect();
+        self.apply_native_playback();
+        self.synchronize(now);
+    }
+
+    fn apply_native_playback(&mut self) {
+        for source in &mut self.native.players {
+            let player = &mut source.view.player;
+            if let Some(status) = self
+                .native_playback
+                .get(&(player.bus.clone(), source.view.instance))
+            {
+                player.playing = status.playing;
+                player.stopped = status.stopped;
+            } else {
+                // Raw capture and its frontend guard remain untouched, including
+                // while an invalidation withdraws a previously verified status.
+                player.playing = source.raw["playing"].as_bool().expect("parsed native flag");
+                player.stopped = source.raw["stopped"].as_bool().expect("parsed native flag");
             }
         }
     }
@@ -2166,8 +2215,11 @@ impl Runtime {
         &mut self,
         id: u64,
         players: Vec<crate::playback::RecoveredPlayer>,
+        statuses: Vec<NativePlayback>,
         now: f64,
     ) -> Result<(), String> {
+        // Both observation sets come from the same locked dispatch boundary.
+        self.update_native_playback(statuses, now);
         self.update_recovered(players, now);
         let tx = self
             .transaction
@@ -2833,6 +2885,13 @@ fn serve_service_io(
         let now = monotonic_seconds();
         let received = input.is_some();
         let mut tick = false;
+        // Observe status evidence before a result can complete an in-flight plan.
+        if let Some(recovery) = &recovery
+            && recovery.take_changed()
+        {
+            runtime.update_native_playback(recovery.native_playback(), now);
+            runtime.update_recovered(recovery.players(), now);
+        }
         match input {
             Some(Input::Eof) => return Ok(()),
             Some(Input::Invalid(error)) => runtime.fail(error),
@@ -2857,7 +2916,15 @@ fn serve_service_io(
                 .map(|p| p.view.player.bus.clone())
                 .collect();
             recovery.update(&runtime.native.streams, &buses);
+            let players: Vec<_> = runtime
+                .native
+                .players
+                .iter()
+                .map(|p| (p.view.player.bus.clone(), p.view.instance))
+                .collect();
+            recovery.watch_native(&players);
             if recovery.take_changed() {
+                runtime.update_native_playback(recovery.native_playback(), now);
                 runtime.update_recovered(recovery.players(), now);
             }
         }
@@ -2895,6 +2962,7 @@ fn serve_service_io(
             }
             let now = monotonic_seconds();
             if let Some(recovery) = &recovery {
+                runtime.update_native_playback(recovery.native_playback(), now);
                 runtime.update_recovered(recovery.players(), now);
             }
             let Some(apply) = runtime.advance(now) else {
@@ -2908,10 +2976,11 @@ fn serve_service_io(
                     || Err("The recovered media player disappeared.".into()),
                     |recovery| {
                         recovery
-                            .dispatch(&apply.operation.playback(), |players| {
+                            .dispatch(&apply.operation.playback(), |players, statuses| {
                                 runtime.validate_recovered_apply(
                                     apply.id,
                                     players,
+                                    statuses,
                                     monotonic_seconds(),
                                 )
                             })

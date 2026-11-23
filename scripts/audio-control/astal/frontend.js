@@ -4,27 +4,17 @@ import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
-import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { AudioBackend } from './backend.js';
 import { parseRequest } from './logic.js';
-import { loadPanelStyle } from '../../live-style.js';
-
-function read(path) {
-    if (!path) throw new Error('Run through audio-panel, or set AUDIO_PANEL_CONFIG and AUDIO_PANEL_PALETTE.');
-    const [ok, contents] = GLib.file_get_contents(path);
-    if (!ok) throw new Error(`Could not read audio theme: ${path}`);
-    return new TextDecoder().decode(contents);
-}
+import { loadPanelTheme } from '../../shared/astal/theme.js';
+import { replyAndClose } from '../../shared/astal/socket.js';
+import { drawCutCornerFrame } from '../../shared/astal/drawing.js';
 
 function loadTheme(entry, palettePath) {
-    const palette = JSON.parse(read(palettePath));
-    for (const key of ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'secondaryBackground', 'chromeBackground'])
-        if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid audio palette colour: ${key}`);
-    const definitions = '.audio-panel {\n' + Object.entries(palette)
-        .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `    --ap_${key}: ${value};`).join('\n') + '\n}';
-    loadPanelStyle({ entry, definitions, label: 'Audio' });
+    const { palette } = loadPanelTheme({ entry, palettePath,
+        required: ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'secondaryBackground', 'chromeBackground'],
+        selector: '.audio-panel', prefix: 'ap', label: 'Audio' });
     return palette;
 }
 
@@ -114,20 +104,8 @@ function volumeBar(scale, beforeStep) {
 function frame(palette) {
     const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
     drawing.set_draw_func((_, cr, width, height) => {
-        const cut = Math.min(10, width / 2, height / 2), inset = 0.5;
-        cr.moveTo(cut + inset, inset);
-        cr.lineTo(width - inset, inset);
-        cr.lineTo(width - inset, height - cut - inset);
-        cr.lineTo(width - cut - inset, height - inset);
-        cr.lineTo(inset, height - inset);
-        cr.lineTo(inset, cut + inset);
-        cr.closePath();
-        cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.9);
-        cr.fillPreserve();
-        const rgb = palette.yellow.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
-        cr.setSourceRGBA(...rgb, 1);
-        cr.setLineWidth(1);
-        cr.stroke();
+        drawCutCornerFrame(cr, { width: width - 1, height: height - 1,
+            cut: Math.min(10, width / 2, height / 2), color: palette.yellow });
     });
     return drawing;
 }
@@ -623,23 +601,8 @@ const AudioApplication = GObject.registerClass({ GTypeName: 'AudioPanelApplicati
                 default: throw new Error('Unknown audio panel command.');
                 }
             } catch (error) { response = JSON.stringify({ error: error.message || String(error) }); }
-            try {
-                AstalIO.write_sock(connection, response, (_, result) => {
-                    try { AstalIO.write_sock_finish(result); }
-                    catch (error) { console.error(error); }
-                    finally { this.closeConnection(connection); }
-                });
-            } catch (error) {
-                console.error(error);
-                this.closeConnection(connection);
-            }
-        }
-
-        closeConnection(connection) {
-            connection.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                try { source.close_finish(result); }
-                catch (error) { console.error(error); }
-            });
+            replyAndClose(connection, response, { label: 'Audio', asyncClose: true,
+                onError: (_, error) => console.error(error) });
         }
 
         startPanel() {

@@ -3,7 +3,7 @@ import Gio from 'gi://Gio';
 import Mpris from 'gi://AstalMpris';
 import Wp from 'gi://AstalWp';
 import { badge } from './logic.js';
-import { communicate, LineDecoder, writeBytes } from '../../ipc.js';
+import { communicate, LineDecoder, writeBytes } from '../../shared/astal/ipc.js';
 
 const clock = () => GLib.get_monotonic_time() / 1e6;
 const encoder = new TextEncoder();

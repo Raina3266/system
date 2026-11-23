@@ -2,7 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { badge, truncateTitle, formatTime } from './logic.js';
-import { loadIPC } from '../../ipc-test-loader.js';
+import { loadIPC } from '../../shared/astal/ipc-test-loader.js';
 
 const viewSource = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
 const accessibleProperty = { LABEL: 'label', DESCRIPTION: 'description' };
@@ -25,8 +25,12 @@ describe('Media theme color syntax', () => {
         const calls = [], reads = [];
         const theme = viewSource.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
         assert.ok(theme);
-        const loadTheme = new Function('read', 'loadPanelStyle', `${theme}\nreturn loadTheme;`)(
-            path => { reads.push(path); return contents; }, options => calls.push(options));
+        assert.match(viewSource, /import \{ loadPanelTheme \} from '..\/..\/shared\/astal\/theme\.js'/);
+        const sharedTheme = readFileSync(new URL('../../shared/astal/theme.js', import.meta.url), 'utf8')
+            .replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+        const loadTheme = new Function('GLib', 'loadPanelStyle', `${sharedTheme}\n${theme}\nreturn loadTheme;`)(
+            { file_get_contents(path) { reads.push(path); return [true, new TextEncoder().encode(contents)]; } },
+            options => calls.push(options));
         return { loadTheme, calls, reads };
     }
 
@@ -74,6 +78,70 @@ describe('Media theme color syntax', () => {
             assert.equal(h.calls.length, 0, 'Malformed JSON must not load CSS');
         }
     });
+});
+
+test('media frame delegates to shared drawing without clamping small allocations', async () => {
+    assert.match(viewSource, /import \{ drawCutCornerFrame \} from '..\/..\/shared\/astal\/drawing\.js'/);
+    const { drawCutCornerFrame } = await import('../../shared/astal/drawing.js');
+    let draw;
+    const frame = new Function('Gtk', 'drawCutCornerFrame',
+        `${viewSource.match(/function frame\([\s\S]*?\n\}/)[0]}\nreturn frame;`)(
+        { DrawingArea: function(properties) { return { ...properties, set_draw_func(callback) { draw = callback; } }; } },
+        drawCutCornerFrame);
+    const widget = frame({ yellow: '#AbCdEf' });
+    assert.equal(widget.can_target, false);
+    assert.equal(widget.hexpand, true);
+    assert.equal(widget.vexpand, true);
+    for (const [width, height] of [[400, 200], [8, 6], [0, 0]]) {
+        const calls = [];
+        const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve', 'setLineWidth', 'stroke']
+            .map(name => [name, (...args) => calls.push([name, ...args])]));
+        draw(widget, cr, width, height);
+        assert.deepEqual(calls, [
+            ['moveTo', 10.5, 0.5], ['lineTo', width - 0.5, 0.5],
+            ['lineTo', width - 0.5, height - 10.5], ['lineTo', width - 10.5, height - 0.5],
+            ['lineTo', 0.5, height - 0.5], ['lineTo', 0.5, 10.5], ['closePath'],
+            ['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, 0.9], ['fillPreserve'],
+            ['setSourceRGBA', 171 / 255, 205 / 255, 239 / 255, 1], ['setLineWidth', 1], ['stroke'],
+        ]);
+    }
+});
+
+test('media requests retain local parsing and dispatch with shared synchronous-close replies', () => {
+    assert.match(viewSource, /import \{ replyAndClose \} from '..\/..\/shared\/astal\/socket\.js'/);
+    const socket = readFileSync(new URL('../../shared/astal/socket.js', import.meta.url), 'utf8')
+        .replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+    const events = [], warnings = [];
+    let failWrite = false;
+    const fixture = new Function('GObject', 'Astal', 'AstalIO', 'console', `${socket}\n`
+        + viewSource.slice(viewSource.indexOf('let backend, panel;'), viewSource.indexOf('\nGtk.init();'))
+        + '\nreturn { MediaApplication, setState(b, p) { backend = b; panel = p; } };')(
+        { registerClass: value => value }, { Application: class {} }, {
+            write_sock(connection, response, callback) {
+                events.push(['reply', response]);
+                if (failWrite) throw new Error('write failed');
+                callback(connection, 'written');
+            },
+            write_sock_finish(result) { events.push(['finish', result]); },
+        }, { warn: message => warnings.push(message) });
+    const app = new fixture.MediaApplication();
+    const connection = { close(value) { events.push(['close', value]); } };
+    fixture.setState({ status: () => 'status' }, { close: () => events.push(['dispatch']) });
+    app.vfunc_request('{"command":"status"}', connection);
+    assert.deepEqual(events, [['reply', 'status'], ['finish', 'written'], ['close', null]]);
+    events.length = 0;
+    app.vfunc_request('{"command":"close"}', connection);
+    assert.deepEqual(events, [['dispatch'], ['reply', 'ok'], ['finish', 'written'], ['close', null]]);
+    events.length = 0;
+    fixture.setState(null, null);
+    app.vfunc_request('null', connection);
+    assert.deepEqual(JSON.parse(events[0][1]), { error: 'A media panel command object is required.' });
+    events.length = 0;
+    failWrite = true;
+    app.vfunc_request('{"command":"status"}', connection);
+    assert.deepEqual(JSON.parse(events[0][1]), { error: 'Media panel is starting.' });
+    assert.equal(events.filter(([phase]) => phase === 'close').length, 1);
+    assert.deepEqual(warnings, ['Media request reply: write failed']);
 });
 
 test('source rows use dim yellow interactions with a later dim red current override and unchanged tint', () => {
@@ -265,7 +333,7 @@ test('the entire built media tree stays tooltip-free through source, title and c
 });
 
 test('media runtime supports AVIF artwork and refreshes native progress while open', () => {
-    const runtime = readFileSync(new URL('../../shared.nix', import.meta.url), 'utf8');
+    const runtime = readFileSync(new URL('../../shared/default.nix', import.meta.url), 'utf8');
     const recipe = readFileSync(new URL('../default.nix', import.meta.url), 'utf8');
     assert.match(runtime, /pkgs\.libavif/);
     assert.match(recipe, /imageLoaders\s*=\s*true\s*;/);

@@ -9,6 +9,10 @@ async function unitTests() {
     const { default: assert } = await import('node:assert/strict');
     const { readFileSync } = await import('node:fs');
     const { runInNewContext } = await import('node:vm');
+    const drawingHelpers = await import('../shared/astal/drawing.js');
+    const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    const sharedSocket = readFileSync(new URL('../shared/astal/socket.js', import.meta.url), 'utf8')
+        .replace(/^import .*\n/gm, '').replace(/^export /gm, '');
 
     function loadClass(file, name, context) {
         const source = readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -17,6 +21,98 @@ async function unitTests() {
         const definition = source.slice(start, end).replace('export class', 'class');
         return runInNewContext(`${definition}\n${name};`, context);
     }
+
+    test('panel drawing keeps its literal yellow outline and half-pixel allocation', () => {
+        const definition = frontend.match(/function drawPanelFrame\([^]*?\n\}/)?.[0];
+        assert.ok(definition);
+        const draw = runInNewContext(`${definition}\ndrawPanelFrame;`, drawingHelpers);
+        for (const [width, height] of [[496, 280], [200, 100]]) {
+            const calls = [];
+            const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve',
+                'setLineWidth', 'stroke'].map(name => [name, (...args) => calls.push([name, ...args])]));
+            draw(cr, width, height);
+            assert.deepEqual(calls, [['moveTo', 10.5, 0.5], ['lineTo', width - 0.5, 0.5],
+                ['lineTo', width - 0.5, height - 10.5], ['lineTo', width - 10.5, height - 0.5],
+                ['lineTo', 0.5, height - 0.5], ['lineTo', 0.5, 10.5], ['closePath'],
+                ['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, 0.9], ['fillPreserve'],
+                ['setSourceRGBA', 252 / 255, 238 / 255, 10 / 255, 1], ['setLineWidth', 1], ['stroke']]);
+        }
+        assert.doesNotMatch(frontend.match(/function drawTileFrame\([^]*?\n\}/)?.[0] || '', /drawCutCornerFrame/);
+        assert.doesNotMatch(frontend, /loadPanelTheme/);
+        assert.match(frontend, /provider = loadPanelStyle\(\{ entry: config, label: 'Launcher' \}\)/);
+    });
+
+    test('socket requests keep arrival order without waiting for write or close completion', async () => {
+        const method = frontend.match(/        vfunc_request\(text, connection\) \{([^]*?)\n        \}/)?.[1];
+        assert.ok(method);
+        const events = [], warnings = [], replies = [];
+        let finishFirst;
+        const first = new Promise(resolve => { finishFirst = resolve; });
+        const run = runInNewContext(`${sharedSocket}\n({ run(text, connection) { ${method} } }).run`, {
+            GLib: { PRIORITY_DEFAULT: 0 },
+            AstalIO: {
+                write_sock(connection, response, callback) { events.push(`write:${connection.id}`); replies.push({ connection, response, callback }); },
+                write_sock_finish() { events.push('write-finish'); },
+            },
+            console: { warn: warning => warnings.push(warning), error: warning => warnings.push(warning) },
+        });
+        const app = { async handleRequest(text) {
+            events.push(`handle:${text}`);
+            if (text === 'first') await first;
+            if (text === 'second') throw new Error('bad request');
+            return 'ok';
+        } };
+        const connection = id => ({ id,
+            close_async(priority, cancellable, callback) {
+                assert.equal(priority, 0); assert.equal(cancellable, null);
+                events.push(`close:${id}`); callback(null, {});
+            },
+            close_finish() { events.push(`closed:${id}`); },
+        });
+        assert.equal(run.call(app, 'first', connection('first')), undefined);
+        assert.equal(run.call(app, 'second', connection('second')), undefined);
+        await Promise.resolve();
+        assert.deepEqual(events, ['handle:first']);
+        finishFirst();
+        await app.requests;
+        assert.deepEqual(events, ['handle:first', 'write:first', 'handle:second', 'write:second']);
+        assert.deepEqual(replies.map(({ response }) => response), ['ok', '{"error":"bad request"}']);
+        for (const { callback } of replies) callback(null, {});
+        assert.deepEqual(events.slice(4), ['write-finish', 'close:first', 'closed:first',
+            'write-finish', 'close:second', 'closed:second']);
+        assert.deepEqual(warnings, []);
+    });
+
+    test('socket failures preserve launcher diagnostic labels and do not poison the queue', async () => {
+        const method = frontend.match(/        vfunc_request\(text, connection\) \{([^]*?)\n        \}/)?.[1];
+        assert.ok(method);
+        for (const phase of ['write', 'finish']) {
+            const warnings = [], handled = [];
+            let closes = 0;
+            const run = runInNewContext(`${sharedSocket}\n({ run(text, connection) { ${method} } }).run`, {
+                GLib: { PRIORITY_DEFAULT: 0 },
+                AstalIO: {
+                    write_sock(_connection, _response, callback) {
+                        if (phase === 'write') throw new Error('write failed');
+                        callback(null, {});
+                    },
+                    write_sock_finish() { throw new Error('write failed'); },
+                },
+                console: { warn: warning => warnings.push(warning), error: warning => warnings.push(warning) },
+            });
+            const app = { async handleRequest(text) { handled.push(text); return 'ok'; } };
+            const connection = {
+                close_async(_priority, _cancellable, callback) { closes++; callback(null, {}); },
+                close_finish() { throw new Error('close failed'); },
+            };
+            run.call(app, 'first', connection); run.call(app, 'second', connection);
+            await app.requests;
+            assert.deepEqual(handled, ['first', 'second']);
+            assert.equal(closes, 2);
+            assert.deepEqual(warnings, ['Launcher reply: write failed', 'Launcher connection: close failed',
+                'Launcher reply: write failed', 'Launcher connection: close failed']);
+        }
+    });
 
     function panelFixture() {
         let query = '', focused = null;

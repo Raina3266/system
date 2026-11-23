@@ -1,9 +1,221 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { loadIPC } from './ipc-test-loader.js';
+import { cutCornerPath, drawCutCornerFrame, hexRgb } from './drawing.js';
 
 const encode = text => new TextEncoder().encode(text);
 const { LineDecoder } = loadIPC();
+
+test('shared infrastructure groups Astal utilities, panel-launcher and packaging together', () => {
+    const shared = new URL('../', import.meta.url);
+    assert.deepEqual(readdirSync(shared).sort(), ['astal', 'default.nix', 'panel-launcher']);
+    for (const directory of ['astal/', 'panel-launcher/'])
+        assert.ok(statSync(new URL(directory, shared)).isDirectory());
+    for (const file of ['ipc.js', 'live-style.js', 'theme.js', 'socket.js', 'drawing.js', 'ipc-test-loader.js', 'package.json', 'test.js'])
+        assert.ok(statSync(new URL(file, import.meta.url)).isFile(), file);
+    for (const file of ['Cargo.toml', 'src/main.rs', 'src/tests.rs'])
+        assert.ok(statSync(new URL(`panel-launcher/${file}`, shared)).isFile(), file);
+    const recipe = readFileSync(new URL('default.nix', shared), 'utf8');
+    assert.match(recipe, /workspaceRoot \? \.\.\//);
+    assert.match(recipe, /workspaceMember = "shared\/panel-launcher"/);
+    assert.ok(recipe.includes('/shared/astal/ipc.js'));
+    for (const file of ['live-style.js', 'theme.js', 'socket.js', 'drawing.js'])
+        assert.ok(recipe.includes(`/shared/astal/${file}`));
+
+    const workspace = readFileSync(new URL('../../Cargo.toml', import.meta.url), 'utf8');
+    assert.ok(workspace.includes('"shared/panel-launcher"'));
+    assert.doesNotMatch(workspace, /^\s*"panel-launcher",?$/m);
+});
+
+// Exercise the real GI modules with native doubles, not duplicate implementations.
+function sharedModule(file, names, bindings) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8')
+        .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
+    return new Function(...Object.keys(bindings), `${source}\nreturn { ${names.join(', ')} };`)(...Object.values(bindings));
+}
+
+function themeFixture() {
+    const calls = [], provider = {};
+    let contents = JSON.stringify({ yellow: '#ffee00', cyan: '#00ccFF', extra: '#123456' }), readable = true;
+    const options = { entry: '/panel/frontend.js', palettePath: '/palette.json', required: ['yellow', 'cyan'],
+        selector: '.test-panel', prefix: 'tp', label: 'Test' };
+    const theme = sharedModule('theme.js', ['loadPanelTheme', 'paletteDefinitions'], {
+        GLib: { file_get_contents(path) { calls.push(['read', path]); return [readable, encode(contents)]; } },
+        loadPanelStyle(value) { calls.push(['style', value]); return provider; },
+    });
+    return { ...theme, options, calls, provider, setContents(value) { contents = value; }, setReadable(value) { readable = value; } };
+}
+
+test('shared theme validates before installation and preserves namespace, extras and provider ownership', () => {
+    const h = themeFixture(), result = h.loadPanelTheme(h.options);
+    assert.deepEqual(result.palette, { yellow: '#ffee00', cyan: '#00ccFF', extra: '#123456' });
+    assert.equal(result.provider, h.provider);
+    assert.deepEqual(h.calls, [['read', '/palette.json'], ['style', {
+        entry: '/panel/frontend.js', label: 'Test',
+        definitions: '.test-panel {\n    --tp_yellow: #ffee00;\n    --tp_cyan: #00ccFF;\n    --tp_extra: #123456;\n}',
+    }]]);
+    result.palette.yellow = '#000000';
+    assert.ok(h.calls[1][1].definitions.includes('#ffee00'), 'installed definitions are a restart-time snapshot');
+});
+
+test('palette definitions admit only alphabetic property names and full hexadecimal colors', () => {
+    const h = themeFixture();
+    assert.equal(h.paletteDefinitions({
+        valid: '#aAbBcc', 'bad-name': '#123456', 'x;injected': '#123456', short: '#fff',
+        named: 'red', injected: '#123456; color: red', number: 123456, nil: null,
+    }, '.scope', 'sc'), '.scope {\n    --sc_valid: #aAbBcc;\n}');
+});
+
+for (const invalid of [null, [], {}, { yellow: '#ffffff' }, { yellow: '#fff', cyan: '#000000' },
+    { yellow: '#ffffff', cyan: 'red' }, { yellow: '#ffffff', cyan: '#000000;evil' }]) {
+    test(`invalid required palette values never install CSS: ${JSON.stringify(invalid)}`, () => {
+        const h = themeFixture(); h.setContents(JSON.stringify(invalid));
+        assert.throws(() => h.loadPanelTheme(h.options), /Invalid test palette colour: (yellow|cyan)/);
+        assert.equal(h.calls.filter(([operation]) => operation === 'style').length, 0);
+    });
+}
+
+test('theme rejects missing files, failed reads and malformed JSON without installing CSS', () => {
+    const h = themeFixture();
+    assert.throws(() => h.loadPanelTheme({ ...h.options, palettePath: null }), /Run through test-panel/);
+    assert.deepEqual(h.calls, []);
+    h.setReadable(false);
+    assert.throws(() => h.loadPanelTheme(h.options), /Could not read test theme: \/palette.json/);
+    h.setReadable(true); h.setContents('{broken');
+    assert.throws(() => h.loadPanelTheme(h.options), SyntaxError);
+    assert.ok(h.calls.every(([operation]) => operation === 'read'));
+});
+
+test('theme permits per-panel diagnostics and required color sets without broadening them', () => {
+    const h = themeFixture(), options = { ...h.options, errors: {
+        missing: 'Missing clipboard palette', read: 'Cannot load the clipboard theme.', invalid: 'Invalid clipboard palette',
+    } };
+    assert.throws(() => h.loadPanelTheme({ ...options, palettePath: '' }), /Missing clipboard palette/);
+    h.setReadable(false);
+    assert.throws(() => h.loadPanelTheme(options), /Cannot load the clipboard theme\./);
+    h.setReadable(true); h.setContents('{"yellow":"#abcdef"}');
+    assert.throws(() => h.loadPanelTheme(options), /Invalid clipboard palette: cyan/);
+    assert.deepEqual(h.loadPanelTheme({ ...options, required: ['yellow'] }).palette, { yellow: '#abcdef' });
+});
+
+function socketFixture({ writeError = false, finishError = false, closeError = false, closeFinishError = false, inline = false } = {}) {
+    const events = [], errors = [];
+    let writeCallback, closeCallback;
+    const connection = {
+        close(cancellable) { events.push(['close', cancellable]); if (closeError) throw new Error('close failed'); },
+        close_async(priority, cancellable, callback) {
+            events.push(['close_async', priority, cancellable]);
+            if (closeError) throw new Error('close failed');
+            closeCallback = callback;
+        },
+        close_finish(result) { events.push(['close_finish', result]); if (closeFinishError) throw new Error('close finish failed'); },
+    };
+    const { replyAndClose } = sharedModule('socket.js', ['replyAndClose'], {
+        GLib: { PRIORITY_DEFAULT: 0 },
+        AstalIO: {
+            write_sock(target, response, callback) {
+                assert.equal(target, connection); events.push(['write', response]); writeCallback = callback;
+                if (inline) callback(null, 'inline');
+                if (writeError) throw new Error('write failed');
+            },
+            write_sock_finish(result) { events.push(['write_finish', result]); if (finishError) throw new Error('finish failed'); },
+        },
+        console: { warn(message) { errors.push(['warning', message]); } },
+    });
+    return { events, errors, connection, replyAndClose,
+        onError(phase, error) { errors.push([phase, error.message]); },
+        finishWrite() { writeCallback(null, 'written'); },
+        finishClose() { closeCallback(connection, 'closed'); },
+    };
+}
+
+for (const asyncClose of [false, true]) {
+    test(`socket reply finishes writing before closing, preserving close mode (${asyncClose})`, () => {
+        const h = socketFixture();
+        h.replyAndClose(h.connection, 'exact response\n', { asyncClose, onError: h.onError });
+        assert.deepEqual(h.events, [['write', 'exact response\n']]);
+        h.finishWrite();
+        assert.deepEqual(h.events, [['write', 'exact response\n'], ['write_finish', 'written'],
+            asyncClose ? ['close_async', 0, null] : ['close', null]]);
+        if (asyncClose) { h.finishClose(); assert.deepEqual(h.events.at(-1), ['close_finish', 'closed']); }
+        assert.deepEqual(h.errors, []);
+    });
+    for (const failure of ['writeError', 'finishError', 'closeError', 'closeFinishError']) {
+        if (!asyncClose && failure === 'closeFinishError') continue;
+        test(`socket ${failure} reports without losing connection cleanup (${asyncClose})`, () => {
+            const h = socketFixture({ [failure]: true });
+            assert.doesNotThrow(() => h.replyAndClose(h.connection, 'sensitive response', { asyncClose, onError: h.onError }));
+            if (failure !== 'writeError') h.finishWrite();
+            assert.equal(h.events.filter(([operation]) => operation === (asyncClose ? 'close_async' : 'close')).length, 1);
+            if (asyncClose && failure !== 'closeError') h.finishClose();
+            assert.equal(h.errors.length, 1);
+            assert.equal(h.errors[0][0], failure.startsWith('close') ? 'close' : 'reply');
+            assert.ok(!JSON.stringify(h.errors).includes('sensitive response'));
+        });
+    }
+}
+
+test('socket closes only once when a native write completes inline and then throws', () => {
+    const h = socketFixture({ inline: true, writeError: true });
+    h.replyAndClose(h.connection, 'ok', { onError: h.onError });
+    assert.equal(h.events.filter(([operation]) => operation === 'write_finish').length, 1);
+    assert.equal(h.events.filter(([operation]) => operation === 'close_async').length, 1);
+    h.finishClose();
+    assert.deepEqual(h.errors, [['reply', 'write failed']]);
+});
+
+test('a failing error reporter cannot prevent socket cleanup', () => {
+    const h = socketFixture({ finishError: true });
+    h.replyAndClose(h.connection, 'ok', { onError() { throw new Error('logger failed'); } });
+    assert.doesNotThrow(h.finishWrite);
+    assert.equal(h.events.filter(([operation]) => operation === 'close_async').length, 1);
+    h.finishClose();
+});
+
+test('default socket diagnostics are labelled and never include response bodies', () => {
+    const h = socketFixture({ writeError: true });
+    h.replyAndClose(h.connection, 'secret response', { label: 'Example' });
+    assert.deepEqual(h.errors, [['warning', 'Example request reply: write failed']]);
+});
+
+function drawingFixture() {
+    const calls = [];
+    const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve', 'setLineWidth', 'stroke']
+        .map(name => [name, (...args) => calls.push([name, ...args])]));
+    return { calls, cr };
+}
+
+test('cut-corner geometry retains caller offsets, dimensions and exact unclamped cut', () => {
+    const h = drawingFixture();
+    cutCornerPath(h.cr, { x: 4.5, y: 6.5, width: 99, height: 59, cut: 10 });
+    assert.deepEqual(h.calls, [['moveTo', 14.5, 6.5], ['lineTo', 103.5, 6.5], ['lineTo', 103.5, 55.5],
+        ['lineTo', 93.5, 65.5], ['lineTo', 4.5, 65.5], ['lineTo', 4.5, 16.5], ['closePath']]);
+    h.calls.length = 0;
+    cutCornerPath(h.cr, { x: 0.5, y: 0.5, width: 2, height: 1, cut: 10 });
+    assert.deepEqual(h.calls[0], ['moveTo', 10.5, 0.5], 'fixed-cut callers are not silently clamped');
+    assert.deepEqual(h.calls[2], ['lineTo', 2.5, -8.5]);
+});
+
+for (const opacity of [0.9, 0.95]) test(`frame painting preserves the neutral surface, accent and opacity ${opacity}`, () => {
+    const h = drawingFixture();
+    drawCutCornerFrame(h.cr, { width: 99, height: 59, color: '#fCeE0A', opacity });
+    assert.deepEqual(h.calls.slice(0, 7), [['moveTo', 10.5, 0.5], ['lineTo', 99.5, 0.5], ['lineTo', 99.5, 49.5],
+        ['lineTo', 89.5, 59.5], ['lineTo', 0.5, 59.5], ['lineTo', 0.5, 10.5], ['closePath']]);
+    assert.deepEqual(h.calls.slice(7), [['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, opacity], ['fillPreserve'],
+        ['setSourceRGBA', 252 / 255, 238 / 255, 10 / 255, 1], ['setLineWidth', 1], ['stroke']]);
+});
+
+test('frame defaults do not retain earlier geometry or color across redraws', () => {
+    const h = drawingFixture();
+    drawCutCornerFrame(h.cr, { x: 8, y: 9, width: 20, height: 30, cut: 0, color: '#ff0000', opacity: 0.95 });
+    h.calls.length = 0;
+    drawCutCornerFrame(h.cr, { width: 99, height: 59, color: '#00ff00' });
+    assert.deepEqual(h.calls[0], ['moveTo', 10.5, 0.5]);
+    assert.deepEqual(h.calls[7], ['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, 0.9]);
+    assert.deepEqual(h.calls[9], ['setSourceRGBA', 0, 1, 0, 1]);
+    assert.deepEqual(hexRgb('#AbCdEf'), [171 / 255, 205 / 255, 239 / 255]);
+});
 
 test('JSONL decoding spans reads and UTF-8 scalars with per-frame, not lifetime, limits', () => {
     const frames = new LineDecoder(4), lines = [];

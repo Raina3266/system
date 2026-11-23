@@ -96,6 +96,7 @@ pub struct NativeRoute {
     pub index: i32,
     pub name: String,
     pub description: String,
+    /// Rust policy view; raw NativeSnapshot routes retain Astal's enum.
     pub available: bool,
 }
 
@@ -343,8 +344,8 @@ impl NativeSnapshot {
             .collect::<Result<Vec<Card>, _>>()?;
         let nodes = self
             .objects("node")
-            .map(|node| {
-                serde_json::from_value(fields(
+            .map(|node| -> AppResult<Node> {
+                let mut value = fields(
                     node,
                     &[
                         "id",
@@ -358,9 +359,20 @@ impl NativeSnapshot {
                         "routes",
                         "routeName",
                     ],
-                ))
+                );
+                let routes = value["routes"].as_array_mut().ok_or("Missing native routes")?;
+                for route in routes {
+                    // AstalWp.Available: UNKNOWN=0, NO=1, YES=2. Interpret only
+                    // this copy so raw snapshots and equality guards stay lossless.
+                    route["available"] = match route["available"].as_u64() {
+                        Some(0 | 2) => true,
+                        Some(1) => false,
+                        _ => return Err("Invalid native route availability; expected Astal UNKNOWN=0, NO=1 or YES=2".into()),
+                    }.into();
+                }
+                Ok(serde_json::from_value(value)?)
             })
-            .collect::<Result<Vec<Node>, _>>()?;
+            .collect::<AppResult<Vec<Node>>>()?;
         let default = |key: &str| {
             self.object(key)
                 .ok()

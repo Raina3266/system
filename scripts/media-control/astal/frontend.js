@@ -10,24 +10,15 @@ import GObject from 'gi://GObject';
 import { exit } from 'system';
 import { MediaBackend } from './backend.js';
 import { formatTime } from './logic.js';
-import { loadPanelStyle } from '../../live-style.js';
+import { loadPanelTheme } from '../../shared/astal/theme.js';
+import { replyAndClose } from '../../shared/astal/socket.js';
+import { drawCutCornerFrame } from '../../shared/astal/drawing.js';
 
 // Theme and metadata presentation.
-function read(path) {
-    if (!path) throw new Error('Run through media-panel, or set MEDIA_PANEL_CONFIG and MEDIA_PANEL_PALETTE.');
-    const [ok, contents] = GLib.file_get_contents(path);
-    if (!ok) throw new Error(`Could not read media theme: ${path}`);
-    return new TextDecoder().decode(contents);
-}
-
 function loadTheme(entry, palettePath) {
-    const palette = JSON.parse(read(palettePath));
-    for (const key of ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'secondaryBackground'])
-        if (!/^#[a-f\d]{6}$/i.test(palette[key])) throw new Error(`Invalid media palette colour: ${key}`);
-    const definitions = '.media-panel {\n' + Object.entries(palette)
-        .filter(([key, value]) => /^[a-zA-Z]+$/.test(key) && /^#[a-f\d]{6}$/i.test(value))
-        .map(([key, value]) => `    --mp_${key}: ${value};`).join('\n') + '\n}';
-    loadPanelStyle({ entry, definitions, label: 'Media' });
+    const { palette } = loadPanelTheme({ entry, palettePath,
+        required: ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'secondaryBackground'],
+        selector: '.media-panel', prefix: 'mp', label: 'Media' });
     return { palette };
 }
 
@@ -171,20 +162,8 @@ function trackKey(player) {
 function frame(palette) {
     const drawing = new Gtk.DrawingArea({ can_target: false, hexpand: true, vexpand: true });
     drawing.set_draw_func((_, cr, width, height) => {
-        const cut = 10, inset = 0.5;
-        cr.moveTo(cut + inset, inset);
-        cr.lineTo(width - inset, inset);
-        cr.lineTo(width - inset, height - cut - inset);
-        cr.lineTo(width - cut - inset, height - inset);
-        cr.lineTo(inset, height - inset);
-        cr.lineTo(inset, cut + inset);
-        cr.closePath();
-        cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.9);
-        cr.fillPreserve();
-        const rgb = palette.yellow.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
-        cr.setSourceRGBA(...rgb, 1);
-        cr.setLineWidth(1);
-        cr.stroke();
+        drawCutCornerFrame(cr, { width: width - 1, height: height - 1,
+            cut: 10, color: palette.yellow });
     });
     return drawing;
 }
@@ -606,22 +585,7 @@ const MediaApplication = GObject.registerClass(class MediaApplication extends As
         let response;
         try { response = handleRequest(JSON.parse(request)); }
         catch (error) { response = JSON.stringify({ error: error.message }); }
-        const close = () => {
-            try { connection.close(null); }
-            catch (error) { console.warn(`Media request close: ${error.message}`); }
-        };
-        try {
-            // Native request API exposes the connection, so its owner can close
-            // it after Astal finishes writing instead of relying on GJS GC.
-            AstalIO.write_sock(connection, response, (_, result) => {
-                try { AstalIO.write_sock_finish(result); }
-                catch (error) { console.warn(`Media request reply: ${error.message}`); }
-                finally { close(); }
-            });
-        } catch (error) {
-            close();
-            console.warn(`Media request reply: ${error.message}`);
-        }
+        replyAndClose(connection, response, { label: 'Media', asyncClose: false });
     }
 });
 

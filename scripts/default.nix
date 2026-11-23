@@ -1,4 +1,4 @@
-# Utility packages and per-panel imports; common builders live in shared.nix.
+# Utility packages and per-panel imports; common builders live in shared/default.nix.
 {
   pkgs,
   craneLib,
@@ -11,11 +11,11 @@
 }:
 let
   inherit (pkgs) lib;
-  inherit (import ./shared.nix {
+  shared = import ./shared {
     inherit pkgs craneLib agsPackage;
     astalPackage = astalPackages.io;
-    panelLauncher = packages.panelLauncher;
-  })
+  };
+  inherit (shared)
     mkWorkspacePackage
     mkCargoArtifacts
     mkPanel
@@ -50,7 +50,7 @@ let
           --set WEBCAM_CROP_V4L2LOOPBACK_CTL "${kernelPackages.v4l2loopback.bin}/bin/v4l2loopback-ctl"
       '';
     };
-    panelLauncher = import ./panel-launcher { inherit pkgs mkWorkspacePackage mkCargoArtifacts; };
+    panelLauncher = shared.panelLauncher;
     audioControl = import ./audio-control {
       inherit pkgs mkWorkspacePackage mkPanel repoRoot palette astalPackages;
     };

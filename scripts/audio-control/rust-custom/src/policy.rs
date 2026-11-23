@@ -308,15 +308,13 @@ pub mod panel {
         let snapshot = native.snapshot()?;
         let current = live(&snapshot, &original)?;
         if let Some(route) = route {
-            let routes = current["routes"]
-                .as_array()
-                .ok_or("Missing native routes")?;
-            if routes
+            let audio = snapshot.audio()?;
+            if audio
+                .node(&node)?
+                .routes
                 .iter()
                 .filter(|item| {
-                    item["index"] == route
-                        && item["name"] == target.port_name
-                        && item["available"] == true
+                    item.index == route && item.name == target.port_name && item.available
                 })
                 .count()
                 != 1

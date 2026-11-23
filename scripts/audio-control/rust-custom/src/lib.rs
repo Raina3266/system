@@ -16,5 +16,17 @@ pub mod policy;
 pub type AppError = Box<dyn Error + Send + Sync>;
 pub type AppResult<T> = Result<T, AppError>;
 
+// Integration suites run only when tests.rs is the Cargo test target.
 #[cfg(test)]
-mod unit_tests;
+macro_rules! skip_integration_tests {
+    (integration) => {};
+}
+#[cfg(test)]
+pub(crate) use skip_integration_tests as script_tests;
+
+#[cfg(test)]
+#[macro_use]
+mod tests;
+
+#[cfg(test)]
+audio_unit_tests!(library);

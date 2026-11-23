@@ -20,6 +20,14 @@ and utility, not just the media panel.
 - Keep the frontend-to-Rust boundary thin: send requests, receive results, manage
   cancellation, and present state or errors. Do not duplicate backend decisions
   or maintain a second backend implementation in the frontend.
+- Files in `astal/`, including `backend.js` or `backend.ts`, are frontend adapters,
+  not a place to add custom backend features. Limit them to native Astal/GTK
+  bindings, UI, raw snapshot marshaling, Rust-directed native calls, and thin
+  IPC/lifecycle/identity-safety glue. Preserve native enums and unknown states in
+  snapshots and opaque guards; interpret availability, eligibility, selection,
+  fallback, and recovery policy in Rust. For example, audio snapshots carry the
+  native route-availability enum unchanged; Rust decides that `UNKNOWN` and `YES`
+  are usable and `NO` is not.
 - Display formatting, widget/layout calculations, UI lifecycle, CSS reloading,
   and temporary interaction state belong in the frontend. Nix and launch wrappers
   may package, configure, and start components; custom backend work still belongs
@@ -55,11 +63,74 @@ Rust helpers must be rebuilt and deployed together when their protocol changes.
   CPU and memory snapshots use `procfs`; sampling cadence, unavailable-value
   sentinels, disk reserved-space accounting, and temperature selection remain local.
 - Panel transports share bounded JSONL decoding, partial writes, stream cleanup,
-  and one-shot subprocess handling in [`scripts/ipc.js`](scripts/ipc.js). Queueing,
+  and one-shot subprocess handling in
+  [`shared/astal/ipc.js`](scripts/shared/astal/ipc.js). Queueing,
   cancellation ordering, secret-buffer clearing, and restart policy stay with the
   owning panel. This is GJS/Gio frontend lifecycle code, not a second backend.
+- Shared frontend presentation helpers live in `scripts/shared/astal/`:
+  `theme.js` loads and validates palettes and generates scoped CSS variables;
+  `socket.js` writes Astal socket responses and closes their connections;
+  `drawing.js` supplies cut-corner paths and frame painting. Panels retain their
+  required colors, palette namespaces, request dispatch/ordering, close mode,
+  frame geometry, opacity, glow, and prompt decorations. Do not turn these helpers
+  into a second policy layer or a generic panel controller.
+
+## Test organization rule
+
+**Keep every component's tests in one file, separately for its frontend and Rust
+backend.** This applies to all repository-maintained scripts and utilities.
+
+- AGS/Astal frontend tests belong in `astal/test.js` or `astal/test.ts`, alongside
+  the frontend sources. Network follows this layout too. The frontend-only App
+  Launcher currently keeps its single `test.js` alongside its flat frontend
+  sources; this is not an exception for panels with a local Rust backend.
+- Each Rust crate keeps all unit, integration, CLI, regression, and live tests in
+  `src/tests.rs`, including test-only fixtures and helpers. Do not split suites
+  into `unit_tests.rs`, feature-specific test files, or inline test bodies in
+  production modules.
+- Production Rust files may contain test-only module declarations and macro
+  wiring that expand suites from `tests.rs`, preserving private access without
+  widening production APIs. Cargo integration-test targets must point directly
+  at that crate's `src/tests.rs`; do not add separate test-runner files. Audio
+  and Media use a crate-root macro hook so their integration suites expand only
+  in the integration target, not again during unit-test compilation.
+- Shared frontend infrastructure keeps its single suite in
+  [`shared/astal/test.js`](scripts/shared/astal/test.js); shared Rust runtime tests
+  live in `shared/panel-launcher/src/tests.rs`. Frontend module loaders contain
+  no test bodies or fixtures.
+- Add new tests to the existing suite, preserve ignored/live-test safeguards,
+  and update the test command or packaging source filters when wiring changes.
 
 ## Packaging layout
+
+**Panels with their own Rust backend must have exactly this top-level layout:**
+
+```text
+scripts/<feature>/
+├── astal/        # All frontend code, styles, package.json, and frontend tests
+├── rust-custom/  # Rust crate; all backend tests in src/tests.rs
+└── default.nix   # Packaging and Home Manager integration
+```
+
+Do not leave frontend files at the feature root or make per-panel exceptions.
+Network uses `scripts/network-manager/astal/` and
+`scripts/network-manager/rust-custom/`; its frontend test command is
+`npm --prefix scripts/network-manager/astal test`. Standalone utilities keep their
+own directories; do not create empty Rust crates for frontend-only components.
+
+Shared infrastructure follows the same grouping, with the Rust folder retaining
+its `panel-launcher` name:
+
+```text
+scripts/shared/
+├── astal/           # IPC, themes, socket replies, drawing, and test.js
+├── panel-launcher/  # Shared Rust runtime; tests in src/tests.rs
+└── default.nix      # Shared builders and panel-launcher packaging
+```
+
+Keep shared frontend utilities here rather than loose in `scripts/` or copied
+into individual panels. The Rust package/executable remains `panel-launcher`;
+only its source directory changes.
 
 [`scripts/default.nix`](scripts/default.nix) defines the central utility recipes
 and imports per-panel packages, supplying shared builder, runtime, and theme
@@ -72,12 +143,13 @@ Cloud-specific Dolphin Drive actions are packaged directly in
 | Component | Recipe / exported metadata |
 | --- | --- |
 | Rust utilities: OCR, timer, cropped webcam | [`scripts/default.nix`](scripts/default.nix) defines the Rust derivations |
-| Rust backends: panel launcher, audio, media, clipboard, dashboard | `scripts/<feature>/default.nix` returns the Rust derivation |
+| Rust backends: audio, media, clipboard, dashboard | `scripts/<feature>/default.nix` returns the Rust derivation |
+| Shared panel launcher | [`scripts/shared/default.nix`](scripts/shared/default.nix) exports the `panelLauncher` Rust derivation |
 | Audio, media, clipboard, dashboard frontends | The same feature’s `default.nix` exposes the panel derivation as backend `.panel` metadata |
 | Network | `scripts/network-manager/default.nix` returns the panel derivation and exposes its Rust helper as `.backend` metadata |
 | App launcher frontend | [`scripts/app-launcher/default.nix`](scripts/app-launcher/default.nix) returns the panel derivation; its focused-output helper remains in `panel-launcher` |
 | Each panel’s installed packages, palette links, and user services | Defined in the same feature’s `default.nix`, exported as panel `.homeManagerModule` metadata |
-| Parent-death exec wrapper | [`scripts/panel-launcher/default.nix`](scripts/panel-launcher/default.nix), exported as launcher `.withParentDeath` metadata |
+| Parent-death exec wrapper | [`scripts/shared/default.nix`](scripts/shared/default.nix), exported as launcher `.withParentDeath` metadata |
 | Upstream Niri window buttons and Waybar calendar | [`scripts/default.nix`](scripts/default.nix) |
 | Dolphin Google Drive actions | [`home/cloud.nix`](home/cloud.nix) |
 
@@ -88,8 +160,8 @@ The index exposes `audioPanel = audioControl.panel`,
 derivation `passthru` metadata, not additional runtime commands. Network exposes
 its backend through `networkControl = networkPanel.backend`.
 
-[`scripts/shared.nix`](scripts/shared.nix) exports
-`mkWorkspacePackage`, `mkCargoArtifacts`, and `mkPanel`. It owns the common Rust
+[`scripts/shared/default.nix`](scripts/shared/default.nix) exports
+`mkWorkspacePackage`, `mkCargoArtifacts`, `mkPanel`, and `panelLauncher`. It owns the common Rust
 build environment, dependency artifacts, and per-member source filtering, as well
 as the AGS/Astal runtime, image loaders, immutable bundles, and launcher
 configuration. Panel recipes supply explicit live `cssFile` paths and, where
@@ -156,7 +228,9 @@ Sources: [`scripts/audio-control/`](scripts/audio-control/).
 
 ## Network
 
-Sources: [`scripts/network-manager/`](scripts/network-manager/).
+Sources: [`astal/`](scripts/network-manager/astal/),
+[`rust-custom/`](scripts/network-manager/rust-custom/), and
+[`default.nix`](scripts/network-manager/default.nix).
 
 - Manage Wi-Fi and Ethernet: connect, disconnect, choose saved profiles, and forget
   networks. Forget asks for confirmation, removes matching profiles, and disconnects.
@@ -200,10 +274,12 @@ Sources: [`scripts/media-control/`](scripts/media-control/).
 Sources: [Astal frontend](scripts/dashboard/astal/) and
 [Rust backend](scripts/dashboard/rust-custom/), matching Media's layout.
 
-The frontend follows Media's six-file organization, retaining TypeScript:
-`frontend.ts` contains all GTK rendering and widgets, `backend.ts` owns native
-Astal bindings and IPC, `logic.ts` contains pure display helpers/types, and
-`test.ts` holds the frontend suite alongside `style.css` and `package.json`.
+The frontend follows Media's six-file JavaScript organization:
+`frontend.js` contains all GTK rendering and widgets, `backend.js` owns native
+Astal bindings and IPC, `logic.js` contains pure display helpers, and
+`test.js` holds the frontend suite alongside `style.css` and `package.json`.
+It reuses `shared/astal/` for IPC, theme loading, socket replies, and drawing;
+`npm test` runs directly in Node without TypeScript transformation.
 Its `default.nix` returns the Rust backend with the panel available as `.panel`,
 just like Media. Rust keeps a small `main.rs`/`lib.rs`, with separate metrics,
 idle-sleep, notification policy, protocol, storage, service, and test modules.
@@ -333,7 +409,7 @@ D-Bus integration lives entirely in Rust.
 | --- | --- | --- |
 | Network | [`network-control`](scripts/network-manager/rust-custom/) | `NETWORK_CONTROL` |
 | Dashboard | [`dashboard-control`](scripts/dashboard/rust-custom/) | `DASHBOARD_CONTROL` |
-| App launcher’s external Niri query | [`panel-launcher runtime focused-output`](scripts/panel-launcher/) | `PANEL_BACKEND` |
+| App launcher’s external Niri query | [`panel-launcher runtime focused-output`](scripts/shared/panel-launcher/) | `PANEL_BACKEND` |
 
 Network and Dashboard use binary-only Rust crates: `main.rs` declares their
 private backend modules directly, without forwarding library targets. Network's
@@ -347,7 +423,14 @@ validation, and Trash; its `observe` command streams invalidations while the pan
 is open. GDK clipboard ownership stays in the resident GUI. Media artwork/credits
 and the stateless `media-control model` command also remain available.
 
-[`panel-launcher`](scripts/panel-launcher/) still owns config-based panel
+`media-control service` also verifies native MPRIS playback status using its
+existing Rust `dbus` adapter. It subscribes before reading the initial status and
+fences replies against newer signals and owner changes, covering Astal's startup
+race without modifying Astal. Verified status affects grouping and controls;
+raw frontend snapshots remain unchanged. Startup retries are bounded, and settled
+status watches are event-driven rather than periodically polled.
+
+[`panel-launcher`](scripts/shared/panel-launcher/) still owns config-based panel
 launching/command IPC and the following unchanged runtime helpers:
 
 - `panel-launcher runtime focused-output` handles the external Niri focused-monitor
@@ -389,8 +472,9 @@ are in [`themes/default.nix`](themes/default.nix).
 
 For checks, run `npm test` in a panel’s source directory or
 `cargo test --manifest-path scripts/Cargo.toml --locked` from the repository root.
-Dashboard's frontend suite is `npm --prefix scripts/dashboard/astal test`.
-Run the shared frontend transport suite with `node --test scripts/ipc.test.js`.
+Network's frontend suite is `npm --prefix scripts/network-manager/astal test`;
+Dashboard's is `npm --prefix scripts/dashboard/astal test`.
+Run the shared frontend suite with `npm --prefix scripts/shared/astal test`.
 
 Normal frontend tests use simulated services; native/UI test modes have additional
 runtime and isolation requirements documented in their test files. To check all
@@ -410,11 +494,13 @@ Public panel commands and services are unchanged. App launcher still uses
 cloud sync/watch, calendar toggle, and parent-death supervision also retain their
 existing `panel-launcher runtime` commands.
 
-Audio and Media keep private unit tests in `src/unit_tests.rs`; their
-`src/tests.rs` targets cover the real executables and opt-in desktop integration.
-Production modules are compiled through their libraries rather than redeclared
-inside integration tests. Clipboard keeps its private-module and real-binary tests
-in one explicit integration target.
+Every Rust crate keeps its test bodies and fixtures in `src/tests.rs`, following
+the [test organization rule](#test-organization-rule). Audio and Media expand
+private unit suites inside their production modules. Cargo uses each crate's
+`src/tests.rs` directly for real-executable integration suites. Production modules
+are compiled through their libraries rather than redeclared inside those suites.
+Clipboard keeps its private-module and real-binary tests in one explicit
+integration target.
 
 Cargo uses only `scripts/target/` for this workspace. Do not keep per-member
 `target/` directories from the former standalone builds. `cargo machete` checks
@@ -434,20 +520,20 @@ and bounded/cancellable Rust IPC remain frontend responsibilities.
 
 | Script / component | Status | Backend boundary |
 | --- | --- | --- |
-| Audio & Bluetooth | Compliant | Rust [`policy.rs`](scripts/audio-control/rust-custom/src/policy.rs) and [`audio.rs`](scripts/audio-control/rust-custom/src/audio.rs) own route reliability, selection transactions/rollback, stream-pin resets, discovery ownership, and post-pair trust/connect orchestration. JS captures raw Astal state and executes guarded native calls. |
+| Audio & Bluetooth | Compliant | Rust [`policy.rs`](scripts/audio-control/rust-custom/src/policy.rs) and [`audio.rs`](scripts/audio-control/rust-custom/src/audio.rs) own native route-availability interpretation, route reliability, selection transactions/rollback, stream-pin resets, discovery ownership, and post-pair trust/connect orchestration. JS captures raw Astal state and executes guarded native calls. |
 | Network | Compliant | Rust [`network-control`](scripts/network-manager/rust-custom/) owns NetworkManager discovery/reconciliation, connection construction/activation, profile deletion, credential authorization, and scans. JS consumes opaque context stamps and action descriptors, renders state, and manages UI cancellation. |
 | Media | Compliant | Rust [`model.rs`](scripts/media-control/rust-custom/src/model.rs) owns custom policy, selection, timing, and action transactions; [`playback.rs`](scripts/media-control/rust-custom/src/playback.rs) owns private-player recovery. Artwork, credits, and media-key selection also live in Rust. |
 | Dashboard & notifications | Compliant | Rust [`dashboard-control`](scripts/dashboard/rust-custom/) owns telemetry, idle-sleep persistence/supervision, notification archive migration/retention, popup admission, and lifetime/hover policy. TS retains GTK rendering and guarded Astal notification operations/settings. |
 | Clipboard | Compliant | Rust [`main.rs`](scripts/clipboard/rust-custom/src/main.rs) and [`store.rs`](scripts/clipboard/rust-custom/src/store.rs) own source classification/observation, deletion guards, Trash, history, and payload selection. Native GDK clipboard publication and UI editing remain in JS. |
-| App launcher | Compliant | Rust’s [`panel-launcher runtime focused-output`](scripts/panel-launcher/) handles the external Niri query, selected through `PANEL_BACKEND`. AstalApps lookup/launch and GTK monitor/layout handling stay in [`backend.js`](scripts/app-launcher/backend.js). |
+| App launcher | Compliant | Rust’s [`panel-launcher runtime focused-output`](scripts/shared/panel-launcher/) handles the external Niri query, selected through `PANEL_BACKEND`. AstalApps lookup/launch and GTK monitor/layout handling stay in [`backend.js`](scripts/app-launcher/backend.js). |
 | Screenshot OCR | Compliant | Backend is in [`scripts/ocr-screenshot/`](scripts/ocr-screenshot/). |
 | Countdown timer | Compliant | Backend is in [`scripts/waybar-timer/`](scripts/waybar-timer/). |
 | Cropped webcam | Compliant | Backend is in [`scripts/webcam-crop/`](scripts/webcam-crop/). |
-| Panel launcher | Compliant | [`scripts/panel-launcher/`](scripts/panel-launcher/) retains config-based panel launching/command IPC, focused-output, input-toggle, bisync/watch, calendar toggle, parent-death supervision, and internal shared process helpers. Only Network/Dashboard backend ownership changes in this step. |
-| Input-method toggle | Compliant | [`panel-launcher runtime input-toggle`](scripts/panel-launcher/) owns input-method discovery and switching. |
-| Cloud sync/watch | Compliant | [`panel-launcher runtime bisync` and `runtime watch`](scripts/panel-launcher/) own bisync/resync decisions and filesystem-event debouncing/orchestration; Nix retains static settings and excludes. |
-| Calendar toggle | Compliant | [`panel-launcher runtime ycal-toggle`](scripts/panel-launcher/) owns PID validation, signalling, and retry/fallback policy. |
-| Shared stylesheet loader | Frontend-only | [`scripts/live-style.js`](scripts/live-style.js) loads and reloads UI styles. |
+| Panel launcher | Compliant | [`scripts/shared/panel-launcher/`](scripts/shared/panel-launcher/) retains config-based panel launching/command IPC, focused-output, input-toggle, bisync/watch, calendar toggle, parent-death supervision, and internal shared process helpers. |
+| Input-method toggle | Compliant | [`panel-launcher runtime input-toggle`](scripts/shared/panel-launcher/) owns input-method discovery and switching. |
+| Cloud sync/watch | Compliant | [`panel-launcher runtime bisync` and `runtime watch`](scripts/shared/panel-launcher/) own bisync/resync decisions and filesystem-event debouncing/orchestration; Nix retains static settings and excludes. |
+| Calendar toggle | Compliant | [`panel-launcher runtime ycal-toggle`](scripts/shared/panel-launcher/) owns PID validation, signalling, and retry/fallback policy. |
+| Shared stylesheet loader | Frontend-only | [`scripts/shared/astal/live-style.js`](scripts/shared/astal/live-style.js) loads and reloads UI styles. |
 | Build/update entrypoints | Configuration/build glue | `switch.sh`, `update.sh`, ordinary Nix build/launch wiring, and [`themes/patch-daemon.py`](themes/patch-daemon.py) are build-time/configuration tools, not custom runtime backends. |
 
 Locally maintained runtime helpers outside `scripts/` have been migrated too:
@@ -460,7 +546,7 @@ Locally maintained runtime helpers outside `scripts/` have been migrated too:
   from state and debounce filesystem events before scheduling sync. The packaged
   upstream inotify/rclone tools are adapters, not shell policy.
 - [`scripts/default.nix`](scripts/default.nix) and
-  [`scripts/panel-launcher/default.nix`](scripts/panel-launcher/default.nix):
+  [`scripts/shared/default.nix`](scripts/shared/default.nix):
   wrappers pass configuration and exec `panel-launcher runtime ycal-toggle` for
   calendar policy or `panel-launcher runtime with-parent-death` for supervision.
   The local C supervisor has been removed.

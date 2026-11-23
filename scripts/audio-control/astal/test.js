@@ -14,7 +14,7 @@ const { tmpdir } = await import('node:os');
 const { join } = await import('node:path');
 const { default: vm } = await import('node:vm');
 const logic = await import('./logic.js');
-const { loadIPC } = await import('../../ipc-test-loader.js');
+const { loadIPC } = await import('../../shared/astal/ipc-test-loader.js');
 const {
     parseRequest, nativeEvent, rawEqual, waybarStatus,
 } = await import('./logic.js');
@@ -26,14 +26,76 @@ const root = new URL('../../../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 
 
-test('audio application uses the public native request virtual and socket writer', () => {
+test('audio application uses the public native request virtual and shared socket writer', () => {
     const source = read('scripts/audio-control/astal/frontend.js');
     assert.match(source, /extends Astal\.Application/);
     assert.match(source, /vfunc_request\(request, connection\)/);
-    assert.match(source, /AstalIO\.write_sock\(connection/);
-    assert.match(source, /AstalIO\.write_sock_finish\(result\)/);
-    assert.match(source, /connection\.close_async/);
+    assert.match(source, /import \{ replyAndClose \} from '..\/..\/shared\/astal\/socket\.js'/);
+    assert.match(source, /replyAndClose\(connection, response,/);
     assert.doesNotMatch(source, /\.prototype\.|Object\.defineProperty|gi:\/\/Gio.*SocketService/);
+    const socket = read('scripts/shared/astal/socket.js').replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+    const application = source.slice(source.indexOf('const AudioApplication ='), source.indexOf('\nGtk.init();'));
+    const events = [], errors = [];
+    let writeFailure = false;
+    const AudioApplication = vm.runInNewContext(`${socket}\n${application}\nAudioApplication;`, {
+        GObject: { registerClass: (_, value) => value }, Astal: { Application: class {} }, parseRequest,
+        GLib: { PRIORITY_DEFAULT: 0 }, console: { error: error => errors.push(error) },
+        AstalIO: {
+            write_sock(connection, response, callback) {
+                events.push(['reply', response]);
+                if (writeFailure) throw new Error('write failed');
+                callback(connection, 'written');
+            },
+            write_sock_finish(result) { events.push(['finish', result]); },
+        },
+    });
+    const app = new AudioApplication();
+    const connection = {
+        close_async(priority, cancellable, callback) { events.push(['close', priority, cancellable]); callback(this, 'closed'); },
+        close_finish(result) { events.push(['closed', result]); },
+    };
+    app.backend = { status: () => 'status' }; app.panel = {};
+    app.vfunc_request('{"command":"status"}', connection);
+    assert.deepEqual(events, [['reply', 'status'], ['finish', 'written'], ['close', 0, null], ['closed', 'closed']]);
+    events.length = 0;
+    app.backend = null;
+    app.vfunc_request('{"command":"status"}', connection);
+    assert.deepEqual(JSON.parse(events[0][1]), { error: 'Audio panel is starting.' });
+    events.length = 0;
+    writeFailure = true;
+    app.vfunc_request('{', connection);
+    assert.ok(JSON.parse(events[0][1]).error, 'parse errors are serialized before replying');
+    assert.equal(events.filter(([phase]) => phase === 'close').length, 1);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].message, 'write failed');
+});
+
+test('audio frame delegates to shared drawing with allocation-based cut clamping', async () => {
+    const source = read('scripts/audio-control/astal/frontend.js');
+    assert.match(source, /import \{ drawCutCornerFrame \} from '..\/..\/shared\/astal\/drawing\.js'/);
+    const { drawCutCornerFrame } = await import('../../shared/astal/drawing.js');
+    let draw;
+    const frame = new Function('Gtk', 'drawCutCornerFrame',
+        `${source.match(/function frame\([\s\S]*?\n\}/)[0]}\nreturn frame;`)(
+        { DrawingArea: function(properties) { return { ...properties, set_draw_func(callback) { draw = callback; } }; } },
+        drawCutCornerFrame);
+    const widget = frame({ yellow: '#AbCdEf' });
+    assert.equal(widget.can_target, false);
+    assert.equal(widget.hexpand, true);
+    assert.equal(widget.vexpand, true);
+    for (const [width, height, cut] of [[400, 200, 10], [8, 6, 3], [0, 0, 0]]) {
+        const calls = [];
+        const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve', 'setLineWidth', 'stroke']
+            .map(name => [name, (...args) => calls.push([name, ...args])]));
+        draw(widget, cr, width, height);
+        assert.deepEqual(calls, [
+            ['moveTo', cut + 0.5, 0.5], ['lineTo', width - 0.5, 0.5],
+            ['lineTo', width - 0.5, height - cut - 0.5], ['lineTo', width - cut - 0.5, height - 0.5],
+            ['lineTo', 0.5, height - 0.5], ['lineTo', 0.5, cut + 0.5], ['closePath'],
+            ['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, 0.9], ['fillPreserve'],
+            ['setSourceRGBA', 171 / 255, 205 / 255, 239 / 255, 1], ['setLineWidth', 1], ['stroke'],
+        ]);
+    }
 });
 
 test('audio lists highlight user interaction without a persistent connected Bluetooth highlight', () => {
@@ -99,9 +161,11 @@ test('audio theme generates scoped CSS variables for every stylesheet color', ()
     const calls = [];
     const theme = source.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
     assert.ok(theme);
-    const loadTheme = vm.runInNewContext(`${theme}\nloadTheme;`, {
-        read: () => JSON.stringify(input),
-        loadPanelStyle: options => calls.push(options),
+    assert.match(source, /import \{ loadPanelTheme \} from '..\/..\/shared\/astal\/theme\.js'/);
+    const sharedTheme = read('scripts/shared/astal/theme.js').replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+    const loadTheme = vm.runInNewContext(`${sharedTheme}\n${theme}\nloadTheme;`, {
+        GLib: { file_get_contents: () => [true, new TextEncoder().encode(JSON.stringify(input))] },
+        TextDecoder, loadPanelStyle: options => calls.push(options),
     });
     const loaded = loadTheme('fixture/frontend.js', 'fixture/palette.json');
     assert.equal(JSON.stringify(loaded), JSON.stringify(input));
@@ -144,7 +208,7 @@ test('retired panel implementations and Rust status sources remain absent', () =
 
 // Raw native adapter tests; domain regressions are ported to Rust tests.rs.
 {
-const NO = 1, YES = 2;
+const UNKNOWN = 0, NO = 1, YES = 2;
 const plain = value => structuredClone(value); // Normalize objects from the VM realm.
 const GObject = {
     TYPE_STRING: Symbol('GObject.TYPE_STRING'),
@@ -351,7 +415,7 @@ function fixture(t, { outputs = [endpoint()], inputs = [], cards = [], streams =
     const wp = new Signals({ audio }), bluetooth = new Signals({ adapter: radio, devices });
     let changes = 0;
     const AudioBackend = vm.runInNewContext(`${source}\nAudioBackend;`, { ...logic, GLib: timers.GLib, Gio: {}, GObject, HelperProcess,
-        Wp: { Available: { NO, YES }, get_default: () => wp }, Bluetooth: { get_default: () => bluetooth }, TextEncoder });
+        Wp: { Available: { UNKNOWN, NO, YES }, get_default: () => wp }, Bluetooth: { get_default: () => bluetooth }, TextEncoder });
     const backend = new AudioBackend({ onChange: () => changes++ });
     backend.start(); timers.advance();
     t.after(() => { backend.finish(); backend.worker?.stop(); });
@@ -372,6 +436,7 @@ test('native snapshots are raw, canonical Astal properties; status and visibilit
     assert.equal(raw.objects.filter(object => object.type === 'device').length, 2, 'Rust filters the native adapter, not JS');
     assert.equal(raw.objects.filter(object => object.type === 'stream').length, 1, 'recording streams are never playback action targets');
     assert.equal(f.raw(output).name, output.pwName); assert.equal(f.raw(output).routes[0].index, 0);
+    assert.equal(f.raw(output).routes[0].available, YES);
     assert.equal(f.raw(nativeCard).activeProfile, 0); assert.deepEqual(f.raw(nativeCard).profiles, [{ index: 0 }, { index: 1 }]);
     assert.equal(f.raw(local).battery, -1, 'battery interpretation is Rust policy');
     assert.ok(!('routesReliable' in f.raw(output)));
@@ -382,6 +447,31 @@ test('native snapshots are raw, canonical Astal properties; status and visibilit
     assert.deepEqual([...f.worker.argv], ['/test/audio-control', 'panel']);
     assert.deepEqual(Object.keys(f.worker.options).sort(), ['onChunk', 'onExit']);
     assert.ok(f.radio.propertyReads.length, 'adapter path uses the generic GObject getter');
+});
+
+test('route availability is captured losslessly without frontend eligibility policy', t => {
+    const route = { index: 0, name: 'port', available: UNKNOWN };
+    const output = endpoint({ routes: [route] }), input = endpoint({ id: 20, routes: [route] });
+    const f = fixture(t, { outputs: [output], inputs: [input] });
+    for (const availability of [UNKNOWN, NO, YES, 99]) {
+        route.available = availability;
+        assert.equal(f.raw(output).routes[0].available, availability);
+        assert.equal(f.raw(input).routes[0].available, availability);
+    }
+    assert.deepEqual(output.routeWrites, []); assert.deepEqual(input.routeWrites, []);
+    assert.deepEqual(output.defaultWrites, []); assert.deepEqual(input.defaultWrites, []);
+});
+
+test('raw route guards distinguish UNKNOWN from YES even though Rust permits both', async t => {
+    const route = { index: 0, name: 'port', available: UNKNOWN };
+    const output = endpoint({ routes: [route] }), f = fixture(t, { outputs: [output] });
+    for (const [before, after] of [[UNKNOWN, YES], [YES, UNKNOWN], [UNKNOWN, NO]]) {
+        route.available = before;
+        const raw = f.raw(output), guards = [{ key: raw.key, expect: { routes: raw.routes } }];
+        route.available = after;
+        await assert.rejects(f.backend.execute(f.action('route', output, { route: 0 }, guards)), /changed/);
+    }
+    assert.deepEqual(output.routeWrites, []);
 });
 
 test('raw lifetime keys and default epochs invalidate replacement, removal and A -> B -> A controls', t => {
@@ -2316,7 +2406,8 @@ const { default: GdkX11 } = await import('gi://GdkX11?version=4.0');
 const { default: Pango } = await import('gi://Pango');
 const { default: Astal } = await import('gi://Astal?version=4.0');
 const { default: System } = await import('system');
-const { loadPanelStyle } = await import('../../live-style.js');
+const { loadPanelTheme } = await import('../../shared/astal/theme.js');
+const { drawCutCornerFrame } = await import('../../shared/astal/drawing.js');
 
 if (GLib.getenv('AUDIO_DROPDOWN_ISOLATED') !== '1'
     || GLib.getenv('GDK_BACKEND') !== 'x11'
@@ -2421,8 +2512,8 @@ assert(boundary > source.indexOf('class AudioPanel'), 'Production extraction bou
 const extracted = source.slice(0, boundary)
     .replace(/^import .*;[ \t]*$/gm, '');
 assert(!/^\s*(?:import|export)\b/m.test(extracted), 'All imports/exports stripped before evaluation');
-const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib', 'loadPanelStyle',
-    `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib, loadPanelStyle);
+const { AudioPanel, loadTheme } = new Function('Gtk', 'Gdk', 'Pango', 'Astal', 'GLib', 'loadPanelTheme', 'drawCutCornerFrame',
+    `${extracted}\nreturn { AudioPanel, loadTheme };`)(Gtk, Gdk, Pango, Astal, GLib, loadPanelTheme, drawCutCornerFrame);
 
 // XTEST uses the existing libX11 request allocator, so no xdotool, python-xlib,
 // libXtst, shell, or extra on-disk input harness is needed. All input is sent

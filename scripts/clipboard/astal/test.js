@@ -1077,9 +1077,12 @@ async function unitTests() {
         const calls = [];
         const theme = source.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
         assert.ok(theme);
-        const loadTheme = runInNewContext(`${theme}\nloadTheme;`, {
-            read: () => JSON.stringify(input),
-            loadPanelStyle: options => calls.push(options),
+        assert.match(source, /import \{ loadPanelTheme \} from '..\/..\/shared\/astal\/theme\.js'/);
+        const sharedTheme = (await readFile(new URL('../../shared/astal/theme.js', import.meta.url), 'utf8'))
+            .replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+        const loadTheme = runInNewContext(`${sharedTheme}\n${theme}\nloadTheme;`, {
+            GLib: { file_get_contents: () => [true, new TextEncoder().encode(JSON.stringify(input))] },
+            TextDecoder, loadPanelStyle: options => calls.push(options),
         });
         const loaded = loadTheme('fixture/frontend.js', 'fixture/palette.json');
         assert.equal(JSON.stringify(loaded), JSON.stringify(input));
@@ -1107,6 +1110,32 @@ async function viewTests(test, assert) {
     const { readFile } = await import('node:fs/promises');
     const { TABS, editable, title } = await import('./logic.js');
     const source = await readFile(new URL('./frontend.js', import.meta.url), 'utf8');
+    test('clipboard frame delegates to shared drawing with fixed cuts and its original opacity', async () => {
+        assert.match(source, /import \{ drawCutCornerFrame \} from '..\/..\/shared\/astal\/drawing\.js'/);
+        const { drawCutCornerFrame } = await import('../../shared/astal/drawing.js');
+        let draw;
+        const frame = new Function('Gtk', 'drawCutCornerFrame',
+            `${source.match(/function frame\([\s\S]*?\n\}/)[0]}\nreturn frame;`)(
+            { DrawingArea: function(properties) { return { ...properties, set_draw_func(callback) { draw = callback; } }; } },
+            drawCutCornerFrame);
+        const widget = frame({ yellow: '#AbCdEf' });
+        assert.equal(widget.can_target, false);
+        assert.equal(widget.hexpand, true);
+        assert.equal(widget.vexpand, true);
+        for (const [width, height] of [[450, 200], [8, 6], [0, 0]]) {
+            const calls = [];
+            const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve', 'setLineWidth', 'stroke']
+                .map(name => [name, (...args) => calls.push([name, ...args])]));
+            draw(widget, cr, width, height);
+            assert.deepEqual(calls, [
+                ['moveTo', 10.5, 0.5], ['lineTo', width - 0.5, 0.5],
+                ['lineTo', width - 0.5, height - 10.5], ['lineTo', width - 10.5, height - 0.5],
+                ['lineTo', 0.5, height - 0.5], ['lineTo', 0.5, 10.5], ['closePath'],
+                ['setSourceRGBA', 37 / 255, 37 / 255, 47 / 255, 0.95], ['fillPreserve'],
+                ['setSourceRGBA', 171 / 255, 205 / 255, 239 / 255, 1], ['setLineWidth', 1], ['stroke'],
+            ]);
+        }
+    });
     test('clipboard tabs use the network panel’s flat cyan/red underline styling', async () => {
         const css = await readFile(new URL('./style.css', import.meta.url), 'utf8');
         const tabs = css.slice(css.indexOf('.clipboard-panel button.tab {'), css.indexOf('.clipboard-panel entry,'));
@@ -1144,21 +1173,43 @@ async function viewTests(test, assert) {
         assert.doesNotMatch(widgets.replace('clear.set_tooltip_text(null);', ''),
             /tooltip[_-]?(?:text|markup)|has[_-]?tooltip|(?:set|query)[_-]?tooltip|Gtk\.Settings/i);
     });
-    test('clipboard status retains its tooltip metadata contract while open and closed', async () => {
-        let respond;
-        const createApplication = new Function('GObject', 'Astal', 'AstalIO',
-            source.slice(source.indexOf('export function createApplication('), source.indexOf('\nfunction main(')).replace('export ', '')
+    test('clipboard status retains its metadata and requests await panel saves before shared replies', async () => {
+        let respond, closes = 0;
+        assert.match(source, /import \{ replyAndClose \} from '..\/..\/shared\/astal\/socket\.js'/);
+        const socket = (await readFile(new URL('../../shared/astal/socket.js', import.meta.url), 'utf8'))
+            .replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+        const createApplication = new Function('GObject', 'Astal', 'AstalIO', `${socket}\n`
+            + source.slice(source.indexOf('export function createApplication('), source.indexOf('\nfunction main(')).replace('export ', '')
             + '\nreturn createApplication;')({ registerClass: value => value }, { Application: class {} }, {
-                write_sock(connection, response, callback) { respond(JSON.parse(response)); callback(null, {}); },
+                write_sock(connection, response, callback) { respond(response); callback(null, {}); },
                 write_sock_finish() {},
             });
         const app = createApplication();
         for (const opened of [false, true]) {
             app.panel = { opened };
             const response = new Promise(resolve => { respond = resolve; });
-            app.vfunc_request('{"command":"status"}', { close() {} });
-            assert.deepEqual(await response, { text: '󰅌', tooltip: 'Clipboard panel · history and preview', class: opened ? 'open' : 'closed' });
+            app.vfunc_request('{"command":"status"}', { close(value) { assert.equal(value, null); closes++; } });
+            assert.deepEqual(JSON.parse(await response), { text: '󰅌', tooltip: 'Clipboard panel · history and preview', class: opened ? 'open' : 'closed' });
         }
+        assert.equal(closes, 2);
+        let saved;
+        app.panel = { close: () => new Promise(resolve => { saved = resolve; }) };
+
+        app.model = { failure: 'Save failed' };
+        const response = new Promise(resolve => { respond = resolve; });
+        app.vfunc_request('{"command":"close"}', { close() { closes++; } });
+        await Promise.resolve();
+        assert.equal(closes, 2, 'the request connection stays open while the save is pending');
+        saved(false);
+        assert.deepEqual(JSON.parse(await response), { error: 'Save failed' });
+        assert.equal(closes, 3);
+        const success = new Promise(resolve => { respond = resolve; });
+        app.vfunc_request('{"command":"close"}', { close() { closes++; } });
+        await Promise.resolve();
+        assert.equal(closes, 3);
+        saved(true);
+        assert.equal(await success, 'ok');
+        assert.equal(closes, 4);
     });
     test('the whole clipboard tree stays tooltip-free and row accessibility refreshes on recycling', () => {
         class Widget {

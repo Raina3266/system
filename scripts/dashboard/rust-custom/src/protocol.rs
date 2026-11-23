@@ -8,12 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(test)]
-thread_local! {pub(crate) static EVENTS: std::cell::RefCell<Vec<Value>>=const{std::cell::RefCell::new(Vec::new())};}
-#[cfg(test)]
-pub(crate) fn emit(v: Value) -> io::Result<()> {
-    EVENTS.with(|e| e.borrow_mut().push(v));
-    Ok(())
-}
+crate::tests::protocol_test_helpers!();
 #[cfg(not(test))]
 pub(crate) fn emit(v: Value) -> io::Result<()> {
     writeln!(io::stdout().lock(), "{v}")

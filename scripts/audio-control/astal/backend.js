@@ -4,7 +4,7 @@ import GObject from 'gi://GObject';
 import Wp from 'gi://AstalWp';
 import Bluetooth from 'gi://AstalBluetooth';
 import { nativeEvent, rawEqual, waybarStatus } from './logic.js';
-import { closeStream, LineDecoder, writeBytes } from '../../ipc.js';
+import { closeStream, LineDecoder, writeBytes } from '../../shared/astal/ipc.js';
 
 const PRIORITY = GLib.PRIORITY_DEFAULT;
 
@@ -156,7 +156,7 @@ export class AudioBackend {
                     nick: node.get_pw_property('node.nick') || '', cardId: binding?.id ?? null, cardSerial: binding?.serial || '',
                     profileDevice: /^\d+$/.test(profile) ? Number(profile) : null,
                     routeName: node.route?.name || '', routes: (node.routes || []).map(route => ({ index: route.index,
-                        name: route.name || '', description: route.description || route.name || '', available: route.available !== Wp.Available.NO })),
+                        name: route.name || '', description: route.description || route.name || '', available: route.available })),
                     volume: Number.isFinite(node.volume) ? node.volume : 0, muted: Boolean(node.mute), isDefault: Boolean(node.is_default),
                 }));
             }

@@ -45,39 +45,4 @@ pub(crate) fn home() -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
-
-    #[test]
-    fn atomic_writes_replace_private_state_without_temporary_file_leaks() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("state/settings.json");
-        save(&path, b"old").unwrap();
-        save(&path, b"new").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"new");
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            fs::metadata(path.parent().unwrap())
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn failed_atomic_publication_cleans_up_the_temporary_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("existing-directory");
-        fs::create_dir(&destination).unwrap();
-        assert!(save(&destination, b"cannot replace a directory").is_err());
-        assert!(destination.is_dir());
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-}
+crate::tests::storage_tests!();

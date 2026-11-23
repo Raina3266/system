@@ -410,7 +410,7 @@ function protocolState(rows = []) {
 }
 
 async function nodeAdapterTests() {
-    const { loadIPC } = await import('../ipc-test-loader.js');
+    const { loadIPC } = await import('../../shared/astal/ipc-test-loader.js');
     const { test } = await import('node:test');
     const { default: assert } = await import('node:assert/strict');
     const { readFileSync } = await import('node:fs');
@@ -745,6 +745,11 @@ async function nodeControllerTests() {
     const { readFileSync } = await import('node:fs');
     const { default: vm } = await import('node:vm');
     const frontend = readFileSync(new URL('./frontend.js', import.meta.url), 'utf8');
+    const drawingHelpers = await import('../../shared/astal/drawing.js');
+    const sharedTheme = readFileSync(new URL('../../shared/astal/theme.js', import.meta.url), 'utf8')
+        .replace(/^import .*\n/gm, '').replace(/^export /gm, '');
+    const sharedSocket = readFileSync(new URL('../../shared/astal/socket.js', import.meta.url), 'utf8')
+        .replace(/^import .*\n/gm, '').replace(/^export /gm, '');
     it('passes numeric GTK tristates for collapsed, expanded, and collapsed-again Info', () => {
         const body = frontend.match(/    renderInfo\(active\) \{([\s\S]*?)\n    \}/)?.[1];
         assert.ok(body, 'renderInfo is available');
@@ -881,16 +886,17 @@ async function nodeControllerTests() {
         const frame = frontend.match(/function frame\(palette[^\n]*\{([\s\S]*?)\n\}/)?.[1];
         assert.ok(frame);
         assert.doesNotMatch(frame, /railX|railTop|setLineWidth\(3\)/);
-        assert.match(frame, /cr\.setLineWidth\(1\)/);
+        assert.match(frame, /drawCutCornerFrame\(/);
     });
 
     it('matches the audio panel background, yellow outline and cut-corner drawing', () => {
-        const audio = readFileSync(new URL('../audio-control/astal/frontend.js', import.meta.url), 'utf8');
+        const audio = readFileSync(new URL('../../audio-control/astal/frontend.js', import.meta.url), 'utf8');
         const palette = { yellow: '#ffcc33', cyan: '#33ddff', background: '#110011' };
         const capture = (source, width, height) => {
             const definition = source.match(/function frame\(palette[^\n]*\{[\s\S]*?\n\}/)?.[0];
             assert.ok(definition);
             const frame = vm.runInNewContext(`${definition}\nframe;`, {
+                ...drawingHelpers,
                 Gtk: { DrawingArea: class {
                     set_draw_func(callback) { this.draw = callback; }
                 } },
@@ -911,6 +917,30 @@ async function nodeControllerTests() {
         }
     });
 
+    it('keeps frame guards, tiny-allocation clamping and the red prompt top band', () => {
+        const definition = frontend.match(/function frame\(palette[^\n]*\{[\s\S]*?\n\}/)?.[0];
+        assert.ok(definition);
+        const frame = vm.runInNewContext(`${definition}\nframe;`, {
+            ...drawingHelpers,
+            Gtk: { DrawingArea: class { set_draw_func(callback) { this.draw = callback; } } },
+        });
+        const drawing = frame({ yellow: '#fcee0a' }, { color: '#ff0000', topBand: 3 });
+        for (const [width, height] of [[0, 20], [20, 0], [1, 1], [4, 3], [100, 80]]) {
+            const calls = [];
+            const cr = Object.fromEntries(['moveTo', 'lineTo', 'closePath', 'setSourceRGBA', 'fillPreserve',
+                'setLineWidth', 'stroke', 'rectangle', 'fill'].map(name =>
+                [name, (...args) => calls.push([name, ...args])]));
+            drawing.draw(drawing, cr, width, height);
+            if (width < 1 || height < 1) { assert.deepEqual(calls, []); continue; }
+            const cut = Math.min(10, (width - 1) / 2, (height - 1) / 2);
+            assert.deepEqual(calls.slice(0, 7), [['moveTo', cut + 0.5, 0.5], ['lineTo', width - 0.5, 0.5],
+                ['lineTo', width - 0.5, height - cut - 0.5], ['lineTo', width - cut - 0.5, height - 0.5],
+                ['lineTo', 0.5, height - 0.5], ['lineTo', 0.5, cut + 0.5], ['closePath']]);
+            assert.deepEqual(calls.slice(-5), [['setSourceRGBA', 1, 0, 0, 1], ['setLineWidth', 1], ['stroke'],
+                ['rectangle', cut + 0.5, 0.5, Math.max(0, width - cut - 1), Math.min(3, height - 1)], ['fill']]);
+        }
+    });
+
     it('generates panel-scoped network CSS variables from a validated raw JSON palette', () => {
         const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
         const keys = ['yellow', 'cyan', 'pink', 'red', 'dimPink', 'separator', 'foreground', 'background', 'chromeBackground'];
@@ -922,8 +952,10 @@ async function nodeControllerTests() {
         const calls = [], paths = [];
         const theme = frontend.match(/function loadTheme\([\s\S]*?\n\}/)?.[0];
         assert.ok(theme);
-        const loadTheme = vm.runInNewContext(`${theme}\nloadTheme;`, {
-            read(path) { paths.push(path); return raw; },
+        let readable = true;
+        const loadTheme = vm.runInNewContext(`${sharedTheme}\n${theme}\nloadTheme;`, {
+            TextDecoder,
+            GLib: { file_get_contents(path) { paths.push(path); return [readable, new TextEncoder().encode(raw)]; } },
             loadPanelStyle: options => calls.push(options),
         });
         const loaded = loadTheme('fixture/frontend.js', 'fixture/network palette.json');
@@ -954,6 +986,11 @@ async function nodeControllerTests() {
             /Invalid network palette colour: yellow/);
         raw = '{invalid JSON';
         assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/network palette.json'), { name: 'SyntaxError' });
+        assert.throws(() => loadTheme('fixture/frontend.js', null),
+            { message: 'Run through network-panel, or set NETWORK_PANEL_CONFIG and NETWORK_PANEL_PALETTE.' });
+        readable = false;
+        assert.throws(() => loadTheme('fixture/frontend.js', 'fixture/network palette.json'),
+            { message: 'Could not read network theme: fixture/network palette.json' });
         assert.equal(calls.length, 1, 'invalid palettes never reach the stylesheet loader');
     });
 
@@ -1491,8 +1528,10 @@ async function nodeControllerTests() {
                 const method = frontend.match(/        vfunc_request\(request, connection\) \{([\s\S]*?)\n        \}/)?.[1];
                 assert.ok(method);
                 const writes = [], work = deferred(); let closes = 0;
-                const connection = { close_async(_priority, _io, callback) { closes++; callback({ close_finish() {} }, {}); } };
-                const handler = vm.runInNewContext(`({ run(request, connection) { ${method} } }).run`, {
+                const connection = {
+                    close_async(_priority, _io, callback) { closes++; callback(this, {}); }, close_finish() {},
+                };
+                const handler = vm.runInNewContext(`${sharedSocket}\n({ run(request, connection) { ${method} } }).run`, {
                     GLib: { PRIORITY_DEFAULT: 0 }, console,
                     AstalIO: { write_sock(_connection, response, callback) { writes.push(response); callback(null, {}); }, write_sock_finish() {} },
                 });
@@ -3166,13 +3205,33 @@ async function nodeLogicTests() {
 async function nodeLauncherTests() {
     const { default: test } = await import('node:test');
     const { default: assert } = await import('node:assert/strict');
-    const { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } = await import('node:fs');
+    const { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } = await import('node:fs');
     const { spawnSync } = await import('node:child_process');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
 
-    const root = new URL('../../', import.meta.url);
+    const root = new URL('../../../', import.meta.url);
     const read = path => readFileSync(new URL(path, root), 'utf8');
+
+    test('network sources and packaging follow the astal/rust-custom layout', () => {
+        const feature = new URL('scripts/network-manager/', root);
+        assert.deepEqual(readdirSync(feature).sort(), ['astal', 'default.nix', 'rust-custom']);
+        assert.ok(statSync(new URL('astal/', feature)).isDirectory());
+        assert.ok(statSync(new URL('rust-custom/', feature)).isDirectory());
+        assert.ok(statSync(new URL('default.nix', feature)).isFile());
+        for (const name of ['backend.js', 'frontend.js', 'logic.js', 'style.css', 'package.json', 'test.js'])
+            assert.ok(statSync(new URL(`astal/${name}`, feature)).isFile(), name);
+        const recipe = read('scripts/network-manager/default.nix');
+        assert.match(recipe, /sourceDir = "network-manager\/astal";/);
+        assert.match(recipe, /cssFile = "\$\{repoRoot\}\/scripts\/network-manager\/astal\/style\.css";/);
+        assert.match(recipe, /workspaceMember = "network-manager\/rust-custom";/);
+        for (const [name, shared] of [['backend.js', 'ipc.js'], ['frontend.js', 'theme.js'],
+            ['frontend.js', 'socket.js'], ['frontend.js', 'drawing.js']]) {
+            const source = read(`scripts/network-manager/astal/${name}`);
+            assert.ok(source.includes(`from '../../shared/astal/${shared}'`), `${name} imports the shared module`);
+            assert.ok(statSync(new URL(`../../shared/astal/${shared}`, import.meta.url)).isFile());
+        }
+    });
 
     test('Niri imports all six panel Home Manager modules directly', () => {
         const source = read('niri/default.nix');
@@ -3244,7 +3303,7 @@ async function nodeLauncherTests() {
         assert.match(manifest.bundle, /^\/nix\/store\/[a-z0-9]{32}-[^/]+(?:\/|$)/, 'the prebuilt bundle must be immutable');
         assert.ok(statSync(manifest.bundle).isFile());
         assert.match(manifest.forced_environment.NETWORK_PANEL_CONFIG,
-            /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/frontend\.js$/,
+            /^\/nix\/store\/[^/]+\/(?:scripts\/)?network-manager\/astal\/frontend\.js$/,
             'the entry must come from the packaged source, never the checkout or XDG config');
         for (const key of ['NETWORK_PANEL_PALETTE', 'PANEL_CSS_FILE', 'DASHBOARD_PANEL', 'MEDIA_PANEL', 'NETWORK_CONTROL']) {
             assert.equal(typeof manifest.environment[key], 'string', `${key} must have a manifest default`);
@@ -3338,7 +3397,7 @@ async function nodeLauncherTests() {
             assert.deepEqual(runtime.env, { ...manifest.environment, ...manifest.forced_environment,
                 XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR });
             assert.match(runtime.env.NETWORK_PANEL_PALETTE, /^\/nix\/store\//);
-            assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/style\.css$/);
+            assert.match(runtime.env.PANEL_CSS_FILE, /\/scripts\/network-manager\/astal\/style\.css$/);
             assert.doesNotMatch(runtime.env.PANEL_CSS_FILE, /^\/nix\/store\//);
             assert.equal(runtime.env.DASHBOARD_PANEL, 'dashboard-panel');
             assert.equal(runtime.env.MEDIA_PANEL, 'media-panel');

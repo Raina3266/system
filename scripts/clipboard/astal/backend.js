@@ -1,7 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gdk from 'gi://Gdk?version=4.0';
-import { communicate } from '../../ipc.js';
+import { communicate } from '../../shared/astal/ipc.js';
 
 const helper = () => GLib.getenv('CLIPBOARD_CUSTOM_HELPER') || 'clipboard-custom';
 

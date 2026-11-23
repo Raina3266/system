@@ -5,10 +5,11 @@ import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
-import AstalIO from 'gi://AstalIO';
 import System from 'system';
 import { LauncherBackend, monitors, focusedMonitor } from './backend.js';
-import { loadPanelStyle } from '../live-style.js';
+import { loadPanelStyle } from '../shared/astal/live-style.js';
+import { replyAndClose } from '../shared/astal/socket.js';
+import { drawCutCornerFrame } from '../shared/astal/drawing.js';
 import { ANIMATION_MS, BAR_GAP, PANEL_LEFT, TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GRID_COLUMNS, SEARCH_HEIGHT, SEARCH_GAP,
     parseRequest, panelLayout, nextIndex } from './logic.js';
 
@@ -30,20 +31,7 @@ function frame(draw) {
 }
 
 function drawPanelFrame(cr, width, height) {
-    // Match the media panel's outline and translucent background.
-    const cut = 10, inset = 0.5;
-    cr.moveTo(cut + inset, inset);
-    cr.lineTo(width - inset, inset);
-    cr.lineTo(width - inset, height - cut - inset);
-    cr.lineTo(width - cut - inset, height - inset);
-    cr.lineTo(inset, height - inset);
-    cr.lineTo(inset, cut + inset);
-    cr.closePath();
-    cr.setSourceRGBA(37 / 255, 37 / 255, 47 / 255, 0.9);
-    cr.fillPreserve();
-    cr.setSourceRGBA(252 / 255, 238 / 255, 10 / 255, 1);
-    cr.setLineWidth(1);
-    cr.stroke();
+    drawCutCornerFrame(cr, { width: width - 1, height: height - 1, color: '#fcee0a', cut: 10 });
 }
 
 function drawTileFrame(cr, width, height) {
@@ -340,13 +328,9 @@ export const LauncherApplication = GObject.registerClass({ GTypeName: 'Cyberpunk
                 let response;
                 try { response = await this.handleRequest(text); }
                 catch (error) { response = JSON.stringify({ error: error.message }); }
-                AstalIO.write_sock(connection, response, (_source, result) => {
-                    try { AstalIO.write_sock_finish(result); }
-                    catch (error) { console.warn(`Launcher reply: ${error.message}`); }
-                    finally { connection.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
-                        try { source.close_finish(result); }
-                        catch (error) { console.warn(`Launcher connection: ${error.message}`); }
-                    }); }
+                replyAndClose(connection, response, {
+                    label: 'Launcher', asyncClose: true,
+                    onError: (phase, error) => console.warn(`Launcher ${phase === 'reply' ? 'reply' : 'connection'}: ${error.message}`),
                 });
             }).catch(error => console.error(`Launcher request: ${error.message}`));
         }

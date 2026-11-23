@@ -18,7 +18,7 @@ let
     prefix = "DASHBOARD_PANEL";
     sourceDir = "dashboard/astal";
     cssFile = "${repoRoot}/scripts/dashboard/astal/style.css";
-    entryPoint = "frontend.ts";
+
     extraPackages = [
       astalPackages.battery astalPackages.powerprofiles astalPackages.notifd
     ];

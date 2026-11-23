@@ -4,8 +4,7 @@
   craneLib,
   agsPackage,
   astalPackage,
-  panelLauncher,
-  workspaceRoot ? ./.,
+  workspaceRoot ? ../.,
   sourceRoot ? workspaceRoot,
 }:
 let
@@ -49,6 +48,7 @@ let
       root = workspaceRoot;
       fileset = lib.fileset.unions [
         (craneLib.fileset.cargoTomlAndLock workspaceRoot)
+
         (craneLib.fileset.commonCargoSources (workspaceRoot + "/${memberPath}"))
       ];
     };
@@ -92,6 +92,16 @@ let
       }
     );
 
+  panelLauncher = mkWorkspacePackage "panel-launcher" {
+    workspaceMember = "shared/panel-launcher";
+    cargoArtifacts = mkCargoArtifacts "panel-launcher-deps" {
+      cargoExtraArgs = "--locked --package panel-launcher";
+    };
+    passthru.withParentDeath = pkgs.writeShellScriptBin "with-parent-death" ''
+      exec ${lib.getExe panelLauncher} runtime with-parent-death "$@"
+    '';
+  };
+
   mkPanel =
     {
       name,
@@ -126,8 +136,11 @@ let
       source = lib.fileset.toSource {
         root = sourceRoot;
         fileset = lib.fileset.unions [
-          (sourceRoot + "/live-style.js")
-          (sourceRoot + "/ipc.js")
+          (sourceRoot + "/shared/astal/live-style.js")
+          (sourceRoot + "/shared/astal/ipc.js")
+          (sourceRoot + "/shared/astal/theme.js")
+          (sourceRoot + "/shared/astal/socket.js")
+          (sourceRoot + "/shared/astal/drawing.js")
           (lib.fileset.fileFilter
             (file:
               (file.hasExt "js" || file.hasExt "ts" || file.hasExt "json")
@@ -193,5 +206,5 @@ let
     '';
 in
 {
-  inherit mkCargoArtifacts mkWorkspacePackage mkPanel;
+  inherit mkCargoArtifacts mkWorkspacePackage mkPanel panelLauncher;
 }
