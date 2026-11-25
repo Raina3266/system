@@ -23,7 +23,8 @@ window.app-launcher {
 .app-launcher .launcher-search text { background: transparent; color: #F8F8F2; }
 .app-launcher .launcher-search image { color: #5DF4FE; }
 .app-launcher .launcher-scroll { background: transparent; border: none; }
-.app-launcher button.app-tile {
+.app-launcher .launcher-grid { padding: 0; background: transparent; }
+.app-launcher flowboxchild.app-tile {
     min-width: 0;
     min-height: 0;
     padding: 2px 0;
@@ -37,16 +38,16 @@ window.app-launcher {
     color: #58ced9;
     transition: border-color 140ms ease;
 }
-.app-launcher button.app-tile.selected,
-.app-launcher button.app-tile:hover,
-.app-launcher button.app-tile:focus-visible,
-.app-launcher button.app-tile:active {
+.app-launcher flowboxchild.app-tile:selected,
+.app-launcher flowboxchild.app-tile:hover,
+.app-launcher flowboxchild.app-tile:focus-visible,
+.app-launcher flowboxchild.app-tile:active {
     background: color-mix(in srgb, #ff6b75 10%, transparent);
     background-image: none;
     box-shadow: none;
     border-color: color-mix(in srgb, #FCEE0A 45%, transparent);
 }
-.app-launcher button.app-tile.selected { border-color: color-mix(in srgb, #ff6b75 55%, transparent); }
+.app-launcher flowboxchild.app-tile:selected { border-color: color-mix(in srgb, #ff6b75 55%, transparent); }
 .app-launcher .app-name {
     font-size: 9px;
     font-weight: 800;
@@ -54,7 +55,7 @@ window.app-launcher {
     text-shadow: 0 0 5px color-mix(in srgb, #26c6da 28%, transparent);
 }
 .app-launcher .launcher-empty { color: #6eb6bd; font-size: 10px; }
-.app-launcher button.app-tile.launch-error { color: #ff6b75; border-color: #ff6b75; }
+.app-launcher flowboxchild.app-tile.launch-error { color: #ff6b75; border-color: #ff6b75; }
 .app-launcher scrollbar { background: transparent; }
 .app-launcher scrollbar slider { min-width: 3px; border-radius: 0; background: #326c74; }
 .app-launcher scrollbar slider:hover { background: #66e7ef; }

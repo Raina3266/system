@@ -2,7 +2,14 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk?version=4.0';
 import Apps from 'gi://AstalApps';
-import { applicationsFor } from './logic.js';
+import { communicate } from '../shared/astal/ipc.js';
+
+function applicationsFor(apps, query = '') {
+    const search = query.trim();
+    if (search) return apps.fuzzy_query(search);
+    return [...apps.list].sort((a, b) =>
+        a.name.localeCompare(b.name) || a.entry.localeCompare(b.entry));
+}
 
 export class LauncherBackend {
     constructor(onChanged) {
@@ -38,23 +45,21 @@ export class LauncherBackend {
 }
 
 export function monitors() {
-    const list = Gdk.Display.get_default().get_monitors();
-    return Array.from({ length: list.get_n_items() }, (_, index) => list.get_item(index));
+    return [...Gdk.Display.get_default().get_monitors()];
 }
 
 export async function focusedMonitor(name) {
     let connector = name;
     if (!connector) {
         try {
-            const process = Gio.Subprocess.new([GLib.getenv('PANEL_BACKEND') || 'panel-launcher', 'runtime', 'focused-output'],
-                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
-            const [, stdout] = await new Promise((resolve, reject) => {
-                process.communicate_utf8_async(null, null, (source, result) => {
-                    try { resolve(source.communicate_utf8_finish(result)); }
-                    catch (error) { reject(error); }
+            const stdout = await communicate(
+                [GLib.getenv('PANEL_BACKEND') || 'panel-launcher', 'runtime', 'focused-output'],
+                {
+                    maxBytes: 64 * 1024,
+                    timeoutMs: 10000,
+                    flags: Gio.SubprocessFlags.STDERR_SILENCE,
+                    errors: { failed: 'Focused-monitor helper failed.' },
                 });
-            });
-            if (!process.get_successful()) throw new Error('Focused-monitor helper failed.');
             const reply = JSON.parse(stdout);
             if (!reply || (reply.name !== null && typeof reply.name !== 'string'))
                 throw new Error('Invalid focused-monitor helper response.');

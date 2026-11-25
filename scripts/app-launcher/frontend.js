@@ -3,6 +3,7 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
+import Graphene from 'gi://Graphene';
 import Pango from 'gi://Pango';
 import Astal from 'gi://Astal?version=4.0';
 import System from 'system';
@@ -10,8 +11,40 @@ import { LauncherBackend, monitors, focusedMonitor } from './backend.js';
 import { loadPanelStyle } from '../shared/astal/live-style.js';
 import { replyAndClose } from '../shared/astal/socket.js';
 import { drawCutCornerFrame } from '../shared/astal/drawing.js';
-import { ANIMATION_MS, BAR_GAP, PANEL_LEFT, TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GRID_COLUMNS, SEARCH_HEIGHT, SEARCH_GAP,
-    parseRequest, panelLayout, nextIndex } from './logic.js';
+
+const ANIMATION_MS = 260;
+const BAR_GAP = 48;
+const PANEL_LEFT = 12;
+const TILE_WIDTH = 66;
+const TILE_HEIGHT = 90;
+const TILE_GAP = 10;
+const GRID_COLUMNS = 4;
+const GRID_ROWS = 2;
+const PANEL_PADDING = 12;
+const SEARCH_HEIGHT = 34;
+const SEARCH_GAP = 10;
+
+function parseRequest(text) {
+    const request = JSON.parse(text);
+    if (!request || typeof request !== 'object' || Array.isArray(request)
+        || !['toggle', 'close', 'status'].includes(request.command)
+        || (request.monitor !== undefined && (typeof request.monitor !== 'string' || !request.monitor.trim()))) {
+        throw new Error('Expected toggle [monitor], close, or status.');
+    }
+    return request;
+}
+
+function panelLayout(width, height) {
+    const available = Math.max(1, width - PANEL_LEFT * 2);
+    const columns = Math.max(1, Math.min(GRID_COLUMNS,
+        Math.floor((available - PANEL_PADDING * 2 + TILE_GAP) / (TILE_WIDTH + TILE_GAP))));
+    return {
+        columns,
+        width: Math.min(available, columns * TILE_WIDTH + (columns - 1) * TILE_GAP + PANEL_PADDING * 2),
+        gridHeight: Math.max(1, Math.min(GRID_ROWS * TILE_HEIGHT + (GRID_ROWS - 1) * TILE_GAP,
+            height - BAR_GAP - PANEL_PADDING * 2 - SEARCH_HEIGHT - SEARCH_GAP)),
+    };
+}
 
 function box(vertical, spacing, children = []) {
     const widget = new Gtk.Box({ orientation: vertical ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL, spacing });
@@ -74,7 +107,7 @@ function drawTileFrame(cr, width, height) {
     cr.fill();
 }
 
-function tile(application, activate) {
+function tile(application) {
     const iconFrame = new Gtk.Overlay({ width_request: 56, height_request: 56, halign: Gtk.Align.CENTER });
     iconFrame.set_child(frame(drawTileFrame));
     const image = new Gtk.Image({ pixel_size: 34, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
@@ -86,10 +119,11 @@ function tile(application, activate) {
         max_width_chars: 9, height_request: 24,
     });
     const content = box(true, 4, [iconFrame, caption]);
-    const button = new Gtk.Button({ child: content, width_request: TILE_WIDTH, height_request: TILE_HEIGHT,
+    content.valign = Gtk.Align.CENTER;
+    const child = new Gtk.FlowBoxChild({ child: content, width_request: TILE_WIDTH, height_request: TILE_HEIGHT,
         css_classes: ['app-tile'] });
-    button.connect('clicked', activate);
-    return button;
+    child.application = application;
+    return child;
 }
 
 export class LauncherPanel {
@@ -98,11 +132,11 @@ export class LauncherPanel {
         this.opened = false;
         this.monitor = null;
         this.columns = GRID_COLUMNS;
-        this.selected = 0;
         this.results = [];
         this.tiles = [];
-        this.tileCache = new WeakMap();
-        this.hideTimer = 0;
+        this.tileCache = new Map();
+        this.resultOrder = new Map();
+        this.catalog = null;
         this.window = new Astal.Window({ application: app, name: 'app-launcher', namespace: 'astal:app-launcher',
             anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT,
             exclusivity: Astal.Exclusivity.IGNORE, layer: Astal.Layer.OVERLAY,
@@ -114,6 +148,9 @@ export class LauncherPanel {
         this.revealer = new Gtk.Revealer({ transition_type: Gtk.RevealerTransitionType.SLIDE_UP,
             transition_duration: ANIMATION_MS, halign: Gtk.Align.START, valign: Gtk.Align.END,
             margin_start: PANEL_LEFT, margin_bottom: BAR_GAP });
+        this.revealer.connect('notify::child-revealed', () => {
+            if (!this.opened && !this.revealer.child_revealed) this.window.visible = false;
+        });
         this.card = new Gtk.Overlay({ css_classes: ['launcher-card'] });
         this.card.set_child(frame(drawPanelFrame));
         this.search = new Gtk.SearchEntry({ placeholder_text: 'Search applications',
@@ -127,9 +164,16 @@ export class LauncherPanel {
         }
         this.search.connect('search-changed', () => this.render());
         this.search.connect('activate', () => this.launch(this.selected));
-        this.grid = new Gtk.Grid({ column_spacing: TILE_GAP, row_spacing: TILE_GAP,
-            column_homogeneous: true, row_homogeneous: true,
-            halign: Gtk.Align.CENTER, valign: Gtk.Align.START });
+        this.grid = new Gtk.FlowBox({ column_spacing: TILE_GAP, row_spacing: TILE_GAP,
+            homogeneous: true, min_children_per_line: 1, max_children_per_line: GRID_COLUMNS,
+            selection_mode: Gtk.SelectionMode.SINGLE, activate_on_single_click: true,
+            halign: Gtk.Align.CENTER, valign: Gtk.Align.START, css_classes: ['launcher-grid'] });
+        this.grid.set_filter_func(child => this.resultOrder.has(child.application));
+        // GTK expects a gint comparator; nonmatches must have a finite fallback rank.
+        this.grid.set_sort_func((left, right) =>
+            (this.resultOrder.get(left.application) ?? this.results.length)
+                        - (this.resultOrder.get(right.application) ?? this.results.length));
+        this.grid.connect('child-activated', (_grid, child) => this.launch(this.resultOrder.get(child.application)));
         this.empty = label('NO APPLICATIONS', 'launcher-empty', { vexpand: true });
         this.gridStack = new Gtk.Stack();
         this.gridStack.add_named(this.grid, 'apps');
@@ -137,6 +181,7 @@ export class LauncherPanel {
         this.scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER,
             vscrollbar_policy: Gtk.PolicyType.AUTOMATIC, child: this.gridStack,
             css_classes: ['launcher-scroll'], propagate_natural_height: false });
+        this.grid.set_vadjustment(this.scroll.get_vadjustment());
         this.content = box(true, SEARCH_GAP, [this.search, this.scroll]);
         this.content.add_css_class('launcher-content');
         this.card.add_overlay(this.content);
@@ -148,8 +193,7 @@ export class LauncherPanel {
         outside.connect('released', (_gesture, _count, x, y) => {
             if (!this.opened) return;
             const [valid, bounds] = this.card.compute_bounds(this.root);
-            if (valid && (x < bounds.get_x() || y < bounds.get_y()
-                || x > bounds.get_x() + bounds.get_width() || y > bounds.get_y() + bounds.get_height())) this.close();
+            if (valid && !bounds.contains_point(new Graphene.Point({ x, y }))) this.close();
         });
         this.root.add_controller(outside);
         const keys = new Gtk.EventControllerKey({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
@@ -167,6 +211,7 @@ export class LauncherPanel {
         const { width, height } = this.monitor.get_geometry();
         const layout = panelLayout(width, height);
         this.columns = layout.columns;
+        this.grid.max_children_per_line = layout.columns;
         this.card.width_request = layout.width;
         this.scroll.height_request = layout.gridHeight;
     }
@@ -190,8 +235,6 @@ export class LauncherPanel {
 
     toggle(monitor) {
         if (this.opened && this.monitor?.get_connector() === monitor.get_connector()) { this.close(); return; }
-        if (this.hideTimer) GLib.source_remove(this.hideTimer);
-        this.hideTimer = 0;
         this.setMonitor(monitor);
         this.resize();
         this.search.set_text('');
@@ -205,47 +248,39 @@ export class LauncherPanel {
     }
 
     close(animate = true) {
-        if (this.hideTimer) GLib.source_remove(this.hideTimer);
-        this.hideTimer = 0;
         this.opened = false;
         this.window.keymode = Astal.Keymode.NONE;
         this.revealer.reveal_child = false;
-        if (animate && this.window.visible) {
-            // Keep the surface mapped until the reverse slide finishes.
-            this.hideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ANIMATION_MS + 30, () => {
-                this.hideTimer = 0;
-                if (!this.opened) this.window.visible = false;
-                return GLib.SOURCE_REMOVE;
-            });
-        } else this.window.visible = false;
+        if (!animate || !this.revealer.child_revealed) this.window.visible = false;
     }
 
-    getTile(application, index) {
-        let button = this.tileCache.get(application);
-        if (!button) {
-            button = tile(application, () => this.launch(button.resultIndex));
-            const focus = new Gtk.EventControllerFocus();
-            focus.connect('enter', () => this.select(button.resultIndex));
-            button.add_controller(focus);
-            this.tileCache.set(application, button);
-        }
-        // Native reloads create new application objects; old tiles can then be collected.
-        button.resultIndex = index;
-        button.remove_css_class('selected');
-        button.remove_css_class('launch-error');
-        return button;
+    get selected() {
+        return this.resultOrder.get(this.grid.get_selected_children()[0]?.application) ?? -1;
     }
 
     render() {
-        const gridFocused = this.tiles.includes(this.window.get_focus());
+        const focused = this.window.get_focus();
+        const gridFocused = focused === this.grid || Boolean(focused?.is_ancestor(this.grid));
         const query = this.search.get_text().trim();
         this.results = this.backend.query(query);
-        while (this.grid.get_first_child()) this.grid.remove(this.grid.get_first_child());
-        this.tiles = this.results.map((application, index) => {
-            const button = this.getTile(application, index);
-            this.grid.attach(button, index % this.columns, Math.floor(index / this.columns), 1, 1);
-            return button;
-        });
+        this.resultOrder = new Map(this.results.map((application, index) => [application, index]));
+        const catalog = this.backend.applications;
+        if (catalog !== this.catalog) {
+            // Only a native catalog reload replaces widgets; searches filter and reorder them in place.
+            this.grid.remove_all();
+            this.tileCache.clear();
+            for (const application of catalog) {
+                const child = tile(application);
+                this.tileCache.set(application, child);
+                this.grid.append(child);
+            }
+            this.catalog = catalog;
+        }
+        this.grid.unselect_all();
+        this.grid.invalidate_sort();
+        this.grid.invalidate_filter();
+        this.tiles = this.results.map(application => this.tileCache.get(application));
+        this.tiles.forEach(child => child.remove_css_class('launch-error'));
         this.gridStack.visible_child_name = this.results.length ? 'apps' : 'empty';
         this.empty.label = query ? 'NO MATCHING APPLICATIONS' : 'NO APPLICATIONS';
         const selectFirst = this.results.length && (query || gridFocused);
@@ -254,27 +289,20 @@ export class LauncherPanel {
     }
 
     select(index, focus = false) {
-        this.tiles[this.selected]?.remove_css_class('selected');
-        this.selected = index;
-        this.tiles[index]?.add_css_class('selected');
+        const child = this.tiles[index];
+        if (child) this.grid.select_child(child);
+        else this.grid.unselect_all();
         if (focus) {
-            const button = this.tiles[index];
-            if (!button) { this.root.grab_focus(); return; }
-            button.grab_focus();
-            const [valid, bounds] = button.compute_bounds(this.grid);
-            if (valid) {
-                const adjustment = this.scroll.get_vadjustment();
-                const top = bounds.get_y(), bottom = top + bounds.get_height();
-                if (top < adjustment.value) adjustment.value = top;
-                else if (bottom > adjustment.value + adjustment.page_size) adjustment.value = bottom - adjustment.page_size;
-            }
+            // FlowBox's focus vfunc updates its navigation cursor as well as keyboard focus.
+            if (child) child.child_focus(Gtk.DirectionType.TAB_FORWARD);
+            else this.root.grab_focus();
         }
     }
 
     keyPressed(key, state = 0) {
         if (!this.opened) return false;
         if (key === Gdk.KEY_Escape) { this.close(); return true; }
-        if (key === Gdk.KEY_Return || key === Gdk.KEY_KP_Enter) { this.launch(this.selected); return true; }
+
         const focused = this.window.get_focus();
         const searchFocused = focused === this.search || Boolean(focused?.is_ancestor(this.search));
         const name = Gdk.keyval_name(key);
@@ -283,9 +311,14 @@ export class LauncherPanel {
             if (name === 'Down' && this.results.length) { this.select(0, true); return true; }
             return false;
         }
-        if (['Left', 'Right', 'Up', 'Down', 'Home', 'End'].includes(name)) {
-            if (name === 'Up' && this.selected < this.columns) this.search.grab_focus();
-            else this.select(nextIndex(this.selected, name, this.columns, this.results.length), true);
+        const index = this.resultOrder.get(focused?.application) ?? -1;
+        if (name === 'Up' && index >= 0 && index < this.columns) {
+            this.search.grab_focus();
+            return true;
+        }
+        // GTK stays in the same column at a missing cell; the launcher clamps to the last result.
+        if (name === 'Down' && index >= 0 && index + this.columns >= this.results.length) {
+            this.select(this.results.length - 1, true);
             return true;
         }
         return false;
