@@ -227,6 +227,7 @@ in
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
+      "inode/directory" = [ "org.kde.dolphin.desktop" ];
       "x-scheme-handler/terminal" = [ "com.mitchellh.ghostty.desktop" ];
     }
     // handledBy "google-chrome.desktop" webMimeTypes

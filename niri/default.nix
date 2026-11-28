@@ -12,17 +12,18 @@ let
     exec ${lib.getExe repoPackages.mediaControl} playerctl "$@"
   '';
 
-  # Shared by niri's environment block and environment.d below, so Qt apps
-  # are themed and scaled however they get started.
-  qtEnvironment =
+  # Shared by niri's environment block and environment.d so applications
+  # use the KDE-backed file portal however they get started.
+  sessionEnvironment =
     let
       inherit (config.home) profileDirectory;
       qtPluginPath = qt: "${profileDirectory}/${qt.qtbase.qtPluginPrefix}";
       qtQmlPath = qt: "${profileDirectory}/${qt.qtbase.qtQmlPrefix}";
     in
     {
-      QT_QPA_PLATFORMTHEME = "kde";
+      QT_QPA_PLATFORMTHEME = "xdgdesktopportal";
       QT_STYLE_OVERRIDE = "kvantum";
+      GTK_USE_PORTAL = "1";
       QT_PLUGIN_PATH = "${qtPluginPath pkgs.qt5}:${qtPluginPath pkgs.qt6}";
       QML2_IMPORT_PATH = "${qtQmlPath pkgs.qt5}:${qtQmlPath pkgs.qt6}";
     };
@@ -44,7 +45,7 @@ in
   xdg.configFile."niri/environment.kdl".text = ''
     environment {
     ${lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (name: value: "  ${name} \"${value}\"") qtEnvironment
+      lib.mapAttrsToList (name: value: "  ${name} \"${value}\"") sessionEnvironment
     )}
     }
 
@@ -104,5 +105,5 @@ in
     x11.enable = true;
   };
 
-  systemd.user.sessionVariables = qtEnvironment;
+  systemd.user.sessionVariables = sessionEnvironment;
 }

@@ -8,25 +8,6 @@
 }:
 
 let
-  # Portals are configured system-wide in ../nixos/services.nix; declaring
-  # them here as well would install a second copy into the user profile.
-  # Only explicitly wrapped packages opt into portal-based Qt integration.
-  portalizeQtPackage =
-    package:
-    pkgs.symlinkJoin {
-      name = "${package.name}-portal";
-      paths = [ package ];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        for program in "$out/bin/"*; do
-          if [ -f "$program" ] && [ -x "$program" ]; then
-            wrapProgram "$program" --set QT_QPA_PLATFORMTHEME xdgdesktopportal
-          fi
-        done
-      '';
-      inherit (package) meta;
-    };
-
   # Inherit the session's Qt platform theme; only patch FastFlix's own overrides.
   # The menu entry and icon live in desktop.nix.
   fastflix = pkgs.fastflix.overrideAttrs (old: {
@@ -76,7 +57,7 @@ in
   home.packages = [
     fastflix
     krokiet
-    (portalizeQtPackage pdf4qt)
+    pdf4qt
     repoPackages.ocrScreenshot
   ];
 

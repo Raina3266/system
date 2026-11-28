@@ -120,6 +120,18 @@ window-rule {
     default-window-height { fixed 650; }
 }
 
+// Zed's agent notifications are titleless toplevels, not desktop notifications.
+// Leave titled editor windows tiled; floating windows open centered by default.
+window-rule {
+    match app-id=r#"^dev\.zed\.Zed$"#
+    exclude title="."
+
+    open-floating true
+    open-focused false
+    default-column-width { fixed 450; }
+    default-window-height { fixed 72; }
+}
+
 window-rule {
     match app-id="com.mitchellh.ghostty"
     open-floating true
